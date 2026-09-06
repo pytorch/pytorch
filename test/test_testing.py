@@ -827,6 +827,27 @@ class TestEnvironmentDefFlag(TestCase):
                 "FOO_DF_5", env_var="FOO_DF_5",
                 default=True, implied_by_fn=lambda: True))
 
+    def test_repro_prefix_uses_env_var_name_not_flag_name(self):
+        # Regression test for #106377: the repro command shown on test failure
+        # must use the actual environment variable name (e.g. PYTORCH_TEST_WITH_INDUCTOR),
+        # not the Python flag name (e.g. TEST_WITH_TORCHINDUCTOR).
+        from torch.testing._internal.common_utils import TestEnvironment
+        saved = TestEnvironment.repro_env_vars.copy()
+        try:
+            TestEnvironment.repro_env_vars.clear()
+            with unittest.mock.patch.dict(os.environ, {"MY_ACTUAL_ENV_VAR_6": "1"}):
+                self._def_flag(
+                    "MY_PYTHON_FLAG_6",
+                    env_var="MY_ACTUAL_ENV_VAR_6",
+                    include_in_repro=True,
+                )
+                prefix = TestEnvironment.repro_env_var_prefix()
+                self.assertIn("MY_ACTUAL_ENV_VAR_6=1", prefix)
+                self.assertNotIn("MY_PYTHON_FLAG_6", prefix)
+        finally:
+            TestEnvironment.repro_env_vars.clear()
+            TestEnvironment.repro_env_vars.update(saved)
+
 
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
     """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
