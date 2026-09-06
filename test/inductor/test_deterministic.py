@@ -204,7 +204,7 @@ class DeterministicTest(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -220,7 +220,7 @@ class DeterministicTest(TestCase):
             # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
-                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )

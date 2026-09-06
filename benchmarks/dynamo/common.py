@@ -41,7 +41,6 @@ import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
-from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
@@ -550,37 +549,35 @@ def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 
     def deterministic_torch_manual_seed(*args, **kwargs):
-        from torch._C import default_generator
-
-        seed = 1337
-        if HAS_CUDA:
-            import torch.cuda
-
-            if not torch.cuda._is_in_bad_fork():
-                torch.cuda.manual_seed_all(seed)
-        if HAS_XPU:
-            import torch.xpu
-
-            if not torch.xpu._is_in_bad_fork():
-                torch.xpu.manual_seed_all(seed)
-        return default_generator.manual_seed(seed)
+        return torch.random.manual_seed(1337)
 
     torch.manual_seed = deterministic_torch_manual_seed
+
+
+def _get_accelerator():
+    return torch.accelerator.current_accelerator(check_available=True)
+
+
+def _is_accelerator_device(device):
+    accelerator = _get_accelerator()
+    return accelerator is not None and torch.device(device).type == accelerator.type
 
 
 def empty_gpu_cache(device):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
+    device_module = torch.get_device_module(device)
+    empty_cache = getattr(device_module, "empty_cache", None)
 
-    if device not in ["cuda", "xpu", "mps"]:
+    if empty_cache is None:
         log.warning(
-            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            "Device %s does not provide an empty_cache API",
             device,
         )
         return
 
-    getattr(torch, device).empty_cache()
+    empty_cache()
 
 
 def synchronize():
@@ -1869,7 +1866,21 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
-        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+        device_type = torch.device(device).type
+
+        capturable_devices = {
+            "cuda",
+            "xpu",
+            "hpu",
+            "xla",
+            torch._C._get_privateuse1_backend_name(),
+        }
+
+        if (
+            device_type in capturable_devices
+            and self.args.training
+            and name not in CI_SKIP_OPTIMIZER
+        ):
             use_sgd = (
                 (name in CI_USE_SGD and self.args.ci)
                 or name in BENCHMARK_USE_SGD
@@ -4420,15 +4431,19 @@ def run(runner, args, original_dir=None):
         return sys.exit(-1)
 
     if not args.devices:
-        if torch.cuda.is_available():
-            args.devices = ["cuda"]
+        accelerator = _get_accelerator()
+        if accelerator is not None:
+            args.devices = [accelerator.type]
         else:
-            log.warning("torch.cuda.is_available() == False, using CPU")
+            log.warning("No accelerator is available, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
+    if args.devices != ["cpu"]:
         global synchronize
-        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
+        device_module = torch.get_device_module(args.devices[0])
+        device_synchronize = getattr(device_module, "synchronize", None)
+        if device_synchronize is not None:
+            synchronize = device_synchronize
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
