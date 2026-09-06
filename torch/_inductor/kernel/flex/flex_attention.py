@@ -12,6 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._inductor import config
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
 from torch.nn.attention.flex_attention import _Backend
@@ -65,6 +66,81 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 Expr = sympy.Expr
+
+# Extra bytes Triton includes in the static shared-memory metadata for these
+# templates (barriers, sync objects, padding). Keep these separate from the
+# tile storage terms below so estimates line up with the OutOfResources
+# "Required" value.
+#
+# The forward SMEM estimate intentionally omits the FP32 accumulator because
+# Triton keeps accumulator values in registers across the MMA pipeline, not in
+# shared memory. The register pressure from the accumulator is already reflected
+# in the occupancy constraints enforced by Triton's autotuner.
+#
+# Measured against Triton 3.2.x (bundled with PyTorch 2.7.0) on:
+#   GPU: NVIDIA RTX 3090 (sm_86)
+#   Template: non-TMA, non-warp-spec, no mask_mod
+# Should be re-verified if Triton version or template variant changes.
+_FLEX_FWD_SHARED_MEMORY_OVERHEAD = 4096
+_FLEX_BWD_SHARED_MEMORY_OVERHEAD = 4096
+
+
+def _get_cuda_max_shared_memory(device: torch.device) -> int | None:
+    if device.type != "cuda" or torch.version.hip is not None:
+        return None
+
+    try:
+        device_index = device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_index)
+        if hasattr(props, "shared_memory_per_block_optin"):
+            return int(props.shared_memory_per_block_optin)
+        elif hasattr(props, "shared_memory_per_block"):
+            return int(props.shared_memory_per_block)
+        return None
+    except (RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _flex_fwd_kernel_shared_memory(
+    kernel_options: dict[str, Any], dtype: torch.dtype
+) -> int | None:
+    try:
+        block_m = int(kernel_options["BLOCK_M"])
+        block_n = int(kernel_options["BLOCK_N"])
+        qk_head_dim = int(kernel_options["QK_HEAD_DIM_ROUNDED"])
+        v_head_dim = int(kernel_options["V_HEAD_DIM_ROUNDED"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    # Forward estimate omits num_stages: the forward kernel pipelines
+    # K and V loads within a single stage, so shared memory does not scale
+    # with the stage count the way the backward two-pass kernel does.
+    return (
+        block_m * qk_head_dim + block_n * max(qk_head_dim, v_head_dim)
+    ) * dtype.itemsize + _FLEX_FWD_SHARED_MEMORY_OVERHEAD
+
+
+def _flex_bwd_kernel_shared_memory(
+    kernel_options: dict[str, Any], dtype: torch.dtype
+) -> int | None:
+    try:
+        num_stages = int(kernel_options.get("num_stages", 1))
+        qk_head_dim = int(kernel_options["QK_HEAD_DIM_ROUNDED"])
+        v_head_dim = int(kernel_options["V_HEAD_DIM_ROUNDED"])
+        block_mn1 = int(kernel_options["BLOCK_M1"]) + int(kernel_options["BLOCK_N1"])
+        block_mn2 = int(kernel_options["BLOCK_M2"]) + int(kernel_options["BLOCK_N2"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    return (
+        max(block_mn1, block_mn2)
+        * (qk_head_dim + v_head_dim)
+        * dtype.itemsize
+        * num_stages
+        + _FLEX_BWD_SHARED_MEMORY_OVERHEAD
+    )
 
 
 def _sanitize_kernel_options_for_triton(
@@ -444,6 +520,7 @@ def flex_attention(
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim, seq_len_q, dtype, query.get_device().type
     )
+    max_shared_memory = _get_cuda_max_shared_memory(query.get_device())
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
@@ -482,7 +559,7 @@ def flex_attention(
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
-        if len(configs) == 1 and all(
+        if not config.max_autotune and all(
             is_power_of_2(s) and s >= 16
             for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
         ):
@@ -501,7 +578,7 @@ def flex_attention(
             != 0
         ):
             invalid_block_options = cur_kernel_options
-            if len(configs) == 1:
+            if not config.max_autotune:
                 raise_flex_kernel_options_error(
                     "forward",
                     cur_kernel_options,
@@ -515,6 +592,22 @@ def flex_attention(
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
+
+        fwd_required_shared_memory = _flex_fwd_kernel_shared_memory(
+            cur_kernel_options, dtype
+        )
+        if (
+            max_shared_memory is not None
+            and fwd_required_shared_memory is not None
+            and fwd_required_shared_memory > max_shared_memory
+        ):
+            log.info(
+                "Skipping FlexAttention forward config %s: estimated shared "
+                "memory exceeds device limit %d",
+                conf,
+                max_shared_memory,
+            )
+            continue
 
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -541,8 +634,20 @@ def flex_attention(
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
-        if error is not None and len(configs) == 1:
-            raise error
+        if error is not None:
+            if not config.max_autotune:
+                raise error
+            continue
+        if not config.max_autotune:
+            break
+
+    if not choices and max_shared_memory is not None and invalid_block_options is None:
+        raise RuntimeError(
+            "All forward FlexAttention configs exceed device shared memory: "
+            f"device has {max_shared_memory} bytes. "
+            "Try reducing head dimension or passing kernel_options "
+            "with BLOCK_M, BLOCK_N, or num_stages."
+        )
 
     # Let the active choices handler append any backend-specific flex-attention
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
@@ -1001,6 +1106,7 @@ def flex_attention_backward(*args, **kwargs):
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    max_shared_memory = _get_cuda_max_shared_memory(query.get_device())
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -1038,7 +1144,7 @@ def flex_attention_backward(*args, **kwargs):
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m1, block_n1 = conf.block_m1, conf.block_n1
         block_m2, block_n2 = conf.block_m2, conf.block_n2
-        if len(configs) == 1 and all(
+        if not config.max_autotune and all(
             is_power_of_2(s) and s >= 16
             for s in (SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE)
         ):
@@ -1075,7 +1181,7 @@ def flex_attention_backward(*args, **kwargs):
             or cur_kernel_options["BLOCK_M2"] % cur_kernel_options["BLOCK_N2"] != 0
         ):
             invalid_block_options = cur_kernel_options
-            if len(configs) == 1:
+            if not config.max_autotune:
                 raise_flex_kernel_options_error(
                     "backward",
                     cur_kernel_options,
@@ -1090,7 +1196,23 @@ def flex_attention_backward(*args, **kwargs):
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
-        flex_attention_backward_template.maybe_append_choice(
+        bwd_required_shared_memory = _flex_bwd_kernel_shared_memory(
+            cur_kernel_options, dtype
+        )
+        if (
+            max_shared_memory is not None
+            and bwd_required_shared_memory is not None
+            and bwd_required_shared_memory > max_shared_memory
+        ):
+            log.info(
+                "Skipping FlexAttention backward config %s: estimated shared "
+                "memory exceeds device limit %d",
+                conf,
+                max_shared_memory,
+            )
+            continue
+
+        error = flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
                 query,
@@ -1124,6 +1246,20 @@ def flex_attention_backward(*args, **kwargs):
             ],
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
+        )
+        if error is not None:
+            if not config.max_autotune:
+                raise error
+            continue
+        if not config.max_autotune:
+            break
+
+    if not choices and max_shared_memory is not None and invalid_block_options is None:
+        raise RuntimeError(
+            "All backward FlexAttention configs exceed device shared memory: "
+            f"device has {max_shared_memory} bytes. "
+            "Try reducing head dimension or passing kernel_options "
+            "with BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, or num_stages."
         )
 
     if not choices and invalid_block_options is not None:
