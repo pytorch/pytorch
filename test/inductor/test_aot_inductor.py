@@ -80,6 +80,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
@@ -3961,26 +3962,6 @@ class AOTInductorTestsTemplate:
                 gm, tuple(i.to(self.device) for i in example_inputs)
             )
 
-    def test_fx_gm_return_tuple_validation(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x, y):
-                return x + y
-
-        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
-
-        gm = make_fx(Model(), tracing_mode="symbolic")(*example_inputs)
-        with self.assertRaisesRegex(
-            AssertionError,
-            r"Graph output must be a tuple\(\). This is so that we can avoid "
-            "pytree processing of the outputs.",
-        ):
-            torch._inductor.aot_compile(gm, example_inputs)
-
     def test_consecutive_compiles(self):
         """Test that compilation behaves correctly with cache hits"""
 
@@ -4024,29 +4005,6 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
-
-    @patch("torch._dynamo.utils.CompileEventLogger.log_instant_event")
-    def test_backward_no_op_logging(self, mock_log_instant_event):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x):
-                return x
-
-        model = Model()
-        dummy_input = torch.randn(1, 5)
-
-        from torch._dynamo.utils import CompileEventLogLevel
-        from torch._inductor import compile_fx
-
-        graph_module = torch.fx.symbolic_trace(model)
-        compile_fx._compile_fx_inner(graph_module, (dummy_input,))
-        mock_log_instant_event.assert_called_once_with(
-            "backward no-op",
-            metadata={"compile_id": None},
-            log_level=CompileEventLogLevel.PT2_COMPILE,
-        )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_dup_unbacked_sym_decl(self):
@@ -10284,6 +10242,8 @@ torch._inductor.aoti_load_package("{model_path}")
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards
@@ -10414,6 +10374,8 @@ class KernelProfileNumelScopeTest(TestCase):
 
 
 class TestAOTInductorConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
@@ -10577,6 +10539,8 @@ MPS_TEST_FAILURES = {
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -10596,6 +10560,8 @@ copy_tests(
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -10631,6 +10597,8 @@ class AOTInductorTestDualWrapper(TestCase):
     """Run AOTInductor tests with autotune_at_compile_time=False, exercising
     the lazy Triton compile + dual-wrapper-mode codegen path."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -10656,6 +10624,8 @@ copy_tests(
 
 @unittest.skipIf(not torch.backends.mps.is_available(), "No MPS backend available")
 class AOTInductorTestABICompatibleMps(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     device = "mps"
     device_type = "mps"
     check_model = check_model
@@ -10674,6 +10644,8 @@ copy_tests(
 
 
 class TestCheckLowerboundConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_check_lowerbound_codegen(self):
         """
         Test that check_lowerbound config controls lowerbound check codegen.
@@ -10717,6 +10689,53 @@ class TestCheckLowerboundConfig(TestCase):
                 0,
                 exactly=True,
             ).run(code)
+
+
+class AOTInductorCompileTimeTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_fx_gm_return_tuple_validation(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
+
+        gm = make_fx(Model(), tracing_mode="symbolic")(*example_inputs)
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Graph output must be a tuple\(\). This is so that we can avoid "
+            "pytree processing of the outputs.",
+        ):
+            torch._inductor.aot_compile(gm, example_inputs)
+
+    @patch("torch._dynamo.utils.CompileEventLogger.log_instant_event")
+    def test_backward_no_op_logging(self, mock_log_instant_event):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        model = Model()
+        dummy_input = torch.randn(1, 5)
+
+        from torch._dynamo.utils import CompileEventLogLevel
+        from torch._inductor import compile_fx
+
+        graph_module = torch.fx.symbolic_trace(model)
+        compile_fx._compile_fx_inner(graph_module, (dummy_input,))
+        mock_log_instant_event.assert_called_once_with(
+            "backward no-op",
+            metadata={"compile_id": None},
+            log_level=CompileEventLogLevel.PT2_COMPILE,
+        )
 
 
 if __name__ == "__main__":
