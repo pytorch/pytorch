@@ -244,9 +244,6 @@ CI_USE_SGD = {
 }
 
 
-DO_NOT_CAST_INPUTS = {"stable_diffusion"}
-
-
 # Maps a benchmark model name to a list of status codes. For any listed entry, we'll
 # capture TORCH_COMPILE_DEBUG logs in CI runs and preserve them (i.e., for upload) if
 # the result status matches one listed.
@@ -2141,10 +2138,6 @@ class BenchmarkRunner:
         return start, end
 
     def get_fsdp_auto_wrap_policy(self, model_name: str):
-        from diffusers.models.transformer_2d import Transformer2DModel
-        from torchbenchmark.models.nanogpt.model import Block
-        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
         from torch.distributed.fsdp.wrap import (
             ModuleWrapPolicy,
             size_based_auto_wrap_policy,
@@ -2152,9 +2145,15 @@ class BenchmarkRunner:
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
-            "stable_diffusion_unet": (Transformer2DModel,),
-            "llama_v2_7b_16h": (LlamaDecoderLayer,),
-            "nanogpt": (Block,),
+            "stable_diffusion_unet": (
+                "diffusers.models.transformers.transformer_2d",
+                "Transformer2DModel",
+            ),
+            "llama_v2_7b_16h": (
+                "transformers.models.llama.modeling_llama",
+                "LlamaDecoderLayer",
+            ),
+            "nanogpt": ("torchbenchmark.models.nanogpt.model", "Block"),
         }
 
         if model_name not in MODEL_FSDP_WRAP:
@@ -2163,7 +2162,9 @@ class BenchmarkRunner:
                 size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
             )
 
-        return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
+        module_name, class_name = MODEL_FSDP_WRAP[model_name]
+        model_class = getattr(importlib.import_module(module_name), class_name)
+        return ModuleWrapPolicy((model_class,))
 
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
@@ -4915,11 +4916,7 @@ def run(runner, args, original_dir=None):
                 torch.cuda.set_per_process_memory_fraction(
                     args.per_process_memory_fraction
                 )
-            if model_name in DO_NOT_CAST_INPUTS:
-                model, _ = runner.cast_based_on_args(model, example_inputs)
-
-            else:
-                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
             guard_ctx = contextlib.nullcontext()
             if name in runner.guard_on_nn_module_models:
