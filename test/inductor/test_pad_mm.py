@@ -14,11 +14,19 @@ from torch._inductor.fx_passes.pad_mm import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDAAndPRIVATEUSE1,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
 class PadMMTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         if not is_big_gpu():
@@ -27,7 +35,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_mm_dyn_m(self):
+    def test_pad_mm_dyn_m(self, device):
         M = 40
         K1 = 581
         K2 = 49
@@ -37,15 +45,15 @@ class PadMMTest(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
-                    (K2, N), (1, K2), device=GPU_TYPE, dtype=torch.float32
+                    (K2, N), (1, K2), device=device, dtype=torch.float32
                 )
 
             def forward(self, a):
                 a1 = torch.narrow(a, 1, 0, K2)
                 return torch.mm(a1, self.w)
 
-        fn = Model().to(GPU_TYPE)
-        a = rand_strided((M, K1), (K1, 1), device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = rand_strided((M, K1), (K1, 1), device=device, dtype=torch.float32)
         aligned_k = get_padded_length(K2, get_alignment_size(a)) + K2
         torch._dynamo.mark_dynamic(a, 0)
         with unittest.mock.patch(
@@ -60,7 +68,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_cat_pad_mm_dyn_m(self):
+    def test_cat_pad_mm_dyn_m(self, device):
         M1 = 128
         M2 = 40
         K1 = 129
@@ -71,7 +79,7 @@ class PadMMTest(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
-                    (K2, N), (1, K2), device=GPU_TYPE, dtype=torch.float32
+                    (K2, N), (1, K2), device=device, dtype=torch.float32
                 )
 
             def forward(self, a, b):
@@ -79,9 +87,9 @@ class PadMMTest(TestCase):
                 a1 = torch.narrow(c, 1, 0, K2)
                 return torch.mm(a1, self.w)
 
-        fn = Model().to(GPU_TYPE)
-        a = rand_strided((M1, K1), (K1, 1), device=GPU_TYPE, dtype=torch.float32)
-        b = rand_strided((M2, K1), (K1, 1), device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = rand_strided((M1, K1), (K1, 1), device=device, dtype=torch.float32)
+        b = rand_strided((M2, K1), (K1, 1), device=device, dtype=torch.float32)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
         aligned_k = get_padded_length(K2, get_alignment_size(a)) + K2
@@ -97,7 +105,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_mm_dyn_n(self):
+    def test_pad_mm_dyn_n(self, device):
         M = 20
         K = 81
         N = 30
@@ -109,9 +117,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.mm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = rand_strided((M, K), (K, 1), device=GPU_TYPE, dtype=torch.float32)
-        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = rand_strided((M, K), (K, 1), device=device, dtype=torch.float32)
+        b = rand_strided((K, N), (1, K), device=device, dtype=torch.float32)
         aligned_k = get_padded_length(K, get_alignment_size(a)) + K
         torch._dynamo.mark_dynamic(b, 1)
         with unittest.mock.patch(
@@ -126,7 +134,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_mm_dyn_k(self):
+    def test_pad_mm_dyn_k(self, device):
         M = 21
         K = 80
         N = 30
@@ -138,9 +146,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.mm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = rand_strided((M, K), (K, 1), device=GPU_TYPE, dtype=torch.float32)
-        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = rand_strided((M, K), (K, 1), device=device, dtype=torch.float32)
+        b = rand_strided((K, N), (1, K), device=device, dtype=torch.float32)
         # TODO: Getting the alignment right requires pattern matcher to
         # run on newly added nodes
         aligned_m = get_padded_length(M, get_alignment_size(a)) + M
@@ -155,7 +163,7 @@ class PadMMTest(TestCase):
             FileCheck().check(f"M = {aligned_m}").run(code)
         self.assertEqual(res1, res2)
 
-    def test_pad_mm_dyn_mnk(self):
+    def test_pad_mm_dyn_mnk(self, device):
         M = 20
         K = 81
         N = 30
@@ -167,9 +175,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.mm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = rand_strided((M, K), (K, 1), device=GPU_TYPE, dtype=torch.float32)
-        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = rand_strided((M, K), (K, 1), device=device, dtype=torch.float32)
+        b = rand_strided((K, N), (1, K), device=device, dtype=torch.float32)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(a, 1)
         torch._dynamo.mark_dynamic(b, 0)
@@ -183,22 +191,19 @@ class PadMMTest(TestCase):
         self.assertEqual(res1, res2)
 
     @inductor_config.patch(force_shape_pad=True)
-    def test_zero_dim(self):
+    def test_zero_dim(self, device):
         def addmm(x, a, b):
             return torch.addmm(x, a, b)
 
-        x = torch.randn(100).to(GPU_TYPE)
-        a = torch.randn(0, 10).to(GPU_TYPE)
-        b = torch.randn(10, 100).to(GPU_TYPE)
+        x = torch.randn(100, device=device)
+        a = torch.randn(0, 10, device=device)
+        b = torch.randn(10, 100, device=device)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
     @fresh_cache()
     @inductor_config.patch(shape_padding=True)
-    @unittest.skipIf(
-        GPU_TYPE != "cuda",
-        "CUDA eager ignores addmm input shape when beta=0",
-    )
-    def test_addmm_beta_zero_mismatched_bias_skips_padding(self):
+    @onlyCUDAAndPRIVATEUSE1
+    def test_addmm_beta_zero_mismatched_bias_skips_padding(self, device):
         def addmm(bias, x, weight):
             return torch.addmm(bias, x, weight, beta=0.0, alpha=0.1)
 
@@ -206,9 +211,9 @@ class PadMMTest(TestCase):
             fn()
             return 1.0
 
-        bias = torch.zeros(8, device=GPU_TYPE)
-        x = torch.randn(2, 8, device=GPU_TYPE)
-        weight = torch.randn(8, 13, device=GPU_TYPE)
+        bias = torch.zeros(8, device=device)
+        x = torch.randn(2, 8, device=device)
+        weight = torch.randn(8, 13, device=device)
 
         with (
             unittest.mock.patch(
@@ -226,7 +231,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_bmm_dyn_b(self):
+    def test_pad_bmm_dyn_b(self, device):
         B = 10
         M = 128
         K = 33
@@ -239,9 +244,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.bmm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = torch.randn(B, M, K, device=device, dtype=torch.float32)
+        b = torch.randn(B, K, N, device=device, dtype=torch.float32)
         aligned_k = get_padded_length(K, get_alignment_size(a)) + K
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
@@ -257,7 +262,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_bmm_dyn_k(self):
+    def test_pad_bmm_dyn_k(self, device):
         B = 10
         M = 128
         K = 40
@@ -270,9 +275,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.bmm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = torch.randn(B, M, K, device=device, dtype=torch.float32)
+        b = torch.randn(B, K, N, device=device, dtype=torch.float32)
         aligned_n = get_padded_length(N, get_alignment_size(b)) + N
         torch._dynamo.mark_dynamic(a, 2)
         torch._dynamo.mark_dynamic(b, 1)
@@ -288,7 +293,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_bmm_dyn_bm(self):
+    def test_pad_bmm_dyn_bm(self, device):
         B = 10
         M = 128
         K = 40
@@ -301,9 +306,9 @@ class PadMMTest(TestCase):
             def forward(self, a, b):
                 return torch.bmm(a, b)
 
-        fn = Model().to(GPU_TYPE)
-        a = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = torch.randn(B, M, K, device=device, dtype=torch.float32)
+        b = torch.randn(B, K, N, device=device, dtype=torch.float32)
         aligned_n = get_padded_length(N, get_alignment_size(b)) + N
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(a, 1)
@@ -320,7 +325,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_addmm_dyn_m(self):
+    def test_pad_addmm_dyn_m(self, device):
         M = 128
         K = 33
         N = 40
@@ -332,10 +337,10 @@ class PadMMTest(TestCase):
             def forward(self, a, b, c):
                 return torch.addmm(a, b, c)
 
-        fn = Model().to(GPU_TYPE)
-        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float32)
-        c = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = torch.randn(M, N, device=device, dtype=torch.float32)
+        b = torch.randn(M, K, device=device, dtype=torch.float32)
+        c = torch.randn(K, N, device=device, dtype=torch.float32)
         aligned_k = get_padded_length(K, get_alignment_size(b)) + K
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 0)
@@ -351,7 +356,7 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_addmm_dyn_mn(self):
+    def test_pad_addmm_dyn_mn(self, device):
         M = 128
         K = 33
         N = 40
@@ -363,10 +368,10 @@ class PadMMTest(TestCase):
             def forward(self, a, b, c):
                 return torch.addmm(a, b, c)
 
-        fn = Model().to(GPU_TYPE)
-        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float32)
-        b = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float32)
-        c = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float32)
+        fn = Model().to(device)
+        a = torch.randn(M, N, device=device, dtype=torch.float32)
+        b = torch.randn(M, K, device=device, dtype=torch.float32)
+        c = torch.randn(K, N, device=device, dtype=torch.float32)
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(a, 1)
         torch._dynamo.mark_dynamic(b, 0)
@@ -382,18 +387,18 @@ class PadMMTest(TestCase):
         self.assertEqual(res1, res2)
 
     @inductor_config.patch(force_shape_pad=True)
-    def test_pad_single_cat(self):
+    def test_pad_single_cat(self, device):
         @torch.compile()
         def foo(x, y):
             return x @ y
 
-        inps = [torch.rand([5, 5], device=GPU_TYPE) for _ in range(2)]
+        inps = [torch.rand([5, 5], device=device) for _ in range(2)]
         out = foo(*inps)
         self.assertEqual(out, inps[0] @ inps[1])
 
     @inductor_config.patch(force_shape_pad=True)
     @fresh_cache()
-    def test_pad_addmm_2d_bias(self):
+    def test_pad_addmm_2d_bias(self, device):
         @torch.compile()
         def foo(input, x, y):
             return torch.ops.aten.addmm(input, x, y)
@@ -401,9 +406,9 @@ class PadMMTest(TestCase):
         for a in [1, 4]:
             for b in [1, 6]:
                 inps = (
-                    torch.rand([a, b], device=GPU_TYPE),
-                    torch.rand([4, 5], device=GPU_TYPE),
-                    torch.rand([5, 6], device=GPU_TYPE),
+                    torch.rand([a, b], device=device),
+                    torch.rand([4, 5], device=device),
+                    torch.rand([5, 6], device=device),
                 )
                 out = foo(*inps)
                 out_eager = torch.ops.aten.addmm(*inps)
@@ -411,22 +416,22 @@ class PadMMTest(TestCase):
 
         for a in [1, 6]:
             inps = (
-                torch.rand([a], device=GPU_TYPE),
-                torch.rand([4, 5], device=GPU_TYPE),
-                torch.rand([5, 6], device=GPU_TYPE),
+                torch.rand([a], device=device),
+                torch.rand([4, 5], device=device),
+                torch.rand([5, 6], device=device),
             )
             out = foo(*inps)
             out_eager = torch.ops.aten.addmm(*inps)
             self.assertEqual(out, out_eager)
 
     @inductor_config.patch(force_shape_pad=True)
-    def test_pad_batch(self):
+    def test_pad_batch(self, device):
         m = 6
         n = 9
         k = 11
         batch_size = 3
-        mat1 = torch.ones((batch_size, m, k), device=GPU_TYPE, dtype=torch.float16)
-        mat2 = torch.ones((batch_size, k, n), device=GPU_TYPE, dtype=torch.float16)
+        mat1 = torch.ones((batch_size, m, k), device=device, dtype=torch.float16)
+        mat2 = torch.ones((batch_size, k, n), device=device, dtype=torch.float16)
         expected_alignment = get_alignment_size(mat1)
 
         if expected_alignment != 8:
@@ -443,13 +448,13 @@ class PadMMTest(TestCase):
         # in call code, expect to see a single pad per input, and then we should see padded allocation for output
         FileCheck().check("del async_compile").check_count(
             ".run(", 2, exactly=True
-        ).check(f"empty_strided_{GPU_TYPE}((3, 8, 16)").run(code)
+        ).check(f"empty_strided_{torch.device(device).type}((3, 8, 16)").run(code)
 
         if not torch.allclose(res2, bmm_expected_result):
             raise AssertionError("BMM results are not identical")
 
     @fresh_cache()
-    def test_exclude_padding(self):
+    def test_exclude_padding(self, device):
         def bench(fn):
             fn()
             return 1.0
@@ -471,7 +476,7 @@ class PadMMTest(TestCase):
                 return_value=bench,
             ),
         ):
-            mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
+            mm(torch.rand(size, device=device), torch.rand(size, device=device))
             local_cache = get_pad_cache().get_local_cache()
             self.assertEqual(len(local_cache), 2)
             FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
@@ -482,7 +487,7 @@ class PadMMTest(TestCase):
             def mm(a, b):
                 return (a + 1) @ b
 
-            mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
+            mm(torch.rand(size, device=device), torch.rand(size, device=device))
             local_cache = get_pad_cache().get_local_cache()
             # reuse original base timing
             self.assertEqual(len(local_cache), 3)
@@ -496,13 +501,13 @@ class PadMMTest(TestCase):
 
     @fresh_cache()
     @inductor_config.patch(max_pointwise_cat_inputs=2)
-    def test_exclude_cat_padding(self):
+    def test_exclude_cat_padding(self, device):
         @torch.compile()
         def mm(inps, b):
             return torch.cat(inps) @ b
 
-        inp = torch.rand([2046, 2046], device=GPU_TYPE)
-        inp2 = torch.rand([2046, 2046], device=GPU_TYPE)
+        inp = torch.rand([2046, 2046], device=device)
+        inp2 = torch.rand([2046, 2046], device=device)
 
         inps = inp.chunk(3)
         mm(inps, inp2)
@@ -518,19 +523,20 @@ class PadMMTest(TestCase):
 
     @unittest.skipIf(
         (not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0))
-        and (not torch.xpu.is_available()),
+        and (not torch.xpu.is_available())
+        and (not _is_privateuse1_backend_available()),
         "No perf regression on H100+ with BF16",
     )
     @fresh_cache()
     @inductor_config.patch(
         post_grad_fusion_options={"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
     )
-    def test_pad_mm_bf16(self):
+    def test_pad_mm_bf16(self, device):
         m = 2
         n = 13
         k = 15691904
-        mat1 = torch.ones((m, k), device=GPU_TYPE, dtype=torch.bfloat16)
-        mat2 = torch.ones((k, n), device=GPU_TYPE, dtype=torch.bfloat16)
+        mat1 = torch.ones((m, k), device=device, dtype=torch.bfloat16)
+        mat2 = torch.ones((k, n), device=device, dtype=torch.bfloat16)
         expected_alignment = get_alignment_size(mat1)
 
         if expected_alignment != 8:
@@ -551,7 +557,7 @@ class PadMMTest(TestCase):
         # in call code, expect to see a single pad per input, and then we should see padded allocation for output
         FileCheck().check("del async_compile").check_count(
             ".run(", 2, exactly=True
-        ).check(f"empty_strided_{GPU_TYPE}((8, 16)").run(code)
+        ).check(f"empty_strided_{torch.device(device).type}((8, 16)").run(code)
 
         if not torch.allclose(res2, mm_expected_result):
             raise AssertionError("MM results are not identical")
@@ -566,13 +572,13 @@ class PadMMTest(TestCase):
             "force_shape_pad": True,
         }
     )
-    def test_original_aten_preserved_pad_mm(self):
+    def test_original_aten_preserved_pad_mm(self, device):
         def fn(x, y):
             return x @ y
 
         args = [
-            torch.randn(2**4, 2**8 - 1, device=GPU_TYPE, dtype=torch.float16),
-            torch.randn(2**8 - 1, 2**4, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(2**4, 2**8 - 1, device=device, dtype=torch.float16),
+            torch.randn(2**8 - 1, 2**4, device=device, dtype=torch.float16),
         ]
 
         counters.clear()
@@ -591,7 +597,7 @@ class PadMMTest(TestCase):
         # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
         FileCheck().check("def triton_tem_fused_mm").run(code[0])
 
-    def test_no_autocast_in_pad_bmm_joint_graph_pass(self):
+    def test_no_autocast_in_pad_bmm_joint_graph_pass(self, device):
         # Track bmm dtypes before and after joint graph passes
         bmm_dtypes_pre = {}
         bmm_dtypes_post = {}
@@ -666,9 +672,8 @@ class PadMMTest(TestCase):
                 joint_custom_post_pass=make_bmm_dtype_tracker(bmm_dtypes_post),
             ):
                 mha = torch.compile(mha, fullgraph=True, backend="inductor")
-                with torch.autocast(
-                    device_type=GPU_TYPE, dtype=dtype, cache_enabled=False
-                ):
+                device_type = torch.device(device).type
+                with torch.autocast(device_type, dtype=dtype, cache_enabled=False):
                     out_vid = mha(x1, x2, attn_mask)
                     target_vid = torch.randn_like(out_vid)
 
@@ -694,14 +699,13 @@ class PadMMTest(TestCase):
             self.assertFalse(torch.any(x2.grad.isnan()).item())
 
         B, H, S, D = 2, 32, 549, 128
-        device = GPU_TYPE
         dtype = torch.bfloat16
         torch.compiler.reset()
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
     @inductor_config.patch(force_shape_pad=True, strict_output_strides=True)
-    def test_pad_mm_output_strides_preserved(self):
+    def test_pad_mm_output_strides_preserved(self, device):
         """Regression test: pad_mm creates views with padded strides.
         User-visible output strides must match eager execution."""
 
@@ -710,14 +714,17 @@ class PadMMTest(TestCase):
 
         # N=2 gets padded to 4, so the mm output is (3, 4) sliced to (3, 2),
         # creating a view with stride (4, 1) instead of the expected (2, 1).
-        x = torch.randn(3, 5, device=GPU_TYPE)
-        y = torch.randn(5, 2, device=GPU_TYPE)
+        x = torch.randn(3, 5, device=device)
+        y = torch.randn(5, 2, device=device)
         expected = fn(x, y)
         compiled = torch.compile(fn)(x, y)
         self.assertEqual(compiled, expected)
         self.assertEqual(compiled.stride(), expected.stride())
 
 
+instantiate_device_type_tests(PadMMTest, globals(), except_for="cpu", allow_xpu=True)
+
+
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON:
+    if has_triton():
         run_tests()
