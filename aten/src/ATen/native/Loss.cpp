@@ -84,7 +84,15 @@ TORCH_META_FUNC(smooth_l1_loss)
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
+  // resize_({}) alone keeps the full-size storage that build_borrowing_binary_op
+  // allocated for the elementwise result, leaving the scalar output backed by an
+  // oversized storage (gh-185647). Detach that storage with set_() before sizing
+  // to the scalar shape. This mutates the output tensor in place, preserving the
+  // TensorImpl that the iterator borrows; re-running set_output_*/create_out
+  // would instead free that borrowed tensor (use-after-free).
+  const Tensor& out = maybe_get_output();
+  out.set_();
+  out.resize_({});
 }
 
 TORCH_META_FUNC(mse_loss)
@@ -95,7 +103,15 @@ TORCH_META_FUNC(mse_loss)
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
+  // resize_({}) alone keeps the full-size storage that build_borrowing_binary_op
+  // allocated for the elementwise result, leaving the scalar output backed by an
+  // oversized storage (gh-185647). Detach that storage with set_() before sizing
+  // to the scalar shape. This mutates the output tensor in place, preserving the
+  // TensorImpl that the iterator borrows; re-running set_output_*/create_out
+  // would instead free that borrowed tensor (use-after-free).
+  const Tensor& out = maybe_get_output();
+  out.set_();
+  out.resize_({});
 }
 
 } // namespace at::meta
