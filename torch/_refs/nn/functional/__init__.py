@@ -1287,8 +1287,29 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    torch._check(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: (
+            "pixel_shuffle: upscale factor is too large, "
+            f"(upscale_factor)^2 overflowed: upscale_factor={upscale_factor}"
+        ),
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
+    torch._check(
+        self.shape[-3] % upscale_factor_squared == 0,
+        lambda: (
+            "pixel_shuffle expects its input's 'channel' dimension to be divisible "
+            "by the square of upscale_factor, but "
+            f"input.size(-3)={self.shape[-3]} is not divisible by "
+            f"{upscale_factor_squared}"
+        ),
+    )
     batch = self.shape[:-3]
-    C_out = self.shape[-3] // upscale_factor**2
+    C_out = self.shape[-3] // upscale_factor_squared
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
     n = len(batch)
     B_dims = range(n)

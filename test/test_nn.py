@@ -3352,6 +3352,35 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_decomp_validation(self):
+        from torch._refs.nn.functional import pixel_shuffle as pixel_shuffle_decomp
+
+        input = torch.randn(1, 4, 2, 2)
+        self.assertEqual(pixel_shuffle_decomp(input, 2).shape, (1, 1, 4, 4))
+
+        with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+            pixel_shuffle_decomp(input, 0)
+        with self.assertRaisesRegex(RuntimeError, "upscale factor is too large"):
+            pixel_shuffle_decomp(input, 3_037_000_500)
+        with self.assertRaisesRegex(RuntimeError, "channel.*divisible"):
+            pixel_shuffle_decomp(torch.randn(1, 5, 2, 2), 2)
+
+    def test_pixel_shuffle_meta_validation(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            input = torch.randn(1, 4, 2, 2)
+            self.assertEqual(
+                torch.ops.aten.pixel_shuffle(input, 2).shape, (1, 1, 4, 4)
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                torch.ops.aten.pixel_shuffle(input, 0)
+            with self.assertRaisesRegex(RuntimeError, "upscale factor is too large"):
+                torch.ops.aten.pixel_shuffle(input, 3_037_000_500)
+            with self.assertRaisesRegex(RuntimeError, "Invalid input shape"):
+                torch.ops.aten.pixel_shuffle(torch.randn(1, 5, 2, 2), 2)
+
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
         input = torch.randn(3, 18, 4, 4, device='cpu')

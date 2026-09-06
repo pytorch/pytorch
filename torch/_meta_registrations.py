@@ -8061,7 +8061,19 @@ def meta_pixel_shuffle(self, upscale_factor):
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
     )
     torch._check(
-        self.shape[-3] % (upscale_factor * upscale_factor) == 0,
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    torch._check(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: (
+            "pixel_shuffle: upscale factor is too large, "
+            f"(upscale_factor)^2 overflowed: upscale_factor={upscale_factor}"
+        ),
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
+    torch._check(
+        self.shape[-3] % upscale_factor_squared == 0,
         lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
     )
 
@@ -8082,7 +8094,7 @@ def meta_pixel_shuffle(self, upscale_factor):
             return fmt
         return torch.contiguous_format
 
-    C = self.shape[-3] // (upscale_factor * upscale_factor)
+    C = self.shape[-3] // upscale_factor_squared
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)
