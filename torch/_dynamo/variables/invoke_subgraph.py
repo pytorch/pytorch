@@ -19,11 +19,17 @@ from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
+    GuardBuilder,
     GuardCheckSpec,
+    install_guard,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.source import (
+    _get_source_debug_name,
+    GetItemSource,
+    SyntheticLocalSource,
+)
 from torch._dynamo.utils import _make_inlined, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
@@ -34,6 +40,7 @@ from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
 from torch._guards import (
+    ChainedSource,
     Guard,
     InvokeSubgraphReuseCondition,
     InvokeSubgraphReuseEntry,
@@ -49,6 +56,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.higher_order_ops import SubgraphTracingInfo
+    from torch._dynamo.variables.lazy import LazyConstantVariable
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
@@ -169,6 +177,57 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 # ---------------------------------------------------------------------------
 # Auto-cache helpers for invoke_subgraph
 # ---------------------------------------------------------------------------
+
+
+# Note: [invoke_subgraph index parameterization]
+#
+# A region that subscripts a captured container with a value it read from a
+# guarded location -- `pool.buffers[self.layer_id]` -- bakes the index into the
+# lifted capture's Source. The guard on the index then fails for every distinct
+# index, so the region is retraced once per layer.
+#
+# The fix parameterizes the cached entry over the index instead of specializing
+# to it: the (element_source, index_source) pairs are recorded, and on every
+# reuse lookup the index is resolved again from its own source and every source
+# derived from that subscript is rebuilt around the new index. The rebuilt
+# sources feed both the guard re-evaluation in is_reusable (so the *element's*
+# own guards -- tensor metadata, a folded float constant, a nested subscript --
+# are re-checked against the element this call actually selects) and the
+# capture reconstruction in stamp_out_subgraph.
+#
+# Re-deriving is only sound when the index was read *purely* to subscript. If
+# the region also branched on it, or baked it into the graph as an operand, the
+# cached body is wrong for a different index and there is no guard left to
+# catch that once the index guard is dropped.
+#
+# The guard set cannot answer that question as it stands, because a subscript
+# and a branch install the same CONSTANT_MATCH on the same source. What
+# separates them is that only the subscript can do without one: it needs the
+# value at trace time, but the region can be rebuilt for a different value,
+# whereas a branch or an operand bakes it into the graph.
+#
+# LazyConstantVariable is what makes reading the value without guarding it
+# possible: it holds a primitive whose guard has not been installed yet, and
+# peek_value() reads it without realizing. So a subscript inside a region takes
+# the value that way and leaves the guard *deferred*, registering it with the
+# open region. Every other use realizes the constant and installs the guard
+# itself. When the region closes, a value guard on the index source therefore
+# means -- and only means -- that the region read the index for something
+# besides subscripting, and the entry is not parameterized. Either way the
+# region then pays back the deferred guard, so no read leaves the frame less
+# guarded than it is today; only the *reuse condition* treats the index as a
+# parameter. The deferred read is stricter in two spots: an index that would
+# have realized symbolically, or that today is never realized at all, comes out
+# CONSTANT_MATCH specialized where it otherwise would not be.
+#
+# The deferral window is one region: the guard is installed by the time the
+# region closes, before its reuse condition is built. A second region reading
+# the same index therefore sees that guard and falls back to retracing.
+#
+# Everything else falls back to the existing behaviour of retracing: a
+# container reached through sq_item alone rather than mp_subscript (a deque,
+# say), dict and ModuleList containers, negative or out of range indices, and
+# indices arrived at through arithmetic.
 
 
 class InputTag(enum.Enum):
@@ -418,6 +477,240 @@ LiftedArgOrigin = (
 )
 
 
+GUARDS_PINNING_A_VALUE = frozenset({"CONSTANT_MATCH", "EQUALS_MATCH", "ID_MATCH"})
+
+
+@dataclass
+class IndexedSubscript:
+    """A subscript the region did with an index whose guard it deferred.
+
+    ``element_source`` is the GetItemSource the subscript produced and
+    ``index_source`` is where the index itself was read from, e.g.
+    ``pool.buffers[0]`` selected by ``self.layer_id``. See Note:
+    [invoke_subgraph index parameterization].
+    """
+
+    element_source: Source
+    index_source: Source
+    index_vt: Any
+
+
+class open_index_parameterized_region:
+    """Defer index guards for one invoke_subgraph region and settle them on exit.
+
+    ``reindexable`` is the region's verdict, computed on exit while the guards
+    are still deferred: element source -> index source for every subscript the
+    region can be re-derived for. The guards are then installed, so the reuse
+    condition built afterwards guards every index the verdict left out.
+    """
+
+    def __init__(self, tx: "InstructionTranslatorBase") -> None:
+        self.tx = tx
+        self.records: list[IndexedSubscript] = []
+        # Elements the region also reached by subscripting with a literal
+        # index. Such a read produces the same source, and the same
+        # VariableTracker, as a deferred one at the index the region traced
+        # with, so re-deriving would move a capture the literal read expects
+        # to stay put. See Note: [invoke_subgraph index parameterization].
+        self.literal_elements: OrderedSet[Source] = OrderedSet()
+        self.reindexable: dict[Source, Source] = {}
+
+    def __enter__(self) -> "open_index_parameterized_region":
+        self.tx.output.deferred_index_regions.append(self)
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.tx.output.deferred_index_regions.pop()
+        if exc_info[0] is not None or not self.records:
+            # Either the region unwound (graph break, restart), which produces
+            # no entry, or it deferred nothing, so there is nothing to settle.
+            # Specializing the frame on indexes it read would be gratuitous.
+            return
+        self.reindexable = resolve_reindexable(
+            self.tx, self.records, self.literal_elements
+        )
+        # Pay back every deferred guard, including the ones the verdict kept:
+        # an entry parameterized on an index is still a graph specialized to
+        # the index it traced with, and the frame has to guard that.
+        for index_source in OrderedSet(r.index_source for r in self.records):
+            install_guard(index_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+
+
+def subscript_without_realizing_index(
+    tx: "InstructionTranslatorBase",
+    container_vt: VariableTracker,
+    index_vt: VariableTracker,
+) -> VariableTracker | None:
+    """``container_vt[index_vt]`` inside a region, deferring the index's guard.
+
+    Returns the selected element, or None to fall back to the normal
+    (index-realizing) path. Falling back is always correct: it installs the
+    index's guard right away, which is exactly what tells the enclosing region
+    that the index was read for something other than a subscript.
+    """
+    from torch._dynamo.variables.lazy import LazyConstantVariable
+    from torch._dynamo.variables.lists import ListVariable, TupleVariable
+
+    regions = tx.output.deferred_index_regions
+    if not regions:
+        return None
+    if type(index_vt) is not LazyConstantVariable or index_vt.is_realized():
+        return None
+    # Exactly list/tuple: subclasses (SizeVariable, namedtuples, ...) source
+    # their elements differently.
+    if type(container_vt) not in (ListVariable, TupleVariable):
+        return None
+    container_vt = cast("ListVariable | TupleVariable", container_vt)
+    container_source = container_vt.source
+    index_source = index_vt.source
+    if container_source is None or index_source is None:
+        return None
+
+    index = index_vt.peek_value()
+    # `is int` and not isinstance: bool is an int subclass, and `buffers[True]`
+    # would rebuild as a bool-indexed source.
+    if type(index) is not int:
+        return None
+    # Forward, in-range indices only. Anything else does not produce a source
+    # whose literal is the index we would re-derive, so it falls back and is
+    # guarded normally -- which also blocks re-deriving any *other* subscript
+    # that shares the index, since the fallback installs its guard.
+    if not 0 <= index < len(container_vt.items):
+        return None
+
+    item = container_vt.items[index]
+    # The element must be reachable by re-subscripting the same container at
+    # the literal index; otherwise there is nothing to re-derive.
+    element_source = GetItemSource(container_source, index)
+    if item.source != element_source:
+        return None
+
+    # Normally VariableBuilder records this when it realizes the constant.
+    # Without it the deferred guard would never make it into a reuse condition,
+    # and an index this region turns out not to be able to re-derive would go
+    # unchecked.
+    tx.output.current_tracer.traced_sources.add(index_source)
+    # The element too. Re-derivation only stays sound because the element's own
+    # guards are rebased onto whatever this call selects, and the condition
+    # collects guards per traced source. A caller that already materialized
+    # this element before the region ran leaves it out of traced_sources, so
+    # without this the element would move with nothing checking its metadata.
+    tx.output.current_tracer.traced_sources.add(element_source)
+    # Only the innermost region records. An enclosing region sees the guard
+    # this one installs on exit and falls back, which is what we want: its own
+    # captures came through a body it cannot re-derive by itself.
+    regions[-1].records.append(IndexedSubscript(element_source, index_source, index_vt))
+    return item
+
+
+def realized_to_non_constant(index_vt: "LazyConstantVariable") -> bool:
+    """Whether ``index_vt`` realized to something other than a ConstantVariable.
+
+    An int can realize to a SymNodeVariable rather than a ConstantVariable, and
+    then a branch on it installs a shape guard instead of the CONSTANT_MATCH
+    the verdict looks for. Treat that as read-for-something-else.
+    """
+    if not index_vt.is_realized():
+        return False
+    return not isinstance(index_vt.realize(), ConstantVariable)
+
+
+def resolve_reindexable(
+    tx: "InstructionTranslatorBase",
+    records: list[IndexedSubscript],
+    literal_elements: "OrderedSet[Source]",
+) -> dict[Source, Source]:
+    """The subscripts of ``records`` that can be re-derived, as element -> index.
+
+    Drops any index that already carries a value guard -- the region read it
+    for something besides subscripting, and the cached body is specialized to
+    that read -- and any element that two different indexes both selected, since
+    one lifted capture cannot follow two indexes at once.
+
+    The result keeps ``records`` order, which add_reindexing relies on to
+    resolve a subscript after whatever it was derived from.
+    """
+    rejected: set[Source] = {
+        record.index_source
+        for record in records
+        if any(
+            guard.create_fn_name() in GUARDS_PINNING_A_VALUE
+            for guard in tx.output.guards.get_guards_for_source(record.index_source)
+        )
+        or realized_to_non_constant(record.index_vt)
+    }
+    by_element: dict[Source, Source] = {}
+    for record in records:
+        previous = by_element.setdefault(record.element_source, record.index_source)
+        if previous != record.index_source:
+            rejected.add(previous)
+            rejected.add(record.index_source)
+    return {
+        element: index
+        for element, index in by_element.items()
+        if index not in rejected and element not in literal_elements
+    }
+
+
+def add_reindexing(
+    source_replacement: dict[Source, Source],
+    reindex_nodes: list[tuple[Source, Source]],
+    resolve_globals: dict[str, Any],
+    resolve_locals: dict[str, Any],
+    resolve_cache: dict[Source, Any],
+) -> dict[Source, Source] | None:
+    """Extend an arg-source replacement with this call's subscript indexes.
+
+    Each recorded subscript node is resolved again -- its index read from the
+    current call, its base carried through the replacement built so far -- and
+    registered as a further replacement.
+
+    ``reindex_nodes`` is in the order the region performed the subscripts, and
+    that order has to be preserved: a subscript can only depend on one the
+    region did earlier, either through its base (``groups[gid].buffers[bid]``)
+    or through its index (``buffers[ids[gid]]``), because the region had to
+    evaluate that part first. Ordering by anything else -- source depth, say --
+    would rebuild a subscript before the thing it is derived from moves, and it
+    would silently follow the index the *trace* saw rather than this call's.
+
+    Returns None if any index cannot be resolved into a usable subscript, which
+    means the call cannot reuse this entry.
+    """
+    if not reindex_nodes:
+        return source_replacement
+    augmented = dict(source_replacement)
+
+    def replacement_fn(s: Source) -> Source:
+        return augmented.get(s, s)
+
+    for element_source, index_source in reindex_nodes:
+        if not isinstance(element_source, GetItemSource) or (
+            element_source.index_is_slice
+        ):
+            return None
+        try:
+            index = index_source.clone(replacement_fn).get_value(
+                resolve_globals, resolve_locals, resolve_cache
+            )
+        except Exception:
+            return None
+        if type(index) is not int or index < 0:
+            return None
+        # Only the base is carried through the replacement. Cloning the whole
+        # node would also apply the entry registered for it here, or for
+        # another subscript that happens to land on the same element.
+        rebased = GetItemSource(
+            element_source.base.clone(replacement_fn), element_source.index
+        )
+        if rebased.index == index:
+            continue
+        reindexed = GetItemSource(rebased.base, index)
+        if augmented.setdefault(rebased, reindexed) != reindexed:
+            # Two subscripts want the same node to become different elements.
+            return None
+    return augmented
+
+
 def get_fn_code(fn_var: Any) -> types.CodeType | None:
     if isinstance(fn_var, UserFunctionVariable):
         return fn_var.get_function().__code__
@@ -524,6 +817,7 @@ def build_reuse_condition(
     tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     traced_sources: OrderedSet[Source],
+    reindexable: dict[Source, Source] | None = None,
 ) -> InvokeSubgraphReuseCondition | None:
     """Build an InvokeSubgraphReuseCondition from a traced subgraph.
 
@@ -592,10 +886,17 @@ def build_reuse_condition(
     for source in all_sources:
         all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
 
+    # A re-derived index is a parameter of the entry, not part of its condition:
+    # its value guard is exactly the one that would reject every other index.
+    # Guards that pin something else about it (its type, say) still apply.
+    index_sources = set(reindexable.values()) if reindexable else set()
+
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
     for guard in all_relevant_guards:
         source = guard.originating_source
         type_str = guard.create_fn_name()
+        if source in index_sources and type_str in GUARDS_PINNING_A_VALUE:
+            continue
         handler = GUARD_VALUE_DISPATCH.get(type_str)
 
         if handler is SKIP_GUARD:
@@ -642,6 +943,43 @@ def build_source_replacement(
         for old, new in zip(old_arg_sources, new_arg_sources)
         if old is not None and new is not None and old != new
     }
+
+
+def find_indexed_container(
+    cached_entry: InvokeSubgraphReuseEntry, expected: object
+) -> str | None:
+    """Name of a container a capture was subscripted out of at index ``expected``.
+
+    A subscript like ``pool.buffers[self.layer_id]`` is normally re-derived per
+    call, so reaching here means the region read that index for something
+    besides subscripting -- see Note: [invoke_subgraph index parameterization]
+    -- and so kept the guard that rejects every other index. Naming the
+    container lets the reuse log point at what to rewrite.
+
+    Captures reached through an argument's own source are skipped: the region
+    argument is already parameterized, so an index inside it is not what is
+    blocking reuse.
+    """
+    # type() rather than isinstance: True == 1 and False == 0, so a bool guard
+    # value would match any capture indexed at 0 or 1.
+    if type(expected) is not int:
+        return None
+    arg_sources = {s for s in cached_entry.arg_sources if s is not None}
+    for lifted in cached_entry.subgraph_input_mapping:
+        if not isinstance(lifted, LiftedCapturedSource):
+            continue
+        source = lifted.source
+        while isinstance(source, ChainedSource):
+            if source in arg_sources:
+                break
+            if (
+                isinstance(source, GetItemSource)
+                and not source.index_is_slice
+                and source.index == expected
+            ):
+                return _get_source_debug_name(source.base)
+            source = source.base
+    return None
 
 
 def is_reusable(
@@ -769,6 +1107,32 @@ def is_reusable(
         cached_entry.arg_sources, fingerprint.arg_sources
     )
 
+    # Shared resolution context so source.get_value memoizes intermediate
+    # results (e.g. common base sources) across all guards in this check.
+    resolve_globals: dict[str, Any] = {
+        "G": tx.output.root_tx.f_globals,
+        "L": tx.output.root_tx.f_locals,
+    }
+    resolve_locals: dict[str, Any] = {}
+    resolve_cache: dict[Source, Any] = {}
+
+    # Re-derive the subscripts the entry was parameterized over, so the guards
+    # below run against the elements *this* call selects rather than the ones
+    # the trace saw.
+    augmented = add_reindexing(
+        source_replacement,
+        cached_entry.reindex_nodes,
+        resolve_globals,
+        resolve_locals,
+        resolve_cache,
+    )
+    if augmented is None:
+        hc_log.debug(
+            "subgraph_reuse: reuse failed -- cannot re-derive a subscripted capture",
+        )
+        return False
+    source_replacement = augmented
+
     # Parameterized source - this function gives you new sources parameterized
     # on the arg_sources. For example, if the input to the nested compile region
     # is a nn Module layer with source `layers[0]`, then old source
@@ -790,15 +1154,6 @@ def is_reusable(
     # original trace and will trivially pass again.
     if not source_replacement:
         return True
-
-    # Shared resolution context so source.get_value memoizes intermediate
-    # results (e.g. common base sources) across all guards in this check.
-    resolve_globals: dict[str, Any] = {
-        "G": tx.output.root_tx.f_globals,
-        "L": tx.output.root_tx.f_locals,
-    }
-    resolve_locals: dict[str, Any] = {}
-    resolve_cache: dict[Source, Any] = {}
 
     for source, handler, expected, guard in condition.guards:
         new_source = source.clone(replacement_fn)
@@ -826,6 +1181,28 @@ def is_reusable(
             return False
 
         if not handler.eval_fn(value, expected):
+            log_details = hc_log.isEnabledFor(logging.DEBUG)
+            # Only value-match guards carry the read value itself; a length or
+            # type guard's metadata is not an index the region subscripted with.
+            container = (
+                find_indexed_container(cached_entry, expected)
+                if log_details
+                and guard.create_fn_name() in ("CONSTANT_MATCH", "EQUALS_MATCH")
+                else None
+            )
+            # Phrased as an observation, not a diagnosis: the match is on the
+            # index value, so an unrelated guard that happens to equal an index
+            # reaches here too.
+            hint = (
+                f"\n  hint: a captured value is selected from '{container}' at "
+                "this index. If this value is that index, the region also read "
+                "it for something other than the subscript -- a branch, an "
+                "operand, an argument -- which is what keeps this guard. Read "
+                "it once, only to subscript, and the region is re-derived per "
+                "index instead of retraced."
+                if container
+                else ""
+            )
             hc_log.debug(
                 "subgraph_reuse: reuse failed --\n"
                 "  guard type: %s\n"
@@ -833,7 +1210,7 @@ def is_reusable(
                 "  guard source name: %s\n"
                 "  expected: %s\n"
                 "  got: %s\n"
-                "  user stack:\n%s",
+                "  user stack:\n%s%s",
                 guard.create_fn_name(),
                 new_source,
                 new_source.name,
@@ -842,6 +1219,7 @@ def is_reusable(
                 "".join(guard.user_stack.format())
                 if guard.user_stack
                 else "<no stack>",
+                hint,
             )
             return False
 
@@ -904,6 +1282,7 @@ def save_reuse_entry(
     max_reuse_entries: int = 8,
     condition: "InvokeSubgraphReuseCondition | None" = None,
     hash_key: int | None = None,
+    reindexable: dict[Source, Source] | None = None,
 ) -> None:
     """Save a traced subgraph into the reuse cache for future cache hits.
 
@@ -972,6 +1351,7 @@ def save_reuse_entry(
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
+        reindex_nodes=list(reindexable.items()) if reindexable else [],
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -1036,7 +1416,7 @@ def stamp_out_subgraph(
     tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     cached: InvokeSubgraphReuseEntry,
-) -> VariableTracker:
+) -> VariableTracker | None:
     """Emit a new invoke_subgraph call by stamping out a cached subgraph.
 
     Sources in the cached entry are parameterized: they refer to the original
@@ -1061,6 +1441,31 @@ def stamp_out_subgraph(
     }
     resolve_locals: dict[str, Any] = {}
     resolve_cache: dict[Source, Any] = {}
+
+    # Re-derive the entry's parameterized subscripts for this call. is_reusable
+    # already resolved them to accept this call, so a failure here is a bug.
+    augmented = add_reindexing(
+        source_replacement,
+        cached.reindex_nodes,
+        resolve_globals,
+        resolve_locals,
+        resolve_cache,
+    )
+    if augmented is None:
+        # is_reusable resolves these before accepting a call, so the
+        # guard-based path does not get here. The reuse_hash_fn path has no
+        # such check, and whether an index resolves depends on the calling
+        # site rather than on the entry, so there is nothing to reject when
+        # the entry is saved. Report a miss and let the caller trace.
+        hc_log.debug(
+            "subgraph_reuse: stamp out failed -- an index this region "
+            "subscripted with does not resolve for this call"
+        )
+        return None
+    source_replacement = augmented
+
+    def replacement_fn(s: Source) -> Source:
+        return source_replacement.get(s, s)
 
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:
@@ -1104,6 +1509,18 @@ def stamp_out_subgraph(
             value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
             vt = VariableBuilder(tx, new_source)(value)
             new_lifted_args.append(vt.as_proxy())
+
+    # The stamped-out call reads the element each index selects, but never the
+    # index itself, so pin it the way the traced region would have. After the
+    # args resolve, so a stamp out that gives up partway does not leave the
+    # frame specialized on a call it did not serve. OrderedSet since several
+    # elements can share one index source (e.g. a K/V cache pair).
+    for index_source in OrderedSet(
+        index_source for _, index_source in cached.reindex_nodes
+    ):
+        install_guard(
+            index_source.clone(replacement_fn).make_guard(GuardBuilder.CONSTANT_MATCH)
+        )
 
     # Generate fake tensor outputs
     if tx.fake_mode is None:
@@ -1368,7 +1785,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
-                    return stamp_out_subgraph(tx, fingerprint, cached)
+                    stamped = stamp_out_subgraph(tx, fingerprint, cached)
+                if stamped is not None:
+                    return stamped
 
         # Automatic reuse lookup (guard-based): check fn_code first (cheap) to
         # avoid the expensive pytree flatten in build_input_fingerprint on
@@ -1388,11 +1807,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     match.body_name,
                 )
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
-                    return stamp_out_subgraph(tx, fingerprint, match)
+                    stamped = stamp_out_subgraph(tx, fingerprint, match)
+                if stamped is not None:
+                    return stamped
 
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must not be None")
-        with dynamo_timed("invoke_subgraph_trace"):
+        with (
+            dynamo_timed("invoke_subgraph_trace"),
+            open_index_parameterized_region(tx) as index_region,
+        ):
             (
                 p_args,
                 p_kwargs,
@@ -1454,16 +1878,24 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     example_value,
                     max_reuse_entries,
                     hash_key=hash_key,  # type: ignore[possibly-undefined]
+                    # A hash key says the body is interchangeable across calls,
+                    # not that the captures are. Without this a key that
+                    # deliberately ignores the layer id -- the reason to reach
+                    # for reuse_hash_fn on a KV cache -- would pin every layer
+                    # to the first one's slot.
+                    reindexable=index_region.reindexable,
                 )
             else:
                 traced_sources = tracing_info.traced_sources
                 if is_reuse_eligible(
                     tx, body_r, fingerprint, tracing_info, traced_sources
                 ):
+                    reindexable = index_region.reindexable
                     condition = build_reuse_condition(
                         tx,
                         fingerprint,
                         traced_sources,
+                        reindexable,
                     )
                     if condition is not None:
                         save_reuse_entry(
@@ -1478,6 +1910,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                             example_value,
                             max_reuse_entries,
                             condition=condition,
+                            reindexable=reindexable,
                         )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]

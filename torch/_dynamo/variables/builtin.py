@@ -1224,6 +1224,22 @@ class BuiltinVariable(BaseBuiltinVariable):
                     result = _try_computed_lazy_constant(fn, args)
                     if result is not None:
                         return result
+                if (
+                    tx.output.deferred_index_regions
+                    and fn is operator.getitem
+                    and len(args) == 2
+                    and not kwargs
+                ):
+                    # Inside a nested compile region, subscripting with a
+                    # constant read from a guarded location can leave that
+                    # index unrealized, which is how the region later tells
+                    # a pure subscript apart from a use of the value. See
+                    # Note: [invoke_subgraph index parameterization].
+                    from .invoke_subgraph import subscript_without_realizing_index
+
+                    element = subscript_without_realizing_index(tx, args[0], args[1])
+                    if element is not None:
+                        return element
                 for a in args:
                     if isinstance(a, lazy_constant_types):
                         if a.get_handler_type_for_dispatch() is not ConstantVariable:
