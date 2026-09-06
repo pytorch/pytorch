@@ -91,8 +91,18 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   size_t total_cache_entry_count{0};
   // Lock ordering: a thread that needs both convert_frame.compile_lock and
   // this cache_mutex must take compile_lock FIRST (reset()/remove_from_cache
-  // do). cache_mutex is recursive and drops the GIL while waiting; taking it
-  // before compile_lock anywhere would risk a cycle against that path.
+  // do). cache_mutex is recursive and drops the GIL while waiting. What keeps
+  // this sound is that lookup() releases cache_mutex before guard evaluation
+  // (see extra_state.cpp), so the hot path runs no Python under the lock. Sites
+  // that DO run Python while holding cache_mutex are knowingly exempt because
+  // they run only at compile/debug time, not on the hot path:
+  // drain_pending_invalidations (from lookup()/_debug_get_cache_entry_list),
+  // try_lookup_without_guard_eval's backend_match, and create_cache_entry's
+  // CacheEntry ctor. A second cycle needs no compile_lock at all:
+  // create_cache_entry (and the py::cast bindings) can hold cache_mutex(X)
+  // while a __del__ calls a compiled function that blocks on cache_mutex(Y);
+  // invalidate() and _reset_precompile_entries_for_owner park rather than block
+  // for that reason, but those sites do not.
   mutable std::recursive_mutex cache_mutex;
   // Frame-id source for the default compile scope: holds only "_id", the
   // counter behind CompileId.frame_id for this code object. Dynamic-shape
