@@ -2650,54 +2650,74 @@ class BuiltinVariable(BaseBuiltinVariable):
                 "attributes; intentionally graph breaking.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        # handle __instancecheck__ defined in user class
-        if (
-            isinstance(arg, variables.UserDefinedObjectVariable)
-            and "__instancecheck__" in isinstance_type.__class__.__dict__
-        ):
-            return VariableTracker.build(
-                tx,
-                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value),
-            )
-
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, isinstance(arg_type, isinstance_type))
 
-        isinstance_type_tuple: tuple[type, ...]
-        if isinstance(isinstance_type, type) or callable(
-            # E.g. isinstance(obj, typing.Sequence)
-            getattr(isinstance_type, "__instancecheck__", None)
-        ):
-            isinstance_type_tuple = (isinstance_type,)
-        elif isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = typing.get_args(isinstance_type)
-        elif isinstance(isinstance_type, tuple) and all(
-            isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
-            for tp in isinstance_type
-        ):
-            isinstance_type_tuple = isinstance_type
-        else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
-            )
-
-        try:
-            # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.
-            # But usually `isinstance(obj, type_info)` and `issubclass(type(obj), type_info)` gives
-            # the same result.
-            # WARNING: This might run arbitrary user code `__subclasscheck__` and we did not trace
-            # through it. This is a limitation of the current implementation.
-            # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
-            # might not be a big issue and we trade off it for performance.
-            val = issubclass(arg_type, isinstance_type_tuple)
-        except TypeError:
-            val = arg_type in isinstance_type_tuple
-        return VariableTracker.build(tx, val)
+        # Mirror CPython's object_recursive_isinstance: nested tuples and
+        # unions are flattened, and members are validated and checked left to
+        # right, stopping at the first match. A member whose metaclass defines
+        # __instancecheck__ (Protocols, ABCs, ...) is evaluated with the real
+        # isinstance() on the wrapped Python object. Only that branch reads
+        # arg.value, so a lazy constant stays unrealized -- and keeps its
+        # weaker type-only guard -- until such a member is actually reached.
+        pending: list[Any] = [isinstance_type]
+        while pending:
+            member = pending.pop()
+            if isinstance(member, tuple):
+                pending.extend(reversed(member))
+                continue
+            if isinstance(member, types.UnionType):
+                pending.extend(reversed(typing.get_args(member)))
+                continue
+            if not (
+                isinstance(member, type)
+                # E.g. isinstance(obj, typing.Sequence)
+                or callable(getattr(member, "__instancecheck__", None))
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                    ],
+                )
+            # type.__dict__ holds __instancecheck__ itself, so plain classes
+            # must be excluded: their answer comes from issubclass() below.
+            metaclass = type(member)
+            hooked = metaclass is not type and "__instancecheck__" in metaclass.__dict__
+            if hooked and isinstance(
+                arg, (variables.UserDefinedObjectVariable, variables.ConstantVariable)
+            ):
+                try:
+                    val = isinstance(arg.value, member)
+                except TypeError as e:
+                    raise_observed_exception(TypeError, tx, args=list(e.args))
+            else:
+                try:
+                    # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.
+                    # But usually `isinstance(obj, type_info)` and `issubclass(type(obj), type_info)` gives
+                    # the same result.
+                    # WARNING: This might run arbitrary user code `__subclasscheck__` and we did not trace
+                    # through it. This is a limitation of the current implementation.
+                    # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
+                    # might not be a big issue and we trade off it for performance.
+                    val = issubclass(arg_type, member)
+                except TypeError as e:
+                    # issubclass() rejecting the classinfo (e.g. a runtime_checkable
+                    # Protocol with data members) says nothing about isinstance();
+                    # without the wrapped Python object Dynamo cannot evaluate it.
+                    unimplemented(
+                        gb_type="builtin isinstance() with classinfo that does not support issubclass()",
+                        context=f"isinstance({arg}, {isinstance_type})",
+                        explanation=f"issubclass({arg_type}, {member}) raised "
+                        f"TypeError: {e}. Dynamo emulates isinstance() with "
+                        "issubclass() for this argument and cannot determine the result.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            if val:
+                return VariableTracker.build(tx, True)
+        return VariableTracker.build(tx, False)
 
     def call_issubclass(
         self,
