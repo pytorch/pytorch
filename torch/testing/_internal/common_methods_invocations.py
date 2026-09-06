@@ -10019,6 +10019,16 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
             (1, 1, 1, 0),
         ]
     )
+    # A downscale_factor of 1 leaves the shape alone, so the empty samples above
+    # cannot tell a correct output shape from the input shape being returned.
+    yield from (
+        SampleInput(make_arg(shape), downscale_factor=3)
+        for shape in [
+            (1, 0, 6, 6),
+            (1, 1, 0, 6),
+            (1, 1, 6, 0),
+        ]
+    )
 
 def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
