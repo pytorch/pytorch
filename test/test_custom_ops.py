@@ -43,11 +43,15 @@ from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     OpDTypes,
     ops,
     PYTORCH_CUDA_MEMCHECK,
+    skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -57,14 +61,12 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfCrossRef,
     skipIfTorchDynamo,
-    skipIfXpu,
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -171,6 +173,21 @@ class CustomOpTestCaseBase(TestCase):
 
     def get_op(self, qualname):
         return torch._custom_op.impl.get_op(qualname)
+
+    def _test_impl_device(self, name, types, device):
+        lib = self.lib()
+        torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
+
+        @torch.library.impl(f"{self.test_ns}::{name}", types)
+        def f(x):
+            x_np = x.cpu().numpy()
+            y = torch.from_numpy(np.sin(x_np))
+            return y.to(device=x.device)
+
+        x = torch.randn(3, device=device)
+        y = getattr(self.ns(), name)(x)
+        if not torch.allclose(y, x.sin()):
+            raise AssertionError("expected y to equal x.sin()")
 
 
 @requires_compile
@@ -670,6 +687,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 
 class TestCustomOp(CustomOpTestCaseBase):
+    hw_classification = HardwareClassification.GENERIC
     test_ns = "_test_custom_op"
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
@@ -2046,51 +2064,6 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
-    @skipIfXpu(msg="Deprecated torch.custom_ops API")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
-    def test_impl_separate(self):
-        @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError
-
-        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types="cpu")
-        def foo_cpu(x):
-            return x.sin()
-
-        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)
-        def foo_cuda(x):
-            return x.cos()
-
-        x = torch.randn(3)
-        op = self.get_op(f"{self.test_ns}::foo")
-        result = op(x)
-        self.assertEqual(result, foo_cpu(x))
-
-        x_cuda = x.to(device_type)
-        op = self.get_op(f"{self.test_ns}::foo")
-        result = op(x_cuda)
-        self.assertEqual(result, foo_cuda(x_cuda))
-
-    @skipIfXpu(msg="Deprecated torch.custom_ops API")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
-    def test_impl_multiple(self):
-        @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError
-
-        @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
-        def foo_impl(x):
-            return x.cos()
-
-        op = self.get_op(f"{self.test_ns}::foo")
-        x = torch.randn(3)
-        result = op(x)
-        self.assertEqual(result, foo_impl(x))
-
-        x_cuda = x.to(device_type)
-        result = op(x_cuda)
-        self.assertEqual(result, foo_impl(x_cuda))
-
     def test_impl_abstract_overload(self):
         lib = self.lib()
         lib.define("sin.blah(Tensor x) -> Tensor")
@@ -2653,33 +2626,11 @@ Dynamic shape operator
         )
         self.assertTrue(ns.bar.overload._defined_in_python)
 
-    def _test_impl_device(self, name, types, device):
-        lib = self.lib()
-        torch.library.define(f"{self.test_ns}::{name}", "(Tensor x) -> Tensor", lib=lib)
-
-        @torch.library.impl(f"{self.test_ns}::{name}", types)
-        def f(x):
-            x_np = x.cpu().numpy()
-            y = torch.from_numpy(np.sin(x_np))
-            return y.to(device=x.device)
-
-        x = torch.randn(3, device=device)
-        y = getattr(self.ns(), name)(x)
-        if not torch.allclose(y, x.sin()):
-            raise AssertionError("expected y to equal x.sin()")
-
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_impl_device_cpu(self):
         self._test_impl_device("foo1", "default", "cpu")
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
-    def test_impl_device_cuda(self):
-        self._test_impl_device("foo4", "default", device_type)
-        self._test_impl_device("foo5", [device_type], device_type)
-        self._test_impl_device("foo6", ["cpu", device_type], device_type)
 
     def test_impl_device_function(self):
         lib = self.lib()
@@ -2970,6 +2921,74 @@ TORCH_LIBRARY(_test_out_of_range_index_error, m) {
         self.assertEqual(received, [torch.contiguous_format, torch.channels_last])
 
 
+class TestCustomOpDevice(CustomOpTestCaseBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipXPUIf(True, "Deprecated torch.custom_ops API")
+    @skipMPS
+    @onlyAccelerator
+    def test_impl_separate(self, device):
+        device_type = torch.device(device).type
+
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            raise NotImplementedError
+
+        @custom_ops.impl(f"{self.test_ns}::foo", device_types="cpu")
+        def foo_cpu(x):
+            return x.sin()
+
+        @custom_ops.impl(f"{self.test_ns}::foo", device_types=device_type)
+        def foo_cuda(x):
+            return x.cos()
+
+        x = torch.randn(3)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x)
+        self.assertEqual(result, foo_cpu(x))
+
+        x_acc = x.to(device)
+        op = self.get_op(f"{self.test_ns}::foo")
+        result = op(x_acc)
+        self.assertEqual(result, foo_cuda(x_acc))
+
+    @skipXPUIf(True, "Deprecated torch.custom_ops API")
+    @skipMPS
+    @onlyAccelerator
+    def test_impl_multiple(self, device):
+        device_type = torch.device(device).type
+
+        @custom_ops.custom_op(f"{self.test_ns}::foo")
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            raise NotImplementedError
+
+        @custom_ops.impl(f"{self.test_ns}::foo", device_types="cpu")
+        def foo_impl(x):
+            return x.cos()
+
+        @custom_ops.impl(f"{self.test_ns}::foo", device_types=device_type)
+        def foo_impl_device(x):
+            return x.cos()
+
+        op = self.get_op(f"{self.test_ns}::foo")
+        x = torch.randn(3)
+        result = op(x)
+        self.assertEqual(result, foo_impl(x))
+
+        x_acc = x.to(device)
+        result = op(x_acc)
+        self.assertEqual(result, foo_impl_device(x_acc))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @skipMPS
+    @onlyAccelerator
+    def test_impl_device_accelerator(self, device):
+        device_type = torch.device(device).type
+        self._test_impl_device("foo4", "default", device)
+        self._test_impl_device("foo5", [device_type], device)
+        self._test_impl_device("foo6", ["cpu", device_type], device)
+
+
 def op_with_incorrect_schema(testcase, name):
     lib = testcase.lib()
     lib.define(f"{name}(Tensor x) -> Tensor")
@@ -3084,6 +3103,8 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 
 class TestCustomOpAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "tags, opname",
         [
@@ -5402,60 +5423,6 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.cos())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_split_device(self):
-        cpu_call_count = 0
-        cuda_call_count = 0
-
-        @torch.library.custom_op(
-            "_torch_testing::f", mutates_args=(), device_types="cpu"
-        )
-        def f(x: Tensor) -> Tensor:
-            nonlocal cpu_call_count
-            cpu_call_count += 1
-            x_np = x.numpy()
-            out_np = np.sin(x_np)
-            return torch.from_numpy(out_np)
-
-        @f.register_kernel("cuda")
-        def _(x: Tensor) -> Tensor:
-            nonlocal cuda_call_count
-            cuda_call_count += 1
-            x_np = x.cpu().numpy()
-            out_np = np.sin(x_np)
-            return torch.from_numpy(out_np).to(x.device)
-
-        x = torch.randn(3)
-        y = f(x)
-        self.assertEqual(y, x.sin())
-        self.assertEqual(cpu_call_count, 1)
-        self.assertEqual(cuda_call_count, 0)
-
-        x = x.cuda()
-        y = f(x)
-        self.assertEqual(y, x.sin())
-        self.assertEqual(cpu_call_count, 1)
-        self.assertEqual(cuda_call_count, 1)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_multi_types(self):
-        @torch.library.custom_op(
-            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
-        )
-        def f(x: Tensor) -> Tensor:
-            x_np = x.cpu().numpy()
-            out_np = np.sin(x_np)
-            return torch.from_numpy(out_np).to(x.device)
-
-        x = torch.randn(3)
-        y = f(x)
-        self.assertEqual(y, x.sin())
-        x = x.cuda()
-        y = f(x)
-        self.assertEqual(y, x.sin())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
         called_f1 = 0
@@ -6140,6 +6107,69 @@ Please use `add.register_fake` to add an fake impl.""",
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
+class TestCustomOpAPIDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @skipMPS
+    @onlyAccelerator
+    def test_split_device(self, device):
+        device_type = torch.device(device).type
+        cpu_call_count = 0
+        cuda_call_count = 0
+
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types="cpu"
+        )
+        def f(x: Tensor) -> Tensor:
+            nonlocal cpu_call_count
+            cpu_call_count += 1
+            x_np = x.numpy()
+            out_np = np.sin(x_np)
+            return torch.from_numpy(out_np)
+
+        @f.register_kernel(device_type)
+        def _(x: Tensor) -> Tensor:
+            nonlocal cuda_call_count
+            cuda_call_count += 1
+            x_np = x.cpu().numpy()
+            out_np = np.sin(x_np)
+            return torch.from_numpy(out_np).to(x.device)
+
+        x = torch.randn(3)
+        y = f(x)
+        self.assertEqual(y, x.sin())
+        self.assertEqual(cpu_call_count, 1)
+        self.assertEqual(cuda_call_count, 0)
+
+        x = x.to(device)
+        y = f(x)
+        self.assertEqual(y, x.sin())
+        self.assertEqual(cpu_call_count, 1)
+        self.assertEqual(cuda_call_count, 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @skipMPS
+    @onlyAccelerator
+    def test_multi_types(self, device):
+        device_type = torch.device(device).type
+
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", device_type)
+        )
+        def f(x: Tensor) -> Tensor:
+            x_np = x.cpu().numpy()
+            out_np = np.sin(x_np)
+            return torch.from_numpy(out_np).to(x.device)
+
+        x = torch.randn(3)
+        y = f(x)
+        self.assertEqual(y, x.sin())
+        x = x.to(device)
+        y = f(x)
+        self.assertEqual(y, x.sin())
+
+
 class TestLibrarySourceLocation(TestCase):
     def test_library_source_location(self):
         # Library.__init__ uses sys._getframe(1) to capture the caller's
@@ -6764,6 +6794,12 @@ class TestOpProfiles(TestCase):
 only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCustomOpDevice, globals(), allow_xpu=True, allow_mps=True
+)
+instantiate_device_type_tests(
+    TestCustomOpAPIDevice, globals(), allow_xpu=True, allow_mps=True
 )
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
