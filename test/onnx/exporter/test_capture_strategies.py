@@ -6,10 +6,13 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal.exporter import _capture_strategies
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class ExportStrategiesTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "strategy_cls",
         [
