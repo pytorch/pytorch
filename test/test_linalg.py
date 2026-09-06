@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
@@ -35,8 +35,8 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
-     e4m3_type, e5m2_type)
+     onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
+     e4m3_type, e5m2_type, largeMPSBufferTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -11497,188 +11497,112 @@ class TestGroupedMM(TestCase):
         torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
-    def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
-        for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
-            a = a.clone().detach().requires_grad_()
-            b = b.clone().detach().requires_grad_()
-            out_ref = torch.mm(a, b.t())
-            out_ref.backward(gO)
-            self.assertEqual(out, out_ref)
-            if agrad is not None:
-                self.assertEqual(agrad, a.grad)
-                self.assertEqual(bgrad, b.grad)
+    def _make_grouped_mm_matrix(self, shape, row_major, device, dtype, strided=False):
+        rows, cols = shape[-2:] if row_major else shape[-2:][::-1]
+        alignment = 16 // dtype.itemsize
+        stride = max(alignment, math.ceil(cols / alignment) * alignment) * (1 + strided)
+        batch = (shape[0] * (1 + strided),) if len(shape) == 3 else ()
+        matrix = torch.randn(*batch, rows, stride, device=device, dtype=dtype)[..., :cols]
+        if batch:
+            matrix = matrix[::(1 + strided)]
+        return matrix if row_major else matrix.transpose(-2, -1)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, dtype):
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
-        else:
-            a = torch.randn(k * n_groups + k * int(strided), m, device=device, dtype=dtype).t()[:, :k * n_groups]
-
-        if b_row_major:
-            b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
-        else:
-            b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
-
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-
-        f = F.grouped_mm
-        out = f(a, b.t(), offs=offs, out_dtype=dtype)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        offs_cpu = offs.cpu()
-        alist, blist, agradlist, bgradlist = [], [], [], []
+    def grouped_mm_helper(self, a, b, offs=None, backward=True):
+        a.requires_grad_(backward)
+        b.requires_grad_(backward)
+        out = F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=a.dtype)
+        if backward:
+            # Odd output widths need padded gradients to satisfy grouped_mm alignment.
+            grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
+            out.backward(grad)
+        ends = offs.cpu().tolist() if offs is not None else [0] * a.size(0)
         start = 0
-        for i in range(n_groups):
-            alist.append(a[:, start:offs_cpu[i]])
-            blist.append(b[:, start:offs_cpu[i]])
-            agradlist.append(a.grad[:, start:offs_cpu[i]])
-            bgradlist.append(b.grad[:, start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
+        for group, end in enumerate(ends):
+            span = slice(start, end)
+            if a.dim() == b.dim():
+                a_idx = b_idx = (slice(None), span) if a.dim() == 2 else group
+                out_idx = group
+            elif a.dim() == 2:
+                a_idx, b_idx, out_idx = span, group, span
+            else:
+                a_idx, b_idx, out_idx = group, span, (slice(None), span)
+            a_ref = a[a_idx].detach().clone().requires_grad_(backward)
+            b_ref = b[b_idx].detach().clone().requires_grad_(backward)
+            out_ref = torch.mm(a_ref, b_ref.t())
+            self.assertEqual(out[out_idx], out_ref)
+            if backward:
+                out_ref.backward(grad[out_idx])
+                self.assertEqual(a.grad[a_idx], a_ref.grad)
+                self.assertEqual(b.grad[b_idx], b_ref.grad)
+            start = end
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
+    @parametrize("a_shape,b_shape,offsets,backward", [
+        subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
+        subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
+        subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
+        subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
+        subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
+        subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
+    ])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
-        else:
-            a = torch.randn(k, (m + 2 * s_int) * n_groups, device=device, dtype=dtype).t()[:m * n_groups, :]
-
-        if b_row_major:
-            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-
-        a_contig = a if a_row_major else a.t()
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-        for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
-            a.grad = None
-            b.grad = None
-            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
-            if check_zero_size:
-                offs[0] = offs[1]
-
-            f = F.grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
-            gO = torch.rand_like(out)
-            if not check_zero_size:
-                out.backward(gO)
-            offs_cpu = offs.cpu()
-            alist, agradlist, gOlist, outlist = [], [], [], []
-            bgradlist = [None] * n_groups if check_zero_size else b.grad
-            start = 0
-            for i in range(n_groups):
-                alist.append(a[start:offs_cpu[i]])
-                agradlist.append(None if check_zero_size else a.grad[start:offs_cpu[i]])
-                outlist.append(out[start:offs_cpu[i]])
-                gOlist.append(gO[start:offs_cpu[i]])
-                start = offs_cpu[i]
-            self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
+    def test_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
+        sizes = a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())
+        unaligned = any(size % (16 // dtype.itemsize) for size in sizes)
+        if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
+            self.skipTest("Unaligned cases require the CUDA float32 fallback")
+        a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
+        b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
+        offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=backward)
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        if b_row_major:
-            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        a.requires_grad_(True)
-        b.requires_grad_(True)
+    @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
+        subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),
+        subtest(((2, 49, 8192), (1024, 8192), [257, 1024], False, True), name="cols_bn256"),
+    ])
+    @dtypes(torch.float32)
+    @toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-4)})
+    def test_grouped_gemm_wide_tiles(self, device, a_shape, b_shape, offsets, a_row_major, b_row_major, dtype):
+        # Exercises MPS MPP BN128/BN256 kernels and partial tiles that smaller tests never reach:
+        # dispatch requires N >= 1024 and at least 32 MiB of weights.
+        a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype).div_(math.sqrt(a_shape[-1]))
+        b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype)
+        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs)
 
-        a_contig = a if a_row_major else a.transpose(-2, -1)
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-
-        f = F.grouped_mm
-        out = f(a, b.transpose(-2, -1), out_dtype=dtype)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
-
+    @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        if b_row_major:
-            b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
-        else:
-            b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
+    @dtypes(torch.bfloat16)
+    def test_grouped_mm_large_stride_fallback(self, device, dtype):
+        # Forces MPS's oversized-stride guard and jagged-column transposed fallback.
+        # Ordinary strides fit int32; this size-one dimension triggers rejection without needing huge storage.
+        a = torch.randn(16, device=device, dtype=dtype).as_strided((1, 1, 16), (16, 2**32, 1))
+        b = self._make_grouped_mm_matrix((17, 16), True, device, dtype)
+        offs = torch.tensor([17], device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=False)
 
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-
-        a_contig = a if a_row_major else a.transpose(-2, -1)
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-        for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
-            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
-            if check_zero_size:
-                offs[0] = offs[1]
-
-            f = F.grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
-            gO = torch.rand_like(out)
-            if not check_zero_size:
-                out.backward(gO)
-            offs_cpu = offs.cpu()
-            blist, outlist, bgradlist, gOlist = [], [], [], []
-            agradlist = [None] * n_groups if check_zero_size else a.grad
-            start = 0
-            for i in range(n_groups):
-                blist.append(b[start:offs_cpu[i]])
-                bgradlist.append(b.grad[start:offs_cpu[i]])
-                outlist.append(out[:, start:offs_cpu[i]])
-                gOlist.append(gO[:, start:offs_cpu[i]])
-                start = offs_cpu[i]
-            self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
-
+    @onlyOn(["cuda", "mps"])
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @serialTest()
+    @largeTensorTest("6GB")
+    @largeMPSBufferTest((2**31 + 8) * torch.float16.itemsize)
+    @dtypes(torch.float16)
+    def test_grouped_mm_u64_indexing(self, device, dtype):
+        # Exercises MPS's combined extent/stride guard and 64-bit indexing. Strides fit int32,
+        # but accessed offsets exceed it; the size-one stride test never accesses distant storage.
+        stride = 2**30
+        storage = torch.empty(2 * stride + 8, device=device, dtype=dtype)
+        for row in range(3):
+            storage[row * stride:row * stride + 8].normal_()
+        a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
+        b = storage.as_strided((8, 3), (1, stride))
+        offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
