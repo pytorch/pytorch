@@ -35,10 +35,16 @@ from torch.distributed.checkpoint.planner import (
 )
 from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
 from torch.distributed.checkpoint.storage import WriteResult
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestHfStorage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_write_data_hf(self) -> None:
         mock_module = MagicMock()
         mock_module.save.return_value = b""
