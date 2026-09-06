@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import gc
 import re
+import sys
+import types
 import unittest
 import weakref
 from unittest.mock import patch
@@ -8,6 +10,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import trace_rules
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
@@ -20,6 +23,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -3079,6 +3083,149 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
+
+
+class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
+    """
+    Regression test for https://github.com/pytorch/pytorch/pull/192970
+    Issue: https://github.com/pytorch/pytorch/issues/192969
+
+    Verifies that out-of-tree PrivateUse1 backends registered via DeviceInterface
+    get correct stream handling in Dynamo tracing, specifically ensuring that
+    `wait_stream` receives a valid stream index and not `None`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        # 1. Define Fake DeviceInterface
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def current_stream():
+                # Return the real accelerator stream instead of raising RuntimeError.
+                # This allows Dynamo to compute example values without crashing.
+                # If the handler is correctly registered, Dynamo will intercept this
+                # call and never reach here. If the handler is missing, Dynamo will
+                # call this directly, but the returned stream won't be properly
+                # tracked as a PrivateUse1 stream, leading to incorrect graph generation.
+                return torch.accelerator.current_stream()
+
+        cls.FakeDeviceInterface = FakeDeviceInterface
+
+        # 2. Create and mount fake module
+        cls.fake_device_module = types.ModuleType("fake_device")
+        cls.fake_device_module.current_stream = FakeDeviceInterface.current_stream
+
+        # Patch __module__/__qualname__ so that trace_rules string matching
+        # can resolve "torch.fake_device.current_stream" correctly.
+        FakeDeviceInterface.current_stream.__module__ = "torch.fake_device"
+        FakeDeviceInterface.current_stream.__qualname__ = "current_stream"
+
+        torch.fake_device = cls.fake_device_module
+        sys.modules["torch.fake_device"] = cls.fake_device_module
+
+        # 3. Register interface
+        register_interface_for_device("fake_device", FakeDeviceInterface)
+
+        # 4. Register trace rule
+        cls.torch_current_stream_fake = dict.fromkeys(
+            ["torch.fake_device.current_stream"],
+            TorchInGraphFunctionVariable,
+        )
+        trace_rules.torch_name_rule_map.append(cls.torch_current_stream_fake)
+        trace_rules.clear_lru_cache()
+
+        # 5. Clear Dynamo handler cache
+        if hasattr(TorchInGraphFunctionVariable._get_handlers, "cache_clear"):
+            TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(TorchInGraphFunctionVariable._get_handlers, "cache_clear"):
+            TorchInGraphFunctionVariable._get_handlers.cache_clear()
+
+        if cls.torch_current_stream_fake in trace_rules.torch_name_rule_map:
+            trace_rules.torch_name_rule_map.remove(cls.torch_current_stream_fake)
+        trace_rules.clear_lru_cache()
+
+        if "fake_device" in device_interfaces:
+            del device_interfaces["fake_device"]
+
+        if hasattr(torch, "fake_device"):
+            del torch.fake_device
+        if "torch.fake_device" in sys.modules:
+            del sys.modules["torch.fake_device"]
+
+        super().tearDownClass()
+
+    @unittest.skipUnless(
+        torch.accelerator.is_available(),
+        "Requires an accelerator to populate cur_stream_stack in SymbolicStreamState",
+    )
+    def test_wait_stream_graph_has_valid_index(self):
+        """
+        Behavioral test: Verifies that the Dynamo handler correctly resolves
+        `current_stream` for PrivateUse1 backends, preventing the `wait_stream(None)`
+        regression from #192969.
+
+        Without the fix, Dynamo cannot properly track `torch.fake_device.current_stream`,
+        resulting in `wait_stream(None, None)` which triggers a RuntimeError from the
+        C++ streams layer. This test catches that specific failure and reports it as
+        a regression assertion failure.
+
+        With the fix, Dynamo intercepts the call via the handler table, generates
+        a StreamVariable with a valid user_object_index, and the wait_stream node
+        receives proper stream indices.
+        """
+
+        def fn(x):
+            s = torch.fake_device.current_stream()
+            t = torch.fake_device.current_stream()
+            s.wait_stream(t)
+            return x + 1
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        # Execute the compiled function.
+        # Without the fix, this raises:
+        #   RuntimeError: streams::wait_stream() Expected a value of type 'int'
+        #   for argument 'waiting_stream_index' but instead found type 'NoneType'.
+        try:
+            compiled_fn(torch.tensor(1.0))
+        except RuntimeError as e:
+            if "wait_stream" in str(e) and "NoneType" in str(e):
+                self.fail(
+                    f"Regression detected (Issue #192969): "
+                    f"PrivateUse1 'current_stream' handler was not found by Dynamo.\n"
+                    f"Dynamo generated 'wait_stream(None, None)' instead of valid stream indices.\n"
+                    f"Original error: {e}"
+                )
+            raise  # Re-raise if it's a different RuntimeError
+
+        # If we reach here, compilation and execution succeeded.
+        # Verify the graph structure.
+        self.assertEqual(len(backend.graphs), 1, "Should compile in a single frame")
+        graph = backend.graphs[0].graph
+
+        wait_stream_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function" and "wait_stream" in str(n.target)
+        ]
+
+        self.assertTrue(
+            len(wait_stream_nodes) > 0,
+            "No wait_stream node found in the compiled graph",
+        )
+
+        for node in wait_stream_nodes:
+            self.assertNotIn(
+                None,
+                node.args,
+                "wait_stream received None as an argument (regression from #192969!)",
+            )
 
 
 if __name__ == "__main__":
