@@ -145,8 +145,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // this closes). Guarded by pending_invalidation_mutex; applied by the next
   // cache_mutex holder whose cache_python_depth is zero. Known limit: an
   // eviction parked from inside a lookup is applied AFTER entries that same
-  // Python then installs or compiles, and takes them too unless (as install()
-  // does with a fresh owner token) they are keyed apart from it.
+  // Python then installs or compiles, and takes them too unless they are keyed
+  // apart from it -- e.g. an OWNER-scoped park spares an install whose
+  // caller-supplied owner token differs.
   struct PendingEviction {
     enum Kind : uint8_t {
       CLEAR_ALL, // every cache and precompile entry
