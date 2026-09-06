@@ -4939,7 +4939,7 @@
     {
       "Gb_type": "attempted to trace numpy function unsupported by PyTorch",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
-      "Explanation": "Can't find numpy numpy function {self.value} in torch._numpy.",
+      "Explanation": "Can't find numpy function {self.value} in torch._numpy.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
