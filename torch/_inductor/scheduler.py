@@ -3534,7 +3534,7 @@ class WhyNoFuse:
         )
 
 
-def pformat(obj: Any) -> str:
+def pformat(obj: object) -> str:
     if isinstance(obj, (OrderedSet, set)):  # noqa: set_linter
         # pformat has trouble with sets of sympy exprs
         obj = sorted(obj, key=str)

@@ -3780,6 +3780,18 @@ class TestFxGraphCacheHashing(TestCase):
             self._fx_graph_cache_key(different, []),
         )
 
+    def test_nested_region_uncacheable_config_bypasses_cache(self):
+        # Config annotations are not enforced when a patch is applied, so an
+        # allowed key can still carry a callable value that cannot be cached.
+        def invalid_value():
+            pass
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm({"fallback_by_default": invalid_value}),
+                require_shape_env=False,
+            ).validate()
+
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
             get_backward_nested_region_config,

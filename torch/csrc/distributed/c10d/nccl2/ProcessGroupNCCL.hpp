@@ -242,6 +242,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     return true;
   }
+  bool isInitialized() override;
   bool supportsShrinking() const override {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
     return true;

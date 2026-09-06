@@ -957,6 +957,7 @@ if(USE_LLVM_BOLT)
   # Extract the committed BOLT profiles for the build-time optimization
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
   file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 endif()

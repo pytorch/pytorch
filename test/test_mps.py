@@ -12384,6 +12384,35 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(mps.rank.cpu(), cpu.rank)
         self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
 
+    def test_linalg_svd_large_batch(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195937:
+        # batches whose numel exceeds 8192 take the native on-device Jacobi
+        # kernel rather than the CPU fallback. That kernel used to crash the
+        # Metal compiler (a runtime mem_flags argument to threadgroup_barrier
+        # fails AGX instruction selection), so nothing above the threshold ran.
+        # Small OpInfo samples stay under the gate, so this is the only coverage
+        # of the kernel itself.
+        for dtype in (torch.float32, torch.complex64):
+            A = torch.randn(4096, 3, 3, dtype=dtype)  # 36864 elements, over the gate
+            Am = A.to(device)
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            # Singular values and reconstruction are gauge invariant; the raw
+            # U/Vh differ between the Jacobi solver and LAPACK.
+            self.assertEqual(S.cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+            # svdvals shares the same kernel.
+            self.assertEqual(torch.linalg.svdvals(Am).cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+
+    def test_linalg_lstsq_large_batch(self, device="mps", dtype=torch.float32):
+        # lstsq is built on the native SVD; exercise a batch above the 8192 gate.
+        A = torch.randn(4096, 6, 3, dtype=dtype)  # overdetermined, well conditioned
+        B = torch.randn(4096, 6, 2, dtype=dtype)
+        xm = torch.linalg.lstsq(A.to(device), B.to(device)).solution.cpu()
+        xc = torch.linalg.lstsq(A, B).solution
+        # Fitted values A@x are unique for full column rank even where the raw
+        # solution is sensitive to conditioning of individual batch members.
+        self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
+
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
     @parametrize("m, n, data, noncontig", [
@@ -15875,6 +15904,182 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(na, na_cpu)
 
 
+class TestNondeterministic(TestCaseMPS):
+    def _case_embedding_dense_backward(self, device):
+        weight = torch.randn(10, 3, device=device, requires_grad=True)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        res = F.embedding(idx, weight)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_embedding_bag_dense_backward(self, device):
+        weight = torch.randn(10, 3, device=device, requires_grad=True)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        res = F.embedding_bag(idx, weight, offsets)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_embedding_bag_per_sample_weights_backward(self, device):
+        weight = torch.randn(10, 3, device=device)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        per_sample_weights = torch.randn(4, device=device, requires_grad=True)
+        res = F.embedding_bag(idx, weight, offsets, mode="sum", per_sample_weights=per_sample_weights)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_grid_sampler_2d_backward(self, device):
+        input = torch.randn(1, 1, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 3, 3, 2, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_grid_sampler_3d_backward(self, device):
+        input = torch.randn(1, 1, 4, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 3, 3, 3, 3, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_max_pool3d_backward(self, device):
+        module = torch.nn.MaxPool3d(2)
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_adaptive_max_pool2d_backward(self, device):
+        module = torch.nn.AdaptiveMaxPool2d(2)
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_avg_pool3d_backward(self, device):
+        module = torch.nn.AvgPool3d(2)
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_bilinear2d_aa_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="bilinear", align_corners=False, antialias=True)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_bicubic2d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="bicubic", align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_trilinear_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="trilinear", align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_nearest_3d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="nearest")
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_nearest_exact_3d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="nearest-exact")
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_scatter_reduce(self, device):
+        src = torch.tensor([1., 2., 3., 4., 5., 6.], device=device)
+        index = torch.tensor([0, 1, 0, 1, 2, 1], device=device)
+        input = torch.tensor([1., 2., 3., 4.], device=device)
+        return lambda: input.scatter_reduce(0, index, src, reduce="sum")
+
+    def _case_index_put_accumulate(self, device):
+        input = torch.randn(10, device=device)
+        indices = (torch.randint(0, 10, (10,), device=device),)
+        values = torch.randn(10, device=device)
+        return lambda: input.index_put(indices, values, accumulate=True)
+
+    def _case_index_reduce(self, device):
+        input = torch.randn(10, device=device)
+        index = torch.randint(0, 10, (10,), device=device)
+        return lambda: input.index_reduce(0, index, input, reduce='prod')
+
+
+    def _case_kthvalue(self, device):
+        input = torch.randn(10, device=device)
+        return lambda: torch.kthvalue(input, 5)
+
+    # Maps a test case name to (builder method, alert message caller name). The
+    # builder method must return a callable which, when called, will exercise
+    # the nondeterministic alert.
+    ALERT_CASES = {
+        "embedding_dense_backward": (
+            _case_embedding_dense_backward, "embedding_dense_backward_mps"
+        ),
+        "embedding_bag_dense_backward": (
+            _case_embedding_bag_dense_backward, "_embedding_bag_dense_backward_mps"
+        ),
+        "embedding_bag_per_sample_weights_backward": (
+            _case_embedding_bag_per_sample_weights_backward,
+            "_embedding_bag_per_sample_weights_backward_mps",
+        ),
+        "grid_sampler_2d_backward": (
+            _case_grid_sampler_2d_backward, "grid_sampler_2d_backward_mps"
+        ),
+        "grid_sampler_3d_backward": (
+            _case_grid_sampler_3d_backward, "grid_sampler_3d_backward_mps"
+        ),
+        "max_pool3d_backward": (
+            _case_max_pool3d_backward, "max_pool3d_backward"
+        ),
+        "adaptive_max_pool2d_backward": (
+            _case_adaptive_max_pool2d_backward, "adaptive_max_pool2d_backward"
+        ),
+        "avg_pool3d_backward": (
+            _case_avg_pool3d_backward, "avg_pool3d_backward"
+        ),
+        "upsample_bilinear2d_aa_backward": (
+            _case_upsample_bilinear2d_aa_backward, "upsample_bilinear2d_aa_backward"),
+        "upsample_bicubic2d_backward": (
+            _case_upsample_bicubic2d_backward, "upsample_bicubic2d_backward"
+        ),
+        "upsample_trilinear_backward": (
+            _case_upsample_trilinear_backward, "upsample_trilinear_backward"
+        ),
+        "upsample_nearest_3d_backward": (
+            _case_upsample_nearest_3d_backward, "upsample_nearest_3d_backward"
+        ),
+        "upsample_nearest_exact_3d_backward": (
+            _case_upsample_nearest_exact_3d_backward, "upsample_nearest_exact_3d_backward"),
+        "scatter_reduce": (
+            _case_scatter_reduce, "scatter_reduce_mps"
+        ),
+        "index_put_accumulate": (
+            _case_index_put_accumulate, "index_put_with_accumulate_mps"
+        ),
+        "index_reduce": (
+            _case_index_reduce, "index_reduce_mps"
+        ),
+        "kthvalue": (
+            _case_kthvalue, "kthvalue MPS"
+        ),
+    }
+
+    # Tests that nondeterministic operators raise a nondeterministic alert
+    @parametrize("case_name", list(ALERT_CASES.keys()))
+    def test_nondeterministic_alert(self, case_name, device="mps"):
+        case_fn, caller_name = self.ALERT_CASES[case_name]
+        fn = case_fn(self, device)
+        self.check_nondeterministic_alert(fn, caller_name)
+
+
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                      seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
@@ -17651,6 +17856,7 @@ instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="m
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
+instantiate_parametrized_tests(TestNondeterministic)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
