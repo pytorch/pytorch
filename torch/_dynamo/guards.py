@@ -4387,10 +4387,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         # An annotation or type param nothing guards can be an unpicklable local
         # class; prune it rather than let it fail the whole dump. Unlike
         # __defaults__/__kwdefaults__ these prune per value with no
-        # _keep(container) escape: no guard registers the __annotations__ dict or
-        # __type_params__ tuple itself (EQUALS_MATCH's ok_types excludes dict and
-        # DICT_KEYS_MATCH bakes only keys), so there is no verbatim-carry case a
-        # rebaked container guard would need preserved.
+        # _keep(container) escape: no guard ever bakes the values of the
+        # __annotations__ dict or __type_params__ tuple (EQUALS_MATCH's ok_types
+        # excludes dict, DICT_KEYS_MATCH bakes only keys, and a TypeVar is not a
+        # literal so the tuple never takes CONSTANT_MATCH), so there is no
+        # verbatim-carry case a rebaked container guard would need preserved. On
+        # 3.14 __annotations__ is a fresh dict per call, so a _keep on it would
+        # be dead there regardless.
         raw_annotations = self._read_raw_annotations(obj)
         annotations = {
             name: self._prune(value, "unguarded function annotation")

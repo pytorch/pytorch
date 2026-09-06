@@ -1961,6 +1961,31 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__annotations__, {"y": int, "return": int})
         self.assertEqual(out(object(), 5), 5)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 695 type params are 3.12+")
+    def test_pickler_drops_unpicklable_type_params(self):
+        # A PEP 695 function-scoped TypeVar pickles to its bare name and then
+        # fails the module lookup, so a nested generic used to abort the dump
+        # even after its annotations were pruned. The whole __type_params__
+        # tuple is now dropped and the function still reloads and runs. Defined
+        # via exec so this file still parses below 3.12.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        ns = {"__name__": __name__}
+        exec(
+            "def outer():\n"
+            "    def inner[T](x: T) -> T:\n"
+            "        return x\n"
+            "    return inner\n",
+            ns,
+        )
+        fn = ns["outer"]()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__type_params__, ())
+        self.assertEqual(out.__annotations__, {})
+        self.assertEqual(out(5), 5)
+
     @unittest.skipIf(
         sys.version_info < (3, 14), "PEP 649 FORWARDREF annotations are 3.14+"
     )

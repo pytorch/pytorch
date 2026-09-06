@@ -92,11 +92,14 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except its annotations. The
-            # runtime assigns those back verbatim and never evaluates them, and
-            # inspect.Signature carries its own picklable copy for tooling, so an
-            # annotation this pickler cannot serialize is dropped per value
-            # rather than left to fail the whole dump (see _pickleable_annotations).
+            # pickler nothing it holds is pruned -- except its annotations and
+            # type params. The runtime assigns those back verbatim and never
+            # evaluates them, so a value this pickler cannot serialize (a
+            # <locals> annotation class, a PEP 695 function-scoped TypeVar) is
+            # dropped rather than left to fail the whole dump. Known limitation:
+            # the top-level function's own annotations ride on
+            # CompileArtifacts.signature, which serialize() dumps unpruned, so
+            # this only protects the nested functions reached here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
@@ -104,10 +107,27 @@ class AOTCompilePickler(FunctionPicklerBase):
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
                 annotations=self._pickleable_annotations(obj),
-                type_params=getattr(obj, "__type_params__", None),
+                type_params=self._pickleable_type_params(obj),
             )
 
         return NotImplemented
+
+    def _dumps_cleanly(self, value: Any) -> bool:
+        # "does it pickle?" has no cheaper predicate than trying. A throwaway
+        # pickler of this exact class keeps external_data/persistent_id behaviour
+        # identical to the real dump. RecursionError is re-raised, not treated as
+        # unpicklable, to match the guard side's deliberate carve-out.
+        probe = type(self)(self.external_data, io.BytesIO())
+        try:
+            probe.dump(value)
+        except RecursionError:
+            raise
+        except Exception:
+            return False
+        # persistent_id records nn.Module instances rather than raising, so such
+        # a value dumps here but would poison the real serialize(); treat it as
+        # unpicklable so it is pruned now instead of failing the whole dump later.
+        return not probe.errors
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
         # resolve=True first turns a 3.14 FORWARDREF proxy into a real value (or
@@ -115,14 +135,20 @@ class AOTCompilePickler(FunctionPicklerBase):
         # Below 3.14 it hands back __annotations__ raw. Either way a value can
         # still be unpicklable -- a <locals> class resolves fine yet pickle
         # cannot reference it -- so probe each and keep only the ones that dump.
-        kept: dict[str, Any] = {}
-        for name, value in self._read_raw_annotations(obj, resolve=True).items():
-            try:
-                type(self)(self.external_data, io.BytesIO()).dump(value)
-            except Exception:
-                continue
-            kept[name] = value
-        return kept
+        return {
+            name: value
+            for name, value in self._read_raw_annotations(obj, resolve=True).items()
+            if self._dumps_cleanly(value)
+        }
+
+    def _pickleable_type_params(self, obj: Any) -> tuple[Any, ...] | None:
+        # A PEP 695 function-scoped TypeVar pickles to its bare name and then
+        # fails the module lookup, so drop the whole tuple when any element will
+        # not dump. Ordinary functions carry (), which dumps and is kept.
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params and not all(self._dumps_cleanly(p) for p in type_params):
+            return None
+        return type_params
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
