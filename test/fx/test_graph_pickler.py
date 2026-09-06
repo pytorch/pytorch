@@ -1095,6 +1095,84 @@ class TestWeakrefPickle(TestCase):
         self.assertIs(restored_weak(), restored_strong)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestViewTensorPickle(TestCase):
+    """Tests that a view FakeTensor in node metadata is serializable.
+
+    A view's MetaTensorDesc carries a `base` descriptor with its own
+    `fake_mode`. Left set, it drags the whole FakeTensorMode ->
+    FakeTensorConverter -> MetaConverter.storage_memo graph into the pickle,
+    which dies on a meta storage's data_ptr().
+    """
+
+    def setUp(self):
+        super().setUp()
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _make_graph_with_view_val(self):
+        """Graph whose call node holds a view FakeTensor in meta['val']."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.permute.default(x, [0, 2, 1])
+
+        gm = torch.fx.symbolic_trace(M())
+        # from_tensor populates the mode's MetaConverter.storage_memo; that memo
+        # is what a leaked base.fake_mode drags into the pickle.
+        view = self.fake_mode.from_tensor(torch.randn(2, 3, 4).permute(0, 2, 1))
+
+        self.assertIsNotNone(view._base, "expected a view tensor")
+        self.assertTrue(
+            len(self.fake_mode.fake_tensor_converter.meta_converter.storage_memo) > 0,
+            "storage_memo empty -- would not exercise the leak",
+        )
+        call_node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        call_node.meta["val"] = view
+        return gm, call_node
+
+    def test_base_fake_mode_is_cleared(self):
+        """_TensorPickleData must clear fake_mode on a view's base."""
+        from torch._subclasses.meta_utils import MetaTensorDescriber
+        from torch.fx._graph_pickler import _TensorPickleData
+
+        _, call_node = self._make_graph_with_view_val()
+        data = _TensorPickleData(
+            MetaTensorDescriber(copy_data=False), call_node.meta["val"]
+        )
+
+        self.assertIsNone(data.metadata.fake_mode)
+        self.assertIsNotNone(data.metadata.base, "expected a base descriptor")
+        self.assertIsNone(data.metadata.base.fake_mode)
+
+    def test_view_val_roundtrips(self):
+        """A view FakeTensor in node meta survives dumps/loads intact."""
+        gm, _ = self._make_graph_with_view_val()
+        # node_metadata_key_filter=None keeps every meta key, matching callers
+        # that opt out of the default filter.
+        options = self.Options(node_metadata_key_filter=None)
+
+        restored = self.GraphPickler.loads(
+            self.GraphPickler.dumps(gm, options), self.fake_mode
+        )
+
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        new_node = next(n for n in restored.graph.nodes if n.op == "call_function")
+        old_node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        restored_val = new_node.meta["val"]
+        original_val = old_node.meta["val"]
+
+        self.assertIsNotNone(restored_val._base, "view-ness was lost")
+        self.assertEqual(restored_val.shape, original_val.shape)
+        self.assertEqual(restored_val.stride(), original_val.stride())
+        self.assertEqual(restored_val.dtype, original_val.dtype)
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 

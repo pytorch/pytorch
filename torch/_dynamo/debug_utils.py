@@ -947,12 +947,22 @@ class InputReader:
 #     works too" but this is delicate so we don't do it
 
 
-def _serialize_storage_nbytes(nbytes: int | torch.SymInt) -> str:
-    if isinstance(nbytes, torch.SymInt):
+def _serialize_sym_expr(val: int | torch.SymInt) -> str:
+    # str()/repr() of a SymInt gives the sympy repr (e.g. CeilToInt(IntTrueDiv(s0, 32))),
+    # which is not valid Python.  SymExprPrinter emits evaluable Python instead; the
+    # repro preamble imports math so math.ceil/math.floor etc. are in scope.
+    if isinstance(val, torch.SymInt):
         from torch.fx.experimental.symbolic_shapes import SymExprPrinter
 
-        return SymExprPrinter().doprint(nbytes.node.expr)
-    return repr(nbytes)
+        return SymExprPrinter().doprint(val.node.expr)
+    return repr(val)
+
+
+def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
+    inner = ", ".join(_serialize_sym_expr(v) for v in vals)
+    if len(vals) == 1:
+        inner += ","
+    return f"({inner})"
 
 
 class InputWriter:
@@ -1011,7 +1021,7 @@ class InputWriter:
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
-        nbytes_source = _serialize_storage_nbytes(nbytes)
+        nbytes_source = _serialize_sym_expr(nbytes)
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
@@ -1032,13 +1042,13 @@ class InputWriter:
         if not statically_known_true(
             sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
         ):
-            args.append(str(tuple(t.stride())))
+            args.append(_serialize_sym_tuple(t.stride()))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
         if not statically_known_true(
             _storage_offset_or_default(None) == t.storage_offset()
         ):
-            args.append(f"storage_offset={t.storage_offset()!r}")
+            args.append(f"storage_offset={_serialize_sym_expr(t.storage_offset())}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
             args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
@@ -1049,11 +1059,11 @@ class InputWriter:
             args.append(f"is_leaf={is_leaf!r}")
         self._lines.append(
             "reader.tensor("
-            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + ", ".join([storage, _serialize_sym_tuple(t.shape), *args])
             + f")  # {name}"
         )
 
-    def unsupported(self, name: str, arg: Any) -> None:
+    def unsupported(self, name: str, arg: object) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(
             f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
@@ -1079,7 +1089,7 @@ class InputWriter:
         )
 
     # TODO: this doesn't actually symint atm
-    def symint(self, name: str, val: Any) -> None:
+    def symint(self, name: str, val: object) -> None:
         if isinstance(val, torch.SymInt):
             expr_str = str(val.node.expr)
             hint = val.node.hint

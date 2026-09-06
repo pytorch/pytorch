@@ -113,8 +113,8 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
-    "torch/csrc/profiler/cupti/monitor_native.cpp",
-    "torch/csrc/profiler/cupti/monitor_pftrace.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_native.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_pftrace.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_metadata.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
@@ -811,6 +811,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_bridge.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.cpp",
     "torch/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu",
     "torch/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
@@ -824,6 +825,7 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -1045,7 +1047,7 @@ libtorch_python_core_sources = [
     "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
-    "torch/csrc/profiler/cupti/monitor_python.cpp",
+    "torch/csrc/profiler/cuspy/cuspy_python.cpp",
     "torch/csrc/profiler/python/init.cpp",
     "torch/csrc/profiler/python/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
@@ -1495,6 +1497,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Normalization.cpp",
     "aten/src/ATen/native/Onehot.cpp",
     "aten/src/ATen/native/PackedSequence.cpp",
+    "aten/src/ATen/native/PhiloxStatelessRNG.cpp",
     "aten/src/ATen/native/PixelShuffle.cpp",
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",

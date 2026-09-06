@@ -1,8 +1,8 @@
 
-#include <c10/xpu/XPUFunctions.h>
 
-#include <ATen/ATen.h>
-#include <ATen/record_function.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <Attr.h>
 #include <Utils.h>

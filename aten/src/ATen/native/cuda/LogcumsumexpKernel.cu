@@ -5,6 +5,7 @@
 
 #include <ATen/native/cuda/ScanKernels.h>
 #include <ATen/native/cuda/ScanUtils.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #include <cmath>
 #include <limits>
@@ -51,8 +52,16 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<sc
   auto xreal = std::real(x);
   auto ximag = std::imag(x);
   auto exp_x_abs = std::exp(xreal);
-  auto exp_x_real = exp_x_abs * std::cos(ximag);
-  auto exp_x_imag = exp_x_abs * std::sin(ximag);
+  scalar_t sin_ximag;
+  scalar_t cos_ximag;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  c10::cuda::compat::sincos(ximag, &sin_ximag, &cos_ximag);
+#else
+  sin_ximag = std::sin(ximag);
+  cos_ximag = std::cos(ximag);
+#endif
+  auto exp_x_real = exp_x_abs * cos_ximag;
+  auto exp_x_imag = exp_x_abs * sin_ximag;
   return {exp_x_real, exp_x_imag};
 }
 
@@ -62,8 +71,14 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // this function only handles the case where the real part of x is infinite
   auto ximag = std::imag(x);
   auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
-  auto sin = std::sin(ximag);
-  auto cos = std::cos(ximag);
+  scalar_t sin;
+  scalar_t cos;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  c10::cuda::compat::sincos(ximag, &sin, &cos);
+#else
+  sin = std::sin(ximag);
+  cos = std::cos(ximag);
+#endif
   // special case if the angle is exactly the multiple of pi/2
   auto exp_x_real = (cos == 0) ? (scalar_t)0.0 : exp_x_abs * cos;
   auto exp_x_imag = (sin == 0) ? (scalar_t)0.0 : exp_x_abs * sin;

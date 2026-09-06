@@ -25,6 +25,11 @@ def generate_docker_matrix() -> dict[str, list[dict[str, str]]]:
     # CPU arm64 image is only available as runtime.
     for cuda, version in generate_binary_build_matrix.CUDA_ARCHES_FULL_VERSION.items():
         for image in DOCKER_IMAGE_TYPES:
+            if (
+                image == "devel"
+                and cuda in generate_binary_build_matrix.CUDA_ARCHES_RUNTIME_IMAGE_ONLY
+            ):
+                continue
             ret.append(
                 {
                     "cuda": cuda,

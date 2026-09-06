@@ -19,12 +19,9 @@
 // contains the full, original git history for both files.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
@@ -90,7 +87,7 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   auto tau_ptr_array_data = reinterpret_cast<scalar_t**>(tau_ptr_array.data_ptr());
 
   int info;
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
 
   // info only indicates wrong arguments to geqrfBatched call
@@ -145,7 +142,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   auto lu_ptr_array_data = reinterpret_cast<const scalar_t* const*>(lu_ptr_array.const_data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, const_cast<scalar_t**>(lu_ptr_array_data),
     lda, const_cast<int*>(pivots_data), b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
@@ -176,11 +173,11 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
   auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
 
   auto alpha = scalar_t{1};
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
     at::cuda::blas::trsm(handle, side, uplo, trans, diag, m, n, &alpha, A_working_ptr, lda, B_working_ptr, ldb);
   }
 }
@@ -213,7 +210,7 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
   auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, m, n, &alpha, A_ptr_array_data, lda, B_ptr_array_data, ldb, batch_size);
 }
 
@@ -276,7 +273,7 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
   auto infos_data = infos.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   int info;
 
   at::cuda::blas::gelsBatched<scalar_t>(

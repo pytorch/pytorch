@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -442,11 +443,6 @@ def adamax(
     lr: float | Tensor,
     weight_decay: float,
 ) -> None:
-    r"""Functional API that performs adamax algorithm computation.
-
-    See :class:`~torch.optim.Adamax` for details.
-    """
-
     if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
@@ -483,3 +479,6 @@ def adamax(
         has_complex=has_complex,
         capturable=capturable,
     )
+
+
+adamax.__doc__ = _functional_api_doc.format(optimizer="Adamax")

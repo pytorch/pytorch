@@ -22,13 +22,19 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
-from torch._dynamo.utils import hashable, is_safe_constant, istype
+from torch._dynamo.utils import hashable, is_compile_supported, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
-from torch.testing._internal.common_utils import skipIfWindows, TEST_CUDA, TEST_XPU
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfWindows,
+    TEST_CUDA,
+    TEST_XPU,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
@@ -429,6 +435,21 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    @parametrize("device", ("cuda", torch.device("cuda")))
+    def test_is_compile_supported_constant(self, device):
+        def fn(x, device):
+            if is_compile_supported(device):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        expected = x + 1 if is_compile_supported(device) else x - 1
+        cnt = CompileCounter()
+        opt_fn = torch.compile(backend=cnt, fullgraph=True)(fn)
+        self.assertEqual(expected, opt_fn(x, device))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
 
@@ -490,6 +511,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_current_stream",  # Safely implemented
             "handle_synchronize",  # Device type from function identity or arg
             "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
+            "handle_set_tensor_requires_grad",  # Only re-reads the proxy's own metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -568,6 +590,9 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
         )
         # Numerical results should match
         self.assertTrue(torch.allclose(y_lambda, y_exp))
+
+
+instantiate_parametrized_tests(TraceRuleTests)
 
 
 if __name__ == "__main__":

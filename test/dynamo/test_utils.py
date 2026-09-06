@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import json
 import os
 import pprint
@@ -14,8 +15,12 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     TEST_WITH_ASAN,
@@ -28,6 +33,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
         # cleared before the weakref callback fires the hook. The hook must not
@@ -42,6 +49,56 @@ class TestUtils(TestCase):
         hook2 = utils.CleanupHook.create(scope, "myglobal", object())
         hook2()
         self.assertNotIn("myglobal", scope)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc(self):
+        saved = gc.get_threshold()
+        try:
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+                # Nested compiles share the outermost adjustment.
+                with utils.deferred_full_gc():
+                    self.assertEqual(gc.get_threshold()[2], 12345)
+                self.assertEqual(gc.get_threshold()[2], 12345)
+            self.assertEqual(gc.get_threshold(), saved)
+            # gen0 and gen1 are left alone, so they keep collecting.
+            self.assertEqual(gc.get_threshold()[:2], saved[:2])
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc_restores_on_exception(self):
+        # A depth counter left above zero would silently turn the feature into a
+        # no-op for the rest of the process and pin the raised threshold.
+        saved = gc.get_threshold()
+        try:
+            with self.assertRaises(RuntimeError):
+                with utils.deferred_full_gc():
+                    raise RuntimeError("boom")
+            self.assertEqual(gc.get_threshold(), saved)
+            self.assertEqual(utils._gc_threshold_depth, 0)
+            # The next one still installs the threshold.
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=None)
+    def test_deferred_full_gc_disabled(self):
+        saved = gc.get_threshold()
+        with utils.deferred_full_gc():
+            self.assertEqual(gc.get_threshold(), saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=100)
+    def test_deferred_full_gc_does_not_lower_threshold(self):
+        saved = gc.get_threshold()
+        try:
+            gc.set_threshold(saved[0], saved[1], 5000)
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 5000)
+            self.assertEqual(gc.get_threshold()[2], 5000)
+        finally:
+            gc.set_threshold(*saved)
 
     def test_nan(self):
         a = torch.Tensor([float("nan")])
@@ -341,6 +398,24 @@ class TestUtils(TestCase):
         self.assertIsInstance(parsed, dict)
         self.assertNotIn("ignore_logging_functions", parsed)
 
+    def test_enumerate_items_with_dict_position_snapshots(self):
+        # VariableBuilder wraps a dict by consuming this generator lazily inside
+        # dict(...). When the dict is a frame-globals dict, Dynamo can add or
+        # drop generated globals (e.g. __resume_at removed by a CleanupHook) on
+        # it mid-iteration. A live items view would raise "dictionary changed
+        # size during iteration"; the snapshot must tolerate the mutation.
+        d = {f"k{i}": i for i in range(8)}
+        d["__resume_at_stale"] = -1
+
+        out = {}
+        for idx, (_, k, v) in enumerate(utils.enumerate_items_with_dict_position(d)):
+            if idx == 1:
+                del d["__resume_at_stale"]
+            out[k] = v
+
+        self.assertEqual(out["k0"], 0)
+        self.assertEqual(len(out), 9)
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -355,6 +430,8 @@ class TestDynamoTimed(TestCase):
     """
     Test utilities surrounding dynamo_timed.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1140,14 +1217,14 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14)))
+        self.assertIn(version, ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14), (3, 15)))
         first, second = {
-            (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
+            (3, 15): (11, 7),
         }[version]
 
         def test1(x):
@@ -1299,10 +1376,10 @@ class TestDynamoTimed(TestCase):
 
 
 class TestTimedSync(TestCase):
-    def test_timed_syncs_on_accelerator(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("sync only triggered for non-CPU devices")
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
+    def test_timed_syncs_on_accelerator(self, device):
         from torch._dynamo.utils import timed
 
         called = []
@@ -1325,6 +1402,8 @@ class TestInductorConfigParsingForLogging(TestCase):
     """
     Test for parsing inductor config for logging in CompilationMetrics.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     class TestObject:
         def __init__(self, a, b):
@@ -1392,6 +1471,8 @@ class TestInductorConfigParsingForLogging(TestCase):
 
 
 class TestFunctorchConfigParsingForLogging(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_functorch_config_jsonify(self):
         functorch_config_json = utils._functorch_config_for_logging()
         self.assertIsInstance(functorch_config_json, str)

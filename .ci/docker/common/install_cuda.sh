@@ -107,21 +107,6 @@ function install_cupti_headers {
   echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
-function install_124 {
-  CUDNN_VERSION=9.1.0.70
-  CUSPARSELT_VERSION=0.6.2.3
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
-  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux
-
-  install_cudnn 12 $CUDNN_VERSION
-
-  CUDA_VERSION=12.4 bash install_nccl.sh
-
-  CUDA_VERSION=12.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
-
-  ldconfig
-}
-
 function install_126 {
   CUDNN_VERSION=9.10.2.21
   CUSPARSELT_VERSION=0.7.1.0
@@ -140,7 +125,7 @@ function install_126 {
 }
 
 function install_129 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.25.1.1
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 12.9.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.9.1 in the same container
@@ -159,7 +144,7 @@ function install_129 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.25.1.1
   CUSPARSELT_VERSION=0.7.1.0
   echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 12.8.1 in the same container
@@ -178,7 +163,7 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.25.1.1
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.0 in the same container
@@ -197,7 +182,7 @@ function install_130 {
 }
 
 function install_132 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.25.1.1
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
@@ -216,7 +201,7 @@ function install_132 {
 }
 
 function install_134 {
-  CUDNN_VERSION=9.24.0.43
+  CUDNN_VERSION=9.25.1.1
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # CUDA 13.4 ships no runfile-local installer yet, so install the toolkit from
@@ -257,8 +242,6 @@ function install_134 {
 while test $# -gt 0
 do
     case "$1" in
-    12.4) install_124;
-        ;;
     12.6|12.6.*) install_126;
         ;;
     12.8|12.8.*) install_128;

@@ -215,7 +215,7 @@ class Transform(abc.ABC):
     ) -> tuple[Any, ...]:
         if fake_mode is None:
             return args
-        # NB: This should hit the cache if tensors were fakefied before.
+        # NB: This should hit the cache if tensors were fakified before.
         # E.g., when the fx graph is produced by Dynamo.
         return tuple(
             fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args

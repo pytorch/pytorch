@@ -212,7 +212,7 @@ jobs:
 
   manywheel-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read

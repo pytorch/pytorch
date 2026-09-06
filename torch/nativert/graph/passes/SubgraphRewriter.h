@@ -57,7 +57,7 @@ inline std::ostream& operator<<(std::ostream& out, const Match& match) {
  *
  * Constraints for Patterns with Multiple Output Nodes:
  * To avoid an exponential increase in the search space, this implementation
- * starts searching from the first output node as an anchor as an heuristic. It
+ * starts searching from the first output node as an anchor as a heuristic. It
  * assumes that all other output nodes in the pattern are interconnected through
  * the graph from this anchor node, allowing the matcher to traverse from the
  * anchor to other outputs.

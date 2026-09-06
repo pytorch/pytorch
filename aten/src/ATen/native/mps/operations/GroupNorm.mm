@@ -82,12 +82,12 @@ static void group_norm_forward(const Tensor& X,
                                                   scalarToMetalTypeString(gamma_opt),
                                                   scalarToMetalTypeString(beta_opt),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm", {X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, Y, mean, rstd, X, gamma_opt, beta_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -152,12 +152,12 @@ static void group_norm_backward_x(const Tensor& dY,
                                                   scalarToMetalTypeString(mean),
                                                   scalarToMetalTypeString(gamma_opt),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_x", {dY, X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, dX, dY, X, mean, rstd, gamma_opt, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(num_threadgroups, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -199,12 +199,12 @@ static void group_norm_backward_affine(const Tensor& dY,
                                                   scalarToMetalTypeString(mean),
                                                   scalarToMetalTypeString(dgamma),
                                                   std::is_same_v<idx_T, uint32_t> ? "uint32_t" : "uint64_t"));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "group_norm_backward_affine", {dY, X}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, dgamma, dbeta, dY, X, mean, rstd, params);
       [compute_encoder dispatchThreadgroups:MTLSizeMake(C, 1, 1)
                       threadsPerThreadgroup:MTLSizeMake(threads_per_threadgroup, 1, 1)];
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }

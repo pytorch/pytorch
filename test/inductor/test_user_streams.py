@@ -1951,6 +1951,77 @@ class GraphModule(torch.nn.Module):
                 f"sum consumer {inp} does not route through synchronize_event barrier",
             )
 
+    def test_barrier_deps_exclude_nodes_defined_after_sync(self):
+        """A get_attr constant first used after the barrier is not a barrier dep.
+
+        The constant is materialized at its first user, which is below the
+        barrier, so listing it as a dep would make the control_deps node
+        reference a value that is not yet defined.
+        """
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x @ w
+            s.synchronize()
+            return a.sum() + torch.tensor([1.0, 2.0, 3.0], device="cuda").sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        order = {node: i for i, node in enumerate(graph.nodes)}
+        cds = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and "control_deps" in str(node.target)
+        ]
+        self.assertGreater(len(cds), 0, "no control_deps node found")
+
+        # Guard against a vacuous pass. The ordering assertions below only
+        # exercise the fix while a tensor constant is still materialized
+        # *below* the barrier -- that is the whole failure condition. If
+        # constant lifting ever hoists the constant above the sync or turns it
+        # into a placeholder, the scenario stops reproducing and this test
+        # would silently stop guarding the regression, so fail loudly instead.
+        # Every control_deps carries its own get_attr for its subgraph, so
+        # those are excluded; only real constants count.
+        subgraph_attrs = {
+            cd.args[1] for cd in cds if isinstance(cd.args[1], torch.fx.Node)
+        }
+        sync_cd = None
+        for cd in cds:
+            attr = cd.args[1]
+            if isinstance(attr, torch.fx.Node) and "synchronize" in attr.name:
+                sync_cd = cd
+        self.assertIsNotNone(sync_cd, "no synchronize control_deps node found")
+
+        constants_after_sync = [
+            node
+            for node in graph.nodes
+            if node.op == "get_attr"
+            and node not in subgraph_attrs
+            and order[node] > order[sync_cd]
+        ]
+        self.assertTrue(
+            constants_after_sync,
+            "scenario no longer reproduces: no tensor constant is materialized "
+            "after the synchronize barrier, so the ordering checks below cannot "
+            "fail. Rework the graph so a constant is first used after the sync.",
+        )
+
+        for cd in cds:
+            for dep in (*cd.args[0], *cd.args[2:]):
+                if isinstance(dep, torch.fx.Node):
+                    self.assertLess(
+                        order[dep],
+                        order[cd],
+                        f"dep {dep} of {cd} is defined after it is used",
+                    )
+
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton

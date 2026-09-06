@@ -6,7 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -26,15 +26,33 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
-ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+def _rocm_version_str():
+    """ROCm release version string, or None when this is not a ROCm build.
+
+    torch.version.hip is the HIP runtime version. It tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so prefer
+    torch.version.rocm and fall back only for builds that never recorded it.
+    """
+    if torch.version.hip is None:
+        return None
+    return getattr(torch.version, 'rocm', None) or torch.version.hip
+
+def _rocm_major_minor():
+    version = _rocm_version_str()
+    if version is None:
+        return (0, 0)
+    return tuple(int(v) for v in version.split('.')[:2])
+
+ROCM_VERSION = LazyVal(_rocm_major_minor)
+
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -42,13 +60,28 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
 
 
 TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+
+
+def _cuda_graph_tools_id_available():
+    # cudaGraphNodeGetToolsId needs cuda-bindings >= 13.1 *and* a CUDA driver
+    # >= 13.1 (or cuda-compat), which is independent of the libcupti version:
+    # a CUDA 13.0 runner can ship libcupti >= 13.3 and still lack the API.
+    # is_available() probes the driver and caches the result.
+    try:
+        from torch.cuda.graph_annotations import is_available
+        return is_available()
+    except Exception:
+        return False
+
+
+TEST_CUDA_GRAPH_TOOLS_ID = LazyVal(_cuda_graph_tools_id_available)
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
@@ -59,6 +92,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -73,12 +115,28 @@ IS_SM90 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available(
                   torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability() == (10, 0))
-IS_SM103 = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
-                   torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.version.hip is None and torch.cuda.is_available() and
                    torch.cuda.get_device_capability()[0] == 12)
+
+# Substrings a subprocess prints when it dies from a device-side assert, or
+# from the GPU fault ROCm reports instead when device-side asserts are not
+# enabled. Tests that trigger a device assert in a child process should check
+# its output with has_device_side_assert rather than growing a local copy.
+DEVICE_ASSERT_MARKERS = (
+    "device-side assert triggered",  # CUDA
+    "Assertion `",  # CUDA/ROCm device-side printf: Assertion `cond` failed.
+    "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+    "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+    "hipErrorLaunchFailure",
+    "launch failure",  # covers "unspecified launch failure"
+    "illegal memory access",
+    "Memory access fault",  # ROCm 7.14+ VM fault abort
+)
+
+def has_device_side_assert(output):
+    return any(marker in output for marker in DEVICE_ASSERT_MARKERS)
 
 @contextlib.contextmanager
 def blas_library_context(backend):
@@ -138,6 +196,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_MTIA:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -160,6 +220,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_MTIA:
         return True
     return False
 
@@ -232,10 +294,11 @@ def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
             archs = ['gfx94']
-            if ROCM_VERSION >= (6, 3):
-                archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
-                archs.append('gfx95')
+                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
+                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
+                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
+                archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:
@@ -282,10 +345,23 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def hipsparselt_supported_archs():
+    # Keep in sync with hipSparseLtSupportedArchs() in
+    # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
+    # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
+    if ROCM_VERSION >= (7, 14):
+        return ['gfx942', 'gfx950', 'gfx1250']
+    elif ROCM_VERSION >= (7, 12):
+        return ['gfx942', 'gfx950']
+    return []
+
+def evaluate_platform_supports_hipsparselt():
+    return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
-            return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+            return evaluate_platform_supports_hipsparselt()
         else:
             return (
                 (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
@@ -479,9 +555,9 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    if not TEST_WITH_ROCM or torch.version.hip is None:
+    rocm_version = _rocm_version_str()
+    if not TEST_WITH_ROCM or rocm_version is None:
         return (0, 0)
-    rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
@@ -571,11 +647,6 @@ def xfailIfSM120OrLater(func):
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
-def skipIfSM103(func):
-    if TEST_WITH_ROCM:
-        return func
-    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
-
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
 
@@ -613,7 +684,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
     return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
 
 
-# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+# When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None

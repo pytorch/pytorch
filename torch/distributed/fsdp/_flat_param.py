@@ -1851,6 +1851,14 @@ class FlatParamHandle:
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
+            # For `NO_SHARD`, this drops the only FSDP reference to the H2D
+            # copy that `pre_unshard()` allocated on the pre-unshard stream,
+            # and no all-gather ran to record it. Hand it to the consuming
+            # stream so the allocator does not reuse it under running kernels.
+            if not self.uses_sharded_strategy:
+                _no_dispatch_record_stream(
+                    flat_param.data, self._device_handle.current_stream()
+                )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             if skip_use_sharded_views:  # type: ignore[possibly-undefined]
@@ -2764,7 +2772,7 @@ def _convert_to_params(
 
 
 def _is_truly_contiguous(x: Tensor) -> bool:
-    # Special case: Pytorch thinks that 1x1 channels_last convolution weights are
+    # Special case: PyTorch thinks that 1x1 channels_last convolution weights are
     # both contiguous and channels_last contiguous at the same time.
     # CuDNN does not agree though and refuses to select faster kernels.
     # It is the reason of having the extra check here.

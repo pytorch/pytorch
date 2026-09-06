@@ -39,6 +39,7 @@
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -190,6 +191,63 @@ std::vector<std::vector<uint8_t>> toVec8(const std::vector<std::string>& data) {
   }
   return out;
 }
+
+using SymmetricMemoryPtr =
+    c10::intrusive_ptr<::c10d::symmetric_memory::SymmetricMemory>;
+
+// Host-side CFT (Compute Fabric Transport) logical-endpoint coordinates for a
+// symmetric memory buffer, as the `(le_id, le_offset)` pair that the
+// device-side `ncclCft` put/get/red family takes. Returned as plain ints so
+// they can be handed straight to a custom kernel; `le_offset` is a byte
+// offset, so advancing into the buffer is just `le_offset + n`.
+//
+// Spelled as two complementary `#if` blocks rather than `#if`/`#else`: an
+// `#else` anywhere in this file sends clang-format down the alternate branch,
+// where it then reformats unrelated code thousands of lines below.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT)
+::c10d::symmetric_memory::NCCLSymmetricMemory* asNcclSymmetricMemory(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = dynamic_cast<::c10d::symmetric_memory::NCCLSymmetricMemory*>(
+      symm_mem.get());
+  TORCH_CHECK(
+      mem != nullptr,
+      "CFT handles are only available on the NCCL symmetric memory backend");
+  return mem;
+}
+
+// Both queries raise on their own when the build predates the host-side CFT
+// API, so there is nothing extra to check here.
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& symm_mem,
+    int64_t peer) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_peer_cft_handle(static_cast<int>(peer));
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_multimem_cft_handle();
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+#endif
+
+#if !defined(USE_C10D_NCCL) || !defined(NCCL_HAS_SYMMEM_SUPPORT)
+constexpr const char* kNoNcclSymmMem =
+    "CFT handles require a build with NCCL symmetric memory support";
+
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */,
+    int64_t /* peer */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+#endif
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -484,14 +542,10 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!c10d_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(c10d_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -955,7 +1009,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -1045,6 +1111,14 @@ Example:
       "_resolve_process_group",
       [](const std::string& group_name) {
         return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
+
+  // Check the native registry without throwing on unknown group names
+  module.def(
+      "_is_process_group_registered",
+      [](const std::string& group_name) {
+        return ::c10d::is_process_group_registered(group_name);
       },
       py::arg("group_name"));
 
@@ -1253,6 +1327,17 @@ Example:
       .value("GATHER", ::c10d::HookOpName::GATHER)
       .value("SPLIT", ::c10d::HookOpName::SPLIT)
       .value("NEW_WINDOW", ::c10d::HookOpName::NEW_WINDOW)
+      .value("ALLREDUCE_COALESCED", ::c10d::HookOpName::ALLREDUCE_COALESCED)
+      .value("ALLGATHER_BASE", ::c10d::HookOpName::ALLGATHER_BASE)
+      .value("ALLGATHER_COALESCED", ::c10d::HookOpName::ALLGATHER_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::HookOpName::ALLGATHER_INTO_TENSOR_COALESCED)
+      .value("REDUCE_SCATTER_BASE", ::c10d::HookOpName::REDUCE_SCATTER_BASE)
+      .value(
+          "REDUCE_SCATTER_TENSOR_COALESCED",
+          ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(module, "PreHookArgs")
@@ -1424,6 +1509,28 @@ Example:
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
+      // A CFT handle is only valid for the group this SymmetricMemory was
+      // rendezvoused with -- each group owns a separate set of logical
+      // endpoints over the same allocation. Requires the group's communicator
+      // to have been created with `host_cft_mode` enabled.
+      .def(
+          "get_peer_cft_handle",
+          getPeerCftHandle,
+          py::arg("peer"),
+          "Return the (le_id, le_offset) CFT logical-endpoint coordinates "
+          "addressing `peer`'s copy of this buffer, for use with the "
+          "device-side ncclCft put/get/reduce API. NCCL backend only; the "
+          "group's communicator must have been created with host_cft_mode "
+          "enabled (see ncclConfig_t.host_cft_mode), and raises RuntimeError "
+          "if the endpoints do not exist (unsupported GPU/driver/NCCL or "
+          "host_cft_mode fallback on an unsupported stack).")
+      .def(
+          "get_multimem_cft_handle",
+          getMultimemCftHandle,
+          "Return the (le_id, le_offset) multicast CFT logical-endpoint "
+          "coordinates for this buffer. Requires NVLS multicast support in "
+          "addition to the get_peer_cft_handle requirements; the first call "
+          "may be collective, so every rank of the group must reach it.")
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -2062,9 +2169,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2127,9 +2233,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -2941,7 +3045,11 @@ Arguments:
               &::c10d::ProcessGroup::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::ProcessGroup::supportsAbortHooks,
+              "(test whether the process group supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
@@ -2952,6 +3060,10 @@ Arguments:
               "unregister_abort_hook",
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::ProcessGroup::supportsCompletionHooks,
+              "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3047,9 +3159,23 @@ Arguments:
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
-              "supports_time_estimate",
+              "_supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
-              "(test whether the backend supports collective time estimation)")
+              R"(Test whether the backend supports collective time estimation.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_start_time_estimate",
+              &::c10d::Backend::startTimeEstimate,
+              R"(Start estimating the duration of subsequent collectives.
+
+This API is experimental and subject to change.)")
+          .def(
+              "_end_time_estimate",
+              &::c10d::Backend::endTimeEstimate,
+              R"(Stop estimating collectives and return their duration in microseconds.
+
+This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
               &::c10d::Backend::supportsShrinking,
@@ -3099,7 +3225,11 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               &::c10d::Backend::new_window,
               py::arg("tensor") = std::nullopt,
               py::call_guard<py::gil_scoped_release>(),
-              "Create a new one-sided communication window")
+              "Collectively create a one-sided communication window; all ranks must call in the same order")
+          .def_property_readonly(
+              "supports_abort_hooks",
+              &::c10d::Backend::supportsAbortHooks,
+              "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
@@ -3110,6 +3240,10 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "unregister_abort_hook",
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"))
+          .def_property_readonly(
+              "supports_completion_hooks",
+              &::c10d::Backend::supportsCompletionHooks,
+              "(test whether the backend supports completion hooks)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -3641,8 +3775,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",
@@ -3800,10 +3934,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
-              "_start_time_estimate",
-              &::c10d::ProcessGroupNCCL::startTimeEstimate)
-          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
-          .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
           .def(
@@ -3915,6 +4045,21 @@ for details.
           [](ncclConfig_t& self, const char* tmp) {
             self.commName = strdup(tmp);
           })
+#endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+      .def_readwrite(
+          "host_cft_mode",
+          &ncclConfig_t::hostCftMode,
+          "Whether NCCL creates CFT (Compute Fabric Transport) logical "
+          "endpoints for this communicator (ncclHostCftMode_t): 1 = enable "
+          "(fail communicator init if the stack cannot support them), 2 = "
+          "disable, 3 = fallback (create them if possible, silently proceed "
+          "without otherwise). Defaults to disable: the endpoints are a "
+          "limited per-device resource, so host-side CFT is opt-in. Must be "
+          "identical on every rank and set before the communicator is "
+          "created. Requires NCCL >= 2.31.2 built with CUDA >= 13.3, a "
+          "driver reporting CUDA >= 13.3, and a GPU with logical-endpoint "
+          "support (sm_100+); NCCL_CFT_ENABLE=0 disables CFT globally.")
 #endif
       .def(
           "unsafe_get_ptr",
@@ -4136,22 +4281,26 @@ Returns:
       intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL2", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Store>& store,
-                     int rank,
-                     int size,
-                     c10::intrusive_ptr<
-                         ::c10d::nccl2::ProcessGroupNCCL::Options> options) {
-                    // gil_scoped_release is not safe as a call_guard in init.
-                    // https://github.com/pybind/pybind11/issues/5473
-                    py::gil_scoped_release nogil{};
-                    return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<
+                              ::c10d::nccl2::ProcessGroupNCCL::Options> options,
+                          std::optional<at::Device> device_id) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                         store, rank, size, std::move(options));
-                  }),
+                backend->setBoundDeviceId(device_id);
+                return backend;
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
+              py::arg("device_id") = std::nullopt,
               R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4160,8 +4309,11 @@ Returns:
                 py::gil_scoped_release nogil{};
                 auto options =
                     ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-                return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                    store, rank, size, options);
+                auto backend =
+                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                        store, rank, size, options);
+                backend->setBoundDeviceId(std::nullopt);
+                return backend;
               }),
               py::arg("store"),
               py::arg("rank"),
@@ -4171,6 +4323,17 @@ Returns:
               "get_error",
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "register_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
+              py::arg("pool"),
+              py::arg("symm") = false)
+          .def(
+              "deregister_mem_pool",
+              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4185,15 +4348,20 @@ Returns:
                       int rank,
                       int size,
                       const c10::intrusive_ptr<
-                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options) {
+                          ::c10d::nccl2::ProcessGroupNCCL::Options>& options,
+                      std::optional<at::Device> device_id) {
             py::gil_scoped_release nogil{};
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(device_id);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("options"),
+          py::arg("device_id") = std::nullopt,
           R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4201,8 +4369,11 @@ Returns:
                       int size) {
             py::gil_scoped_release nogil{};
             auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-            return c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
-                store, rank, size, options);
+            auto backend =
+                c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
+                    store, rank, size, options);
+            backend->setBoundDeviceId(std::nullopt);
+            return backend;
           }),
           py::arg("store"),
           py::arg("rank"),
@@ -4216,6 +4387,11 @@ Returns:
           "_num_active_channels",
           &::c10d::nccl2::ProcessGroupNCCLLazy::numActiveChannels,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "perform_nocolor_split",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
+            self.getPrimary()->performNocolorSplit(device);
+          })
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -4271,6 +4447,9 @@ Returns:
       .value(
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
+      .value(
+          "ALLGATHER_INTO_TENSOR_COALESCED",
+          ::c10d::OpType::ALLGATHER_INTO_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")
@@ -4511,6 +4690,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4526,6 +4708,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4534,8 +4723,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
@@ -4836,12 +5024,19 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "attach",
           &::c10d::FlightRecorderHook::attach,
           py::arg("pg"),
+          py::arg("global_ranks") = std::vector<uint64_t>{},
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.)")
+is called or the returned handle is garbage collected.
+
+global_ranks maps the group's ranks to world ranks; it names the per-rank
+dump file and is published as the group's membership. Leave it empty only
+for a backend that fills in Options::global_ranks_in_group itself -- a
+group with no mapping from either source publishes none rather than
+fabricating 0..size-1, which would collide the dump files of a subgroup.)")
       .def("remove", &::c10d::FlightRecorderHook::remove);
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
@@ -4863,16 +5058,21 @@ be removed again via remove().)")
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace_json(
-            includeCollectives.value_or(true), onlyActive.value_or(false)));
+            includeCollectives.value_or(true),
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -4881,23 +5081,71 @@ be removed again via remove().)")
       "_dump_fr_trace",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
-         std::optional<bool> onlyActive) {
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
         return py::bytes(::c10d::dump_fr_trace(
             includeCollectives.value_or(true),
             includeStackTraces.value_or(true),
-            onlyActive.value_or(false)));
+            onlyActive.value_or(false),
+            backend));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("includeStackTraces") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
       R"(
             Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
+        )");
+  module.def(
+      "_dump_fr_trace_file",
+      [](int rank,
+         std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive,
+         const std::string& backend) {
+        ::c10d::dump_fr_trace_file(
+            rank,
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(false),
+            onlyActive.value_or(false),
+            backend);
+      },
+      py::arg("rank"),
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      py::call_guard<py::gil_scoped_release>(),
+      R"(
+            Dumps the pickled work traces to the file the registered
+            DebugInfoWriter points at, which defaults to
+            <TORCH_FR_DUMP_TEMP_FILE><rank>.
+
+            Arguments:
+                rank(int): Rank used to name the per-rank output file.
+                includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+                includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is False.
+                onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
+        )");
+  module.def(
+      "_reset_fr_trace",
+      [](const std::string& backend) { ::c10d::reset_fr_trace(backend); },
+      py::arg("backend") = ::c10d::kDefaultFRBackend,
+      R"(
+            Drops every work trace recorded so far, so a subsequent dump only
+            contains collectives issued after this call. Backend-agnostic
+            counterpart of _reset_fr_recording_nccl.
+
+            Arguments:
+                backend (str, optional): Name of the backend whose recorder instance to reset. Default is "gloo".
         )");
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(

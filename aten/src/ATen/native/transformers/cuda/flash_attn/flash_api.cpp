@@ -1,12 +1,9 @@
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
-#include <c10/core/ScalarType.h>
-#include <c10/core/DeviceType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
-#include <new>
 #include <tuple>
 #include <type_traits>
 #include <utility>

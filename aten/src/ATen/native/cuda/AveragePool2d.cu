@@ -127,6 +127,11 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
   }
 }
 
+// When uniform_divisor holds (the divisor is the same for every window, which
+// the host determines from !ceil_mode && (count_include_pad || no padding)) the
+// backward gather never uses the clamped window bounds and every window over a
+// real input element is non-empty, so the whole per-window bound/divisor
+// recompute collapses to a single hoisted divide.
 template <typename scalar_t, typename accscalar_t, typename index_t>
 __global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const scalar_t* const top_diff,
     const int64_t channels, const int64_t height,
@@ -134,7 +139,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
-    bool count_include_pad, bool use_divisor) {
+    bool count_include_pad, bool use_divisor, bool uniform_divisor) {
+  const int hoisted_divisor = use_divisor ? divisor_override : kernel_h * kernel_w;
   CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     // find out the local index
     // find out the local offset
@@ -151,30 +157,26 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const
         top_diff + (n * channels + c) * pooled_height * pooled_width;
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
-        // figure out the pooling size
-        int hstart = ph * stride_h - pad_h;
-        int wstart = pw * stride_w - pad_w;
-        int hend = min(hstart + kernel_h, height + pad_h);
-        int wend = min(wstart + kernel_w, width + pad_w);
-        int pool_size = (hend - hstart) * (wend - wstart);
-        hstart = max(hstart, 0);
-        wstart = max(wstart, 0);
-        hend = min(hend, height);
-        wend = min(wend, width);
-
-        if (hstart >= hend || wstart >= wend) {
-          continue;
-        }
-
         int divide_factor;
-        if (use_divisor) {
-          divide_factor = divisor_override;
+        if (uniform_divisor) {
+          divide_factor = hoisted_divisor;
         } else {
-          if(count_include_pad) {
-            divide_factor = pool_size;
-          } else {
-            divide_factor = (hend - hstart) * (wend - wstart);
+          // figure out the pooling size
+          int hstart = ph * stride_h - pad_h;
+          int wstart = pw * stride_w - pad_w;
+          int hend = min(hstart + kernel_h, height + pad_h);
+          int wend = min(wstart + kernel_w, width + pad_w);
+          int pool_size = (hend - hstart) * (wend - wstart);
+          hstart = max(hstart, 0);
+          wstart = max(wstart, 0);
+          hend = min(hend, height);
+          wend = min(wend, width);
+
+          if (hstart >= hend || wstart >= wend) {
+            continue;
           }
+
+          divide_factor = count_include_pad ? pool_size : (hend - hstart) * (wend - wstart);
         }
         gradient += top_diff_slice[ph * pooled_width + pw] / divide_factor;
       }
@@ -191,7 +193,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
-    bool count_include_pad, bool use_divisor) {
+    bool count_include_pad, bool use_divisor, bool uniform_divisor) {
+  const int hoisted_divisor = use_divisor ? divisor_override : kernel_h * kernel_w;
   CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     const int c = index % channels;
     const int w = (index / channels) % width + pad_w;
@@ -206,33 +209,74 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     const scalar_t* const top_diff_slice = top_diff + n * channels * pooled_height * pooled_width + c;
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
-        // figure out the pooling size
-        int hstart = ph * stride_h - pad_h;
-        int wstart = pw * stride_w - pad_w;
-        int hend = min(hstart + kernel_h, height + pad_h);
-        int wend = min(wstart + kernel_w, width + pad_w);
-        int pool_size = (hend - hstart) * (wend - wstart);
-        hstart = max(hstart, 0);
-        wstart = max(wstart, 0);
-        hend = min(hend, height);
-        wend = min(wend, width);
-
-        if (hstart >= hend || wstart >= wend) {
-          continue;
-        }
-
         int divide_factor;
-        if (use_divisor) {
-          divide_factor = divisor_override;
+        if (uniform_divisor) {
+          divide_factor = hoisted_divisor;
         } else {
-          if(count_include_pad) {
-            divide_factor = pool_size;
-          } else {
-            divide_factor = (hend - hstart) * (wend - wstart);
+          // figure out the pooling size
+          int hstart = ph * stride_h - pad_h;
+          int wstart = pw * stride_w - pad_w;
+          int hend = min(hstart + kernel_h, height + pad_h);
+          int wend = min(wstart + kernel_w, width + pad_w);
+          int pool_size = (hend - hstart) * (wend - wstart);
+          hstart = max(hstart, 0);
+          wstart = max(wstart, 0);
+          hend = min(hend, height);
+          wend = min(wend, width);
+
+          if (hstart >= hend || wstart >= wend) {
+            continue;
           }
+
+          divide_factor = count_include_pad ? pool_size : (hend - hstart) * (wend - wstart);
         }
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] / divide_factor;
       }
+    }
+    bottom_diff[index] = static_cast<scalar_t>(gradient);
+  }
+}
+
+// Fast path for non-overlapping windows (stride == kernel, no padding, no
+// ceil_mode): every input element maps to exactly one output element and the
+// divisor is constant, so the whole phstart/phend scan and per-window bound
+// math of the general kernel collapses to a single load and divide. One kernel
+// serves both layouts; channels_last selects the index decode and output
+// stride and is uniform across the grid, so the branch never diverges.
+template <typename scalar_t, typename accscalar_t, typename index_t>
+__global__ void avg_pool2d_backward_nonoverlap_frame(const index_t nthreads,
+    const scalar_t* const top_diff, const int64_t channels, const int64_t height,
+    const int64_t width, const int64_t pooled_height, const int64_t pooled_width,
+    const int kernel_h, const int kernel_w, scalar_t* const bottom_diff,
+    const int divisor_override, bool use_divisor, bool channels_last) {
+  const int divide_factor = use_divisor ? divisor_override : kernel_h * kernel_w;
+  CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+    int w, h;
+    index_t slice_base;
+    int64_t inner_stride;
+    if (channels_last) {
+      const int c = index % channels;
+      const index_t nhw = index / channels;
+      w = nhw % width;
+      const index_t nh = nhw / width;
+      h = nh % height;
+      const index_t n = nh / height;
+      slice_base = n * channels * pooled_height * pooled_width + c;
+      inner_stride = channels;
+    } else {
+      w = index % width;
+      const index_t nch = index / width;
+      h = nch % height;
+      const index_t nc = nch / height;  // n * channels + c
+      slice_base = nc * pooled_height * pooled_width;
+      inner_stride = 1;
+    }
+    const int ph = h / kernel_h;
+    const int pw = w / kernel_w;
+    accscalar_t gradient = accscalar_t(0);
+    if (ph < pooled_height && pw < pooled_width) {
+      gradient = static_cast<accscalar_t>(
+          top_diff[slice_base + (ph * pooled_width + pw) * inner_stride]) / divide_factor;
     }
     bottom_diff[index] = static_cast<scalar_t>(gradient);
   }
@@ -402,6 +446,18 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
 
+  // Non-overlapping windows (stride == kernel, no padding, no ceil_mode) let
+  // each input element map to exactly one output element with a constant
+  // divisor, so a much cheaper kernel replaces the general window scan.
+  const bool nonoverlap = dH == kH && dW == kW && padH == 0 && padW == 0 && !ceil_mode;
+
+  // A weaker condition than nonoverlap: the divisor is the same for every
+  // window (so the general kernel can hoist it and skip its per-window bound
+  // math). !ceil_mode keeps the last window full; then either there is no
+  // padding, or count_include_pad makes every window count kernel_h * kernel_w.
+  const bool uniform_divisor =
+      use_divisor || (!ceil_mode && (count_include_pad || (padH == 0 && padW == 0)));
+
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool gesm10x = properties->major >= 10;
   int double_threads = 1024;
@@ -428,36 +484,54 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
 
                 case MemoryFormat::ChannelsLast: {
                   gradInput.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
-                  avg_pool2d_backward_out_cuda_frame_nhwc<scalar_t, accscalar_t, index_t>
-                    <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      count,
-                      gradOutput_data,
-                      nInputPlane,
-                      inputHeight, inputWidth,
-                      outputHeight, outputWidth,
-                      kH, kW,
-                      dH, dW,
-                      padH, padW,
-                      gradInput_data,
-                      divisor_override_value,
-                      count_include_pad, use_divisor);
+                  if (nonoverlap) {
+                    avg_pool2d_backward_nonoverlap_frame<scalar_t, accscalar_t, index_t>
+                      <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                        count, gradOutput_data, nInputPlane,
+                        inputHeight, inputWidth, outputHeight, outputWidth,
+                        kH, kW, gradInput_data, divisor_override_value, use_divisor,
+                        /*channels_last=*/true);
+                  } else {
+                    avg_pool2d_backward_out_cuda_frame_nhwc<scalar_t, accscalar_t, index_t>
+                      <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                        count,
+                        gradOutput_data,
+                        nInputPlane,
+                        inputHeight, inputWidth,
+                        outputHeight, outputWidth,
+                        kH, kW,
+                        dH, dW,
+                        padH, padW,
+                        gradInput_data,
+                        divisor_override_value,
+                        count_include_pad, use_divisor, uniform_divisor);
+                  }
                   C10_CUDA_KERNEL_LAUNCH_CHECK();
                   break;
                 }
                 case MemoryFormat::Contiguous: {
-                  avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, index_t>
-                    <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      count,
-                      gradOutput_data,
-                      nInputPlane,
-                      inputHeight, inputWidth,
-                      outputHeight, outputWidth,
-                      kH, kW,
-                      dH, dW,
-                      padH, padW,
-                      gradInput_data,
-                      divisor_override_value,
-                      count_include_pad, use_divisor);
+                  if (nonoverlap) {
+                    avg_pool2d_backward_nonoverlap_frame<scalar_t, accscalar_t, index_t>
+                      <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                        count, gradOutput_data, nInputPlane,
+                        inputHeight, inputWidth, outputHeight, outputWidth,
+                        kH, kW, gradInput_data, divisor_override_value, use_divisor,
+                        /*channels_last=*/false);
+                  } else {
+                    avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, index_t>
+                      <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                        count,
+                        gradOutput_data,
+                        nInputPlane,
+                        inputHeight, inputWidth,
+                        outputHeight, outputWidth,
+                        kH, kW,
+                        dH, dW,
+                        padH, padW,
+                        gradInput_data,
+                        divisor_override_value,
+                        count_include_pad, use_divisor, uniform_divisor);
+                  }
                   C10_CUDA_KERNEL_LAUNCH_CHECK();
                   break;
                 }

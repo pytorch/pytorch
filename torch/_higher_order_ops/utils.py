@@ -11,6 +11,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch.vmap import restore_vmap
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
@@ -100,6 +101,99 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
+    # Parks the batch dim on the last axis so it never collides with the scan
+    # dim (0). The -1 convention here is a scan/associative_scan contract, not a
+    # general vmap one: both scan batch rules rely on the scan dim being 0.
+    return pytree.tree_map(
+        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
+        unbatched_args,
+        in_dims,
+    )
+
+
+def _batch_dims_as_last_for_scan(in_dims):
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
+    # Encodes the same scan-specific last-axis convention described there.
+    return tuple(
+        -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
+    )
+
+
+class _VmapCombineFnWrapper:
+    """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
+
+    The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
+    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
+    and passed as the combine_fn to the underlying HOP.
+
+    Contract for callers:
+      - ``in_dims`` are the flat, last-axis batch-dim markers for the combine_fn's
+        positional arguments, and are held fixed for the wrapper's lifetime.
+      - ``out_dims`` is ``None`` until ``__call__`` runs at least once, and only then
+        holds the flat per-output markers aligned to the op's flat outputs. Because a
+        scan HOP may not invoke the combine_fn at all (e.g. scan length < 2), a caller
+        MUST check for ``out_dims is None`` and decide the fallback itself:
+        ``associative_scan_batch_rule`` falls back to the xs batch dims (the op is a
+        no-op so outputs alias xs), while ``scan_batch_rule`` asserts the op always
+        runs. The consistency check below guards ``out_dims`` stability across steps,
+        not ``in_dims`` correctness.
+      - ``expected_out_dims`` (optional): the batch-dim markers the caller assumes the
+        combine_fn outputs will carry. ``generic_associative_scan`` feeds combine_fn
+        outputs back as the left-hand arguments on later recursion levels, reusing the
+        fixed ``in_dims``; that is only valid if the outputs keep the same batchedness
+        as those inputs. When the outputs diverge (e.g. batched additional_inputs with
+        unbatched xs), the stale markers would silently reinterpret a batch axis as
+        data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
+        the first call instead, before the divergence corrupts a later level.
+    """
+
+    def __init__(
+        self,
+        combine_fn: Callable[..., Any],
+        in_dims: tuple[Any, ...],
+        batch_size: int,
+        randomness: str,
+        expected_out_dims: tuple[Any, ...] | None = None,
+        op_name: str = "associative_scan",
+    ) -> None:
+        self.combine_fn = combine_fn
+        self.in_dims = in_dims
+        self.batch_size = batch_size
+        self.randomness = randomness
+        self.expected_out_dims = expected_out_dims
+        self.op_name = op_name
+        self.out_dims: tuple[Any, ...] | None = None
+
+    def __call__(self, *args: Any) -> Any:
+        outputs, per_slice_out_dims = restore_vmap(
+            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+        )(*args)
+        outputs = pytree.tree_map(
+            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
+            outputs,
+            per_slice_out_dims,
+        )
+        out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
+        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
+            raise RuntimeError(
+                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
+                "the same batched arguments as its xs inputs, because the outputs are "
+                "fed back as inputs on later scan levels. Here they diverge (e.g. "
+                "batched additional_inputs with unbatched xs, or a pytree where an "
+                "output leaf becomes batched via another leaf): expected output batch "
+                f"dims {self.expected_out_dims} but got {out_dims}."
+            )
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
+            )
+        self.out_dims = out_dims
+        return outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):

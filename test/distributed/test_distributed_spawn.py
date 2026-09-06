@@ -3,6 +3,10 @@
 import os
 import sys
 
+
+if os.environ.get("BACKEND") == "nccl":
+    os.environ["TORCH_DIST_USE_NCCL2"] = "0"
+
 import torch
 import torch.distributed as dist
 

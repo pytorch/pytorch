@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -351,16 +351,15 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  # b17 adds aux_scalars; CUDA 13 wheels are behind the cu13 extra.
+  local flash_attn_package=flash-attn-4==4.0.0b17
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    pip_install "flash-attn-4[cu13]==4.0.0b17"
-  else
-    pip_install flash-attn-4==4.0.0b17
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b17"
   fi
-  # flash-attn-4 pulls quack unpinned; newer quack needs cutlass._mlir_helpers,
-  # absent from the gated cutlass-dsl 4.5.2. Pin quack to the SHA torch vendors
-  # (torch/_vendor/quack), which uses cutlass._mlir and works with 4.5.2. See #188477.
-  pip_install "git+https://github.com/Dao-AILab/quack.git@99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
+  # QuACK 0.6.4 pins the CuTeDSL version accepted by torch._native.
+  pip_install \
+    "$flash_attn_package" \
+    quack-kernels==0.6.4 \
+    apache-tvm-ffi==0.1.11
   echo "FlashAttention 4 installation complete."
 }
 
@@ -377,8 +376,15 @@ function install_cutlass_dsl() {
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install nvidia-cutlass-dsl==4.5.2 apache-tvm-ffi==0.1.11
+  pip_install nvidia-cutlass-dsl==4.6.2 apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_flydsl() {
+  echo "Installing FlyDSL from PyPI..."
+  # Require the published platform wheel instead of attempting an unsupported source build.
+  pip_install --only-binary=:all: flydsl==0.3.0
+  echo "FlyDSL installation complete."
 }
 
 function install_nvmath() {

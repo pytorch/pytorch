@@ -2,7 +2,6 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -336,6 +335,7 @@ std::string _memory_snapshot_pickled() {
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
+  IValue internal_metadata_s = "internal_metadata";
   IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
@@ -456,6 +456,9 @@ std::string _memory_snapshot_pickled() {
     trace_entry.insert(stream_s, int64_t(te.stream_));
     trace_entry.insert(compile_contexts_s, te.compile_context_);
     trace_entry.insert(user_metadata_s, te.user_metadata_);
+    if (!te.internal_metadata_.empty()) {
+      trace_entry.insert(internal_metadata_s, te.internal_metadata_);
+    }
     if (te.context_) {
       auto sc = getCapturedTracebackFromContext(te.context_);
       frame_tracebacks.push_back(sc);

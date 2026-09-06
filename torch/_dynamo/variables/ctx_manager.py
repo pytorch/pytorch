@@ -82,7 +82,7 @@ class ContextWrappingVariable(VariableTracker):
                 f"Sequence, got {type(target_values).__name__}"
             )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -180,7 +180,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
-    # Some methods in ContextWrappingVariable assumes the arguments are
+    # Some methods in ContextWrappingVariable assume the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         if cm_obj is None:
@@ -257,10 +257,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
             tx
         ):
-            self.old_parameters_var = self.mod.getattro_impl(
+            self.old_parameters_var = self.mod.tp_getattro_impl(
                 tx, "_parameters"
             ).realize()
-            self.old_buffer_var = self.mod.getattro_impl(tx, "_buffers").realize()
+            self.old_buffer_var = self.mod.tp_getattro_impl(tx, "_buffers").realize()
             tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
             tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
             return self.cm_vt.enter(tx)
@@ -1350,7 +1350,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     ) -> "PreserveVersionContextVariable":
         if tensors.is_tensor():
             versions = variables.TupleVariable(
-                [x.getattro_impl(tx, "_version") for x in [tensors]]
+                [x.tp_getattro_impl(tx, "_version") for x in [tensors]]
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
@@ -1359,7 +1359,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
                     f"tensors must be a TupleVariable, got {type(tensors)}"
                 )
             versions = variables.TupleVariable(
-                [x.getattro_impl(tx, "_version") for x in tensors.items]
+                [x.tp_getattro_impl(tx, "_version") for x in tensors.items]
             )
             tensors_tuple = tensors
         return PreserveVersionContextVariable(tensors_tuple, versions)
@@ -1608,7 +1608,15 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        super().__init__(target_values=(), initial_values=initial_values, **kwargs)
+        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
+        target_values = (
+            (budget,) if len(annotation) == 1 and type(budget) is float else ()
+        )
+        super().__init__(
+            target_values=target_values,
+            initial_values=initial_values,
+            **kwargs,
+        )
 
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1626,12 +1634,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
+        if self.target_values:
+            return "_dynamo_region_activation_memory_budget"
         return "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        if self.target_values:
+            return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
@@ -1781,7 +1793,7 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -1835,7 +1847,7 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare

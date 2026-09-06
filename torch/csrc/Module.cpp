@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
 #include <optional>
 
@@ -34,11 +33,9 @@
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <iostream>
@@ -96,18 +93,17 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
@@ -119,7 +115,6 @@
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -244,8 +239,7 @@ static PyObject* THPModule_initExtension(
   libshm_init(path.c_str());
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!module)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(module);
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -702,9 +696,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   auto dl_device = at::torchDeviceToDLDevice(device);
 
   auto tuple = PyTuple_New(2);
-  if (!tuple) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(tuple);
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
@@ -898,6 +890,22 @@ static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THModule_getSymbolizeMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  switch (torch::get_symbolize_mode()) {
+    case torch::unwind::Mode::addr2line:
+      return THPUtils_packString("addr2line");
+    case torch::unwind::Mode::fast:
+      return THPUtils_packString("fast");
+    case torch::unwind::Mode::dladdr:
+      return THPUtils_packString("dladdr");
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unknown symbolize mode");
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THModule_rename_privateuse1_backend(
     PyObject* _unused,
     PyObject* arg) {
@@ -1031,6 +1039,25 @@ static PyObject* THPModule_userEnabledFA3SDP(
   else
     Py_RETURN_FALSE;
 }
+static PyObject* THPModule_setSDPUseFA4(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa4 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA4(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA4SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA4SDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 static PyObject* THPModule_setSDPUseMemEfficient(
     PyObject* _unused,
     PyObject* arg) {
@@ -1117,8 +1144,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -1672,16 +1698,13 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
   };
 
   THPObjectPtr result(PyList_New(0));
-  if (!result)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
     if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
-    if (PyList_Append(result.get(), dtype) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyList_Append(result.get(), dtype) >= 0);
   }
   return result.release();
   END_HANDLE_TH_ERRORS
@@ -1793,7 +1816,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   }
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
-  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
+  bool ret = nodes_in_graph->contains(node);
   if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
@@ -2092,6 +2115,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
     {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
+    {"_get_fa4_sdp_enabled", THPModule_userEnabledFA4SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa4", THPModule_setSDPUseFA4, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
@@ -2289,6 +2314,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_get_symbolize_mode", THModule_getSymbolizeMode, METH_NOARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
@@ -2675,6 +2701,13 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
 
+#if defined(USE_CUFILE)
+  PyObject* has_gds = Py_True;
+#else
+  PyObject* has_gds = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("_has_gds", has_gds));
+
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
 #else
@@ -2700,6 +2733,13 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+  py_module.def("_is_pybind11_type", [](py::handle cls) {
+    if (!PyType_Check(cls.ptr())) {
+      return false;
+    }
+    auto* type = reinterpret_cast<PyTypeObject*>(cls.ptr());
+    return !py::detail::all_type_info(type).empty();
+  });
 
   // Serialized access to the process environment. Prefer these over Python's
   // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so
@@ -2756,6 +2796,25 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_set_cached_tensors_enabled", [](bool enabled) {
     at::caching::set_cached_tensors_enabled(enabled);
+  });
+
+  py_module.def("_set_native_aot_enabled", [](bool enabled) {
+    at::globalContext().setAllowNativeAot(enabled);
+  });
+
+  py_module.def("_get_native_aot_enabled", []() {
+    return at::globalContext().allowNativeAot();
+  });
+
+  // Not a user-facing switch, unlike _set_native_aot_enabled: it masks ops
+  // whose AOT kernels ARE the implementation, changing what the op computes.
+  // Called only by torch._native._unconditional_masked().
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
   });
 
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {

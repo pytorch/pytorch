@@ -44,7 +44,7 @@ def _reload_python_module(
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
+    ptxas = Path(__file__).absolute().parents[2] / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
@@ -124,7 +124,10 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
-_WORKER_CACHE_ENV_VARS = ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR")
+_WORKER_CACHE_ENV_VARS = (
+    "TORCHINDUCTOR_CACHE_DIR",
+    "TRITON_CACHE_DIR",
+)
 _last_applied_cache_env: dict[str, str | None] | None = None
 
 
@@ -155,7 +158,7 @@ def _worker_compile_pycodecache_kernel(
     _precompile entry point. Compiled artifacts are persisted to disk cache so
     the parent process can load them without recompilation.
 
-    Used by both CuteDSL and NV Universal GEMM backends.
+    Used by CuteDSL, FlyDSL, and NV Universal GEMM backends.
     """
     _apply_subprocess_env_and_clear_caches(extra_env)
 

@@ -1,21 +1,15 @@
 #include <torch/csrc/autograd/engine.h>
 
 #include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/autograd.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1305,6 +1299,20 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
+  // Log (once per process each) backward passes by the devices they span, to
+  // assess reliance on multithreaded autograd before changing its default.
+  // The two cases are independent and may both fire for the same pass: one
+  // for a second distinct non-CPU device (multi-device), one for a non-CPU
+  // device alongside CPU nodes (GPU + CPU).
+  static std::atomic<bool> multidevice_logged{false};
+  static std::atomic<bool> gpu_cpu_logged{false};
+  // Skip the per-node device inspection entirely once both cases have already
+  // been logged for this process; the logs fire at most once anyway.
+  const bool inspect_devices =
+      !multidevice_logged.load(std::memory_order_relaxed) ||
+      !gpu_cpu_logged.load(std::memory_order_relaxed);
+  std::optional<at::Device> first_noncpu_device;
+  bool saw_cpu = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1317,6 +1325,22 @@ auto Engine::compute_dependencies(
     }
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
+    }
+    if (inspect_devices) {
+      auto device = fn->device();
+      if (should_run_in_cpu_ready_queue(device.type())) {
+        saw_cpu = true;
+      } else if (!first_noncpu_device.has_value()) {
+        first_noncpu_device = device;
+      } else if (
+          first_noncpu_device.value() != device &&
+          !multidevice_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.multidevice_backward");
+      }
+      if (saw_cpu && first_noncpu_device.has_value() &&
+          !gpu_cpu_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.gpu_cpu_backward");
+      }
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {

@@ -165,7 +165,7 @@ def _resolve_parameter_dtypes(
     #   b. Iterate over all named_inputs
     #   b0. Find the corresponding parameter in the signature
     #   b1. If the argument is a Python constant, skip.
-    #   b2. If the argument is a ir.Value, Bind {constraint: arg.type}.
+    #   b2. If the argument is an ir.Value, Bind {constraint: arg.type}.
     type_binding = {}
     for name, arg in named_inputs.items():
         param = signature.params_map[name]

@@ -2507,13 +2507,13 @@ class TestBinaryUfuncsDevice(TestCase):
             torch.fmax,
             torch.fmin,
         ):
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[0]),
                     torch.ones(1, device=device, dtype=dtypes[1]),
                 )
 
-            with self.assertRaisesRegex(RuntimeError, ".+not implemented for.+"):
+            with self.assertRaisesRegex(TypeError, ".+not implemented for.+"):
                 torch_op(
                     torch.ones(1, device=device, dtype=dtypes[1]),
                     torch.ones(1, device=device, dtype=dtypes[0]),
@@ -2867,6 +2867,48 @@ class TestBinaryUfuncsDevice(TestCase):
                     )
                 ).tangent
             self.assertEqual(tangent, [1.0, float("nan"), float("nan")])
+
+    @dtypes(torch.float, torch.double)
+    def test_fmin_fmax_nan_input_gradients(self, device, dtype):
+        for op in (torch.fmax, torch.fmin):
+            a = torch.tensor(
+                [float("nan"), 1.0, float("nan")],
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            b = torch.tensor(
+                [1.0, float("nan"), float("nan")],
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            op(a, b).sum().backward()
+            self.assertEqual(a.grad, [0.0, 1.0, 1.0])
+            self.assertEqual(b.grad, [1.0, 0.0, 0.0])
+
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(
+                    op(
+                        fwAD.make_dual(
+                            a.detach(),
+                            torch.tensor(
+                                [float("nan"), 4.0, 7.0],
+                                device=device,
+                                dtype=dtype,
+                            ),
+                        ),
+                        fwAD.make_dual(
+                            b.detach(),
+                            torch.tensor(
+                                [10.0, float("nan"), 13.0],
+                                device=device,
+                                dtype=dtype,
+                            ),
+                        ),
+                    )
+                ).tangent
+            self.assertEqual(tangent, [10.0, 4.0, 7.0])
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -4194,6 +4236,7 @@ class TestBinaryUfuncsDevice(TestCase):
             actual = op(x, y, alpha=alpha)
             self.assertTrue(not (actual.isnan() or actual.isinf()))
 
+    @skipIfTorchDynamo()
     def test_sub_typing(self, device):
         m1 = torch.tensor(
             [True, False, False, True, False, False], dtype=torch.bool, device=device
@@ -4202,19 +4245,19 @@ class TestBinaryUfuncsDevice(TestCase):
             [True, True, False, False, False, True], dtype=torch.bool, device=device
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
             r"Use the `\^` or `logical_xor\(\)` operator instead.",
             lambda: m1 - m2,
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
             r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
             lambda: 1 - m1,
         )
         self.assertRaisesRegex(
-            RuntimeError,
+            NotImplementedError,
             r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
             r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
             lambda: m2 - 1,

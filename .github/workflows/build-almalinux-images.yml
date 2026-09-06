@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 240
     strategy:
       matrix:
-        tag: ["cuda12.6", "cuda13.0", "cuda13.2", "cuda13.4", "rocm7.1", "rocm7.2", "cpu"]
+        tag: ["cuda12.6", "cuda13.0", "cuda13.2", "cuda13.4", "rocm7.14", "rocm10.0", "cpu"]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main

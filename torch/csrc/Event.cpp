@@ -335,7 +335,5 @@ PyTypeObject THPEventType = {
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
-  if (PyModule_AddType(module, &THPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPEventType) >= 0);
 }

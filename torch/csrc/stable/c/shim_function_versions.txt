@@ -133,5 +133,6 @@ torch_new_generator_handle: TORCH_VERSION_2_13_0
 torch_new_stable_ivalue: TORCH_VERSION_2_13_0
 torch_stream_native_handle: TORCH_VERSION_2_13_0
 torch_has_storage: TORCH_VERSION_2_14_0
+torch_mps_set_arg_bytes: TORCH_VERSION_2_14_0
 torch_tensor_from_pyobject: TORCH_VERSION_2_14_0
 torch_tensor_to_pyobject: TORCH_VERSION_2_14_0

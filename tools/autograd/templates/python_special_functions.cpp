@@ -61,13 +61,9 @@ void initSpecialFunctions(PyObject* module) {
   };
   PyObject* special = PyModule_Create(&def);
   THPSpecialVariableFunctionsModule = special;
-  if (!special) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(special);
   // steals a reference to special
-  if (PyModule_AddObject(module, "_special", special) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_special", special) == 0);
 }
 
 // generated methods start here

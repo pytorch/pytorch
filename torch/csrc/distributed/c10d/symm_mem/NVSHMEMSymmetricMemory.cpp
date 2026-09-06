@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
@@ -53,6 +54,13 @@ struct NVSHMEMAllocation {
         buffer_size(buffer_size),
         buffer_offset(buffer_offset),
         device_idx(device_idx) {}
+
+  // Whether ptr falls within this allocation's data buffer.
+  bool contains(const void* ptr) const {
+    auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+    auto buffer_ptr = reinterpret_cast<uintptr_t>(alloc_base) + buffer_offset;
+    return ptr_int >= buffer_ptr && ptr_int < buffer_ptr + buffer_size;
+  }
 
   // Delete copy and move operations to prevent double-free
   NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
@@ -139,10 +147,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     // per allocation, shared across every process group that rendezvouses on
     // it -- the same model as the CUDA backend (previously each group did its
     // own nvshmem_malloc for an isolated pad). barrier()/put_signal()/
-    // wait_signal() are not yet implemented for NVSHMEM (see below), so nothing
-    // consumes the pad today; a future implementation must index signal slots
-    // by (rank, world_size, channel) as the CUDA backend does, so that groups
-    // with overlapping ranks on the same allocation do not clobber each other.
+    // wait_signal() consume the pad via the shared kernels, indexing signal
+    // slots by (world_size, channel, rank) as the CUDA backend does.
     world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
       auto peer_base = nvshmem_ptr(base_ptr_, rank_to_global_rank[r]);
@@ -267,15 +273,52 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   void barrier(int channel, size_t timeout_ms) override {
-    // TODO
+    TORCH_CHECK(
+        pai_->world_within_cuda_p2p_,
+        "NVSHMEMSymmetricMemory::barrier requires all peers to be reachable "
+        "over direct load/store access (NVLink/P2P). NYI: signaling "
+        "network-connected peers (e.g. via nvshmemx_signal_op).");
+    c10::cuda::CUDAGuard device_guard(device_idx_);
+    launch_barrier_kernel(
+        reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+        channel,
+        pai_->rank_,
+        pai_->world_size_,
+        timeout_ms);
   }
 
   void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
-    // TODO
+    check_rank(dst_rank, pai_->world_size_);
+    TORCH_CHECK(
+        pai_->signal_pads_[dst_rank] != nullptr,
+        "NVSHMEMSymmetricMemory::put_signal requires the destination rank to "
+        "be reachable over direct load/store access (NVLink/P2P). NYI: "
+        "signaling network-connected peers (e.g. via nvshmemx_signal_op).");
+    c10::cuda::CUDAGuard device_guard(device_idx_);
+    launch_put_signal_kernel(
+        reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+        dst_rank,
+        channel,
+        pai_->rank_,
+        pai_->world_size_,
+        timeout_ms);
   }
 
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
-    // TODO
+    check_rank(src_rank, pai_->world_size_);
+    TORCH_CHECK(
+        pai_->signal_pads_[src_rank] != nullptr,
+        "NVSHMEMSymmetricMemory::wait_signal requires the source rank to be "
+        "reachable over direct load/store access (NVLink/P2P). NYI: "
+        "signaling network-connected peers (e.g. via nvshmemx_signal_op).");
+    c10::cuda::CUDAGuard device_guard(device_idx_);
+    launch_wait_signal_kernel(
+        reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+        src_rank,
+        channel,
+        pai_->rank_,
+        pai_->world_size_,
+        timeout_ms);
   }
 
   int get_rank() override {
@@ -434,7 +477,22 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   void free(void* ptr) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    allocations_.erase(ptr);
+    auto alloc_it = allocations_.find(ptr);
+    if (alloc_it == allocations_.end()) {
+      return;
+    }
+    // Drop cached rendezvous handles pointing into this allocation: a future
+    // allocation may reuse the same address range, and a stale cached handle
+    // would carry the old allocation's size and peer mappings (matches the
+    // NCCL allocator's invalidation on free).
+    for (auto it = symm_mems_.begin(); it != symm_mems_.end();) {
+      if (alloc_it->second->contains(it->first.first)) {
+        it = symm_mems_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    allocations_.erase(alloc_it);
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -462,16 +520,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // In case of MemPool, tensor.storage().data_ptr() may not match
     // exactly an allocation's base address. Thus we perform the search by
     // testing if the former is within an allocation's range.
-    auto alloc_it = std::find_if(
-        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-          auto& allocation = pair.second;
-          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          // pair.first is buffer_ptr, the key alloc() stored (alloc_base +
-          // buffer_offset), i.e. the data buffer start past the signal pad.
-          auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
-          return ptr_int >= buffer_ptr &&
-              ptr_int < buffer_ptr + allocation->buffer_size;
-        });
+    auto alloc_it = find_allocation_covering(ptr);
     TORCH_CHECK(
         alloc_it != allocations_.end(),
         "Pointer not within any SymmetricMemory allocation, "
@@ -522,16 +571,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   bool has_allocation(void* ptr) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto alloc_it = std::find_if(
-        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto buffer_ptr =
-              reinterpret_cast<uintptr_t>(pair.second->alloc_base) +
-              pair.second->buffer_offset;
-          return ptr_int >= buffer_ptr &&
-              ptr_int < buffer_ptr + pair.second->buffer_size;
-        });
-    return alloc_it != allocations_.end();
+    return find_allocation_covering(ptr) != allocations_.end();
   }
 
   c10::DeviceType supported_device_type() override {
@@ -550,6 +590,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       c10::intrusive_ptr<NVSHMEMSymmetricMemory>,
       SymmMemKeyHash>
       symm_mems_;
+
+  // Caller must hold mutex_.
+  decltype(allocations_)::iterator find_allocation_covering(void* ptr) {
+    return std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          return pair.second->contains(ptr);
+        });
+  }
 };
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {

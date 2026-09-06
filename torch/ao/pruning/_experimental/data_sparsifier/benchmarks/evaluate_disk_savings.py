@@ -14,7 +14,7 @@ from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
 
 
 def create_attach_sparsifier(model, **sparse_config):
-    """Create a DataNormSparsifier and the attach it to the model embedding layers
+    """Create a DataNormSparsifier and attach it to the model embedding layers
 
     Args:
         model (nn.Module)

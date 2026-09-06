@@ -93,7 +93,7 @@ fmodel, params, buffers = combine_state_for_ensemble(models)
 
 # Option 1: get predictions using a different minibatch for each model.
 # By default, vmap maps a function across the first dimension of all inputs to the
-# passed-in function. After `combine_state_for_ensemble`, each of of ``params``,
+# passed-in function. After `combine_state_for_ensemble`, each of ``params``,
 # ``buffers`` have an additional dimension of size ``num_models`` at the front;
 # and ``minibatches`` has a dimension of size ``num_models``.
 print([p.size(0) for p in params])

@@ -17,7 +17,13 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    isRocmArchAnyOf,
+    MI200_ARCH,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -169,6 +175,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             if TEST_WITH_ROCM and dtype == torch.float:
                 atol = 3e-3
                 rtol = 1e-2
+            if (
+                self.device == GPU_TYPE
+                and dtype == torch.half
+                and isRocmArchAnyOf(MI200_ARCH)
+            ):
+                # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                # implementation (fp16_on_mi200 in numerical_accuracy.md), so
+                # the eager reference grads are the less accurate side here
+                # (grad rmse vs fp64 gold ~2e-3 vs ~1e-4 for the fused
+                # kernel). Measured max grad diff 3.4e-3 on 1/4096 elements.
+                # The device check keeps this off test_sdpa_rewriter_1_cpu,
+                # which also binds this helper.
+                atol = 5e-3
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
                 checkpoint_wrapper(dot_prod_attention),
@@ -449,6 +468,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     def _test_sdpa_rewriter_7(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_7(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -484,7 +508,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
@@ -497,7 +521,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
         args = (
@@ -511,7 +535,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -524,10 +548,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=SM80OrLater,
             has_dropout=True,
             override_check_equal=True,
-            atol=2e-3,
+            atol=atol,
         )
 
     def _test_sdpa_rewriter_8(self):
+        # MI200: the eager fp16 reference backward uses the bf16-intermediate
+        # alt implementation and is the less accurate side (see
+        # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
+        atol = 4e-3 if isRocmArchAnyOf(MI200_ARCH) else 2e-3
+
         def sfdp_pattern_8(query, key, value):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -553,20 +582,20 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8, args, atol=2e-3)
+        self._check_common(sfdp_pattern_8, args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_8_v2, args, atol=2e-3, contains=False)
+        self._check_common(sfdp_pattern_8_v2, args, atol=atol, contains=False)
 
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
-        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=atol)
         args = (
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
@@ -575,7 +604,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_8_v2),
             args,
-            atol=2e-3,
+            atol=atol,
             contains=False,
         )
 
@@ -749,6 +778,106 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             self._check_common(
                 model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
+
+    def _test_pattern_fails_with_tensor_scale(self):
+        # https://github.com/pytorch/pytorch/issues/191203
+        def model(query, key, value, attn_mask, scale):
+            # Dividing by scale makes the scale gradients very unstable
+            scale = scale.detach()
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+            torch.tensor(0.5, device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fuses_with_symint_scale(self):
+        # A SymInt scale is a scalar the fused kernel accepts. _check_common
+        # only marks dim 0 dynamic, so the scale is taken from that dim.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        # The mask is built inside the model: a mask input would require grad
+        # in the training run, which blocks the fusion for any scale.
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            attn_mask = torch.ones(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args, contains=False)
+
+    def _test_pattern_fuses_with_symint_scale_div(self):
+        # Same SymInt scale, reaching the guard through _sfdp_extra_check
+        # instead of _sfdp_params_check.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value):
+            scale = query.size(0) // 2
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(scale)
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args)
+
+    def _test_pattern_fails_with_symfloat_scale(self):
+        # tensorify_python_scalars turns the SymFloat scale into a 0-d tensor
+        # before the pattern check, so the fusion is skipped.
+        # TODO: the scalar behind a tensorified SymFloat scale (e.g.
+        # head_dim**0.5 under dynamic shapes) could be recovered from the
+        # aten.scalar_tensor node to keep the fusion - tracked in #194444.
+        if self.use_static_shapes:
+            self.skipTest("the scale is only symbolic under dynamic shapes")
+
+        def model(query, key, value, attn_mask):
+            scale = query.size(0) ** 0.5
+            scores = query @ key.transpose(-2, -1) / scale
+            weights = torch.softmax(scores + attn_mask, dim=-1)
+            return weights @ value
+
+        tensor_shape = (8, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+        ]
+        self._check_common(
+            model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
@@ -1840,6 +1969,18 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_tensor_factor_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
         )
+        test_pattern_fails_with_tensor_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
         )
@@ -1974,6 +2115,18 @@ if HAS_CPU:
         test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
         test_pattern_fails_with_tensor_factor_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
+        )
+        test_pattern_fails_with_tensor_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+        )
+        test_pattern_fuses_with_symint_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+        )
+        test_pattern_fuses_with_symint_scale_div_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+        )
+        test_pattern_fails_with_symfloat_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
         )
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask

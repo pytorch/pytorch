@@ -3,8 +3,10 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -19,21 +21,23 @@ namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
 struct Block;
-typedef bool (*Comparison)(const Block*, const Block*);
-bool BlockComparatorSize(const Block* a, const Block* b);
-bool BlockComparatorAddress(const Block* a, const Block* b);
+
+struct BlockComparatorSize {
+  bool operator()(const Block* a, const Block* b) const;
+};
+
+struct BlockComparatorAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
 
 struct PrivatePool;
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
+      : is_small(small), owner_PrivatePool(private_pool) {}
 
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> unmapped;
+  std::set<Block*, BlockComparatorSize> blocks;
+  std::set<Block*, BlockComparatorAddress> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
@@ -101,25 +105,21 @@ struct Block {
   }
 };
 
-bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
   if (a->size != b->size) {
     return a->size < b->size;
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
-bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Represents a contiguous virtual memory segment mapped for allocation.
@@ -542,6 +542,12 @@ class DeviceCachingAllocator {
   // Pools no longer referenced by any graph.
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
+
+  // tracks which pools should not split a segment.
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
+  // tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
   // Deferred because querying event status are illegal during graph recording.
@@ -1223,6 +1229,9 @@ class DeviceCachingAllocator {
   }
 
   bool should_split(const Block* block, size_t size) {
+    if (no_split_pools.count(block->pool->owner_MempoolId())) {
+      return false;
+    }
     size_t remaining = block->size - size;
     if (block->pool->is_small ||
         AcceleratorAllocatorConfig::use_expandable_segments()) {
@@ -1238,6 +1247,38 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(
         pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
     return stat_types;
+  }
+
+  bool try_mempool_fallback(
+      AllocParams& params,
+      size_t size,
+      sycl::queue* queue,
+      c10::DeviceIndex device_idx,
+      size_t alloc_size) {
+    bool block_found = false;
+    // if already trying to use a mempool, then just oom
+    bool active_pool = params.pool->owner_PrivatePool;
+    if (!active_pool) {
+      for (MempoolId_t mempool_id : use_on_oom_pools) {
+        auto tid = std::this_thread::get_id();
+        auto filter = [tid](sycl::queue*) {
+          return std::this_thread::get_id() == tid;
+        };
+        beginAllocateToPool(mempool_id, filter);
+        auto& mempool = get_pool(size, queue);
+        AllocParams mempool_params(
+            device_idx, size, queue, &mempool, alloc_size);
+        mempool_params.stat_types = get_stat_types_for_pool(mempool);
+        block_found = get_free_block(mempool_params);
+        endAllocateToPool(mempool_id);
+        releasePool(mempool_id);
+        if (block_found) {
+          params = mempool_params;
+          break;
+        }
+      }
+    }
+    return block_found;
   }
 
   Block* alloc_found_block(
@@ -1464,8 +1505,13 @@ class DeviceCachingAllocator {
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
       block_found = alloc_block(params, false, context) ||
-          (release_cached_blocks(context, {0, 0}) &&
-           alloc_block(params, true, context));
+          // Skip mempool fallback and cache release during graph capture:
+          // these operations may free memory whose address is baked into the
+          // graph, causing replay to access invalid memory.
+          (C10_LIKELY(!is_capture_context()) &&
+           (try_mempool_fallback(params, size, &queue, device, alloc_size) ||
+            (release_cached_blocks(context, {0, 0}) &&
+             alloc_block(params, true, context))));
     }
     if (!block_found) {
       const auto& raw_device = c10::xpu::get_raw_device(device);
@@ -1833,6 +1879,23 @@ class DeviceCachingAllocator {
     create_or_incref_pool(mempool_id, allocator);
   }
 
+  void setNoSplit(MempoolId_t mempool_id) {
+    // Choose if this pool should not split a segment. Also cleared by
+    // releasePool.
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    no_split_pools.insert(mempool_id);
+  }
+
+  void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
+    // Enable or disable used on OOM for this pool.
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (use_on_oom) {
+      use_on_oom_pools.insert(mempool_id);
+    } else {
+      use_on_oom_pools.erase(mempool_id);
+    }
+  }
+
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     auto it = graph_pools.find(mempool_id);
@@ -1962,6 +2025,7 @@ class DeviceCachingAllocator {
     if (uc == 0) {
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+      no_split_pools.erase(mempool_id);
     }
   }
 };
@@ -2331,6 +2395,19 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->releasePool(std::move(mempool_id));
   }
 
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    assertValidDevice(device);
+    device_allocators[device]->setNoSplit(mempool_id);
+  }
+
+  void setUseOnOOM(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      bool use_on_oom) {
+    assertValidDevice(device);
+    device_allocators[device]->setUseOnOOM(mempool_id, use_on_oom);
+  }
+
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
@@ -2427,6 +2504,17 @@ void markCaptureEnd(c10::DeviceIndex device) {
 
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
+}
+
+void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  return native_allocator.setNoSplit(device, mempool_id);
+}
+
+void setUseOnOOM(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    bool use_on_oom) {
+  return native_allocator.setUseOnOOM(device, mempool_id, use_on_oom);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {

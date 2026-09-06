@@ -279,6 +279,7 @@ int munmap(void* addr, size_t length) {
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <stdexcept>
@@ -351,6 +352,60 @@ using torch::aot_inductor::RAIIAtenTensorHandle;
 
 #ifdef USE_CUDA
 
+// Process-wide, per-device H2D stream shared by every PinnedStagingPool.
+//
+// A stream must NOT be created per pool. On ROCm, destroying a stream that is
+// not CU-masked does not release its hsa_queue_t: Device::releaseQueue
+// (rocclr/device/rocm/rocdevice.cpp) only calls hsa_queue_destroy and erases
+// from queuePool_ when the queue is CU-masked, so the queue stays parked at
+// refcount 0 until ~Device. One stream per constant load or in-place update
+// therefore ratchets the process up to GPU_MAX_HW_QUEUES and never gives the
+// queues back. Once the pool saturates at the cap, every queue above the four
+// MI300X scheduling pipes adds queue-switch overhead to serving streams.
+//
+// Created once per device and intentionally never destroyed, so the process
+// holds exactly one extra queue per device no matter how many loads or updates
+// run. Returns nullptr when the device cannot be resolved or stream creation
+// fails, so callers fall back to the synchronous copy path.
+//
+// Creation is retried on a later call if it fails, rather than latched with
+// call_once: these processes are long-lived and serve many loads, so a
+// transient failure must not disable the staged path for the process lifetime.
+// The map is keyed by device rather than a fixed-size array so no device count
+// is baked in. The lock is uncontended in practice -- it is taken once per pool
+// construction (per constant load or update), never on a per-chunk path.
+inline cudaStream_t sharedConstantsH2DStream() {
+  static std::mutex mutex;
+  static std::unordered_map<int, cudaStream_t> streams;
+
+  int device = 0;
+  if (cudaGetDevice(&device) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return nullptr;
+  }
+
+  std::lock_guard<std::mutex> guard(mutex);
+  // Value-initializes to nullptr on first use of this device.
+  cudaStream_t& stream = streams[device];
+  if (stream == nullptr) {
+    cudaStream_t created = nullptr;
+    cudaError_t rc = cudaStreamCreateWithFlags(&created, cudaStreamNonBlocking);
+    if (rc == cudaSuccess) {
+      stream = created;
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: created shared H2D stream for device "
+          << device << " (one per device, reused for all constant copies)");
+    } else {
+      (void)cudaGetLastError();
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: stream creation failed for device "
+          << device << " rc=" << rc << " (" << cudaGetErrorString(rc)
+          << "); falling back to sync copy, will retry on next call");
+    }
+  }
+  return stream;
+}
+
 // RAII ping-pong pinned staging pool for non-blocking H2D copies of AOTI
 // constants without triggering CUDA/HIP's device-wide implicit sync.
 //
@@ -359,9 +414,11 @@ using torch::aot_inductor::RAIIAtenTensorHandle;
 // synchronize per the CUDA/HIP spec, stalling concurrent inference streams.
 //
 // We avoid that by staging pageable -> pinned (CPU memcpy) and issuing
-// cudaMemcpyAsync(pinned -> device) on a dedicated non-blocking stream.
-// Two pinned staging buffers ping-pong via cudaEvents so CPU fill of one
-// buffer overlaps GPU H2D from the other.
+// cudaMemcpyAsync(pinned -> device) on the shared per-device non-blocking
+// stream above. Two pinned staging buffers ping-pong via cudaEvents so CPU
+// fill of one buffer overlaps GPU H2D from the other. Pools that overlap in
+// time share the stream, so their copies serialize; that costs little, since
+// they would contend for the same host-to-device link anyway.
 //
 // Pinned host buffers are allocated via the stable C ABI
 // aoti_torch_empty_strided_pinned, which routes through ATen's cached
@@ -369,8 +426,8 @@ using torch::aot_inductor::RAIIAtenTensorHandle;
 // keeps freed blocks in a process-wide pool, so back-to-back model loads
 // reuse buffers instead of paying cudaHostAlloc/cudaFreeHost per call.
 //
-// Total host-locked memory is bounded at 2 * AOTI_COPY_STAGE_BUFFER_BYTES
-// (default 2 * 64 MiB = 128 MiB) independent of model size.
+// Host-locked memory is bounded at 2 * AOTI_COPY_STAGE_BUFFER_BYTES per live
+// pool (default 2 * 64 MiB = 128 MiB), independent of model size.
 class PinnedStagingPool {
  public:
   static constexpr size_t kDefaultBufferBytes = 64ULL * 1024 * 1024;
@@ -380,16 +437,15 @@ class PinnedStagingPool {
   static std::unique_ptr<PinnedStagingPool> tryCreate(size_t buffer_bytes) {
     std::unique_ptr<PinnedStagingPool> pool(new PinnedStagingPool());
     pool->buffer_bytes_ = buffer_bytes;
-    cudaError_t rc =
-        cudaStreamCreateWithFlags(&pool->stream_, cudaStreamNonBlocking);
-    if (rc != cudaSuccess) {
-      (void)cudaGetLastError();
+    // Borrowed, not owned: shared per-device stream, never destroyed.
+    pool->stream_ = sharedConstantsH2DStream();
+    if (pool->stream_ == nullptr) {
       AOTI_LOG_LOADING(
-          "PinnedStagingPool: cudaStreamCreateWithFlags failed rc="
-          << rc << " (" << cudaGetErrorString(rc)
-          << "); falling back to sync copy");
+          "PinnedStagingPool: shared per-device H2D stream unavailable; "
+          "falling back to sync copy");
       return nullptr;
     }
+    cudaError_t rc = cudaSuccess;
     const int64_t sizes = static_cast<int64_t>(buffer_bytes);
     const int64_t strides = 1;
     for (int i = 0; i < 2; ++i) {
@@ -462,13 +518,22 @@ class PinnedStagingPool {
     return stream_;
   }
 
-  // Synchronize the H2D stream and surface any error from a previously issued
+  // Wait for this pool's copies and surface any error from a previously issued
   // async copy (cudaMemcpyAsync failures are reported lazily at the sync).
   // Call before destroying the pool so a failed load is not silently swallowed
   // by the no-throw destructor and passed downstream as a populated buffer.
+  //
+  // Waits on this pool's own events rather than the shared stream: a
+  // stream-wide sync would also block on concurrent pools' copies and would
+  // report their errors here. Each event is recorded after the last copy out
+  // of its buffer, so waiting on both covers every copy this pool issued.
+  // cudaEventSynchronize on a never-recorded event returns immediately, which
+  // is the correct no-op for a pool that copied nothing.
   void finish() {
-    if (stream_ != nullptr) {
-      AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(stream_));
+    for (cudaEvent_t event : events_) {
+      if (event != nullptr) {
+        AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(event));
+      }
     }
   }
 
@@ -480,31 +545,29 @@ class PinnedStagingPool {
     // ATen's cached pinned host allocator pool). Members are destroyed after
     // this body returns, in reverse declaration order; stage_tensors_ is
     // last-declared so it runs first among members.
-    if (stream_ != nullptr) {
-      cudaError_t rc = cudaStreamSynchronize(stream_);
-      if (rc != cudaSuccess) {
-        AOTI_LOG_LOADING(
-            "~PinnedStagingPool: cudaStreamSynchronize failed rc="
-            << rc << " (" << cudaGetErrorString(rc) << ")");
-      }
-    }
+    //
+    // stream_ is borrowed from sharedConstantsH2DStream() and is deliberately
+    // NOT destroyed here; see that function for why destroying it would leak
+    // an hsa_queue_t on ROCm. Wait on this pool's own events rather than the
+    // shared stream so an unrelated pool's in-flight copies do not gate this
+    // destructor.
     for (int i = 0; i < 2; ++i) {
-      if (events_[i] != nullptr) {
-        cudaError_t rc = cudaEventDestroy(events_[i]);
-        if (rc != cudaSuccess) {
-          AOTI_LOG_LOADING(
-              "~PinnedStagingPool: cudaEventDestroy buf="
-              << i << " failed rc=" << rc << " (" << cudaGetErrorString(rc)
-              << ")");
-        }
+      if (events_[i] == nullptr) {
+        continue;
       }
-    }
-    if (stream_ != nullptr) {
-      cudaError_t rc = cudaStreamDestroy(stream_);
+      cudaError_t rc = cudaEventSynchronize(events_[i]);
       if (rc != cudaSuccess) {
         AOTI_LOG_LOADING(
-            "~PinnedStagingPool: cudaStreamDestroy failed rc="
-            << rc << " (" << cudaGetErrorString(rc) << ")");
+            "~PinnedStagingPool: cudaEventSynchronize buf="
+            << i << " failed rc=" << rc << " (" << cudaGetErrorString(rc)
+            << ")");
+      }
+      rc = cudaEventDestroy(events_[i]);
+      if (rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "~PinnedStagingPool: cudaEventDestroy buf="
+            << i << " failed rc=" << rc << " (" << cudaGetErrorString(rc)
+            << ")");
       }
     }
     // Clear any error left by best-effort cleanup.
@@ -517,6 +580,9 @@ class PinnedStagingPool {
  private:
   PinnedStagingPool() = default;
 
+  // Borrowed from sharedConstantsH2DStream(); not owned, never destroyed.
+  // Concurrent pools share it, which serializes their copies but keeps the
+  // process at one hardware queue per device.
   cudaStream_t stream_{nullptr};
   cudaEvent_t events_[2]{nullptr, nullptr};
   // Cached borrowed pointers into stage_tensors_[i] to avoid a shim call
@@ -631,9 +697,8 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   void* data_ptr = std::malloc(num_bytes);
-  if (!data_ptr) {
-    throw std::bad_alloc();
-  }
+  AOTI_RUNTIME_CHECK(
+      data_ptr, "Failed to allocate " + std::to_string(num_bytes) + " bytes");
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
@@ -685,8 +750,7 @@ inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
       std::memory_order_relaxed);
 }
 
-using ConstantMap =
-    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
@@ -1346,8 +1410,8 @@ class AOTInductorModelBase {
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
     return weights_size;
 #else
-    throw std::runtime_error{
-        "constant blob size is only available for mmap'd weights"};
+    AOTI_RUNTIME_CHECK(
+        false, "constant blob size is only available for mmap'd weights");
 #endif
   }
 
@@ -1356,10 +1420,9 @@ class AOTInductorModelBase {
   }
 
   void update_constants_array_from_map() {
-    if (!constants_map_) {
-      throw std::runtime_error{
-          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
-    }
+    AOTI_RUNTIME_CHECK(
+        constants_map_,
+        "constants_map_ was not ready when constants_ is trying to be constructed from it!");
     if (!constants_) {
       constants_ =
           std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
@@ -1395,9 +1458,7 @@ class AOTInductorModelBase {
   /// Returns true if the model is complete.
   bool is_finished() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model CUDA event was not initialized");
 
     auto event_status = cudaEventQuery(*run_finished_);
     if (event_status == cudaSuccess) {
@@ -1406,13 +1467,12 @@ class AOTInductorModelBase {
       return false;
     }
 
-    throw std::runtime_error(
+    AOTI_RUNTIME_CHECK(
+        false,
         std::string("The model did not finish successfully. Error: ") +
-        cudaGetErrorString(cudaGetLastError()));
+            cudaGetErrorString(cudaGetLastError()));
 #elif defined(USE_XPU)
-    if (!run_finished_) {
-      throw std::runtime_error{"Model XPU event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model XPU event was not initialized");
     using namespace sycl::info;
     return (*run_finished_)->get_info<event::command_execution_status>() ==
         event_command_status::complete;
@@ -1425,16 +1485,12 @@ class AOTInductorModelBase {
   /// Synchronizes completion event.
   void wait_for_completion() {
 #ifdef USE_CUDA
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
 
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
 #ifdef USE_XPU
-    if (!run_finished_) {
-      throw std::runtime_error{"Model event was not initialized"};
-    }
+    AOTI_RUNTIME_CHECK(run_finished_, "Model event was not initialized");
     (*run_finished_)->wait_and_throw();
 #endif
   }
@@ -1442,10 +1498,9 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #if defined(USE_MMAP_EXTERNAL)
-    if (!user_managed_mmap) {
-      throw std::runtime_error{
-          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
-    }
+    AOTI_RUNTIME_CHECK(
+        user_managed_mmap,
+        "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first.");
     // Mapped memory for weights
     return user_managed_mmap;
 #endif

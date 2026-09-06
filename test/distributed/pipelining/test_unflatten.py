@@ -3,7 +3,11 @@
 import torch
 from torch.distributed.pipelining import pipe_split, pipeline
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # Building block for model
@@ -41,6 +45,8 @@ class M(torch.nn.Module):
 
 
 class UnflattenTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_unflatten(self, device):
         x = torch.randn(1, 16, 256, 256, device=device)
         constant = torch.ones(1, 16, 256, 256, device=device)
@@ -76,6 +82,8 @@ class UnflattenTests(TestCase):
 
 class UnflattenPlaceholderOrderingTests(TestCase):
     """regression tests for https://github.com/pytorch/pytorch/issues/162898"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _check(self, node_ops, expected_ops):
         from torch.distributed.pipelining._IR import _move_placeholders_to_front
@@ -125,10 +133,7 @@ class UnflattenPlaceholderOrderingTests(TestCase):
         )
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    UnflattenTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(UnflattenTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

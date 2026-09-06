@@ -19,9 +19,10 @@
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
+#include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
-#include <stdexcept>
+#include <cstring>
 
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
@@ -32,7 +33,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(std::move(ss).str());                      \
+      TORCH_CHECK(false, std::move(ss).str());                            \
     }                                                                     \
   }
 
@@ -169,6 +170,20 @@ void parseKernelArgs(
       case 'K':
         convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
         break;
+      case 'e':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonFp16,
+            "float16",
+            slot,
+            item);
+        break;
+      case 'y':
+        convertType<uint16_t>(
+            torch::inductor::static_launcher::unpackTritonBf16,
+            "bfloat16",
+            slot,
+            item);
+        break;
       case 'f':
         convertType<float>(THPUtils_unpackDouble, "float", slot, item);
         break;
@@ -284,6 +299,55 @@ sycl::kernel* loadKernel(
   return _createKernel(mod, funcName, nSpillsPtr);
 }
 
+template <typename T>
+void setKernelArg(sycl::handler& cgh, int index, const void* argStorage) {
+  T value{};
+  std::memcpy(&value, argStorage, sizeof(value));
+  cgh.set_arg(index, value);
+}
+
+void setKernelArg(
+    sycl::handler& cgh,
+    int index,
+    char typeChar,
+    const void* argStorage) {
+  switch (typeChar) {
+    case 'b':
+      setKernelArg<int8_t>(cgh, index, argStorage);
+      break;
+    case 'h':
+      setKernelArg<int16_t>(cgh, index, argStorage);
+      break;
+    case 'i':
+      setKernelArg<int32_t>(cgh, index, argStorage);
+      break;
+    case 'l':
+      setKernelArg<int64_t>(cgh, index, argStorage);
+      break;
+    case 'B':
+      setKernelArg<uint8_t>(cgh, index, argStorage);
+      break;
+    case 'H':
+    case 'e':
+    case 'y':
+      setKernelArg<uint16_t>(cgh, index, argStorage);
+      break;
+    case 'I':
+    case 'f':
+      setKernelArg<uint32_t>(cgh, index, argStorage);
+      break;
+    case 'K':
+    case 'd':
+      setKernelArg<uint64_t>(cgh, index, argStorage);
+      break;
+    case 'O':
+      setKernelArg<syclDevicePtr_t>(cgh, index, argStorage);
+      break;
+    default:
+      TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
+  }
+}
+
 void launchKernel(
     sycl::kernel* kernelPtr,
     uint32_t gridX,
@@ -291,6 +355,7 @@ void launchKernel(
     uint32_t gridZ,
     uint32_t numWarps,
     uint32_t sharedMemBytes,
+    const char* argTypes,
     void** params,
     sycl::queue* queuePtr) {
   uint32_t threadsPerWarp = kernelPtr->get_info<
@@ -299,7 +364,9 @@ void launchKernel(
   if (threadsPerWarp == 0) {
     threadsPerWarp = 32; // default to 32 if not set
   }
-  uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
+  const uint32_t kernelNumArgs =
+      kernelPtr->get_info<sycl::info::kernel::num_args>();
+  const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
@@ -309,17 +376,21 @@ void launchKernel(
   sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
   sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
-  if (sharedMemBytes > 0) {
-    // numParams from sycl info  = user provided args + sharedMemoryBuffer
-    numParams -= 1;
-  }
+  const bool bindLocal = sharedMemBytes > 0 && kernelNumArgs == numParams + 1;
+  TORCH_CHECK(
+      kernelNumArgs == numParams + (bindLocal ? 1 : 0),
+      "Kernel argument count mismatch: kernel expects ",
+      kernelNumArgs,
+      " arguments, launcher has ",
+      numParams,
+      " scalar/pointer arguments");
   // Submit the imported kernel.
   auto cgf = [&](sycl::handler& cgh) {
     for (uint32_t i = 0; i < numParams; ++i) {
-      cgh.set_arg(static_cast<int>(i), *(static_cast<void**>(params[i])));
+      setKernelArg(cgh, static_cast<int>(i), argTypes[i], params[i]);
     }
 
-    if (sharedMemBytes > 0) {
+    if (bindLocal) {
       using share_mem_t = sycl::local_accessor<int8_t, 1>;
       share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
       cgh.set_arg(static_cast<int>(numParams), localBuffer);
@@ -389,6 +460,7 @@ PyObject* launch_kernel_inner(
       gridZ,
       numWarps,
       sharedMemBytes,
+      argTypes,
       kernelArgs.data(),
       queuePtr);
 
@@ -420,6 +492,7 @@ PyObject* launch_kernel_slow(
       gridZ,
       numWarps,
       sharedMemBytes,
+      argTypes,
       kernelArgs.data(),
       queuePtr);
   Py_RETURN_NONE;
@@ -476,7 +549,15 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   // Kernels with no arguments should just pass nullptr to cuLaunchKernel
   if (num_args == 0) {
     launchKernel(
-        func, gridX, gridY, gridZ, numWarps, sharedMemBytes, nullptr, queuePtr);
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        argTypes,
+        nullptr,
+        queuePtr);
     Py_RETURN_NONE;
   } else if (num_args <= MAX_ARGS) {
     return launch_kernel_inner(

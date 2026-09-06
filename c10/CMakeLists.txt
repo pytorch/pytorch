@@ -47,6 +47,7 @@ set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/
 if(NOT BUILD_LIBTORCHLESS)
   add_library(c10 ${C10_SRCS} ${C10_HEADERS})
   torch_compile_options(c10)
+  torch_optimize_layout_if_enabled(c10)
   if(HAVE_SOVERSION)
     set_target_properties(c10 PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -109,10 +110,40 @@ if(NOT BUILD_LIBTORCHLESS)
     # rpath-link entry. Wrapped in BUILD_INTERFACE so this build-machine path
     # is not baked into the installed Caffe2Targets.cmake export (it is
     # meaningless to downstream find_package(Torch) consumers). ELF/GNU-ld only.
+    #
+    # Skip the entry entirely when libnuma lives in a directory the toolchain
+    # already searches implicitly (the common distro case,
+    # e.g. /usr/lib/x86_64-linux-gnu). There it buys nothing -- ld falls back to
+    # its default directories for DT_NEEDED resolution anyway -- but it does
+    # real harm: GNU ld probes every -rpath-link directory, in command-line
+    # order, *before* -rpath and before its default directories. Naming a
+    # system directory here therefore hoists it to the front of the dependency
+    # search order, so a stale system copy of some *other* library shadows the
+    # intended one from a self-contained toolchain. Concretely, an apt-installed
+    # /usr/lib/x86_64-linux-gnu/libhsa-runtime64.so.1 would win over the ROCm
+    # SDK's own copy when resolving libamdhip64.so's DT_NEEDED, breaking every
+    # HIP-linking target with undefined hsa_* references. Only the conda-style
+    # narrow-sysroot case (libnuma outside the implicit dirs) needs the flag.
     if(NOT WIN32 AND NOT APPLE)
       get_filename_component(_numa_dir "${Numa_LIBRARIES}" DIRECTORY)
-      target_link_options(
-        c10 INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,${_numa_dir}>")
+      get_filename_component(_numa_dir "${_numa_dir}" REALPATH)
+      set(_numa_dir_is_implicit FALSE)
+      foreach(_implicit_dir IN LISTS CMAKE_C_IMPLICIT_LINK_DIRECTORIES
+                                     CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
+        get_filename_component(_implicit_dir "${_implicit_dir}" REALPATH)
+        if(_numa_dir STREQUAL _implicit_dir)
+          set(_numa_dir_is_implicit TRUE)
+          break()
+        endif()
+      endforeach()
+      if(_numa_dir_is_implicit)
+        message(STATUS
+          "Not adding -rpath-link for ${_numa_dir}: already an implicit "
+          "linker search directory")
+      else()
+        target_link_options(
+          c10 INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,${_numa_dir}>")
+      endif()
     endif()
   else()
     message(STATUS "don't use NUMA")

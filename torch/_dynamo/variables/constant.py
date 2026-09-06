@@ -143,7 +143,7 @@ class ConstantVariable(VariableTracker):
     def is_python_constant(self) -> Literal[True]:
         return True
 
-    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(repr(self.value))
 
     def is_symnode_like(self) -> bool:
@@ -232,14 +232,14 @@ class ConstantVariable(VariableTracker):
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def str_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def tp_str_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(str(self.value))
 
     def len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
@@ -249,13 +249,27 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
-    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Sequence length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Mapping length - delegates to len_impl for constants."""
         return self.len_impl(tx)
+
+    def mp_subscript_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        key: VariableTracker,
+    ) -> VariableTracker:
+        from .object_protocol import type_implements_mp_subscript
+
+        if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
+            try:
+                return ConstantVariable.create(self.value[key.as_python_constant()])
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        return super().mp_subscript_impl(tx, key)
 
     def const_getattr(
         self, tx: InstructionTranslatorBase, name: str
@@ -267,7 +281,19 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError
         return member
 
-    def sq_contains(self, tx: InstructionTranslatorBase, item: VariableTracker):
+    def sq_concat_impl(
+        self, tx: InstructionTranslatorBase, other: VariableTracker
+    ) -> VariableTracker:
+        from .object_protocol import type_implements_sq_concat
+
+        if type_implements_sq_concat(type(self.value)) and other.is_python_constant():
+            try:
+                return ConstantVariable.create(self.value + other.as_python_constant())
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        return super().sq_concat_impl(tx, other)
+
+    def sq_contains_impl(self, tx: InstructionTranslatorBase, item: VariableTracker):
         """Sequence contains for constants."""
         if item.is_python_constant():
             search = item.as_python_constant()
@@ -280,7 +306,7 @@ class ConstantVariable(VariableTracker):
                     tx,
                     args=list(e.args),
                 )
-        return super().sq_contains(tx, item)
+        return super().sq_contains_impl(tx, item)
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         from .lists import ListIteratorVariable
@@ -467,6 +493,18 @@ class ConstantVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+    def nb_bool_impl(
+        self,
+        tx: InstructionTranslatorBase,
+    ) -> VariableTracker:
+        # CPython: int, float, and bool define nb_bool (returns self for int,
+        # bool(self) for float). All other constant types do not.
+        from .object_protocol import type_implements_nb_bool
+
+        if type_implements_nb_bool(type(self.value)):
+            return ConstantVariable.create(bool(self.value))
+        return super().nb_bool_impl(tx)
 
     def nb_index_impl(
         self,
@@ -906,14 +944,19 @@ class FakeIdVariable(VariableTracker):
     def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
-    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
         # decimal string. The distinct-but-compile-time-only identity carried by
         # the fake id is preserved in the resulting string, matching how
         # FakeIdVariable already resolves same-kind id()/hash() comparisons.
         return ConstantVariable.create(repr(self.value))
 
-    def richcompare_impl(
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        # Mirrors long_bool. The fake value is only meaningful at compile time,
+        # but its truthiness is, like tp_repr_impl, a plain function of it.
+        return ConstantVariable.create(bool(self.value))
+
+    def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
     ) -> VariableTracker:
         if (

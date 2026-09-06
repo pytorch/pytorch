@@ -160,7 +160,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter  # noqa: S101
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -179,9 +182,11 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)  # noqa: S101
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(f"unexpected node.target: {node.target}")
     inp, src, view_ops = node.args
-    assert not node.kwargs  # noqa: S101
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
@@ -380,9 +385,11 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         extra_check=should_reinplace_scatter,
     ),
     # Stateless Philox RNG: reinplace the functionalized clone onto the dead
-    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
+    # output buffer, so out-of-place uniform()/normal()/bits() don't pay an
+    # extra copy.
     aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
+    aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
 }
 
 try:

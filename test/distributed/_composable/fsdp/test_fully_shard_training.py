@@ -42,7 +42,6 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
-    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -739,7 +738,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)

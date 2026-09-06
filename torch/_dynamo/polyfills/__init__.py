@@ -6,6 +6,10 @@ Python polyfills for common builtins.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 #          Add it in the TYPE_CHECKING block below as well.
 
+from __future__ import annotations
+
+import importlib
+import sys as py_sys
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
@@ -23,6 +27,8 @@ C = TypeVar("C")
 
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from ..utils import dict_keys
 
     # Load by torch._dynamo.polyfills.loader
@@ -32,6 +38,7 @@ if TYPE_CHECKING:
         _collections as _collections,
         builtins as builtins,
         functools as functools,
+        heapq as heapq,
         io as io,
         itertools as itertools,
         operator as operator,
@@ -75,15 +82,20 @@ def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T
 
 
 def index(
-    iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
+    iterator: Iterator[T],
+    item: T,
+    start: int = 0,
+    end: int | None = None,
+    not_found_msg: str = "{!r} is not in list",
 ) -> int:
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
         if elem is item or elem == item:
             return i
-    # This will not run in dynamo
-    raise ValueError(f"{item} is not in {type(iterator)}")
+    # Callers pass the message their sequence type raises in CPython, which is
+    # not uniform: list/deque repr the value, tuple ignores it.
+    raise ValueError(not_found_msg.format(item))
 
 
 def repeat(item: T, count: int) -> Iterator[T]:
@@ -95,6 +107,39 @@ def radians(x: float) -> float:
     import math
 
     return math.pi / 180.0 * x
+
+
+def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Keep this in sync with torch._subclasses.fake_impls.infer_size and
+    # aten/src/ATen/ExpandUtils.cpp::infer_size_impl.  In particular, check the
+    # broadcasting cases before size equality: the former are often statically
+    # known, while the latter may need to become a deferred runtime assertion.
+    dims_a = len(a)
+    dims_b = len(b)
+    ndim = max(dims_a, dims_b)
+    expanded_sizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dim_a = dims_a - 1 - offset
+        dim_b = dims_b - 1 - offset
+        size_a = a[dim_a] if dim_a >= 0 else 1
+        size_b = b[dim_b] if dim_b >= 0 else 1
+
+        # Dynamo requires torch._check message closures to capture only Python
+        # constants, so report the static dimension without capturing sizes.
+        error_message = f"invalid broadcast shape at dimension {i}"
+        torch._check(
+            guard_or_false(size_a == 1)
+            or guard_or_false(size_b == 1)
+            or size_a == size_b,
+            lambda: error_message,
+        )
+        expanded_sizes[i] = size_b if guard_or_false(size_a == 1) else size_a
+
+    return torch.Size(expanded_sizes)
 
 
 def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
@@ -456,7 +501,7 @@ def foreach_lerp_inplace(
     self,
     end: list[torch.Tensor] | tuple[torch.Tensor, ...],
     weight: float | int | torch.Tensor,
-) -> None:
+) -> list[torch.Tensor] | tuple[torch.Tensor, ...]:
     # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
     # approach as CUDA's native lerp to get bitwise identical results:
     #   |w| <  0.5  (low):  fma(w, diff, start)
@@ -567,3 +612,29 @@ def group_tensors_by_device_and_dtype(
             indices.append(idx)
 
     return result
+
+
+# Partially copied from CPython test/support/import_helper.py
+# https://github.com/python/cpython/blob/bb8791c0b75b5970d109e5557bfcca8a578a02af/Lib/test/support/import_helper.py
+def _save_and_remove_modules(names: set[str]) -> dict[str, ModuleType]:
+    orig_modules = {}
+    prefixes = tuple(name + "." for name in names)
+    for modname in list(py_sys.modules):
+        if modname in names or modname.startswith(prefixes):
+            orig_modules[modname] = py_sys.modules.pop(modname)
+    return orig_modules
+
+
+def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
+    # Keep track of modules saved for later restoration as well
+    # as those which just need a blocking entry removed
+    names = {name, *blocked}
+    orig_modules = _save_and_remove_modules(names)
+    for modname in blocked:
+        py_sys.modules[modname] = None  # type: ignore[assignment]
+
+    try:
+        return importlib.import_module(name)
+    finally:
+        _save_and_remove_modules(names)
+        py_sys.modules.update(orig_modules)

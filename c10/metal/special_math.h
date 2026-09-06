@@ -2157,6 +2157,37 @@ inline float hermite_polynomial_he_forward(T x, int64_t n) {
   return r;
 } // hermite_polynomial_he_forward(T x, int64_t n)
 
+template <typename T>
+inline float laguerre_polynomial_l_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 0.0) {
+    return 1.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return 1.0 - x;
+  }
+
+  float p = 1.0;
+  float q = 1.0 - x;
+  float r = q;
+
+  for (int64_t k = 1; (k < n) && !::metal::isnan(q); k++) {
+    r = (((k + k) + (1.0 - x)) * q - k * p) / (k + 1);
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // laguerre_polynomial_l_forward(T x, int64_t n)
+
 /* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology

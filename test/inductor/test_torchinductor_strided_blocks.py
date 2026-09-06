@@ -37,6 +37,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    requires_block_ptr,
     requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
@@ -1599,6 +1600,7 @@ class CommonTemplate:
 
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@requires_block_ptr
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
     device = GPU_TYPE
@@ -2399,6 +2401,85 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
             "static Triton launcher path was not taken for host-side TMA kernel",
         )
         self.assertTrue(torch.allclose(compiled_out, eager_out))
+
+    def _host_tma_launcher_lines(self, fn, *args):
+        from torch._inductor.runtime import triton_heuristics
+
+        captured = []
+        orig = triton_heuristics.CompileResult._gen_launcher_code
+
+        def capture(result_self, scope, def_args, runner_args, pre_runner_lines=None):
+            if pre_runner_lines:
+                names = getattr(result_self.kernel, "tensordesc_arg_names", [])
+                captured.append((pre_runner_lines, names))
+            return orig(
+                result_self,
+                scope,
+                def_args,
+                runner_args,
+                pre_runner_lines=pre_runner_lines,
+            )
+
+        with mock.patch.object(
+            triton_heuristics.CompileResult, "_gen_launcher_code", capture
+        ):
+            result, _ = run_and_get_code(torch.compile(fn), *args)
+        self.assertTrue(captured, "no host-side TMA descriptors were emitted")
+        return captured, result
+
+    @config.patch("use_static_triton_launcher", True)
+    def test_host_tma_launcher_keeps_aligned_tensor_alive(self):
+        # The CUtensorMap stores only a device address, so the aligned (possibly
+        # cloned) tensor must be a launcher local that outlives the launch.
+        def fn(a, b):
+            return (a + b) * 2
+
+        a = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        captured, result = self._host_tma_launcher_lines(fn, a, b)
+        self.assertTrue(torch.allclose(result, fn(a, b)))
+        for lines, _ in captured:
+            expands = [ln for ln in lines if "expand_host_tma_descriptor(" in ln]
+            self.assertTrue(expands)
+            for line in expands:
+                name = line.split("_host_tma_desc")[0].strip()
+                self.assertIn(
+                    f'{name}_aligned = _host_tma_aligned({name}, "{name}")', lines
+                )
+                self.assertIn(f"{name}_aligned,", line)
+
+    def test_host_tma_meta_index_follows_signature_order(self):
+        # triton keys tensordesc_meta by signature position. Real kernels happen
+        # to encounter descriptors in signature order, so drive the mapping
+        # directly with the two orders disagreeing.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        desc = {"block_shape": [128], "shape": [1024], "strides": [1]}
+        stub = SimpleNamespace(
+            inductor_meta={
+                "host_tma_descriptor_args": {"out_ptr0": desc, "in_ptr0": desc}
+            },
+            config=SimpleNamespace(kwargs={}),
+            compile_meta={"constants": {}},
+            kernel=SimpleNamespace(
+                tensordesc_meta=[{"elem_size": 2}, {"elem_size": 4}],
+                tensordesc_arg_names=["in_ptr0", "out_ptr0"],
+            ),
+        )
+        call_args = ["in_ptr0", "out_ptr0"]
+        lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(
+            stub, list(call_args), call_args
+        )
+        meta_idx = {
+            ln.split("_host_tma_desc")[0].strip(): int(
+                ln.split("_tma_meta[")[1].split("]")[0]
+            )
+            for ln in lines
+            if "expand_host_tma_descriptor(" in ln
+        }
+        self.assertEqual(meta_idx, {"in_ptr0": 0, "out_ptr0": 1})
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)

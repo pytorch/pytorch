@@ -669,7 +669,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
 
     if quantized:
         """
-        TODO: SetAttr + quantized ops will result incorrect program. This flag is used to temporarily
+        TODO: SetAttr + quantized ops will result in incorrect program. This flag is used to temporarily
         bypass test cases.
 
         The deadcode elimination pass is needed to remove legacy quantized ops. Otherwise, retracing

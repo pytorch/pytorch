@@ -151,7 +151,10 @@ VERY_FAST_LINTERS = {
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
+    "CMAKE_INSTALL_PREFIX_ROOT",
     "CMAKE_MINIMUM_REQUIRED",
+    "CMAKE_PLATLIB_DESTINATION",
+    "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
     "CUBINCLUDE",
@@ -209,6 +212,7 @@ SLOW_LINTERS = {
     "CLANGFORMAT",
     "CLANGTIDY",
     "CODESPELL",
+    "CPYTHON_DIFF_SYNC",
     "FLAKE8",
     "GB_REGISTRY",
     "GENERATED_SHIMS_VERSION",
@@ -568,15 +572,25 @@ def _pip_install_cmd(editable):
     return cmd + [".", "-v", "--no-build-isolation"]
 
 
+def _native_aot_stage2():
+    # Post-install: the kernel builders import the installed torch, and
+    # scikit-build-core has no post-build hook inside the PEP 517 backend. Skips when
+    # AOT does not apply, but a machine with an exportable GPU needs the DSL wheels
+    # installed, or TORCH_NATIVE_AOT=0.
+    spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
+
+
 @click.command()
 def develop():
     """Build PyTorch (editable install).
 
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin develop`.
+    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=True))
+    _native_aot_stage2()
 
 
 # Alias so `spin editable` also works.
@@ -590,9 +604,11 @@ def install():
 
     Runs a regular pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
-    `BUILD_CONFIG spin install`.
+    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
     """
     spin.util.run(_pip_install_cmd(editable=False))
+    _native_aot_stage2()
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"

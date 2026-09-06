@@ -45,19 +45,30 @@ fp16_ieee_to_fp32_value
 # torch/headeronly/util/HeaderOnlyArrayRef.h
 HeaderOnlyArrayRef
 
-# c10/util/complex.h, torch/headeronly/util/complex.h
+# c10/util/complex.h
 complex
 
-# ATen/NumericUtils.h, c10/util/generic_math.h
+# torch/headeronly/util/complex_utils.h
+is_complex
+scalar_value_type
+
+# c10/util/generic_math.h
 div_floor_floating
 div_floor_integer
-_isnan
 
-# ATen/core/PhiloxRNGEngine.h
+# torch/headeronly/cuda/KernelUtils.h
+fastAtomicAdd
+fastSpecializedAtomicAdd
+
+# torch/headeronly/util/NumericUtils.h
+_isnan
+_isinf
+
+# aten/src/ATen/core/PhiloxRNGEngine.h
 Philox4_32
 randn
 
-# torch/headeronly/Metaprogramming.h
+# torch/headeronly/util/Metaprogramming.h
 infer_function_traits_t
 make_function_traits_t
 tuple_elements
@@ -65,29 +76,23 @@ tuple_map
 tuple_slice
 tuple_take
 
-# torch/headeronly/TypeList.h
+# torch/headeronly/util/TypeList.h
 # false_t => tested through from_tuple_t and various other APIs
 all
 concat_t
 contains
-count_if
 drop_if_nonempty_t
 drop_t
-filter_t
-find_if
 from_tuple_t
 head_t
 head_with_default_t
-map_t
-map_types_to_values
-reverse_t
 size
 take_t
 to_tuple_t
 true_for_any_type
 typelist
 
-# torch/headeronly/TypeTraits.h
+# torch/headeronly/util/TypeTraits.h
 is_equality_comparable
 is_function_type
 is_hashable
@@ -95,7 +100,7 @@ is_instantiation_of
 is_stateless_lambda
 is_type_condition
 
-# ATen/cpu/vec/vec.h
+# aten/src/ATen/cpu/vec/vec.h
 Vectorized
 clamp_min
 convert
@@ -225,3 +230,33 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/util/MathConstants.h
+e
+euler
+frac_1_pi
+frac_1_sqrt_pi
+frac_sqrt_2
+frac_sqrt_3
+golden_ratio
+ln_10
+ln_2
+log_10_e
+log_2_e
+pi
+sqrt_2
+sqrt_3
+
+# torch/headeronly/util/copysign.h
+copysign
+
+# torch/headeronly/util/Load.h
+load
+
+# torch/headeronly/util/BFloat16-math.h
+is_reduced_floating_point_v
+is_reduced_floating_point
+
+# torch/headeronly/util/irange.h
+integer_range
+irange

@@ -103,7 +103,7 @@ class CustomClassVariable(UserDefinedVariable):
 
     def is_python_constant(self) -> bool:
         # prevents constant folding of attribute accesses on
-        # opaque classes. this ensures getattro_impl is called,
+        # opaque classes. this ensures tp_getattro_impl is called,
         # allowing for proper validation and error handling
         return False
 
@@ -134,7 +134,7 @@ class CustomClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         obj = None
@@ -335,7 +335,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
 
     __repr__ = __str__
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: "VariableTracker",
@@ -366,7 +366,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
@@ -387,7 +387,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
                 else:
-                    return super().getattro_impl(tx, name)
+                    return super().tp_getattro_impl(tx, name)
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
@@ -400,16 +400,16 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
-                return super().getattro_impl(tx, name)
+                return super().tp_getattro_impl(tx, name)
 
             elif is_opaque_constant_type(real_obj_type):
-                return super().getattro_impl(tx, name)
+                return super().tp_getattro_impl(tx, name)
 
             elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
                 # Special case: __bool__ and __len__ are used for truthiness checks.
                 # If they're not registered and the real object doesn't have them,
                 # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior
+                # treating the object as truthy (Python default behavior)
                 raise_observed_exception(AttributeError, tx)
 
             else:
@@ -446,7 +446,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
 
         if self.source is None:
             raise AssertionError(
-                "CustomClassObjectVariable requires a source for getattro_impl"
+                "CustomClassObjectVariable requires a source for tp_getattro_impl"
             )
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
@@ -465,7 +465,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         return CustomClassObjectVariable.call_method(self, tx, "__getitem__", [key], {})
 
     # We only support method calls on script objects. Interpreting the bytecodes
-    # should go through getattro_impl then call_function instead of call_method.
+    # should go through tp_getattro_impl then call_function instead of call_method.
 
     # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(

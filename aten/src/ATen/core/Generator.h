@@ -62,13 +62,7 @@ struct TORCH_API Generator {
     TORCH_CHECK(impl_.get(), "GeneratorImpl with nullptr is not supported");
   }
 
-  bool operator==(const Generator& rhs) const {
-    return this->impl_ == rhs.impl_;
-  }
-
-  bool operator!=(const Generator& rhs) const {
-    return !((*this) == rhs);
-  }
+  bool operator==(const Generator& rhs) const = default;
 
   bool defined() const {
     return static_cast<bool>(impl_);

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import itertools
 import unittest
 import uuid
@@ -7,7 +8,10 @@ import uuid
 import torch
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.associative_scan import (
+    _fake_associative_scan,
+    associative_scan,
+)
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
@@ -242,6 +246,18 @@ class CondModels:
 
             return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
+    class UnbackedSymIntPredicate(torch.nn.Module):
+        def forward(self, x, flag):
+            flag = flag.item()
+
+            def true_fn(x):
+                return x.clone()
+
+            def false_fn(x):
+                return x + 1
+
+            return torch.cond(flag > 0, true_fn, false_fn, (x,))
+
     class MismatchedOutputSize(torch.nn.Module):
         def forward(self, p, x, y, z):
             a = y.shape[0]
@@ -414,6 +430,21 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_cond_unbacked_symint_predicate(self, device, dynamic):
+        for flag in (-1, 1):
+            torch._dynamo.reset()
+            self._run_test(
+                model=CondModels.UnbackedSymIntPredicate(),
+                inputs=(torch.randn(10, 20), torch.tensor(flag)),
+                device=device,
+                dynamic=dynamic,
+                num_predicates=0,
+            )
 
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
@@ -1797,6 +1828,34 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
 
+    @requires_gpu
+    # Include a non-power-of-two length (9): the backward now relies on flip + scan,
+    # which misbehaves for particular lengths (see issue #131805), so exercise an
+    # odd length in addition to the power-of-two case.
+    @parametrize("scan_length", [9, 16])
+    def test_associative_scan_pointwise_autograd(self, scan_length):
+        device = GPU_TYPE
+
+        # Multiplicative body so the local ys-gradient is non-unit and the reversed
+        # backward scan's alignment logic is actually exercised.
+        def fct(x, y):
+            return x * y
+
+        torch.compiler.reset()
+        compiled_scan = torch.compile(
+            associative_scan, backend="inductor", fullgraph=True
+        )
+
+        x = torch.randn(scan_length, 4, device=device, requires_grad=True)
+
+        result = compiled_scan(fct, x, 0, combine_mode="pointwise")
+        result_ref = _fake_associative_scan(fct, x, 0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), x)
+        grads_ref = torch.autograd.grad(result_ref.sum(), x)
+        self.assertEqual(grads, grads_ref)
+
 
 class ScanModels:
     class SimpleScan(torch.nn.Module):
@@ -2659,6 +2718,58 @@ instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
 instantiate_parametrized_tests(MapTests)
 instantiate_parametrized_tests(SwitchTests)
+
+
+# CondTests cases that fail under the cpp wrapper: both declare an unbacked SymInt
+# inside a branch, which the inlined C++ does not bind correctly.
+_CPP_WRAPPER_XFAIL = frozenset(
+    f"test_cond_unbacked_symint_inner{variant}_device_{device}"
+    for variant in ("", "_to_outer")
+    for device in ("cpu", GPU_TYPE)
+)
+
+
+# Re-runs a control-flow suite under config.cpp_wrapper=True; these HOPs reach
+# CppWrapperCpu.codegen_subgraph, which the default python wrapper never exercises.
+# WhileLoopTests and ScanTests are not re-run yet: a branch subgraph declares its
+# buffers in the parent's C++ scope, so two branches reusing a name collide
+# (`redefinition of 'true_graph_0_bufN'`), and while_loop_stack_output is NYI here.
+class _CppWrapperMixin:
+    def setUp(self):
+        super().setUp()
+        patcher = torch._inductor.config.patch(cpp_wrapper=True)
+        patcher.__enter__()
+        self.addCleanup(patcher.__exit__, None, None, None)
+
+
+class CondTestsCppWrapper(_CppWrapperMixin, CondTests):
+    pass
+
+
+class AssociativeScanTestsCppWrapper(_CppWrapperMixin, AssociativeScanTests):
+    pass
+
+
+class MapTestsCppWrapper(_CppWrapperMixin, MapTests):
+    pass
+
+
+class SwitchTestsCppWrapper(_CppWrapperMixin, SwitchTests):
+    pass
+
+
+# instantiate_parametrized_tests expanded CondTests in place, so the subclass inherits
+# concrete methods. Rebind each through a fresh function before marking it:
+# unittest.expectedFailure mutates and returns its argument, so marking the inherited
+# method would mark CondTests' own copy too.
+for _name in _CPP_WRAPPER_XFAIL:
+    _inherited = getattr(CondTests, _name)
+
+    @functools.wraps(_inherited)
+    def _xfail(self, _inherited=_inherited):
+        return _inherited(self)
+
+    setattr(CondTestsCppWrapper, _name, unittest.expectedFailure(_xfail))
 
 
 if __name__ == "__main__":

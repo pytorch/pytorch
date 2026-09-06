@@ -11,6 +11,7 @@ import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
+from torch.distributed import ReduceOp
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -142,6 +143,13 @@ def wait_tensor(tensor):
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
+def wait_tensors(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+    """
+    Wait on tensors returned by the same multi-output collective.
+    """
+    return torch.ops._c10d_functional.wait_tensors(tensors)  # type: ignore[attr-defined, no-any-return]
+
+
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -158,7 +166,9 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
-def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+def all_reduce(
+    self: torch.Tensor, reduceOp: str | dist.ReduceOp, group: RANK_TYPES, tag: str = ""
+):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -174,10 +184,16 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
+
+    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
+    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+    instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
     tensor = torch.ops._c10d_functional.all_reduce(
-        self, reduceOp.lower(), _group_or_group_name(group)
+        self, reduce_op, _group_or_group_name(group)
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -206,6 +222,10 @@ def all_gather_single(
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
+    # The can_use_view check and _maybe_view_chunk_cat below assume a
+    # non-negative gather_dim.
+    if gather_dim < 0:
+        gather_dim += self.dim()
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
         self, group_size, _group_or_group_name(group)
     )
@@ -215,7 +235,7 @@ def all_gather_single(
         # If not, it will use torch.cat which needs the data anyway, so
         # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
+            shape = res.shape
             numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
             can_use_view = shape[0] == group_size and numel_between == 1
             if not can_use_view:
@@ -381,7 +401,10 @@ def reduce_scatter_tensor_autograd(
 
 
 def all_reduce_coalesced(
-    self: list[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
+    self: list[torch.Tensor],
+    reduceOp: str | dist.ReduceOp,
+    group: RANK_TYPES,
+    tag: str = "",
 ) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
@@ -398,14 +421,20 @@ def all_reduce_coalesced(
 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
+
+    :: N.B. ``premul_sum`` backward assumes the pre-multiplier is identical on
+    every rank. With a per-rank (or tensor) factor the backward is incorrect: it
+    re-applies ``premul_sum`` to the gradient, yielding ``sum_s k_s * g_s``,
+    instead of scaling the summed gradient locally by this rank's ``k_r``.
     """
     group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
     tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
         self,
-        reduceOp.lower(),
+        reduce_op,
         _group_or_group_name(group),
     )
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 def all_gather_single_coalesced(
@@ -434,7 +463,7 @@ def all_gather_single_coalesced(
         group_size,
         _group_or_group_name(group),
     )
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 def reduce_scatter_single_coalesced(
@@ -482,7 +511,7 @@ def reduce_scatter_single_coalesced(
         _group_or_group_name(group),
     )
 
-    return list(map(_maybe_wrap_tensor, tensor_list))
+    return _maybe_wrap_tensors(tensor_list)
 
 
 # Guarded warning rather than the @deprecated wrapper so Dynamo can trace
@@ -641,6 +670,44 @@ torch.library.register_autograd(
 )
 
 
+def _reduce_op_type(op: str | ReduceOp):
+    """Normalize a reduce op to a lowercase str or a ReduceOp.RedOpType.
+
+    ReduceOp.SUM/AVG/MIN/MAX are RedOpType enum members, while
+    ReduceOp.PREMUL_SUM(factor) is a ReduceOp instance exposing `.op`.
+    """
+    if isinstance(op, str):
+        return op
+    return op.op if hasattr(op, "op") else op
+
+
+def _is_min_max(op: str | ReduceOp):
+    op = _reduce_op_type(op)
+    if isinstance(op, str):
+        return op in ("min", "max")
+    return op in (ReduceOp.MIN, ReduceOp.MAX)
+
+
+def _is_reduceop_supported(op: str | ReduceOp):
+    op = _reduce_op_type(op)
+    if isinstance(op, str):
+        return op in ("sum", "avg", "premul_sum", "max", "min")
+    return op in (
+        ReduceOp.SUM,
+        ReduceOp.AVG,
+        ReduceOp.PREMUL_SUM,
+        ReduceOp.MIN,
+        ReduceOp.MAX,
+    )
+
+
+def _min_max_extremum_mask(fwd_input: torch.Tensor, fwd_output: torch.Tensor):
+    # A NaN input is the extremum only when the reduced output is also NaN;
+    # gating on both keeps the extremum mask disjoint from the NaN mask even if
+    # the backend drops NaN through min/max.
+    return (fwd_input == fwd_output) | (fwd_input.isnan() & fwd_output.isnan())
+
+
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
     """
     Backward for all_reduce: all_reduce with same reduce_op.
@@ -656,21 +723,34 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     """
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
-
-    # Only linear reductions have a well-defined all_reduce backward: for both
-    # 'sum' and 'avg' the gradient is an all_reduce of grad_output with the same
-    # op (grad wrt each rank's input is the same reduction of the per-rank
-    # grad_outputs). Nonlinear ops (min/max/product/premul_sum) do not.
-    if reduce_op not in ("sum", "avg"):
+    if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
+            f"all_reduce backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
         )
-
-    # Backward does all_reduce with the same reduce_op
+    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     output = torch.ops._c10d_functional.all_reduce(
-        grad_output.contiguous(), reduce_op, group_name
+        grad_output.contiguous(), grad_reduce_op, group_name
     )
-    return wait_tensor(output), None, None
+
+    output = wait_tensor(output)
+    if _is_min_max(reduce_op):
+        fwd_input, fwd_output = ctx.saved_tensors
+        fwd_output = wait_tensor(fwd_output)
+        # Split the summed grad evenly across extremum holders like ATen's
+        # evenly_distribute_backward. Ties may span ranks, so the holder count
+        # is itself an all_reduce(sum) of the local extremum mask. The count is
+        # summed in float32 (not the grad dtype) so it stays exact -- fp16/bf16
+        # cannot represent large integer counts. Scale in the promoted dtype,
+        # then cast back to the grad dtype.
+        mask = _min_max_extremum_mask(fwd_input, fwd_output)
+        tie_count = wait_tensor(
+            torch.ops._c10d_functional.all_reduce(
+                mask.to(torch.float32), "sum", group_name
+            )
+        )
+        scaled = (output / tie_count).to(output.dtype)
+        output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
+    return output, None, None
 
 
 def all_reduce_setup_context(ctx, inputs, output):
@@ -683,7 +763,9 @@ def all_reduce_setup_context(ctx, inputs, output):
     """
     input, reduce_op, group_name = inputs
     ctx.group_name = group_name
-    ctx.reduce_op = reduce_op.lower()
+    ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
+    if _is_min_max(ctx.reduce_op):
+        ctx.save_for_backward(input, output)
 
 
 torch.library.register_autograd(
@@ -884,19 +966,45 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     """
     group_name = ctx.group_name
     reduce_op = ctx.reduce_op
-
-    if reduce_op != "sum":
+    if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"all_reduce_coalesced backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
         )
-
-    # Backward does all_reduce on list of gradients
+    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     grad_inputs = torch.ops._c10d_functional.all_reduce_coalesced(
         [grad_output.contiguous() for grad_output in grad_outputs],
-        reduce_op,
+        grad_reduce_op,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None)
+    grad_inputs = wait_tensors(grad_inputs)
+
+    if _is_min_max(reduce_op):
+        saved = ctx.saved_tensors
+        n = len(grad_inputs)
+        fwd_inputs = saved[:n]
+        fwd_outputs = wait_tensors(list(saved[n:]))
+        # Split each summed grad evenly across extremum holders like ATen's
+        # evenly_distribute_backward. Ties may span ranks, so holder counts are
+        # an all_reduce(sum) of the local extremum masks, batched into one
+        # coalesced collective. Counts are summed in float32 (not the grad dtype)
+        # so they stay exact -- fp16/bf16 cannot represent large integer counts.
+        # Scale in the promoted dtype, then cast back to each grad dtype.
+        masks = [
+            _min_max_extremum_mask(fwd_input, fwd_output)
+            for fwd_input, fwd_output in zip(fwd_inputs, fwd_outputs)
+        ]
+        tie_counts = wait_tensors(
+            torch.ops._c10d_functional.all_reduce_coalesced(
+                [mask.to(torch.float32) for mask in masks],
+                "sum",
+                group_name,
+            )
+        )
+        grad_inputs = [
+            torch.ops.aten.where.ScalarOther(mask, (g / count).to(g.dtype), 0)
+            for g, mask, count in zip(grad_inputs, masks, tie_counts)
+        ]
+    return (grad_inputs, None, None)
 
 
 def all_reduce_coalesced_setup_context(ctx, inputs, output):
@@ -910,7 +1018,9 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
     """
     tensor_list, reduce_op, group_name = inputs
     ctx.group_name = group_name
-    ctx.reduce_op = reduce_op.lower()
+    ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
+    if _is_min_max(ctx.reduce_op):
+        ctx.save_for_backward(*tensor_list, *output)
 
 
 torch.library.register_autograd(
@@ -945,7 +1055,7 @@ def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tens
         group_size,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None)
+    return (wait_tensors(grad_inputs), None, None)
 
 
 def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1000,7 +1110,7 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
         group_size,
         group_name,
     )
-    return (list(map(wait_tensor, grad_inputs)), None, None, None)
+    return (wait_tensors(grad_inputs), None, None, None)
 
 
 def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1409,6 +1519,12 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     return _wrap_tensor_autograd(self)
 
 
+def _maybe_wrap_tensors(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+    if _are_we_tracing():
+        return wait_tensors(tensors)
+    return list(map(_wrap_tensor_autograd, tensors))
+
+
 @contextlib.contextmanager
 def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     """
@@ -1473,6 +1589,11 @@ def _all_reduce_meta(self, *args):
 
 def _wait_tensor_meta(self, *args):
     return torch.empty_like(self)
+
+
+def _wait_tensors_meta(tensors):
+    torch._check(len(tensors) > 0, lambda: "wait_tensors requires at least one tensor")
+    return list(tensors)
 
 
 def _isend_meta(self, *args):
@@ -1589,6 +1710,7 @@ lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
 lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
 lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
 lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+lib_impl.impl("wait_tensors", _wait_tensors_meta, "Meta")
 lib_impl.impl("isend", _isend_meta, "Meta")
 lib_impl.impl("irecv", _irecv_meta, "Meta")
 lib_impl.impl("batch_p2p_ops", _batch_p2p_ops_meta, "Meta")
@@ -1631,6 +1753,8 @@ lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 # whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensors.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensors)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type: ignore[has-type]
@@ -1915,10 +2039,7 @@ def batch_p2p_ops_inplace(
         op_list, peer_list, tag_list, tensors, group_name
     )
     if _are_we_tracing():
-        return [
-            _maybe_wrap_tensor(t) if op == "irecv" else t
-            for op, t in zip(op_list, tensors)
-        ]
+        return tensors
     return list(map(_maybe_wrap_tensor, tensors))
 
 

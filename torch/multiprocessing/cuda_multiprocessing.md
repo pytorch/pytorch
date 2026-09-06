@@ -1,6 +1,6 @@
 # CUDA IPC Refcounting implementation explained
 
-Since shared CUDA memory belongs to the producer process, we need to take special precautions to make sure that it is stays allocated for entire shared tensor life-span.
+Since shared CUDA memory belongs to the producer process, we need to take special precautions to make sure that it stays allocated for entire shared tensor life-span.
 
 It could be done manually by syncing on an event:
 
@@ -21,7 +21,7 @@ Instead, we implement cross-process reference counting for shared CUDA (and HIP)
 
 Details of implementation follow.
 
-At the moment of sending tensor, we are wrapping DataPtr of the tensor with additional structure CudaIPCSentData. It still points to the same memory, but have other behavior on destruction.
+At the moment of sending tensor, we are wrapping DataPtr of the tensor with additional structure CudaIPCSentData. It still points to the same memory, but has other behavior on destruction.
 
 Instead of simply removing the allocated block, it checks if there are any active references to this block (references are stored in shared memory files described by CudaIPCRefCountersFile structure). If such exists, instead of deleting blocks DataPtr it is moved to the global state CudaIPCSentDataLimbo.
 

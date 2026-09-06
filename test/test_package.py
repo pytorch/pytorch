@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: package/deploy"]
+# Owner(s): ["module: package/deploy"]
 
 from package.package_a.test_all_leaf_modules_tracer import (  # noqa: F401
     TestAllLeafModulesTracer,

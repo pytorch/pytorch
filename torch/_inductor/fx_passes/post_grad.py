@@ -55,6 +55,7 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -142,25 +143,36 @@ def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
     preserve_node_ordering(graph, additional_deps_map)
 
 
-def reject_current_device_nodes(graph: torch.fx.Graph) -> None:
-    """[device-as-parameter] Reject CooR coor::current_device() nodes in inductor.
+def respecialize_current_device_nodes(graph: torch.fx.Graph) -> None:
+    """[device-as-parameter] Re-specialize CooR _coor_current_device() device nodes.
 
-    Under compile_on_one_rank, make_fx rewrites a baked accelerator device operand to a
-    ``coor::current_device()`` node so the FX graph is rank-agnostic. Inductor has no
-    device-valued IR and cannot lower a device-returning op, so raise a clear, actionable
-    error instead of failing later with a cryptic lowering assertion. A follow-up adds
-    real support by stripping the node before lowering.
+    Under compile-on-one-rank, make_fx rewrites a baked accelerator device operand to a
+    ``_coor_current_device()`` node so the FX graph is rank-agnostic. Inductor has no
+    device-valued IR, so before lowering we replace each use of that node with the node's
+    own runtime value -- the concrete current device (``_coor_current_device()``), the
+    authoritative source, not the consumer's meta. Runs in post_grad, before GraphLowering,
+    so the node never reaches the call_function OpOverload assertion. ``_coor_current_device``
+    lives in core fx and only reads torch.accelerator, so this never imports
+    torch.distributed for a non-distributed compile.
     """
-    import torch.fx.experimental.proxy_tensor
+    # Importing proxy_tensor registers the coor::current_device op (core fx, no
+    # torch.distributed) and gives us its impl for the concrete value.
+    from torch.fx.experimental.proxy_tensor import _coor_current_device
 
     target = torch.ops.coor.current_device.default
-    if any(n.op == "call_function" and n.target is target for n in graph.nodes):
-        raise RuntimeError(
-            "compile_on_one_rank is not supported with the inductor backend when the "
-            "graph contains a device-derived factory or cast (it emits a "
-            "coor::current_device node that inductor cannot lower). Use a non-inductor "
-            "backend (e.g. aot_eager) or disable compile_on_one_rank."
-        )
+    nodes = graph.find_nodes(op="call_function", target=target)
+    if not nodes:
+        return
+    device = _coor_current_device()
+    for node in nodes:
+        for user in list(node.users):
+            user.args = torch.fx.map_arg(
+                user.args, lambda n: device if n is node else n
+            )
+            user.kwargs = torch.fx.map_arg(
+                user.kwargs, lambda n: device if n is node else n
+            )
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -220,9 +232,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         _remove_profiler_ops
     )
 
-    # [device-as-parameter] Reject CooR device nodes inductor can't lower (clear error).
-    GraphTransformObserver(gm, "reject_current_device").apply_graph_pass(
-        reject_current_device_nodes
+    # [device-as-parameter] Re-specialize CooR current_device() device nodes before
+    # lowering (inductor has no device-valued IR).
+    GraphTransformObserver(gm, "respecialize_current_device").apply_graph_pass(
+        respecialize_current_device_nodes
     )
 
     if config.pattern_matcher:
@@ -883,7 +896,10 @@ def reorder_for_locality(graph: torch.fx.Graph):
             # which cause hangs. Once we have SPMD mode, we can safely reorder them.
             # However, increasing the locality between a collective and its wait node
             # is generally worse for performance.
-            return node.target != torch.ops._c10d_functional.wait_tensor.default
+            return node.target not in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
     else:
 
         def check():
@@ -897,9 +913,16 @@ def reorder_for_locality(graph: torch.fx.Graph):
         )
 
     def visit(other_node):
+        is_wait_tensors_getitem = (
+            other_node.target is operator.getitem
+            and torch.distributed.is_available()
+            and isinstance(other_node.args[0], torch.fx.Node)
+            and other_node.args[0].target
+            is torch.ops._c10d_functional.wait_tensors.default
+        )
         if (
             other_node.op == "call_function"
-            and other_node.target != operator.getitem
+            and (other_node.target is not operator.getitem or is_wait_tensors_getitem)
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
@@ -976,6 +999,10 @@ def is_valid_mm_plus_mm(match: Match):
 
     if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
         return False
+    if is_bf16x9_matmul(mat1_val.device.type, mat1_val.dtype) or is_bf16x9_matmul(
+        mat3_val.device.type, mat3_val.dtype
+    ):
+        return False
 
     *_b1, m1, k1 = mat1_val.shape
     *_b2, k2, n1 = mat2_val.shape
@@ -1005,6 +1032,21 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def pointless_cumsum_check(match: Match) -> bool:
+    # Scalar cumsum is already handled directly by lowering.cumsum.
+    if len(match.kwargs["shape"]) == 0:
+        return False
+    # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
+    # * both reject. A boolean full stays folded: bool(Node) is True, the right
+    # saturation for every nonzero fill and the wrong one for a zero fill, but
+    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
+    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
+    # lands.
+    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
+        match.kwargs["fill_value"], torch.fx.Node
+    )
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
@@ -1021,6 +1063,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
@@ -1448,8 +1491,9 @@ def _propagate_triton_eager_input_vals(
         return
 
     _, eager_kwargs = eager_input_vals
+    dropped = ("tensors_to_clone", "tensor_bases")
     mutation_eager_kwargs = {
-        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+        key: value for key, value in eager_kwargs.items() if key not in dropped
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.

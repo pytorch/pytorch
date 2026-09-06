@@ -1234,6 +1234,10 @@ def _maybe_view_chunk_cat(
         Tensor with data rearranged to gather along gather_dim
     """
 
+    # The shape slicing below assumes a non-negative gather_dim.
+    if gather_dim < 0:
+        gather_dim += res.dim()
+
     if gather_dim == 0:
         # When gather_dim is 0, chunk+cat is a no-op
         return res

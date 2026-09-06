@@ -65,7 +65,7 @@ static __device__ void dsa_add_new_assertion_failure(
   self.thread_id[1] = thread_id.y;
   self.thread_id[2] = thread_id.z;
 }
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 // Emulates a kernel assertion. The assertion won't stop the kernel's progress,
 // so you should assume everything the kernel produces is garbage if there's an

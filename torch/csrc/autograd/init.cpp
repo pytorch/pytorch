@@ -1,3 +1,4 @@
+#include <ATen/core/functional.h>
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/NodeCreationHooks.h>
@@ -9,7 +10,6 @@
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -26,7 +26,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -35,7 +34,6 @@
 #include <ActivityType.h>
 #include <ITraceActivity.h>
 #endif
-#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -262,15 +260,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {
-            std::vector<py::object> as_pyobj;
-            std::transform(
-                e.concreteInputs().begin(),
-                e.concreteInputs().end(),
-                std::back_inserter(as_pyobj),
-                [](const c10::IValue& val) {
-                  return torch::jit::toPyObject(val);
-                });
-            return as_pyobj;
+            return c10::fmap(e.concreteInputs(), [](const c10::IValue& val) {
+              return torch::jit::toPyObject(val);
+            });
           })
       .def(
           "kwinputs",
@@ -335,6 +327,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -1260,7 +1261,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }

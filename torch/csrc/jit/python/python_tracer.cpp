@@ -176,9 +176,7 @@ Node* preRecordPythonTrace(
     at::ArrayRef<Variable> inputs,
     pyobj_list scalar_args) {
   THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));
-  if (!apply) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(apply);
 
   auto& graph = getTracingState()->graph;
 

@@ -259,7 +259,7 @@ class TestDSLRegistry(TestCase):
         if not self.original_registry:
             self.skipTest("Original registry not available")
 
-        dsl_names = ["triton", "cutedsl"]
+        dsl_names = ["triton", "cutedsl", "flydsl"]
 
         for dsl_name in dsl_names:
             with self.subTest(dsl_name=dsl_name):

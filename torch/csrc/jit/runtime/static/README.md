@@ -104,7 +104,7 @@ end of the iteration and allocate a buffer that is possibly bigger on the next i
 `StaticRuntime` can optionally manage output tensors via the `manage_output_tensors` option in `StaticModuleOptions`.
 When this flag is turned on, we coalesce allocations for output tensors together. Note that the buffer containing
 output tensors is separated from the one containing intermediate tensors. The former needs to live past the end
-of the inference run, but the latter needs deallocated at the end of the run.
+of the inference run, but the latter needs to be deallocated at the end of the run.
 
 Under the hood, we store a refcounted pointer to the output arena in each returned `Tensor`. The arena is destroyed
 explicitly.
@@ -153,7 +153,7 @@ the result is not `nullptr`, use that op.
 
 The following diagram shows the core data structure. An arrow from `A` to `B` means that
 `A` stores a reference to `B`. If the reference is unowned,
-`A` may not out live `B` or anything that `B` stores a reference to (directly or indirectly).
+`A` may not outlive `B` or anything that `B` stores a reference to (directly or indirectly).
 If the reference is owned, the lifetimes of `A` and `B` are the same.
 ```
 
@@ -187,7 +187,7 @@ forwards to the cached runtime's `StaticRuntime::operator()`. One upshot of this
 
 The way to use static runtime in a multi-threaded context is to give each thread its own `StaticRuntime`
 instance. New runtime instances can be created directly (`StaticRuntime(static_module)`) or `clone()`'d from
-an existing runtimes.
+an existing runtime.
 
 `StaticModule` takes a set of options that control the behavior of the runtime instances that it spawns;
 see `StaticModuleOptions` for more details.

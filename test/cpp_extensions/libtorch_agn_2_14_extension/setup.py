@@ -50,15 +50,21 @@ def get_extension():
     if not IS_WINDOWS:
         common_cxx.append("-fdiagnostics-color=always")
 
+    all_csrc_dirs = [CSRC_DIR, *PREV_CSRC_DIRS]
+    mps_available = torch.backends.mps.is_available()
+
     # Op extension (_C): this version's ops + inherited 2.9-2.13 csrc, minus the
     # interop module. The op extension is loaded via torch.ops.load_library like
     # the other libtorch_agn extensions; the interop module must instead be an
     # importable Python module (its PyMethodDef helpers hold the GIL), so it is
     # built as a separate extension below.
-    op_sources = list(CSRC_DIR.glob("**/*.cpp"))
-    for prev_dir in PREV_CSRC_DIRS:
-        op_sources.extend(prev_dir.glob("**/*.cpp"))
-    op_sources = [s for s in op_sources if s.name != "pyobject_interop_module.cpp"]
+    op_sources = [
+        s
+        for d in all_csrc_dirs
+        for s in d.glob("**/*.cpp")
+        if s.name != "pyobject_interop_module.cpp"
+        and (s.parent.name != "mps" or mps_available)
+    ]
 
     op_cxx = common_cxx + ["-DSTABLE_LIB_NAME=libtorch_agn_2_14"]
     op_extra = {"cxx": op_cxx}
@@ -76,6 +82,9 @@ def get_extension():
         op_sources.extend(CSRC_DIR.glob("**/*.cu"))
         for prev_dir in PREV_CSRC_DIRS:
             op_sources.extend(prev_dir.glob("**/*.cu"))
+
+    if mps_available:
+        op_cxx.append("-DUSE_MPS")
 
     return [
         op_extension(

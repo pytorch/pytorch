@@ -20,6 +20,10 @@
 
 #endif // __cplusplus
 
+#if IS_PYTHON_3_13_PLUS
+#include <internal/pycore_ceval.h>
+#endif
+
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
 

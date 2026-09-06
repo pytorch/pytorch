@@ -5,6 +5,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
+ENV PIP_NO_CACHE_DIR=1
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH
@@ -46,37 +47,14 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install rocm
 ARG ROCM_VERSION
+ARG THEROCK_INDEX_URL
+ARG USE_MSLK
 ENV ROCM_VERSION=${ROCM_VERSION}
-RUN mkdir ci_commit_pins
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
 COPY ./common/install_rocm.sh install_rocm.sh
-RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh common_utils.sh
-RUN rm -r ci_commit_pins
-COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
-RUN rm install_rocm_magma.sh
-COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
-RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
-RUN rm install_rocSHMEM.sh
-ADD ./common/install_miopen.sh install_miopen.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
-ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
+RUN bash ./install_rocm.sh && rm install_rocm.sh
 
-# Default ROCm environment; /etc/rocm_env.sh (created by install_rocm.sh) may
-# override these at runtime for different install methods (tarballs vs wheels).
-ENV ROCM_PATH=/opt/rocm \
-    ROCM_HOME=/opt/rocm \
-    ROCM_SOURCE_DIR=/opt/rocm \
-    ROCM_BIN=/opt/rocm/bin \
-    ROCM_CMAKE=/opt/rocm \
-    ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    MAGMA_HOME=/opt/rocm/magma
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+# ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
+# by CI scripts. TheRock installs ROCm under the Python environment, not /opt/rocm.
 
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
@@ -130,7 +108,7 @@ RUN rm install_openmpi.sh
 # Install rocm-origami
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
-RUN bash -c 'source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
 
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

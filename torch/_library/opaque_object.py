@@ -11,7 +11,7 @@ SYMBOLIC TYPES (default):
 
 Symbolic-typed opaque objects represent mutable stateful objects and are
 treated as black boxes. In torch.compile, since torch.compile cannot optimize
-the anything (including tensors) within the object, the object must be an
+anything (including tensors) within the object, the object must be an
 input to the graph.
 
 You can register a custom class as being a symbolic-typed opaque object class

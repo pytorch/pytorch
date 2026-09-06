@@ -325,11 +325,11 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
       id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
       id<MTLComputePipelineState> pso =
           lib.getPipelineStateForFunc(fmt::format("unique_mark_boundaries_{}", type_name));
-      getMPSProfiler().beginProfileKernel(pso, "unique_mark_boundaries", false);
+      getMPSProfiler().beginProfileKernel(pso, "unique_mark_boundaries", false, stream);
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, sorted_values, mask);
       mtl_dispatch1DJob(encoder, pso, numel);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
 
@@ -358,20 +358,20 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
       {
         id<MTLComputePipelineState> pso =
             lib.getPipelineStateForFunc(fmt::format("unique_emit_{}_{}", type_name, scan_suffix));
-        getMPSProfiler().beginProfileKernel(pso, "unique_emit", false);
+        getMPSProfiler().beginProfileKernel(pso, "unique_emit", false, stream);
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, sorted_values, mask, scan, unique_values, bound_pos);
         mtl_dispatch1DJob(encoder, pso, numel);
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, stream);
       }
 
       if (return_counts) {
         id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc("unique_counts");
-        getMPSProfiler().beginProfileKernel(pso, "unique_counts", false);
+        getMPSProfiler().beginProfileKernel(pso, "unique_counts", false, stream);
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, bound_pos, counts, static_cast<uint64_t>(num_unique), static_cast<uint64_t>(numel));
         mtl_dispatch1DJob(encoder, pso, num_unique);
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, stream);
       }
 
       // For the sorted case we scatter via the sort permutation. For
@@ -379,11 +379,11 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_flat_mps_fast(const Tensor& se
       // tensor op outside this block to avoid re-entering the queue.
       if (return_inverse && !consecutive) {
         id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(fmt::format("unique_inverse_{}", scan_suffix));
-        getMPSProfiler().beginProfileKernel(pso, "unique_inverse", false);
+        getMPSProfiler().beginProfileKernel(pso, "unique_inverse", false, stream);
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, sort_idx, scan, inverse);
         mtl_dispatch1DJob(encoder, pso, numel);
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, stream);
       }
     }
   });

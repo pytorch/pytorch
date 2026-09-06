@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -44,6 +45,10 @@ class ASGD(Optimizer):
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= lambd:
+            raise ValueError(f"Invalid lambd value: {lambd}")
+        if not 0.0 <= alpha:
+            raise ValueError(f"Invalid alpha value: {alpha}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
@@ -442,10 +447,6 @@ def asgd(
     alpha: float,
     weight_decay: float,
 ) -> None:
-    r"""Functional API that performs asgd algorithm computation.
-
-    See :class:`~torch.optim.ASGD` for details.
-    """
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable, use_fused=False
@@ -476,3 +477,6 @@ def asgd(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+
+asgd.__doc__ = _functional_api_doc.format(optimizer="ASGD")

@@ -259,6 +259,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     static c10::intrusive_ptr<Options> create_default(
         std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads{2};
   };

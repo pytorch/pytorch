@@ -81,6 +81,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
+      void* mc_signal_pad_addr,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -93,6 +94,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
+  void* mc_signal_pad_addr_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;

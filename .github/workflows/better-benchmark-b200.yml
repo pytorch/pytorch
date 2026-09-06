@@ -1,0 +1,60 @@
+# Owner(s): ["oncall: pt2"]
+name: Better Benchmark B200
+
+on:
+  schedule:
+    - cron: 0 7 * * *
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  build:
+    name: cuda13.0-py3.12-gcc11-sm100-better-benchmark
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      runner: l-x86iavx512-48-384
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100-better-benchmark
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_better_benchmark_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200.8" },
+        ]}
+    secrets: inherit
+
+  test:
+    name: cuda13.0-py3.12-gcc11-sm100-better-benchmark
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build
+    with:
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+      timeout-minutes: 180
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit

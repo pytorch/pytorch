@@ -102,6 +102,8 @@ SUPPORTED_OPS = {
     operator.le: torch.ops.aten.le.Tensor,
     operator.eq: torch.ops.aten.eq.Tensor,
     operator.ne: torch.ops.aten.ne.Tensor,
+    torch.ops.aten.clamp_min.default: torch.ops.aten.clamp_min.Tensor,
+    torch.ops.aten.clamp_max.default: torch.ops.aten.clamp_max.Tensor,
 }
 
 SUPPORTED_METHOD_OPS = {
@@ -399,7 +401,7 @@ def _tensorify_impl(
                         and "val" in a.meta
                         and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
-                        failed_tensorify_ops.update(str(node.target))
+                        failed_tensorify_ops.add(str(node.target))
 
                         log.info("Failed to tensorify %s", node.target)
 
@@ -421,14 +423,22 @@ def _tensorify_impl(
                 if has_free_symbols(val.node.expr) and all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
-                    # If all symbols are backed symfloats, we can just specialize the whole node
-                    # and get more precise guards. eg.
-                    #
-                    # zf = a.item()
-                    # zf2 = zf // 2
-                    # op(.. zf2 ..)
-                    #
-                    # It's better to guard on zf // 2 == 2.0 than zf == 5.0
+                    # This node has a live use we could not tensorify, so its
+                    # symfloats must be specialized by restarting analysis and
+                    # letting Dynamo bake the values into its output graph,
+                    # even if other uses of the same symbol were tensorified.
+                    # Specializing only here, by burning the hint into this
+                    # joint graph with a local ShapeEnv guard, is unsound with
+                    # caching: AOTAutogradCache keys on the graph, which is
+                    # identical for any value of the float, and prunes guards
+                    # on symbols that are not placeholder symints, so the
+                    # cached artifact would be silently reused for other
+                    # values of the float (#194976).
+                    for s in val.node.expr.free_symbols:
+                        name = str(s)
+                        if not TensorifyState.should_specialize(name):
+                            TensorifyState.specialize(name)
+                            should_restart = True
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)

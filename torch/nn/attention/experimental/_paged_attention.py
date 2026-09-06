@@ -215,7 +215,7 @@ class PagedAttention:
 
         if block_mask.BLOCK_SIZE[1] != self.page_size:
             raise RuntimeError(
-                f"Expect block_mask has the same column block size as page_size"
+                f"Expect block_mask has the same column block size as page_size "
                 f"but got size={block_mask.BLOCK_SIZE[1]} and size={self.page_size}"
             )
 

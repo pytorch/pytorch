@@ -46,22 +46,31 @@ THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
+# hipInfo gcnArchName lines also contain " gfx", so the same count works on Windows.
 if IS_ROCM and not IS_MEM_LEAK_CHECK:
-    try:
-        # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
-        lines = (
-            subprocess.check_output(["rocminfo"], encoding="ascii").strip().split("\n")
-        )
-        count = 0
-        for line in lines:
-            if " gfx" in line:
-                count += 1
-        if count == 0:
-            raise AssertionError("There must be at least 1 GPU")
+    gpu_info_cmds = ["hipInfo", "rocminfo"] if os.name == "nt" else ["rocminfo"]
+    gpu_count = 0
+    tool_ran = False
+    for gpu_info_cmd in gpu_info_cmds:
+        try:
+            # errors="replace" tolerates non-ASCII device marketing names on Windows.
+            output = subprocess.check_output(
+                [gpu_info_cmd], encoding="utf-8", errors="replace"
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+        tool_ran = True
+        gpu_count = sum(" gfx" in line for line in output.strip().split("\n"))
+        if gpu_count > 0:
+            break
+    if gpu_count > 0:
         # Limiting to 8 GPUs(PROCS)
-        NUM_PROCS = min(count, 8)
-    except subprocess.CalledProcessError:
-        # The safe default for ROCm GHA runners is to run tests serially.
+        NUM_PROCS = min(gpu_count, 8)
+    elif tool_ran:
+        # A GPU runner whose query tools see no devices is unhealthy; fail loudly.
+        raise AssertionError("There must be at least 1 GPU")
+    else:
+        # No GPU query tool available; the safe default is to run tests serially.
         NUM_PROCS = 1
 
 
@@ -87,13 +96,15 @@ def get_with_pytest_shard(
     tests: Sequence[TestRun],
     test_file_times: dict[str, float],
     test_class_times: dict[str, dict[str, float]] | None,
+    *,
+    allow_pytest_sharding: bool = True,
 ) -> list[ShardedTest]:
     sharded_tests: list[ShardedTest] = []
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
 
-        if duration and duration > THRESHOLD:
+        if allow_pytest_sharding and duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -208,6 +219,7 @@ def calculate_shards(
     test_class_times: dict[str, dict[str, float]] | None,
     must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
+    allow_pytest_sharding: bool = True,
 ) -> list[tuple[float, list[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
@@ -222,13 +234,26 @@ def calculate_shards(
         unknown_tests = [x for x in tests if x not in known_tests]
 
         pytest_sharded_tests = sorted(
-            get_with_pytest_shard(known_tests, test_file_times, test_class_times),
+            get_with_pytest_shard(
+                known_tests,
+                test_file_times,
+                test_class_times,
+                allow_pytest_sharding=allow_pytest_sharding,
+            ),
             key=lambda j: j.get_time(),
             reverse=True,
-        ) + get_with_pytest_shard(unknown_tests, test_file_times, test_class_times)
+        ) + get_with_pytest_shard(
+            unknown_tests,
+            test_file_times,
+            test_class_times,
+            allow_pytest_sharding=allow_pytest_sharding,
+        )
     else:
         pytest_sharded_tests = get_with_pytest_shard(
-            tests, test_file_times, test_class_times
+            tests,
+            test_file_times,
+            test_class_times,
+            allow_pytest_sharding=allow_pytest_sharding,
         )
     del tests
 

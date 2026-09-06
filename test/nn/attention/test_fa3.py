@@ -15,7 +15,12 @@ from torch.nn.attention.experimental._scaled_dot_product_attention_quantized imp
 )
 from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _fa3_dependencies_available() -> bool:
@@ -32,6 +37,8 @@ def _fa3_dependencies_available() -> bool:
 
 
 class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # Mixin configuration
     impl_name = "FA3"
     fwd_kernel_patterns = ["flash_attn_3::fwd"]

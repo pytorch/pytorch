@@ -524,11 +524,13 @@ class OverlapScheduler:
             self.allowed_peak_memory_bytes = self.original_peak_memory + (
                 memory_increase_bytes or 0
             )
-            self.memory_tracker = MemoryTracker(self.graph)
+            self.memory_tracker: MemoryTracker | None = MemoryTracker(self.graph)
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+            # Defensive default; budget checks are skipped when uncapped and
+            # the in-flight limit remains active.
+            self.memory_tracker = None
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
@@ -577,6 +579,9 @@ class OverlapScheduler:
 
         self.in_flight: dict[fx.Node, CollectiveInfo] = {}  # start -> info
         self.in_flight_bytes = 0
+        # Coalesced collectives can have multiple waits for the same collective.
+        # We track coll_starts in handling.
+        self.wait_starts_being_handled: OrderedSet[fx.Node] = OrderedSet()
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
 
@@ -639,13 +644,15 @@ class OverlapScheduler:
             return False
 
         # check current mem
-        if (
+        if self.memory_tracker is not None and (
             self.memory_tracker.current_memory_bytes + size
             > self.allowed_peak_memory_bytes
         ):
             return True
 
         start_index = self.current_compute_index
+        # memory_tracker is fixed after __init__, so this is loop-invariant.
+        check_budget = self.memory_tracker is not None
 
         # then, check future mem
         for compute_idx in range(start_index, domination_index):
@@ -658,11 +665,12 @@ class OverlapScheduler:
                 return True
 
             # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
-            baseline_mem = self.original_mem_before_compute_index[compute_idx]
-            projected = baseline_mem + cumulative_prefetch + size
+            if check_budget:
+                baseline_mem = self.original_mem_before_compute_index[compute_idx]
+                projected = baseline_mem + cumulative_prefetch + size
 
-            if projected > self.allowed_peak_memory_bytes:
-                return True
+                if projected > self.allowed_peak_memory_bytes:
+                    return True
 
         return False
 
@@ -931,7 +939,7 @@ class OverlapScheduler:
             elif _schedulable_wait_node(node):
                 # Defer exposed waits until hidden or over memory budget
                 info = self.collective_info[self.wait_to_start[node]]
-                over_budget = (
+                over_budget = self.memory_tracker is not None and (
                     self.memory_tracker.current_memory_bytes
                     > self.allowed_peak_memory_bytes
                 )
@@ -1083,6 +1091,9 @@ class OverlapScheduler:
         }
 
         for start_node, info in self.in_flight.items():
+            # Do not let a nested wait hide an outer active wait.
+            if start_node in self.wait_starts_being_handled:
+                continue
             if info.exposed_time_ms == 0:
                 continue
 
@@ -1137,12 +1148,11 @@ class OverlapScheduler:
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
-        self.memory_tracker.schedule_node(node)
-
+        if self.memory_tracker is not None:
+            self.memory_tracker.schedule_node(node)
         log.debug(
-            "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
+            "Scheduled node %s: total_scheduled=%d",
             node.name,
-            self.memory_tracker.get_current_memory_bytes(),
             len(self.scheduled),
         )
 
@@ -1238,6 +1248,16 @@ class OverlapScheduler:
         if node not in self.wait_to_start:
             raise AssertionError(f"wait node {node} has no associated start")
         coll_start = self.wait_to_start[node]
+        if coll_start in self.wait_starts_being_handled:
+            raise AssertionError(f"wait node {node} is already being handled")
+        self.wait_starts_being_handled.add(coll_start)
+        try:
+            self._handle_wait_impl(node, coll_start)
+        finally:
+            # Keep active state scoped to this handler on every exit.
+            self.wait_starts_being_handled.remove(coll_start)
+
+    def _handle_wait_impl(self, node: fx.Node, coll_start: fx.Node) -> None:
         # For coalesced collectives, multiple waits share the same start node.
         # The first wait completes the collective; subsequent waits just schedule.
         if coll_start not in self.in_flight:
@@ -1248,14 +1268,7 @@ class OverlapScheduler:
         # of every node enqueued prior to the collective on the
         # same process group
         group_name = get_group_name(coll_start)
-        to_schedule: list[fx.Node] = []
-        for in_flight_coll in self.in_flight:
-            if in_flight_coll == coll_start:
-                break
-            if get_group_name(in_flight_coll) == group_name:
-                to_schedule.append(in_flight_coll)
-
-        for coll_to_schedule in to_schedule:
+        for coll_to_schedule in self._get_prior_in_flight_collectives(coll_start):
             self._handle_wait(self.collective_info[coll_to_schedule].wait_node)
 
         # If we are waiting on an exposed collective, use this time to
@@ -1275,6 +1288,33 @@ class OverlapScheduler:
         self.in_flight_bytes -= self.in_flight[coll_start].size_bytes
         del self.in_flight[coll_start]
         self._schedule(node)
+
+    def _get_prior_in_flight_collectives(self, coll_start: fx.Node) -> list[fx.Node]:
+        """Return earlier in-flight collectives on the same process group."""
+        if coll_start not in self.in_flight:
+            return []
+
+        group_name = get_group_name(coll_start)
+        prior_collectives: list[fx.Node] = []
+        for in_flight_coll in self.in_flight:
+            if in_flight_coll == coll_start:
+                break
+            if get_group_name(in_flight_coll) == group_name:
+                prior_collectives.append(in_flight_coll)
+        return prior_collectives
+
+    def _would_reenter_wait(self, coll_start: fx.Node) -> bool:
+        # Check if we are in handle_wait and scheduling this coll_start will result
+        # in recursive handle_wait.
+        active_starts = self.wait_starts_being_handled
+        if not active_starts:
+            return False
+        if coll_start in active_starts:
+            return True
+        return any(
+            prior in active_starts
+            for prior in self._get_prior_in_flight_collectives(coll_start)
+        )
 
     def _schedule_collectives_for_overlap(
         self,
@@ -1366,6 +1406,9 @@ class OverlapScheduler:
                 candidates.extend(group)
 
         for collective in candidates:
+            if collective not in self.unscheduled_collectives:
+                continue
+
             pg_name = get_group_name(collective)
             pg_available_time = remaining_time_per_pg[pg_name]
 
@@ -1388,9 +1431,19 @@ class OverlapScheduler:
             while (
                 self.in_flight
                 and (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes
-                and self._wait_is_hidden(self._get_oldest_wait(), overlap_node)
             ):
+                oldest_wait = self._get_oldest_wait()
+                oldest_start = self.wait_to_start[oldest_wait]
+                # Forcing this wait would re-enter an active handler.
+                if self._would_reenter_wait(oldest_start):
+                    break
+                if not self._wait_is_hidden(oldest_wait, overlap_node):
+                    break
                 self._force_oldest_wait()
+
+            # Forcing a wait may recursively schedule this candidate.
+            if collective not in self.unscheduled_collectives:
+                continue
 
             if (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes:
                 why("in-flight memory limit")
@@ -1491,7 +1544,12 @@ class OverlapScheduler:
             # thus forcing it to be exposed.
             # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):
-                info = self.collective_info[self.wait_to_start[node]]
+                coll_start = self.wait_to_start[node]
+                # Defer paths that would recurse through an active wait.
+                if self._would_reenter_wait(coll_start):
+                    why("path blocked by active wait node %s", node.name)
+                    return None
+                info = self.collective_info[coll_start]
                 if (not info.is_exposed) and (
                     curr_overlap_node not in info.hiding_nodes
                 ):
@@ -1612,24 +1670,27 @@ class OverlapScheduler:
         counters["inductor"]["overlap_scheduling_potentially_hidden"] += len(
             potentially_hidden_collectives
         )
-        counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
-        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
-
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
-            "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
             "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
             "wasted_compute_ms=%.2f",
             len(exposed),
             len(bad_exposed),
             len(potentially_hidden_collectives),
-            self.original_peak_memory,
-            self.memory_tracker.peak_memory,
             total_exposed,
             hideable_exposed_ms,
             total_potential_exposed,
             self.wasted_compute,
         )
+        if self.memory_tracker is not None:
+            counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
+            counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+            log.info(
+                "Overlap scheduling memory: original_peak_memory=%d bytes, "
+                "rescheduled_peak_memory=%d bytes",
+                self.original_peak_memory,
+                self.memory_tracker.peak_memory,
+            )
 
         self.reorder_graph()
 
@@ -1878,7 +1939,7 @@ def schedule_overlap_bucketing(
             estimates (deterministic, no GPU sync), "benchmark" uses GPU benchmarking (more accurate).
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
-            Uses minimum of absolute and ratio limits when both are specified.
+            Uses maximum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
         bucket_mode: Bucketing mode for grouping collectives.
         pre_bucketing_fsdp_collectives: Pre-bucket FSDP collectives into bandwidth-saturating

@@ -4,7 +4,7 @@
 import dataclasses
 import operator
 from collections.abc import Iterator, Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import torch
 from torch._inductor import inductor_prims
@@ -13,6 +13,27 @@ from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 
 from .gemm_epilogue_utils import statically_known_shape_equal
+
+
+GEMM_ACCUMULATOR_ARG_NAME = "accum"
+GEMM_LOCAL_REDUCTION_RESULT_NAME = "_local_reduce"
+GEMM_REDUCTION_FRAGMENT_WIDTH = 32
+GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
+
+GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class GemmEpiloguePlan:
+    source: str | None = None
+    is_evt_fallback: bool = False
+    reads: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()
+    renames: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # A pure ``GEMM_output * scalar`` epilogue can be routed through a
+    # backend's dedicated output-scale argument instead of compiling a generic
+    # elementwise epilogue. The value is the graph buffer name of that scalar.
+    output_scale: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -35,7 +56,7 @@ class GemmReductionGeometry:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.axis == 0 or self.group > 32
+        return self.axis == 0 or self.group > GEMM_REDUCTION_FRAGMENT_WIDTH
 
     @property
     def group_size(self) -> int:
@@ -81,34 +102,7 @@ class GemmReductionGeometry:
         ) or statically_known_shape_equal(output_shape, grouped)
 
 
-@dataclasses.dataclass(frozen=True)
-class GemmReductionDescriptor:
-    """Backend lowering descriptor for a recognized reduction expression.
-
-    Attributes:
-        kind: Canonical reduction or normalized-consumer expression name.
-        parameters: Compile-time scalar parameters encoded by that expression.
-    """
-
-    kind: str
-    parameters: tuple[float, ...] = ()
-
-    @classmethod
-    def parse(cls, value: str) -> "GemmReductionDescriptor":
-        kind, *parameters = value.split(":")
-        return cls(kind, tuple(float(parameter) for parameter in parameters))
-
-    def serialize(self) -> str:
-        if not self.parameters:
-            return self.kind
-        return (
-            self.kind
-            + ":"
-            + ":".join(format(parameter, ".17g") for parameter in self.parameters)
-        )
-
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
@@ -119,26 +113,28 @@ class GemmReductionConfig:
         output_name: Buffer produced by the recognized reduction.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
-        source_type: Transformation applied to GEMM accumulator values.
+        reduction_type: Associative primitive computed by the kernel.
+        source_fn: Generated source transformation applied before reduction.
+        finalizer_fn: Optional source for post-reduction scalar finalization.
     """
 
     output_name: str
     group: int
     axis: int
-    reduction_type: str
-    source_type: str
+    reduction_type: GemmReductionType
+    source_fn: str
+    finalizer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
+
+    def __post_init__(self) -> None:
+        _ = self.geometry
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
 
-    @property
-    def contract(self) -> tuple[int, int, str, str]:
-        return self.group, self.axis, self.reduction_type, self.source_type
 
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionPlan:
     """Backend-neutral reduction outputs passed from analysis to codegen.
 
@@ -146,29 +142,74 @@ class GemmReductionPlan:
         reduction_output: Optional compressed reduction output buffer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
-        source_type: Transformation applied to GEMM accumulator values.
+        reduction_type: Associative primitive used by a kernel-driven reduction.
+        source_fn: Generated source transformation applied before reduction.
+        combine_fn: Generated callback that combines cross-fragment partial results.
         primary_output: Buffer receiving the primary GEMM result.
         feeds_main: Whether the reduction participates in the primary output.
         feed_output: Optional full-shape output consuming the reduction.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by the secondary consumer.
+        finalizer_fn: Optional source for post-reduction scalar finalization.
+        consumer_fn: Optional source for the primary full-shape consumer.
+        consumer_finalizer_fn: Optional source that converts the raw reduction
+            to the value consumed by full-shape outputs.
+        secondary_consumer_fn: Optional source for the secondary consumer.
     """
 
-    reduction_output: str | None
     group: int
     axis: int
-    reduction_type: str
-    source_type: str
+    reduction_type: GemmReductionType | None = "sum"
+    source_fn: str | None = None
+    combine_fn: str | None = None
+    reduction_output: str | None
     primary_output: str
     feeds_main: bool = False
     feed_output: str | None = None
     secondary_feed_output: str | None = None
-    secondary_feed_type: str | None = None
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    consumer_finalizer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
+
+    def __post_init__(self) -> None:
+        _ = self.geometry
+        kernel_reduction_inputs = (self.reduction_type, self.source_fn)
+        if any(value is None for value in kernel_reduction_inputs) and not all(
+            value is None for value in kernel_reduction_inputs
+        ):
+            raise RuntimeError(
+                "GEMM reductions must specify both reduction_type and source_fn or neither"
+            )
+        if self.tensor_epilogue_returns_local_reduce:
+            if self.geometry.needs_physical_callbacks != (self.combine_fn is not None):
+                raise RuntimeError(
+                    "combine_fn must be present exactly when a generated reduction "
+                    "crosses TensorSSA fragments"
+                )
+        elif self.combine_fn is not None:
+            raise RuntimeError("kernel-driven reductions cannot specify combine_fn")
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def tensor_epilogue_returns_local_reduce(self) -> bool:
+        return self.reduction_type is None and self.source_fn is None
+
+    @classmethod
+    def from_config(
+        cls, config: GemmReductionConfig, **plan_fields: Any
+    ) -> "GemmReductionPlan":
+        plan_fields.setdefault("finalizer_fn", config.finalizer_fn)
+        plan_fields.setdefault("secondary_consumer_fn", config.secondary_consumer_fn)
+        return cls(
+            group=config.group,
+            axis=config.axis,
+            reduction_type=config.reduction_type,
+            source_fn=config.source_fn,
+            **plan_fields,
+        )
 
     @property
     def auxiliary_outputs(self) -> tuple[str, ...]:
@@ -185,7 +226,7 @@ class GemmReductionPlan:
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionArguments:
     """Runtime tensors and compile-time parameters for a grouped GEMM reduction.
 
@@ -193,42 +234,72 @@ class GemmReductionArguments:
         output: Optional tensor receiving the compressed reduction.
         feed_output: Optional full-shape tensor receiving the reduction consumer.
         secondary_feed_output: Optional second full-shape reduction consumer.
-        secondary_feed_type: Expression implemented by ``secondary_feed_output``.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Reduction or normalized consumer expression to compute.
-        source_type: Transformation applied to GEMM accumulator values.
+        reduction_type: Associative primitive used by a kernel-driven reduction.
+        source_fn: Generated source transformation applied before reduction.
+        combine_fn: Generated callback that combines cross-fragment partial results.
         feeds_main: Whether the reduction also produces the primary GEMM output.
+        consumer_fn: Optional primary reduction consumer.
+        consumer_finalizer_fn: Optional callback that converts the raw reduction
+            to the value consumed by full-shape outputs.
+        secondary_consumer_fn: Optional secondary reduction consumer.
     """
 
     output: Any | None = None
     feed_output: Any | None = None
     secondary_feed_output: Any | None = None
-    secondary_feed_type: str | None = None
     group: int = 0
     axis: int = 1
-    reduction_type: str = "sum"
-    source_type: str = "identity"
+    reduction_type: GemmReductionType | None = "sum"
+    source_fn: str | None = GEMM_REDUCTION_IDENTITY_SOURCE
+    combine_fn: str | None = None
     feeds_main: bool = False
+    finalizer_fn: str | None = None
+    consumer_fn: str | None = None
+    consumer_finalizer_fn: str | None = None
+    secondary_consumer_fn: str | None = None
 
+    TENSOR_FIELDS: ClassVar[tuple[str, ...]] = (
+        "output",
+        "feed_output",
+        "secondary_feed_output",
+    )
     SPECIALIZATION_FIELDS: ClassVar[tuple[str, ...]] = (
         "group",
         "axis",
         "reduction_type",
-        "source_type",
+        "source_fn",
+        "combine_fn",
         "feeds_main",
-        "secondary_feed_type",
+        "finalizer_fn",
+        "consumer_fn",
+        "consumer_finalizer_fn",
+        "secondary_consumer_fn",
     )
+
+    @classmethod
+    def from_plan(
+        cls, plan: GemmReductionPlan, **tensor_values: Any
+    ) -> "GemmReductionArguments":
+        return cls(
+            **tensor_values,
+            **{field: getattr(plan, field) for field in cls.SPECIALIZATION_FIELDS},
+        )
 
     @property
     def enabled(self) -> bool:
-        return (
-            any(
-                value is not None
-                for value in (self.output, self.feed_output, self.secondary_feed_output)
-            )
-            or self.feeds_main
+        return self.feeds_main or any(
+            value is not None for _, value in self.tensor_items()
         )
+
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
+
+    @property
+    def tensor_epilogue_returns_local_reduce(self) -> bool:
+        return self.reduction_type is None and self.source_fn is None
 
     @property
     def primary_enabled(self) -> bool:
@@ -236,18 +307,19 @@ class GemmReductionArguments:
             self.output is not None or self.feed_output is not None or self.feeds_main
         )
 
-    @property
-    def descriptor(self) -> GemmReductionDescriptor:
-        return GemmReductionDescriptor.parse(self.reduction_type)
+    def tensor_items(self) -> Iterator[tuple[str, Any | None]]:
+        return ((field, getattr(self, field)) for field in self.TENSOR_FIELDS)
 
-    def tensors(self, attr: str) -> tuple[Any | None, Any | None, Any | None]:
-        def tensor(value: Any | None) -> Any | None:
-            return getattr(value, attr) if value is not None else None
+    def specialization_items(self) -> Iterator[tuple[str, Any]]:
+        return ((field, getattr(self, field)) for field in self.SPECIALIZATION_FIELDS)
 
-        return (
-            tensor(self.output),
-            tensor(self.feed_output),
-            tensor(self.secondary_feed_output),
+    def map_tensors(self, transform) -> "GemmReductionArguments":
+        return dataclasses.replace(
+            self,
+            **{
+                field: None if value is None else transform(value)
+                for field, value in self.tensor_items()
+            },
         )
 
 
@@ -260,6 +332,14 @@ class NormalizedView:
 
 
 @dataclasses.dataclass(frozen=True)
+class NormalizedDtypeView:
+    """Canonical source and target dtype for a storage reinterpretation."""
+
+    source: torch.fx.Node
+    dtype: torch.dtype
+
+
+@dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
     """Canonical arguments for a supported FX reduction."""
 
@@ -267,7 +347,7 @@ class NormalizedReduction:
     dim: Any
     keepdim: Any
     dtype: Any
-    reduction_type: str
+    reduction_type: GemmReductionType
 
 
 @dataclasses.dataclass(frozen=True)
@@ -294,6 +374,31 @@ class NormalizedGetItem:
 
 
 @dataclasses.dataclass(frozen=True)
+class NormalizedSplit:
+    """Canonical source, width, and dimension for an FX tensor split."""
+
+    source: torch.fx.Node
+    split_size: Any
+    dim: int
+
+
+@dataclasses.dataclass(frozen=True)
+class NormalizedSelect:
+    """Canonical source, dimension, and index for an FX tensor select."""
+
+    source: torch.fx.Node
+    dim: int
+    index: Any
+
+
+@dataclasses.dataclass(frozen=True)
+class NormalizedToBlocked:
+    """Canonical logical source for a blocked-output transform."""
+
+    source: torch.fx.Node
+
+
+@dataclasses.dataclass(frozen=True)
 class NormalizedUnsupportedReduction:
     """Canonical source and target for an unsupported FX reduction."""
 
@@ -303,15 +408,19 @@ class NormalizedUnsupportedReduction:
 
 NormalizedNode = (
     NormalizedView
+    | NormalizedDtypeView
     | NormalizedReduction
     | NormalizedPrepareSoftmax
     | NormalizedSqueeze
     | NormalizedGetItem
+    | NormalizedSplit
+    | NormalizedSelect
+    | NormalizedToBlocked
     | NormalizedUnsupportedReduction
 )
 
 
-FUNCTION_REDUCTION_TYPES = {
+FUNCTION_REDUCTION_TYPES: dict[Any, tuple[GemmReductionType, bool]] = {
     torch.ops.aten.sum.dim_IntList: ("sum", True),
     torch.ops.aten.mean.dim: ("mean", True),
     torch.ops.aten.prod.dim_int: ("prod", True),
@@ -341,6 +450,13 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
     """Return canonical arguments for a selected epilogue FX node."""
     if node.op != "call_function":
         return None
+    if node.target is torch.ops.aten.view.dtype:
+        source, dtype = node.args
+        if not isinstance(source, torch.fx.Node) or not isinstance(dtype, torch.dtype):
+            raise AssertionError(
+                f"malformed GEMM epilogue dtype view: {node.format_node()}"
+            )
+        return NormalizedDtypeView(source, dtype)
     if node.target in (
         torch.ops.aten.view.default,
         torch.ops.aten.reshape.default,
@@ -358,6 +474,13 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
                 for arg in shape
             ),
         )
+    if node.target is torch.ops.flex_gemm.to_blocked.default:
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed GEMM epilogue output transform: {node.format_node()}"
+            )
+        return NormalizedToBlocked(source)
     if node.target in FUNCTION_REDUCTION_TYPES:
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
@@ -385,6 +508,20 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
             )
         dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         return NormalizedPrepareSoftmax(source, dim)
+    if node.target is torch.ops.aten.split.Tensor:
+        source = node.args[0]
+        dim = node.args[2] if len(node.args) > 2 else node.kwargs.get("dim", 0)
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(f"malformed GEMM epilogue split: {node.format_node()}")
+        return NormalizedSplit(source, node.args[1], dim)
+    if node.target is torch.ops.aten.select.int:
+        source = node.args[0]
+        dim = node.args[1]
+        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
+            raise AssertionError(
+                f"malformed GEMM epilogue select: {node.format_node()}"
+            )
+        return NormalizedSelect(source, dim, node.args[2])
     if node.target in (
         torch.ops.aten.squeeze.dim,
         torch.ops.aten.squeeze.dims,

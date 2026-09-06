@@ -1,19 +1,14 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TEST_XPU
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dispatch_key1(self):
         @torch.compile(backend="aot_eager", fullgraph=True)
         def fn(x):
@@ -80,34 +75,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
-    def test_dispatch_key_set_guard(self):
-        counter = CompileCounter()
-
-        @torch.compile(backend=counter, fullgraph=True)
-        def fn(x, dks):
-            if dks.has("CPU"):
-                return torch.sin(x + 1)
-            else:
-                return torch.sin(x - 1)
-
-        x1 = torch.randn(2, 3)
-        dks1 = torch._C._dispatch_keys(x1)
-        self.assertEqual(fn(x1, dks1), torch.sin(x1 + 1))
-        self.assertEqual(counter.frame_count, 1)
-
-        x2 = torch.randn(2, 3)
-        dks2 = torch._C._dispatch_keys(x2)
-        self.assertEqual(fn(x2, dks2), torch.sin(x2 + 1))
-        # No recompile since the dispatch key set is the same though the tensor is different.
-        self.assertEqual(counter.frame_count, 1)
-
-        x3 = torch.randn(2, 3, device=device_type)
-        dks3 = torch._C._dispatch_keys(x3)
-        self.assertEqual(fn(x3, dks3), torch.sin(x3 - 1))
-        # Re-compile since the dispatch key set is different.
-        self.assertEqual(counter.frame_count, 2)
-
     def test_functorch_interpreter(self):
         counter = CompileCounter()
 
@@ -134,6 +101,69 @@ class GraphModule(torch.nn.Module):
         y = torch.tensor([10, 20, 30, 10])
         self.assertEqual(fn(x, y), torch.tensor([11, 24, 39, 11]))
         # No recompile
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_vmap_attrs(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            if interpreter.randomness() != "error":
+                return y * 0
+            return y + interpreter.batch_size() + interpreter.level()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([6, 7, 8, 9]))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_lower(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            # Tensor ops must happen before lower(); after pop the batched
+            # tensor is no longer in a vmap interpreter.
+            out = y + interpreter.level()
+            with interpreter.lower():
+                pass
+            return out
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([2, 3, 4, 5]))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_process(self):
+        counter = CompileCounter()
+
+        class FakeOp:
+            functorch_table = {
+                torch._C._functorch.TransformType.Vmap: lambda interpreter, t: t * t
+            }
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            return interpreter.process(FakeOp(), (y,), {})
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([1, 4, 9, 16]))
         self.assertEqual(counter.frame_count, 1)
 
     def test_graph_break_recovers_missing_python_tls_snapshot(self):
@@ -164,6 +194,42 @@ class GraphModule(torch.nn.Module):
             torch._C._dispatch_tls_set_dispatch_key_included(
                 torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
             )
+
+
+class PythonDispatcherTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_dispatch_key_set_guard(self, device):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, dks):
+            if dks.has("CPU"):
+                return torch.sin(x + 1)
+            else:
+                return torch.sin(x - 1)
+
+        x1 = torch.randn(2, 3)
+        dks1 = torch._C._dispatch_keys(x1)
+        self.assertEqual(fn(x1, dks1), torch.sin(x1 + 1))
+        self.assertEqual(counter.frame_count, 1)
+
+        x2 = torch.randn(2, 3)
+        dks2 = torch._C._dispatch_keys(x2)
+        self.assertEqual(fn(x2, dks2), torch.sin(x2 + 1))
+        # No recompile since the dispatch key set is the same though the tensor is different.
+        self.assertEqual(counter.frame_count, 1)
+
+        x3 = torch.randn(2, 3, device=device)
+        dks3 = torch._C._dispatch_keys(x3)
+        self.assertEqual(fn(x3, dks3), torch.sin(x3 - 1))
+        # Re-compile since the dispatch key set is different.
+        self.assertEqual(counter.frame_count, 2)
+
+
+instantiate_device_type_tests(
+    PythonDispatcherTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":

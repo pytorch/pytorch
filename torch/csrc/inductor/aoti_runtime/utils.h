@@ -27,12 +27,15 @@
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    bool ok = EXPR;                   \
-    if (!ok) {                        \
-      throw std::runtime_error(MSG);  \
-    }                                 \
+// The condition is tested directly rather than through a `bool` local so that
+// AOTI_RUNTIME_CHECK(false, ...) can end a non-void function without tripping
+// -Wreturn-type.
+#define AOTI_RUNTIME_CHECK(EXPR, MSG)                                     \
+  do {                                                                    \
+    if (!(EXPR)) {                                                        \
+      /* @allow-raw-throw: this macro is the aoti_runtime check itself */ \
+      throw std::runtime_error(MSG);                                      \
+    }                                                                     \
   } while (0)
 
 using AOTIRuntimeError = int32_t;
@@ -256,127 +259,6 @@ class RAIIC10IValueHandle {
   std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_;
 };
 
-class MaybeOwningAtenTensorHandle {
- public:
-  MaybeOwningAtenTensorHandle() : handle_(nullptr) {}
-  // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
-  // makes it undefined.
-  MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =
-      delete;
-  MaybeOwningAtenTensorHandle& operator=(
-      const MaybeOwningAtenTensorHandle& other) = delete;
-
-  // Move constructor and move assignment operator
-  MaybeOwningAtenTensorHandle(MaybeOwningAtenTensorHandle&& other) = default;
-  MaybeOwningAtenTensorHandle& operator=(MaybeOwningAtenTensorHandle&& other) =
-      default;
-
-  // Steal the ownership from another RAIIAtenTensorHandle using std::move
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-rvalue-reference-param-not-moved)
-  MaybeOwningAtenTensorHandle(RAIIAtenTensorHandle&& other)
-      : raii_handle_(std::move(other)) {
-    handle_ = raii_handle_.get();
-  }
-  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-  MaybeOwningAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) {
-    raii_handle_ = std::move(other);
-    handle_ = raii_handle_.get();
-    return *this;
-  }
-
-  // By default, steal the ownership from raw AtenTensorHandle
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MaybeOwningAtenTensorHandle(AtenTensorHandle handle) : raii_handle_(handle) {
-    handle_ = raii_handle_.get();
-  }
-
-  // If user_managed is true, we do not steal the ownership.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
-    if (user_managed) {
-      aoti_torch_new_tensor_handle(handle, &handle_);
-    } else {
-      raii_handle_ = RAIIAtenTensorHandle(handle);
-      handle_ = raii_handle_.get();
-    }
-  }
-
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~MaybeOwningAtenTensorHandle() {
-    // This is no-op if we don't hold raii_handle with the
-    // MaybeOwningAtenTensorHandle.
-    raii_handle_.reset();
-  }
-
-  // Return a raw AtenTensorHandle to be used by aoti_torch functions
-  // Note: this function does NOT transfer the ownership of the handle
-  operator AtenTensorHandle() const {
-    return handle_;
-  }
-
-  AtenTensorHandle release() {
-    if (raii_handle_) {
-      return raii_handle_.release();
-    } else {
-      AtenTensorHandle handle = handle_;
-      handle_ = nullptr;
-      return handle;
-    }
-  }
-
-  AtenTensorHandle get() const {
-    return handle_;
-  }
-
-  void reset() {
-    handle_ = nullptr;
-    raii_handle_.reset();
-  }
-
-  int64_t size(int64_t d) {
-    int64_t size = 0;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_, d, &size));
-    return size;
-  }
-
-  int64_t stride(int64_t d) {
-    int64_t stride = 0;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_stride(handle_, d, &stride));
-    return stride;
-  }
-
-  int64_t storage_offset() {
-    int64_t storage_offset = 0;
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_storage_offset(handle_, &storage_offset));
-    return storage_offset;
-  }
-
-  void* data_ptr() const {
-    void* result = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle_, &result));
-    return result;
-  }
-
-  int64_t* sizes() const {
-    int64_t* result = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_, &result));
-    return result;
-  }
-
-  int64_t* strides() const {
-    int64_t* result = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_, &result));
-    return result;
-  }
-
- private:
-  // handle_ is the underlying AtenTensorHandle of raii_handle_ if raii_handle_
-  // exists. Otherwise it would just be the AtenTensorHandle passed in by users.
-  AtenTensorHandle handle_;
-  RAIIAtenTensorHandle raii_handle_;
-};
-
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
 inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
@@ -577,6 +459,45 @@ inline void assert_size_stride(
   }
 
   assert_size_stride(tensor, expected_sizes, expected_strides, op_name);
+}
+
+inline void assert_alignment(
+    AtenTensorHandle tensor,
+    size_t alignment,
+    const char* op_name = nullptr) {
+  if (alignment == 0) {
+    std::stringstream msg;
+    msg << "alignment cannot be 0";
+    if (op_name) {
+      msg << " in op: " << op_name;
+    }
+    AOTI_RUNTIME_CHECK(false, std::move(msg).str());
+  }
+
+  bool is_defined = true;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(tensor, &is_defined));
+  if (!is_defined) {
+    return;
+  }
+
+  int64_t storage_offset = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_storage_offset(tensor, &storage_offset));
+
+  int32_t dtype = 0;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
+  const size_t itemsize = aoti_torch_dtype_element_size(dtype);
+
+  if (storage_offset * itemsize % alignment != 0) {
+    std::stringstream msg;
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
+    msg << "\nExpect the tensor to be " << alignment
+        << " bytes aligned. Fail due to storage_offset=" << storage_offset
+        << " itemsize=" << itemsize;
+    AOTI_RUNTIME_CHECK(false, std::move(msg).str());
+  }
 }
 
 inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {

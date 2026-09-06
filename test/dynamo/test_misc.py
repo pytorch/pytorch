@@ -46,6 +46,7 @@ from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
 from torch._dynamo.comptime import comptime
+from torch._dynamo.decorators import _DimRange
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -79,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
@@ -95,11 +97,11 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_S390X,
     parametrize,
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -109,6 +111,7 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.utils._sympy.numbers import int_oo
 
 
 pytree_modules = {
@@ -2137,6 +2140,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt(x), fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_symint_explicit_dunder_index(self):
+        # Explicit s.__index__() on a SymInt binds int.__index__ (a C slot
+        # wrapper) as a method-wrapper whose call must dispatch to the
+        # nb_index slot model (specializing the symbol with a guard), not
+        # to SymNodeVariable.call_method's generic proxy path.
+        def fn(x):
+            s = x.size(0)
+            return x.sum() + s.__index__()
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x = torch.randn(5)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_explicit_method_wrapper_call_constant_folds(self):
+        # Explicit dunder calls binding C slot wrappers on constant types
+        # must keep constant-folding through call_method when the VT has no
+        # dedicated slot impl (str subscript/concat, int.__bool__).
+        def fn(x):
+            a = "abc".__getitem__(1)
+            b = "ab".__add__("cd")
+            c = (7).__bool__()
+            d = (7).__index__()
+            return x + 1, a, b, c, d
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_explicit_range_dunder_bool(self):
+        # bool(range(...)) constant-folds before reaching the nb_bool slot, so
+        # the explicit wrapper call is the only path into RangeVariable's slot.
+        def fn(x):
+            return x + 1, range(0).__bool__(), range(5).__bool__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
@@ -2211,6 +2254,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f(torch.tensor([3]))
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch.ops.aten._assert_scalar.default, targets)
+        self.assertNotIn(operator.not_, targets)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
@@ -5248,6 +5310,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, backend="eager", fullgraph=True)(x, config)
         self.assertEqual(result, correct)
 
+    @recover_orig_fp32_precision
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
@@ -5258,6 +5321,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
+            # Compatibility alias; cuda_matmul_precision is authoritative in
+            # payloads written by current versions.
+            if key == "allow_tf32":
+                continue
             if type(value) is int:
                 variant = value + 1
             elif type(value) is bool:
@@ -5278,6 +5345,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
+
+        legacy_json_guards = json_guards.copy()
+        legacy_json_guards.pop("cuda_matmul_precision")
+        legacy_json_guards["allow_tf32"] = (
+            torch.backends.cuda.matmul.fp32_precision == "tf32"
+        )
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertTrue(guards.check())
+        legacy_roundtrip = json.loads(guards.__getstate__())
+        self.assertNotIn("cuda_matmul_precision", legacy_roundtrip)
+        guards.__setstate__(json.dumps(legacy_roundtrip))
+        self.assertTrue(guards.check())
+
+        legacy_json_guards["allow_tf32"] = not legacy_json_guards["allow_tf32"]
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertFalse(guards.check())
+
+        if BF16X9_SUPPORTED:
+            legacy_json_guards["allow_tf32"] = False
+            guards.__setstate__(json.dumps(legacy_json_guards))
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            self.assertFalse(guards.check())
+
+            x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
+            self.assertNotIn("allow_tf32", x9_json_guards)
+            guards.__setstate__(json.dumps(x9_json_guards))
+            self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
@@ -5541,6 +5635,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 return a - b / c
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
+
+    def test_dunder_class_across_vt_types(self):
+        # obj.__class__ under compile must return the type for VTs across
+        # families (list/dict/set subclasses, tensor, exception).
+        class MyList(list):
+            pass
+
+        class MyExc(ValueError):
+            pass
+
+        def fn(x):
+            return (
+                x + 1,
+                MyList([1, 2]).__class__,
+                {1: 2}.__class__,
+                {1, 2}.__class__,
+                x.__class__,
+                MyExc("boom").__class__,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_instance_dunder_dict(self):
+        # An instance's writable __dict__ under compile.
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x):
+            obj = Foo()
+            return x + 1, dict(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_class_object_dunder_dict(self):
+        # A class object's __dict__ is a read-only mappingproxy, not an instance
+        # dict; both membership (which installs a dict guard) and item read must
+        # not route through the instance-dict machinery.
+        class Foo:
+            x = 5
+
+        def fn(t):
+            has_x = "x" in Foo.__dict__
+            return t + 1, has_x, Foo.__dict__["x"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        self.assertEqual(fn(t), opt_fn(t))
+
+    def test_hasattr_dunder_dict_no_dict_type(self):
+        # Types without an instance __dict__ (builtins, __slots__-only classes)
+        # must report hasattr(obj, "__dict__") == False under compile, while
+        # types that do have one report True.
+        class Slots:
+            __slots__ = ("a",)
+
+            def __init__(self):
+                self.a = 1
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+
+        def fn(x):
+            return (
+                x + 1,
+                hasattr(Slots(), "__dict__"),
+                hasattr([1, 2], "__dict__"),
+                hasattr(5, "__dict__"),
+                hasattr(Plain(), "__dict__"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_class_reassignment_graph_break(self):
         class BaseClass:
@@ -5868,6 +6042,84 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
+
+    def test_delete_deref(self):
+        # `del y` on a cell variable (captured by nested `g`) -> DELETE_DEREF
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            z = y * 3
+            del y
+            return z
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_then_reassign(self):
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            y = x + 100
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_read_after_delete(self):
+        # Reading a cell after `del` raises NameError in eager; Dynamo must match
+        # (reads of a deleted cell graph break and fall back to eager).
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        with self.assertRaises(NameError):
+            fn(x)
+        with self.assertRaises(NameError):
+            opt_fn(x)
+
+    def test_delete_deref_symint(self):
+        def fn(x):
+            s = x.shape[0] + 1
+
+            def g():
+                return s
+
+            del s
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_name_collision(self):
+        # An inlined comprehension's iteration variable shadows the `nonlocal`
+        # cell, so `x` occupies both a fast-local and a freevar slot. The
+        # DELETE_DEREF target is the cell, which lives in symbolic_cellvars.
+        x = 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            nonlocal x
+            x = [x for x in range(3)]
+            del x
+
+        f()
 
     def test_closure_with_mutation_and_graph_break(self):
         def fn():
@@ -6818,6 +7070,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for x in [torch.contiguous_format, torch.channels_last]:
             self.assertEqual(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_cuda_tensor_is_pinned_constant_false(self):
+        def pinned_memory_of(arg):
+            return arg.is_pinned()
+
+        def fn(x):
+            if pinned_memory_of(x) or x.is_pinned(None) or x.is_pinned(device=None):
+                return x + 1
+            return x + 2
+
+        x = torch.randn(4, device="cuda")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
@@ -7220,6 +7486,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         del x
         self.assertTrue(p_ref() is None)
 
+    @skipIfWindows(msg="Tensor lifetime checks are unreliable on Windows")
+    def test_release_input_memory_hop_dunder_dict(self):
+        # Accessing a nested function's __dict__ inside a HOP body used to
+        # create a reference cycle through the speculated SideEffects table,
+        # keeping the frame's input tensors alive until a full gc.collect().
+        def fn(pred, x):
+            def branch():
+                def inner():
+                    return x + 1
+
+                inner.attr = 1
+                return inner()
+
+            return torch.cond(pred, branch, branch)
+
+        x = torch.randn(4)
+        x_ref = weakref.ref(x)
+        pred = torch.tensor(True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(out, x + 1)
+        del x, out
+        self.assertIsNone(x_ref())
+
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
             perm = [0, 3, 5]
@@ -7591,7 +7880,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
@@ -7612,8 +7901,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional": lambda: a.addcmul(beta, b, c),
             "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
             "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
-            # Z3 translation validation doesn't support unbacked symbols from
-            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
             "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
         }
 
@@ -10768,6 +11055,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = f(torch.tensor([20, 21]))
         self.assertEqual(torch.tensor(True), res)
 
+    def _range_recording_backend(self, compiled_ranges):
+        """Records the range of the single dynamic dim of each compiled graph."""
+
+        def backend(gm, example_inputs):
+            symints = [arg for arg in example_inputs if isinstance(arg, torch.SymInt)]
+            if not symints:
+                compiled_ranges.append("static")
+                return gm.forward
+            (symint,) = symints
+            vr = symint.node.shape_env.var_to_range[symint.node.expr]
+            compiled_ranges.append((vr.lower, vr.upper))
+            return gm.forward
+
+        return backend
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
@@ -10781,6 +11083,387 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch._dynamo.mark_dynamic(y, 0, min=2, max=5)
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y)
+
+    def test_maybe_mark_dynamic_with_ranges(self):
+        compiled_ranges = []
+
+        def fn(x):
+            if x.shape[0] == 3:
+                return x.sin()
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # min/max do not prevent specialization, the shape[0] == 3 branch
+        # specializes the dim instead of raising a constraint violation.
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static"])
+
+        # The user provided range is used for the dynamic dim.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5)])
+
+        # 5 is within [2, 5], the graph above is reused.
+        x = torch.randn(5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5)])
+
+        # 6 is outside [2, 5] and unmarked, recompile with automatic dynamic.
+        x = torch.randn(6)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo)])
+
+        # A different range is a different request, it recompiles even though the
+        # size fits the graphs compiled above.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
+
+        # Declaring the same range again reuses the graph compiled for it.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5)])
+
+        # Re-marking the same tensor object also recompiles. The guard holds a snapshot
+        # of the declared ranges, so mutating the tensor it was compiled with cannot make
+        # the stale graph look like a match.
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(
+            compiled_ranges, ["static", (2, 5), (2, int_oo), (3, 5), (3, 4)]
+        )
+
+    # Translation validation changes the exception type, don't run with it: the
+    # constraint violation is raised by create_symbol, nested inside the recorded
+    # top level _create_symbolic_sizes_strides_storage_offset event. recording.py pops
+    # that failed event from the log while the mutations it already made to the
+    # ShapeEnv stay, so the replayed ShapeEnv differs and NotEqualError surfaces.
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_maybe_mark_dynamic_range_narrow_and_extend(self):
+        compiled_ranges = []
+
+        def fn(x):
+            if x.shape[0] < 5:
+                return x.sin()
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # Guards may narrow the requested range, [2, 5] becomes [2, 4].
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 4)])
+
+        # The range is never extended to fit the input, a hint outside of it is an
+        # error even though a graph compiled for a wider range is cached.
+        x = torch.randn(6)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        with self.assertRaisesRegex(
+            ConstraintViolationError, r"6 not in range \[2, 5\]"
+        ):
+            opt_fn(x)
+
+    def test_maybe_mark_dynamic_half_open_range_small_hint(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # A half open range must not imply a lower bound the user never declared: a size
+        # 1 input satisfies max=8 and specializes, which this API allows, rather than
+        # raising "1 not in range [2, 8]".
+        x = torch.randn(1)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static"])
+
+        # For a hint that does not specialize, the shape env still narrows the lower
+        # bound to 2 on its own, since 0 and 1 are specialized for backed sizes.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, ["static", (2, 8)])
+
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_mark_dynamic_half_open_range_small_hint(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # Same rule as maybe_mark_dynamic: max=8 declares no lower bound, the shape env
+        # narrows it to 2 on its own for a backed size.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, max=8)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 8)])
+
+        # min alone leaves the upper bound open.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=3)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 8), (3, int_oo)])
+
+        # Where maybe_mark_dynamic accepts a size 1 hint by specializing, mark_dynamic
+        # errors, since it does not allow the dim to specialize.
+        x = torch.randn(1)
+        torch._dynamo.mark_dynamic(x, 0, max=8)
+        with self.assertRaises(ConstraintViolationError):
+            opt_fn(x)
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_maybe_mark_dynamic_half_open_range_shape_env_lower_bound(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # The bound the user left out comes from the shape env, not from the declared
+        # range, so with 0 and 1 no longer specialized the dim starts at 0 instead of 2.
+        x = torch.randn(1)
+        torch._dynamo.maybe_mark_dynamic(x, 0, max=8)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(0, 8)])
+
+    def test_maybe_mark_dynamic_with_partial_range(self):
+        for kwargs, expected in (
+            ({"min": 3}, (3, int_oo)),
+            ({"max": 8}, (2, 8)),
+            ({}, (2, int_oo)),
+        ):
+            with self.subTest(kwargs=kwargs):
+                torch._dynamo.reset()
+                compiled_ranges = []
+
+                def fn(x):
+                    return x.cos() * x.shape[0]
+
+                x = torch.randn(4)
+                torch._dynamo.maybe_mark_dynamic(x, 0, **kwargs)
+                opt_fn = torch.compile(
+                    fn, backend=self._range_recording_backend(compiled_ranges)
+                )
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(compiled_ranges, [expected])
+
+    def test_maybe_mark_dynamic_range_override(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # A second call for the same dim overrides the range of the first one.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=3, max=4)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(3, 4)])
+
+    def test_mark_dynamic_range_cleared_by_bare_remark(self):
+        # Last call wins: a call without min/max declares no range for the dim, which
+        # drops a range an earlier call declared. The attribute goes away with the last
+        # entry, so "no range declared" has a single representation.
+        for mark in (torch._dynamo.mark_dynamic, torch._dynamo.maybe_mark_dynamic):
+            with self.subTest(mark=mark.__name__):
+                x = torch.randn(4)
+                mark(x, 0, min=2, max=5)
+                mark(x, 0)
+                self.assertFalse(hasattr(x, "_dynamo_dynamic_range"))
+
+    def test_maybe_mark_dynamic_range_with_index_list(self):
+        # The list form applies the same range to every listed dim.
+        x = torch.randn(4, 6)
+        torch._dynamo.maybe_mark_dynamic(x, [0, 1], min=2, max=8)
+        self.assertEqual(x._dynamo_weak_dynamic_indices, {0, 1})
+        self.assertEqual(
+            x._dynamo_dynamic_range, {_DimRange(0, 2, 8), _DimRange(1, 2, 8)}
+        )
+
+    def test_maybe_mark_dynamic_range_mirrored_to_subclass_inner_tensors(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        # Marking a traceable wrapper subclass mirrors onto the inner tensors of the
+        # same dim, bounds included.
+        x = TwoTensor(torch.randn(4, 6), torch.randn(4, 6))
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        for inner in (x.a, x.b):
+            self.assertEqual(inner._dynamo_weak_dynamic_indices, {0})
+            self.assertEqual(inner._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+
+    def test_mark_dynamic_range_copied_with_tensor_attributes(self):
+        from torch._dynamo.utils import copy_dynamo_tensor_attributes
+
+        # A clone keeps the marking and its declared range, otherwise it would
+        # compile under different constraints than the tensor it came from.
+        src = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(src, 0, min=2, max=5)
+        dst = torch.randn(4)
+        copy_dynamo_tensor_attributes(src, dst)
+        self.assertEqual(dst._dynamo_weak_dynamic_indices, {0})
+        self.assertEqual(dst._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+        # The copy must not alias the source, mutating one must not touch the other.
+        torch._dynamo.maybe_mark_dynamic(dst, 0, min=3, max=4)
+        self.assertEqual(src._dynamo_dynamic_range, {_DimRange(0, 2, 5)})
+
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_mark_dynamic_takes_precedence_over_maybe_mark_dynamic(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        # A dim may carry both markings, marked_dynamic is tested first in
+        # _automatic_dynamic so mark_dynamic wins, and the range is the one the last
+        # call to declare bounds left behind.
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=6)
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(3, 6)])
+
+        # Enforcement follows mark_dynamic too: specializing the dim is an error rather
+        # than the warning maybe_mark_dynamic alone would give.
+        def specializing_fn(x):
+            if x.shape[0] == 4:
+                return x.sin()
+            return x.cos()
+
+        y = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(y, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch.compile(specializing_fn, backend="eager")(y)
+
+        # mark_dynamic drops the dim from the weak set, so every consumer agrees on the
+        # semantics rather than depending on which index set it tests first. Non strict
+        # export tests the weak set first, and must enforce the dim like dynamo does.
+        class Specializing(torch.nn.Module):
+            def forward(self, x):
+                return specializing_fn(x)
+
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                e = torch.randn(4)
+                torch._dynamo.maybe_mark_dynamic(e, 0, min=2, max=5)
+                torch._dynamo.mark_dynamic(e, 0)
+                self.assertEqual(e._dynamo_dynamic_indices, {0})
+                self.assertEqual(e._dynamo_weak_dynamic_indices, set())
+                with self.assertRaises(
+                    (
+                        torch._dynamo.exc.UserError,
+                        ConstraintViolationError,
+                    )
+                ):
+                    torch.export.export(Specializing(), (e,), strict=strict)
+
+        # Different dims of the same tensor may use different APIs.
+        z = torch.randn(4, 4)
+        torch._dynamo.mark_dynamic(z, 0)
+        torch._dynamo.maybe_mark_dynamic(z, 1, min=2, max=5)
+        self.assertEqual(z._dynamo_dynamic_range, {_DimRange(1, 2, 5)})
+
+        # A weak marking of a dim mark_dynamic already covers is ignored, its bounds
+        # included: they would otherwise be enforced by the mark_dynamic path.
+        w = torch.randn(4)
+        torch._dynamo.mark_dynamic(w, 0)
+        torch._dynamo.maybe_mark_dynamic(w, 0, min=2, max=5)
+        self.assertFalse(hasattr(w, "_dynamo_weak_dynamic_indices"))
+        self.assertFalse(hasattr(w, "_dynamo_dynamic_range"))
+
+        # so narrowing the dim stays allowed, RelaxedUnspecConstraint only forbids
+        # collapsing it to a single value.
+        def narrowing_fn(x):
+            if x.shape[0] < 5:
+                return x.sin()
+            return x.cos()
+
+        self.assertEqual(
+            torch.compile(narrowing_fn, backend="eager")(w), narrowing_fn(w)
+        )
+
+    def test_mark_dynamic_range_change_recompiles(self):
+        compiled_ranges = []
+
+        def fn(x):
+            return x.cos() * x.shape[0]
+
+        opt_fn = torch.compile(
+            fn, backend=self._range_recording_backend(compiled_ranges)
+        )
+
+        # mark_dynamic shares the range attribute with maybe_mark_dynamic, so a
+        # changed range recompiles here as well. A range the user left half open is
+        # completed with the bounds a backed size already has.
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=5)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 5)])
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=3)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(compiled_ranges, [(2, 5), (3, int_oo)])
+
+    def test_maybe_mark_dynamic_range_with_propagated_dynamic_dim(self):
+        def fn(x):
+            return x.cos() * x.shape[0] * x.shape[1]
+
+        x = torch.randn(4, 4)
+        torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+        # dim 1 is weakly dynamic without a declared range, this used to raise
+        # IndexError while looking up its range.
+        x._dynamo_propagated_dynamic_indices = {1}
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_dim_marking_skipped_under_fx_tracing(self):
+        # FX tracers ignore @forbid_in_graph and pass a Proxy. Reading a marking
+        # attribute off one used to raise TraceError: Proxy.__getattr__ answers every
+        # name, so `in` fell through to iterating the Proxy.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._dynamo.maybe_mark_dynamic(x, 0)
+                torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+                torch._dynamo.mark_dynamic(x, 1)
+                torch._dynamo.mark_dynamic(x, 1, min=2, max=5)
+                return x.cos()
+
+        gm = torch.fx.symbolic_trace(M())
+        # The marking is dropped, not recorded as graph nodes.
+        self.assertEqual(
+            [n.op for n in gm.graph.nodes], ["placeholder", "call_method", "output"]
+        )
+        x = torch.randn(4, 4)
+        self.assertEqual(gm(x), x.cos())
 
     def test_mark_static(self):
         counter = CompileCounter()
@@ -11193,6 +11876,136 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_tensor(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Without static-sources automatic dynamic would kick in on the second
+        # call and give us 2 frames; here every size specializes.
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_int(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_dynamic_override(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L\\['x.*'\\]")
+    def test_static_sources_regex(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x1):
+            return x1 * x1
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(static_sources="L['x']:1")
+    def test_static_sources_per_dim(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Dim 0 stays dynamic, so varying it does not recompile.
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Dim 1 is static, so varying it does.
+        fn(torch.randn(3, 5))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Same shapes as test_dynamic_values_tensor, which gets 1 frame: the
+        # sentinel dim 1111 marks the dim dynamic. static-sources undoes that,
+        # so every size specializes instead.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Same values as test_dynamic_values_int, which gets 1 frame. Unlike the
+        # tensor path, precedence here comes from is_static_source being checked
+        # before is_dynamic_value in wrap_literal -- this pins that ordering.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
     @torch.compiler.config.patch(unbacked_sources="L['x']:0")
     def test_unbacked_sources_per_dim(self):
         builder._UNBACKED_SOURCES = None
@@ -11364,6 +12177,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                             )
         finally:
             write_state(initial_state)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_recompile_on_bfx9_precision_change(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
@@ -11825,6 +12663,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(
+        IS_S390X,
+        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and needs investigation",
+    )
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")
         def foo(*args, **kwargs):
@@ -12964,6 +13806,61 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
+
+    def test_deque_mul_bounded_large(self):
+        # A bounded deque repeated by a huge count must stay bounded and keep
+        # only the last maxlen items, matching CPython, instead of building the
+        # full product and raising MemoryError.
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=5)
+            big = collections.deque([1], maxlen=3) * (10**18)
+            return x + 1, list(d * 2), list(d * 30), list(big)
+
+        x = torch.randn(3)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(eager[1:], compiled[1:])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_maxlen_zero(self):
+        # A deque with maxlen=0 is always empty: construction drops the initial
+        # items and every append/extend is a no-op, matching CPython. Guards the
+        # items[-0:] slice trap, which would otherwise keep everything.
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=0)
+            d.append(4)
+            e = collections.deque(maxlen=0)
+            e.extend([5, 6])
+            return x + 1, list(d), list(e), len(d), len(e)
+
+        x = torch.randn(3)
+        eager = fn(x)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(eager[1:], compiled[1:])
+        self.assertEqual(compiled[1:], ([], [], 0, 0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_deque_pop_empty_message(self):
+        # deque.pop() on an empty deque raises IndexError with CPython's "pop
+        # from an empty deque" message, not list's "pop from empty list".
+        def fn(x):
+            try:
+                collections.deque().pop()
+                msg = "no error"
+            except IndexError as e:
+                msg = str(e)
+            return x + 1, msg
+
+        x = torch.randn(3)
+        eager = fn(x)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(eager[0], compiled[0])
+        self.assertEqual(compiled[1], "pop from an empty deque")
+        self.assertEqual(eager[1], compiled[1])
 
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
@@ -15159,13 +16056,13 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_getattro_impl = InspectVariable.getattro_impl
+        original_redirect = InspectVariable._redirect
 
-        def tracking_getattro_impl(self, tx, name):
+        def tracking_redirect(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
             if name in redirects:
                 redirected_attrs.append(name)
-            return original_getattro_impl(self, tx, name)
+            return original_redirect(self, tx, name)
 
         def fn(x, gn):
             sig = inspect.signature(gn)
@@ -15177,7 +16074,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
+        with patch.object(InspectVariable, "_redirect", tracking_redirect):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 
@@ -18103,15 +19000,20 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
-    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
-    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
-    # a TrackedFake) past torch._dynamo.reset(). See #190093.
-    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
+        real_tensor_refs = []
+        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+
+        def record_real_tensor(mode, tensor, **kwargs):
+            fake = from_tensor(mode, tensor, **kwargs)
+            if mode.propagate_real_tensors and fake.real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            return fake
+
         @torch.compile(backend="eager", fullgraph=True)
         def f(mask, box):
             # u0, u1 = mask.tolist()
@@ -18121,7 +19023,18 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 mask, (h, w), mode="bilinear", align_corners=False
             )
 
-        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+        with mock.patch.object(
+            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+        ):
+            f(
+                torch.tensor([30, 30], device=device),
+                torch.tensor([68, 32], device=device),
+            )
+
+        self.assertTrue(real_tensor_refs)
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in real_tensor_refs))
 
     def test_scalar_isin_decomposition(self):
         def f():

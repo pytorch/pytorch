@@ -2,15 +2,15 @@ add_loop_eager,compile_time_instruction_count,3862000000,0.1
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5468000000,0.1
+add_loop_eager_dynamic,compile_time_instruction_count,4927000000,0.1
 
 
 
-add_loop_inductor,compile_time_instruction_count,32830000000,0.1
+add_loop_inductor,compile_time_instruction_count,28860000000,0.1
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,46210000000,0.1
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,33650000000,0.1
 
 
 
@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11730000
 
 
 
-update_hint_regression,compile_time_instruction_count,2074000000,0.1
+update_hint_regression,compile_time_instruction_count,1855000000,0.1
 
 
 
@@ -78,7 +78,7 @@ mm_loop_inductor_gpu,compile_time_instruction_count,5202000000,0.1
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,10670000000,0.1
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8262000000,0.1
 
 
 
@@ -131,3 +131,7 @@ nn_module_guard_eval_dynamic,instruction_count,104100,0.1
 
 
 autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
+
+
+
+runtime_overhead_eager_cpu,instruction_count,193900,0.1

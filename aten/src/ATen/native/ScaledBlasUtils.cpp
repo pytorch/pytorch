@@ -9,12 +9,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/native/Resize.h>
-#include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/ceil_div.h>
@@ -24,26 +19,12 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_addmm_activation_native.h>
-#include <ATen/ops/_efficientzerotensor.h>
-#include <ATen/ops/_scaled_mm_native.h>
-#include <ATen/ops/_unsafe_view_native.h>
-#include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/copy_native.h>
-#include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_strided.h>
-#include <ATen/ops/gelu.h>
-#include <ATen/ops/max.h>
 #include <ATen/ops/mm_native.h>
-#include <ATen/ops/mul.h>
-#include <ATen/ops/relu.h>
-#include <ATen/ops/ones.h>
-#include <ATen/ops/scalar_tensor_native.h>
-#include <ATen/ops/vdot_native.h>
 #endif
 
 using at::blas::ScalingType;

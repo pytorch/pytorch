@@ -95,6 +95,42 @@ kernel void linspace_integral_strided(
   out[off] = integral_linspace_value<T>(index, params, steps);
 }
 
+// Same halfway split as linspace_value (exact endpoints), then base **
+// exponent.
+template <typename I>
+inline float logspace_value(I i, constant array<float, 4>& v, I steps) {
+  const I halfway = steps / 2;
+  const float exponent = i < halfway
+      ? v[0] + v[1] * static_cast<float>(i)
+      : v[2] - v[1] * static_cast<float>(steps - i - 1);
+  return precise::pow(v[3], exponent);
+}
+
+template <typename T, typename I>
+kernel void logspace(
+    device T* out [[buffer(0)]],
+    constant array<float, 4>& v [[buffer(1)]],
+    constant array<I, 2>& p [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  const I i = static_cast<I>(index);
+  out[i * p[1]] = c10::metal::cast_to<T>(logspace_value(i, v, p[0]));
+}
+
+template <typename T>
+kernel void logspace_strided(
+    device T* out [[buffer(0)]],
+    constant array<float, 4>& v [[buffer(1)]],
+    constant uint& steps [[buffer(2)]],
+    constant int& ndim [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* strides [[buffer(5)]],
+    uint index [[thread_position_in_grid]]) {
+  float val = logspace_value(index, v, steps);
+  const long off =
+      c10::metal::offset_from_thread_index(index, sizes, strides, ndim);
+  out[off] = c10::metal::cast_to<T>(val);
+}
+
 template <typename T, typename C, typename I>
 kernel void arange(
     device T* out [[buffer(0)]],
@@ -165,6 +201,29 @@ kernel void arange_strided(
       constant long* strides [[buffer(5)]],                               \
       uint index [[thread_position_in_grid]]);
 
+#define REGISTER_LOGSPACE_OP(DTYPE)                              \
+  template [[host_name("logspace_" #DTYPE "_i32")]] kernel void  \
+  logspace<DTYPE, int>(                                          \
+      device DTYPE * out [[buffer(0)]],                          \
+      constant array<float, 4> & v [[buffer(1)]],                \
+      constant array<int, 2> & p [[buffer(2)]],                  \
+      uint index [[thread_position_in_grid]]);                   \
+  template [[host_name("logspace_" #DTYPE "_i64")]] kernel void  \
+  logspace<DTYPE, long>(                                         \
+      device DTYPE * out [[buffer(0)]],                          \
+      constant array<float, 4> & v [[buffer(1)]],                \
+      constant array<long, 2> & p [[buffer(2)]],                 \
+      uint index [[thread_position_in_grid]]);                   \
+  template [[host_name("logspace_strided_" #DTYPE)]] kernel void \
+  logspace_strided<DTYPE>(                                       \
+      device DTYPE * out [[buffer(0)]],                          \
+      constant array<float, 4> & v [[buffer(1)]],                \
+      constant uint & steps [[buffer(2)]],                       \
+      constant int& ndim [[buffer(3)]],                          \
+      constant long* sizes [[buffer(4)]],                        \
+      constant long* strides [[buffer(5)]],                      \
+      uint index [[thread_position_in_grid]]);
+
 #define REGISTER_ARANGE_OP(DTYPE, CTYPE)                       \
   template [[host_name("arange_" #DTYPE "_i32")]] kernel void  \
   arange<DTYPE, CTYPE, int>(                                   \
@@ -200,6 +259,16 @@ REGISTER_LINSPACE_OP(int);
 
 REGISTER_INTEGRAL_LINSPACE_OP(long);
 REGISTER_INTEGRAL_LINSPACE_OP(int);
+
+REGISTER_LOGSPACE_OP(float);
+REGISTER_LOGSPACE_OP(half);
+REGISTER_LOGSPACE_OP(bfloat);
+REGISTER_LOGSPACE_OP(long);
+REGISTER_LOGSPACE_OP(int);
+REGISTER_LOGSPACE_OP(short);
+REGISTER_LOGSPACE_OP(char);
+REGISTER_LOGSPACE_OP(uchar);
+REGISTER_LOGSPACE_OP(bool);
 
 REGISTER_ARANGE_OP(float, float);
 REGISTER_ARANGE_OP(half, float);

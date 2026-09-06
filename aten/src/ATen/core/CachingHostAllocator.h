@@ -18,7 +18,6 @@
 #include <mutex>
 #include <shared_mutex>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 using c10::CachingAllocator::Stat;
@@ -694,13 +693,22 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size, BlockPool& pool) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-    if (!pool.free_list_[index].list_.empty()) {
-      B* block = pool.free_list_[index].list_.back();
-      pool.free_list_[index].list_.pop_back();
-      block->allocated_.store(true, std::memory_order_relaxed);
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
-      return block;
+    // A bucket normally holds only exact-power-of-two blocks, since allocate
+    // rounds every request up to a power of two. But requests above
+    // pinned_max_round_threshold skip rounding while still being cached, so a
+    // single Log2_64_Ceil bucket can hold blocks of differing (unrounded)
+    // sizes. Returning a block smaller than the request would overflow the
+    // buffer, so scan for one that is large enough.
+    auto& list = pool.free_list_[index].list_;
+    for (auto it = list.rbegin(); it != list.rend(); ++it) {
+      B* block = *it;
+      if (block->size_ >= size) {
+        list.erase(std::next(it).base());
+        block->allocated_.store(true, std::memory_order_relaxed);
+        stats_.active_bucket_stats[index].increase(1);
+        stats_.active_bytes_bucket_stats[index].increase(block->size_);
+        return block;
+      }
     }
     return nullptr;
   }
@@ -1320,25 +1328,25 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual void reset_peak_stats() = 0;
 
   virtual void begin_allocate_to_pool(
-      c10::MempoolId_t pool_id,
-      std::function<bool(c10::Stream)> filter) {
+      c10::MempoolId_t /*pool_id*/,
+      std::function<bool(c10::Stream)> /*filter*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
   }
 
-  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+  virtual void end_allocate_to_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
   }
 
-  virtual void release_pool(c10::MempoolId_t pool_id) {
+  virtual void release_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
   }
 
   virtual void record_history(
-      bool enabled,
-      c10::CachingDeviceAllocator::CreateContextFn context_recorder,
-      size_t max_entries,
-      c10::CachingDeviceAllocator::RecordContext when,
-      bool clearHistory) {}
+      bool /*enabled*/,
+      c10::CachingDeviceAllocator::CreateContextFn /*context_recorder*/,
+      size_t /*max_entries*/,
+      c10::CachingDeviceAllocator::RecordContext /*when*/,
+      bool /*clearHistory*/) {}
 
   virtual bool is_history_enabled() const {
     return false;
@@ -1483,4 +1491,3 @@ struct HostAllocatorRegistry {
   }
 
 } // namespace at
-C10_DIAGNOSTIC_POP()

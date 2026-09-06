@@ -295,6 +295,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "matrix_exp",
     "linalg_matrix_exp",
     "linalg_matrix_sqrth",
+    "linalg_polar",
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
@@ -450,9 +451,10 @@ if (${tensor_name}_storage_saved.has_value() &&
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const Tensor& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_storage() ? ::std::optional<Storage>(tensor.storage()) : ::std::nullopt);
 """
 )
@@ -468,9 +470,10 @@ for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const ::std::optional<Tensor>& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_value() && tensor->has_storage() ? ::std::optional<Storage>(tensor->storage()) : ::std::nullopt);
 """
 )
@@ -732,7 +735,7 @@ LOOP_OVER_VECTOR_OF_GRAD_FNS = CodeTemplate(
 if (!grad_fns.empty()) {
     ${preamble}
     for (const auto& i : c10::irange(grad_fns.size())) {
-        auto grad_fn = grad_fns[i];
+        const auto& grad_fn = grad_fns[i];
         if (grad_fn != nullptr) {
             ${statements}
         }

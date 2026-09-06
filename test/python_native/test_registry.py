@@ -473,6 +473,71 @@ class TestRegistryRuntime(TestCase):
 
         self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
 
+    def test_folded_dynamo_flag_on_real_tensors_does_not_recurse(self):
+        """A residual eager frame carrying Dynamo's folded
+        is_dynamo_compiling()==True must NOT divert to the aten overload:
+        that call re-enters the dispatcher from the top, back into this
+        router (RecursionError). Real tensors always take eager dispatch.
+        """
+        cond_calls = [0]
+
+        def cond(*a, **k):
+            # Reached only from the re-entrant call the shortcut triggers, so
+            # the guard must be held here: this also fails if the shortcut is
+            # removed and cond is consulted directly.
+            self.assertTrue(getattr(self.registry._router_active, "on", False))
+            cond_calls[0] += 1
+            return False
+
+        def impl(a, b):
+            raise AssertionError("impl should not be called when cond=False")
+
+        self.registry.register_op_override(
+            "test_dsl", "aten", "mul.Tensor", "CPU", cond, impl
+        )
+        self._install("mul.Tensor", "CPU")
+
+        a = torch.tensor([2.0, 3.0])
+        b = torch.tensor([4.0, 5.0])
+        # Dynamo folds the call to a True constant while tracing; a frame
+        # carrying that constant can still run eagerly. patch() reproduces
+        # that state without needing a compiled residual.
+        with patch.object(torch.compiler, "is_dynamo_compiling", return_value=True):
+            out = torch.ops.aten.mul.Tensor(a, b)
+
+        self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
+        # Eager dispatch ran (cond consulted) exactly once: no runaway re-entry.
+        self.assertEqual(cond_calls[0], 1)
+
+    def test_dynamo_shortcut_still_fires_for_outer_call(self):
+        """The re-entrancy guard must not disable the shortcut itself: an
+        outer call with the folded flag still diverts to aten (that is what
+        keeps trace-time graph breaks away)."""
+        cond_calls = [0]
+
+        def cond(*a, **k):
+            cond_calls[0] += 1
+            return False
+
+        def impl(a, b):
+            raise AssertionError("impl should not be called when cond=False")
+
+        self.registry.register_op_override(
+            "test_dsl", "aten", "mul.Tensor", "CPU", cond, impl
+        )
+        self._install("mul.Tensor", "CPU")
+
+        a = torch.tensor([2.0, 3.0])
+        b = torch.tensor([4.0, 5.0])
+        with patch.object(torch.compiler, "is_dynamo_compiling", return_value=True):
+            out = torch.ops.aten.mul.Tensor(a, b)
+
+        self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
+        # Outer call diverted to aten; the re-entrant call it triggers takes
+        # eager dispatch, consulting cond exactly once (and not recursing).
+        self.assertEqual(cond_calls[0], 1)
+        self.assertFalse(getattr(self.registry._router_active, "on", False))
+
     def test_dynamo_shortcut_preserves_cow_fallback(self):
         """COW inputs must keep using the eager fallback path under Dynamo."""
         sentinel_called = [False]

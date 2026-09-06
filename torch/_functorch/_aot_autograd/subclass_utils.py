@@ -12,8 +12,17 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
-from torch._library.opaque_object import is_opaque_symbolic_type
+from torch._guards import detect_fake_mode
+from torch._library.fake_class_registry import (
+    maybe_to_fake_obj,
+    maybe_unwrap_fake_script_object,
+)
+from torch._library.opaque_object import (
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
+    should_hoist,
+)
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
@@ -309,13 +318,16 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
+        # Exception: non-hoisted constant-type opaques are inlined as literals
+        # by the tracing layers that produce the FX graph (VariableBuilder._wrap,
+        # track_tensor_tree's wrap_with_proxy, TracerBase.create_arg), so they
+        # must stay real here too -- fakeifying would route them through
+        # torchbind_constants and return a FakeScriptObject at runtime.
         if isinstance(v, CustomClassBase):
-            from torch._guards import detect_fake_mode
-            from torch._library.fake_class_registry import maybe_to_fake_obj
-            from torch._library.opaque_object import is_custom_class
-
             fake_mode = detect_fake_mode()
             if fake_mode is not None and is_custom_class(type(v)):
+                if is_opaque_constant_type(type(v)) and not should_hoist(type(v)):
+                    return v
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 

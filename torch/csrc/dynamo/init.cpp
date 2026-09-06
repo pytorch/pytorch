@@ -437,34 +437,29 @@ void _register_functions(PyObject* mod) {
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
-  if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      dynamo != nullptr && PyModule_AddObject(torch, "_dynamo", dynamo) == 0);
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
-  if (eval_frame == nullptr ||
-      PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      eval_frame != nullptr &&
+      PyModule_AddObject(dynamo, "eval_frame", eval_frame) == 0);
 
   PyObject* utils = torch_c_dynamo_utils_init();
-  if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      utils != nullptr && PyModule_AddObject(dynamo, "utils", utils) == 0);
 
   PyObject* guards = torch_c_dynamo_guards_init();
-  if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      guards != nullptr && PyModule_AddObject(dynamo, "guards", guards) == 0);
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
-  if (compiled_autograd == nullptr ||
-      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      compiled_autograd != nullptr &&
+      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) == 0);
 
   auto m = py::handle(eval_frame).cast<py::module>();
 

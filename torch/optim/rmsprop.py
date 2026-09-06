@@ -12,6 +12,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
@@ -498,10 +499,6 @@ def rmsprop(
     momentum: float,
     centered: bool,
 ) -> None:
-    r"""Functional API that performs rmsprop algorithm computation.
-
-    See :class:`~torch.optim.RMSProp` for details.
-    """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
     if not torch.compiler.is_compiling() and not all(
@@ -542,3 +539,6 @@ def rmsprop(
         differentiable=differentiable,
         has_complex=has_complex,
     )
+
+
+rmsprop.__doc__ = _functional_api_doc.format(optimizer="RMSprop")
