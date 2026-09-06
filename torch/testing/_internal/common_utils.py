@@ -133,7 +133,7 @@ class HardwareClassification(Enum):
     values are executed.  When the flag is not specified, all test discovery
     and execution paths remain unchanged.
 
-    Currently there are three hardware classification categories:
+    Currently there are five hardware classification categories:
 
     * ``GENERIC`` – tests that exercise shared, device-agnostic logic
       (e.g. Dynamo dispatcher, FX passes, and other framework internals
@@ -149,6 +149,22 @@ class HardwareClassification(Enum):
     * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests tied to a specific device.
       Use sparingly, and only for device-specific behavior.  These replace
       ``@onlyCPU``, ``@onlyCUDA``, and similar decorators
+
+    * ``MULTI_ACCELERATOR`` – multi-device tests that work across
+      accelerator types (e.g. ``ProcessGroup`` tests using
+      ``DistributedTestBase`` with a runtime-determined backend, or
+      backend-agnostic collective API tests). These test classes typically
+      use :class:`~torch.testing._internal.common_distributed.MultiProcessTestCase`
+      rather than
+      :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+      FakePG distributed tests should use ``GENERIC`` instead.
+
+    * ``MULTI_ACCELERATOR_CUDA``, ``MULTI_ACCELERATOR_XPU``,
+      ``MULTI_ACCELERATOR_MPS`` – multi-device tests locked to a specific
+      accelerator (e.g. NCCL collectives, NVLink, and peer-to-peer transfers
+      for CUDA; CCL/oneCCL collectives for XPU; or other backend-specific
+      collective libraries). Use sparingly, and only for backend-specific
+      multi-device behavior.
 
     Usage::
 
@@ -169,6 +185,10 @@ class HardwareClassification(Enum):
     CUDA = "cuda"
     MPS = "mps"
     XPU = "xpu"
+    MULTI_ACCELERATOR = "multi_accelerator"
+    MULTI_ACCELERATOR_CUDA = "multi_accelerator_cuda"
+    MULTI_ACCELERATOR_XPU = "multi_accelerator_xpu"
+    MULTI_ACCELERATOR_MPS = "multi_accelerator_mps"
 
 
 # Set by parse_cmd_line_args() if called
