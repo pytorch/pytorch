@@ -592,7 +592,6 @@ class _InstalledArtifact:
         self._recorded: dict[str, Any] = {}
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
-        self._prepared: Any = None
         # Serve-time compiles survive unload/exit: a job reads this after the
         # scope, when the live inner is already gone.
         self._serve_time_compiles = 0
@@ -622,24 +621,6 @@ class _InstalledArtifact:
                     raise PrecompileError(str(e)) from e
             self._fn = fn
 
-    def _prepare(self, package_blob: str) -> None:
-        """Build what serving needs, at load rather than at the first call."""
-        import base64
-
-        from torch._dynamo.precompile_package import prepare_cache_entry
-
-        # Exactly the resolution _ensure performs, or this prepares a different
-        # entry frame than the install will use.
-        fn = self._entry_factory() if self._fn is None else self._fn
-        try:
-            self._prepared = prepare_cache_entry(
-                fn, pickle.loads(base64.b64decode(package_blob))
-            )
-        except PrecompileError:
-            raise
-        except Exception as e:
-            raise PrecompileError(str(e)) from e
-
     def _ensure(self) -> Any:
         inner = self._inner
         if inner is None:
@@ -659,9 +640,6 @@ class _InstalledArtifact:
                     # DynamoStore) can already hold them, with identical content.
                     # _serve records only absent keys; remember which those were
                     # so unload takes back exactly what this install added.
-                    # Consume the prepared entry first, so a failed serve
-                    # does not reuse it on a later call.
-                    prepared, self._prepared = self._prepared, None
                     with _RECORD_LOCK:
                         present = {
                             k
@@ -669,7 +647,7 @@ class _InstalledArtifact:
                             if PrecompileContext.serialize_artifact_by_key(k)
                             is not None
                         }
-                        self._inner = self._serve(fn, prepared=prepared)
+                        self._inner = self._serve(fn)
                         self._recorded = {
                             k: PrecompileContext.serialize_artifact_by_key(k)
                             for k in self._backend_keys
@@ -701,7 +679,6 @@ class _InstalledArtifact:
         with self._install_lock:
             self._unloaded = True
             inner, self._inner = self._inner, None
-            self._prepared = None
         if inner is not None:
             # Fold the retired install's serve-time count into the running
             # total so serve_time_compiles() survives unload/exit.
@@ -3323,7 +3300,6 @@ def _runnable_from_pair(
             )
         if fn is not None:
             forward._rebind(fn)
-        forward._prepare(cast(str, meta["_PACKAGE"]))
         return PrecompiledCallable(forward)
     if fn is not None:
         raise PrecompileError(
