@@ -2985,6 +2985,11 @@ def to_gpu(obj, type_map=None):
     else:
         return deepcopy(obj)
 
+def maybe_to_accelerator(x: torch.Tensor, is_accelerator: bool) -> torch.Tensor:
+    if is_accelerator:
+        return x.to(torch.accelerator.current_accelerator(check_available=True))
+    return x
+
 
 def get_function_arglist(func):
     return inspect.getfullargspec(func).args
