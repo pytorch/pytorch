@@ -10,7 +10,11 @@ from torch._functorch._activation_checkpointing.knapsack_evaluator import (
     KnapsackEvaluator,
 )
 from torch.fx.graph import Graph
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestGraphInfoProvider(TestCase):
@@ -18,6 +22,8 @@ class TestGraphInfoProvider(TestCase):
     Test class for GraphInfoProvider.
     The test class sets up a small graph example and tests the methods validating the graph building logic.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self) -> None:
         super().setUp()
@@ -192,6 +198,8 @@ class TestKnapsackEvaluator(TestCase):
     The test class sets up a small graph example and tests the methods validating the knapsack evaluation logic.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         self.graph_nodes_in_order = [
@@ -331,6 +339,8 @@ class TestKnapsackEvaluator(TestCase):
 
 
 class TestActivationCheckpointingKnapsack(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # (memory, runtime, max_memory, expected_runtime, expected_saved, expected_recomputable)
