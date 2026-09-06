@@ -15,9 +15,9 @@ module scope; torchgen is pure Python with no torch dependency.
 
 A module declares either ONE op (the module itself carries the exports
 below) or a FAMILY: it exports ``declarations() -> list`` of objects,
-each carrying the same exports as attributes/methods. Table-driven
-families (e.g. pointwise) build their declaration objects from the same
-table that drives their JIT registration.
+each carrying the same exports as attributes/methods. A table-driven family
+builds its declaration objects from the same table that drives its JIT
+registration.
 
 Required exports (module or declaration object):
 

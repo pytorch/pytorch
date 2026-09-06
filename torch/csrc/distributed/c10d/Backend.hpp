@@ -158,6 +158,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Most backends initialize their communication resources eagerly. Backends
+  // with lazy initialization must override this method so split() callers can
+  // verify that the parent communicator exists.
+  virtual bool isInitialized() {
+    return true;
+  }
+
   virtual bool supportsCoalescing() const {
     return false;
   }

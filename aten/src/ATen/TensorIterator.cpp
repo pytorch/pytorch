@@ -185,10 +185,6 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   return *this;
 }
 
-bool TensorIteratorConfig::is_tensor_const(size_t idx) {
-  return std::find(const_tensor_indices_.begin(), const_tensor_indices_.end(), idx) != const_tensor_indices_.end();
-}
-
 // NOTE: [Computing output strides]
 // We use the following algorithm to compute output strides
 // If correctly sized output is provided, we respect its strides and don't change them
@@ -1138,7 +1134,10 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
-    operands_[idx].is_const = config.is_tensor_const(idx);
+  }
+  // const_tensor_indices_ are indices into operands_.
+  for (const auto idx : config.const_tensor_indices_) {
+    operands_[idx].is_const = true;
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1412,18 +1411,26 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
 
   bool is_contiguous = true;
-  bool is_channels_last = true;
-  bool is_non_overlapping_and_dense = true;
   for (const auto& op : operands_) {
     if (op.tensor_base().defined() && !op.will_resize) {
       is_contiguous &= op.tensor_base().is_contiguous(at::MemoryFormat::Contiguous);
-      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
-      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+      if (!is_contiguous) {
+        break;
+      }
     }
   }
   // TODO this leads to ambiguous cases (NC11) to be always treated as contiguous
   if (is_contiguous) {
     return FastSetupType::CONTIGUOUS;
+  }
+
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
+    if (op.tensor_base().defined() && !op.will_resize) {
+      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+    }
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;
