@@ -1097,19 +1097,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     def test_reduce_sentinels_an_unpicklable_annotation(self):
         # An annotation nothing guards can be an unpicklable local class; it must
         # be pruned to a sentinel rather than fail the whole dump (which silently
-        # bypasses the package).
+        # bypasses the package). Pruning is selective: an annotation some guard
+        # reads is carried through verbatim, only the unguarded one sentinels.
         class Local:
             pass
 
-        def fn(x):
+        def fn(x, y):
             return x
 
-        fn.__annotations__ = {"x": Local, "return": Local}
+        fn.__annotations__ = {"x": Local, "y": int}
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__annotations__["x"], _Missing)
-        self.assertIsInstance(out.__annotations__["return"], _Missing)
+        self.assertIs(out.__annotations__["y"], int)
 
     def test_retained_grad_non_leaf_survives_pickle(self):
         # .grad is dropped from the pickle for plain non-leafs (reading it
