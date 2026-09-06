@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, sympy_product
+from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -136,7 +136,10 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if not config.triton.native_matmul:
+    if (
+        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+        or not config.triton.native_matmul
+    ):
         return False
 
     # If tma matmul is on, don't do native matmul
