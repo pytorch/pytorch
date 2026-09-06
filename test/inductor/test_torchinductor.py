@@ -5190,6 +5190,39 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.compile(fn, fullgraph=True)(a, b)
 
+    @parametrize(
+        "dtype", (torch.int8, torch.uint8, torch.int32, torch.int64, torch.float32)
+    )
+    def test_bmm_cpu_decompose_preserves_integer_output_dtype(self, dtype):
+        # The CPU mul+sum bmm decomposition must keep aten.bmm's output dtype
+        # for integer inputs instead of leaking L.sum_'s int64 promotion, and
+        # the final narrow must truncate like eager's wraparound accumulation
+        # rather than saturate.
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-specific decomposition branch")
+
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        # M == 1: the 100 + 100 sum overflows int8, so eager (narrow-dtype
+        # wraparound accumulation) and inductor (int64 then to_dtype) only
+        # agree when the final cast truncates.
+        a = torch.full((1, 1, 2), 100, device=self.device, dtype=dtype)
+        b = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        expected = fn(a, b)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), a, b
+        )
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+        # The decomposition must actually fire: no extern bmm in the output.
+        self.assertNotIn("extern_kernels.bmm", "\n".join(code))
+
+        # N == 1: the other half of the branch condition.
+        a2 = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        b2 = torch.full((1, 2, 1), 100, device=self.device, dtype=dtype)
+        self.common(fn, (a2, b2))
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):
