@@ -231,6 +231,40 @@ _SCATTER_COPY_BACK_THROUGH_OPS = OrderedSet(
 )
 
 
+def _has_data_use_of_aliases_after_node(
+    nodes: Sequence[torch.fx.Node], after: torch.fx.Node
+) -> bool:
+    """True if any of `nodes` (or a view/getitem alias) has a real use after `after`.
+
+    Metadata-only and control_deps ordering-only uses are ignored. Following
+    getitem of multi-output views is required so split/unbind results count as
+    live aliases of an indexed-update result.
+    """
+    node_order = {n: i for i, n in enumerate(after.graph.nodes)}
+    after_loc = node_order[after]
+    pending = list(nodes)
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while pending:
+        alias = pending.pop()
+        if alias in seen:
+            continue
+        seen.add(alias)
+        for user in alias.users:
+            if (_is_view_op(user.target) and user.args[0] is alias) or (
+                user.target is operator.getitem
+                and user.args[0] is alias
+                and _is_view_op(alias.target)
+            ):
+                pending.append(user)
+            elif (
+                node_order[user] > after_loc
+                and user.target not in META_ONLY_OPS
+                and not _is_control_deps_ordering_only_use(user, alias)
+            ):
+                return True
+    return False
+
+
 def _is_copied_back_to_input(node: torch.fx.Node, inp: torch.fx.Node) -> bool:
     return any(
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
@@ -240,22 +274,42 @@ def _is_copied_back_to_input(node: torch.fx.Node, inp: torch.fx.Node) -> bool:
 def _scatter_copied_back_through_indexed_updates(
     node: torch.fx.Node, inp: torch.fx.Node
 ) -> bool:
-    """True if node reaches copy_(inp, ...) through indexed-update base edges."""
-    pending = [node]
-    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    """True if a reachable copy-back leaves no indexed-update aliases live.
+
+    Collect every indexed update reachable over the mutation-base edge, then
+    accept reinplacing only when some copy_(inp, ...) has no real later use of
+    the root scatter, any reachable indexed-update result, or a view/getitem
+    alias of those. Checking only the terminal path would leave sibling
+    branches unsafe after reinplace + copy-back.
+    """
+    pending = [
+        user
+        for user in node.users
+        if user.target in _SCATTER_COPY_BACK_THROUGH_OPS and user.args[0] is node
+    ]
+    reachable: OrderedSet[torch.fx.Node] = OrderedSet([node])
+    copy_backs: OrderedSet[torch.fx.Node] = OrderedSet()
     while pending:
         current = pending.pop()
-        if current in seen:
+        if current in reachable:
             continue
-        seen.add(current)
-        if _is_copied_back_to_input(current, inp):
-            return True
+        reachable.add(current)
+        for user in current.users:
+            if (
+                user.target is aten.copy_.default
+                and user.args[0] is inp
+                and user.args[1] is current
+            ):
+                copy_backs.add(user)
         pending.extend(
             user
             for user in current.users
             if user.target in _SCATTER_COPY_BACK_THROUGH_OPS and user.args[0] is current
         )
-    return False
+    return any(
+        not _has_data_use_of_aliases_after_node(tuple(reachable), copy_back)
+        for copy_back in copy_backs
+    )
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -277,11 +331,12 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
     # If the output is copied back into the input (directly, or through a
     # chain of known inplaceable indexed updates), this forces both to be
-    # realized as the output is a user of the input. Other output users do not
-    # change that profitability decision; alias and liveness checks remain the
-    # safety gate for reinplacing.
+    # realized as the output is a user of the input. The indexed-update graph
+    # must not leave any reachable result alias live after the copy-back, since
+    # reinplacing would make that alias observe the input mutation.
     if inp.op in ("placeholder", "get_attr") and (  # type: ignore[union-attr]
-        _scatter_copied_back_through_indexed_updates(node, inp)  # type: ignore[arg-type]
+        _is_copied_back_to_input(node, inp)  # type: ignore[arg-type]
+        or _scatter_copied_back_through_indexed_updates(node, inp)  # type: ignore[arg-type]
     ):
         return True
 

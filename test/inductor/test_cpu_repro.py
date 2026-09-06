@@ -183,6 +183,75 @@ class CPUReproTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertNotIn("aten.slice_scatter.default", post_grad_graphs)
 
+    def test_generalized_scatter_copy_back_preserves_live_view(self):
+        # Returning a pre-copy view of the scatter must not alias the mutated input.
+        def composed(field, src, indices, values):
+            scatter = aten.slice_scatter.default(field, src, 0, 1, -1)
+            view = aten.slice.Tensor(scatter, 0, 0, 2)
+            updated = aten.index_put.default(scatter, [indices], values)
+            aten.copy_.default(field, updated)
+            return view
+
+        field = torch.arange(6, dtype=torch.float32)
+        src = torch.tensor([-1.0, -2.0, -3.0, -4.0])
+        indices = torch.tensor([0], dtype=torch.int64)
+        values = torch.tensor([99.0])
+
+        expected_field = field.clone()
+        expected = composed(expected_field, src, indices, values)
+
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with fresh_cache():
+            actual_field = field.clone()
+            actual = compiled(actual_field, src, indices, values)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_field, expected_field)
+        self.assertFalse(torch._C._is_alias_of(expected, expected_field))
+        self.assertFalse(torch._C._is_alias_of(actual, actual_field))
+
+    @parametrize("output_kind", ("terminal", "intermediate_view", "sibling"))
+    def test_generalized_scatter_copy_back_preserves_live_indexed_update(
+        self, output_kind
+    ):
+        # Path-wide liveness: reinplacing must not overwrite returned terminal,
+        # intermediate-view, or sibling indexed-update results via copy-back.
+        def composed(field, src, indices, first_values, second_values):
+            scatter = aten.slice_scatter.default(field, src, 0, 1, -1)
+            first = aten.index_put.default(scatter, [indices], first_values)
+            if output_kind == "intermediate_view":
+                result = aten.slice.Tensor(first, 0, 0, 2)
+                updated = aten.index_put.default(first, [indices], second_values)
+            elif output_kind == "sibling":
+                result = aten.index_put.default(scatter, [indices], second_values)
+                updated = first
+            else:
+                result = updated = first
+            aten.copy_.default(field, updated)
+            return result
+
+        field = torch.arange(6, dtype=torch.float32)
+        src = torch.tensor([10.0, 11.0, 12.0, 13.0])
+        indices = torch.tensor([0], dtype=torch.int64)
+        first_values = torch.tensor([100.0])
+        second_values = torch.tensor([999.0])
+
+        expected_field = field.clone()
+        expected = composed(expected_field, src, indices, first_values, second_values)
+
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with fresh_cache():
+            actual_field = field.clone()
+            actual = compiled(actual_field, src, indices, first_values, second_values)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_field, expected_field)
+        self.assertFalse(torch._C._is_alias_of(expected, expected_field))
+        self.assertFalse(torch._C._is_alias_of(actual, actual_field))
+
+        actual_field.add_(1)
+        self.assertEqual(actual, expected)
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
