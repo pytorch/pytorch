@@ -7637,7 +7637,14 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         aten.sort.values_stable,
     ]
 )
-def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+def meta_sort(
+    self, dim=-1, descending=False, *, stable=None, values=None, indices=None
+):
+    # `stable` is keyword-only in all four schemas this is registered for, while
+    # `dim` and `descending` are positional in sort.default and sort.values. The
+    # old signature listed `stable` second, so those two overloads bound `dim` to
+    # `stable` and `descending` to `dim`.
+    utils.canonicalize_dim(max(self.dim(), 1), dim)
     v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
     if values is not None and indices is not None:
         if not isinstance(values, TensorLike):
@@ -8909,6 +8916,10 @@ def meta_foreach_norm(tensors, ord=2, dtype=None):
 @register_meta(aten._softmax)
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
+    # The C++ structured meta for _softmax range-checks dim, but this Python
+    # registration shadows it, so the check has to be repeated here. max(dim(), 1)
+    # mirrors maybe_wrap_dim's treatment of 0-d tensors, which accept dim in [-1, 0].
+    utils.canonicalize_dim(max(x.dim(), 1), dim)
     if half_to_float:
         if x.dtype not in [torch.half, torch.bfloat16]:
             raise AssertionError(
