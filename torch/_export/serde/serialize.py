@@ -554,7 +554,8 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             f"expected triton_kernel_wrapper_functional, got {node.target}"
         )
 
-    if not has_triton():
+    # Triton kernel serialization also supports the CPU backend.
+    if not has_triton(include_cpu=True):
         raise AssertionError("triton required to serialize triton kernels")
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction

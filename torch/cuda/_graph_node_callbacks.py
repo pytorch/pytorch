@@ -2,8 +2,8 @@
 
 The CUPTI-backed discovery half of :mod:`torch.cuda._graph_annotations`. Where the
 edge-walk backend infers a ``mark_kernels`` scope's membership from graph topology after
-the fact, this registers a ``RESOURCE`` / ``GRAPHNODE_CREATED`` handler on the CUPTI
-monitor's shared subscriber and records each node against whatever scope is open when
+the fact, this registers a ``RESOURCE`` / ``GRAPHNODE_CREATED`` handler on Cuspy's
+shared subscriber and records each node against whatever scope is open when
 CUPTI announces it. A scope entered while the *current* stream is not yet capturing records
 nothing at all under the walk; CUPTI correctly attributes kernels. The walk rescans a nested
 scope's nodes once per enclosing scope; CUPTI visits each node once.
@@ -13,11 +13,11 @@ exec-graph ids by ``remap_to_exec_graph`` identically, so downstream consumers c
 them apart.
 
 Needs a CUPTI subscription, but does not require one to already exist:
-``annotation_backend="auto"`` picks this backend only when the monitor is already holding
-one (see ``torch.profiler._cupti.monitor.has_live_subscription``), while
-``annotation_backend="cupti"`` brings the monitor up to take one. The handler runs
+``annotation_backend="auto"`` picks this backend only when Cuspy is already holding
+one (see ``torch.profiler._cuspy.core.has_live_subscription``), while
+``annotation_backend="cupti"`` brings Cuspy up to take one. The handler runs
 synchronously on the capturing thread inside the CUDA call, so it stays as short as it can
-and never raises (the monitor's switchboard swallows exceptions, but a raise would still
+and never raises (Cuspy's switchboard swallows exceptions, but a raise would still
 cost a traceback per node).
 """
 
@@ -31,7 +31,7 @@ from typing import Any
 logger = getLogger(__name__)
 
 
-# The handler token from the monitor. Carries the (domain, cbid) it was registered for, so
+# The handler token from Cuspy. Carries the (domain, cbid) it was registered for, so
 # it is also what arm/disarm address the callback by; kept so disarm can unregister it.
 _handler: Any = None
 
@@ -71,7 +71,7 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
         return
     # toolsId is the value CUPTI later reports as "graph node id". mark_kernels gates on
     # _is_tools_id_unavailable, so a driver without this API leaves no scope open and we
-    # returned above -- an error here is genuinely unexpected, and the monitor's switchboard
+    # returned above -- an error here is genuinely unexpected, and Cuspy's switchboard
     # logs it rather than letting it reach CUPTI's C dispatch.
     tools_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(graph_data.node))
     # Nodes reported for any other graph belong to a child-graph or conditional body, whose
@@ -85,16 +85,16 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
 
 
 def is_available() -> bool:
-    """True when this backend can be used right now: the CUPTI monitor holds a
+    """True when this backend can be used right now: Cuspy holds a
     subscription, and cupti-python is importable.
 
-    Does not create the monitor. A capture asking for ``annotation_backend="auto"`` falls
+    Does not create Cuspy. A capture asking for ``annotation_backend="auto"`` falls
     back to the edge walk when this is ``False``.
     """
     try:
-        # Importing the monitor already requires cupti-python (it raises
+        # Importing Cuspy already requires cupti-python (it raises
         # ModuleNotFoundError without it), so this covers both conditions.
-        from torch.profiler._cupti.monitor import has_live_subscription
+        from torch.profiler._cuspy.core import has_live_subscription
     except ImportError:
         return False
     return has_live_subscription()
@@ -107,7 +107,7 @@ def register(*, force: bool = False) -> bool:
     obtain CUPTI cannot leave a capture half-started. Returns ``False`` when the backend is
     unavailable, so the caller can fall back to the edge walk.
 
-    ``force`` brings the CUPTI monitor up instead of requiring a live subscription. That is a
+    ``force`` brings Cuspy up instead of requiring a live subscription. That is a
     deliberate, opt-in cost: once we hold a CUPTI subscription, kineto's one-shot init fails
     permanently, so a later ``torch.profiler`` run records no GPU activity. Only
     ``annotation_backend="cupti"`` asks for it.
@@ -122,14 +122,14 @@ def register(*, force: bool = False) -> bool:
     try:
         from cupti import cupti as _cupti  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cuspy.core import Cuspy
     except ImportError:
         return False
 
-    # Importing the monitor requires cupti-python, so its enums are available too -- there is
+    # Importing Cuspy requires cupti-python, so its enums are available too -- there is
     # no case where a hardcoded (domain, cbid) fallback would be reachable.
     try:
-        _handler = CuptiMonitor().register_callback_handler(
+        _handler = Cuspy().register_callback_handler(
             int(_cupti.CallbackDomain.RESOURCE),
             int(_cupti.CallbackIdResource.GRAPHNODE_CREATED),
             _on_graph_node_created,
@@ -153,12 +153,12 @@ def arm() -> bool:
     if _handler is None:
         return False
     from torch.cuda._graph_annotations import capture_root_graph_id
-    from torch.profiler._cupti.monitor import CuptiMonitor
+    from torch.profiler._cuspy.core import Cuspy
 
     if capture_root_graph_id() is None:
         return False
     _dropped_body_nodes = 0
-    CuptiMonitor().arm_callback(_handler.domain, _handler.cbid)
+    Cuspy().arm_callback(_handler.domain, _handler.cbid)
     return True
 
 
@@ -168,12 +168,12 @@ def disarm() -> None:
     global _handler
     if _handler is None:
         return
-    from torch.profiler._cupti.monitor import CuptiMonitor
+    from torch.profiler._cuspy.core import Cuspy
 
-    monitor = CuptiMonitor()
+    cuspy = Cuspy()
     try:
-        monitor.disarm_callback(_handler.domain, _handler.cbid)
-        monitor.unregister_callback_handler(_handler)
+        cuspy.disarm_callback(_handler.domain, _handler.cbid)
+        cuspy.unregister_callback_handler(_handler)
     finally:
         _handler = None
     # Warn here rather than from the handler: this runs on the normal path, where a
