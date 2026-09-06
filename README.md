@@ -34,6 +34,9 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Get the PyTorch Source](#get-the-pytorch-source)
     - [Install Dependencies](#install-dependencies)
     - [Install PyTorch](#install-pytorch)
+      - [Verify Your Installation](#verify-your-installation)
+      - [Developer Troubleshooting](#developer-troubleshooting)
+      - [Migrating from setup.py develop](#migrating-from-setuppy-develop)
       - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
     - [Using pre-built images](#using-pre-built-images)
@@ -289,19 +292,25 @@ python tools/amd_build/build_amd.py
 Install PyTorch
 
 ```bash
-# the CMake prefix for conda environment
-export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
+# for conda environments
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-$(dirname $(which conda))/../}:${CMAKE_PREFIX_PATH}"
 python -m pip install --no-build-isolation -v -e .
 
-# the CMake prefix for non-conda environment, e.g. Python venv
-# call following after activating the venv
-export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
+# or for venv environments (use one or the other, not both)
+# export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
+# python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
+# for conda environments
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-$(dirname $(which conda))/../}:${CMAKE_PREFIX_PATH}"
 python -m pip install --no-build-isolation -v -e .
+
+# or for venv environments (use one or the other, not both)
+# export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
+# python -m pip install --no-build-isolation -v -e .
 ```
 
 **On Windows**
@@ -377,6 +386,110 @@ if defined CMAKE_PREFIX_PATH (
 
 python -m pip install --no-build-isolation -v -e .
 ```
+
+##### Verify Your Installation
+
+After building from source, verify that your local source code is being loaded correctly:
+
+```python
+import torch
+print(torch.__file__)
+# Should point to your local pytorch source directory, e.g.:
+# /path/to/pytorch/torch/__init__.py
+# NOT something like:
+# /path/to/site-packages/torch/__init__.py
+```
+
+If `torch.__file__` points to `site-packages` instead of your local source directory, you may
+have a conflicting installation — see [Troubleshooting](#developer-troubleshooting).
+
+##### Developer Troubleshooting
+
+For more details on debugging build issues and development workflow, see
+[CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#tips-and-debugging).
+
+**Changes to source code are not reflected when importing torch**
+
+This usually happens when a previous `python setup.py develop` installation takes priority over
+your local source. Follow the [migration steps](#migrating-from-setuppy-develop) to switch to
+editable mode.
+
+**Import errors after `pip install -e .`**
+
+Make sure you are in the correct environment, and that `CMAKE_PREFIX_PATH` is set properly.
+Use one of the following, depending on your environment type:
+
+```bash
+# for conda environments
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-$(dirname $(which conda))/../}:${CMAKE_PREFIX_PATH}"
+
+# or for venv environments
+# export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
+```
+
+**Build failures after pulling new changes**
+
+When updating your local checkout, always sync submodules before rebuilding.
+See [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#tips-and-debugging)
+for the full clean-rebuild procedure.
+
+```bash
+git pull
+git submodule sync
+git submodule update --init --recursive
+python -m pip install --no-build-isolation -v -e .
+```
+
+**Multiple PyTorch installations causing conflicts**
+
+Check for multiple installations and remove any unwanted ones:
+
+```python
+import torch
+print(torch.__version__)
+print(torch.__file__)
+```
+
+If you see unexpected paths, remove all conflicting installations and reinstall from source.
+Use the command matching your package manager:
+
+```bash
+# if installed via pip
+pip uninstall -y torch
+
+# if installed via conda
+conda uninstall pytorch
+
+# if previously installed via setup.py develop
+python setup.py develop --uninstall
+```
+
+Then reinstall from source:
+
+```bash
+python -m pip install --no-build-isolation -v -e .
+```
+
+##### Migrating from setup.py develop
+
+If you previously installed PyTorch using `python setup.py develop`, it is recommended to switch
+to the modern `pip install -e .` (editable mode) approach. The legacy `setup.py develop` can cause
+Python path priority issues where your local source directory is not picked up first, leading to
+stale code being loaded instead of your local changes.
+
+To migrate:
+
+```bash
+# Step 1: Uninstall the previous develop-mode installation
+python setup.py develop --uninstall
+
+# Step 2: Install in editable mode using pip (recommended)
+python -m pip install --no-build-isolation -v -e .
+```
+
+The `pip install -e .` approach properly manages the Python path priority, ensuring your local
+source directory is always loaded first. It also integrates better with modern Python packaging
+tools and provides cleaner uninstall behavior.
 
 ##### Adjust Build Options (Optional)
 
