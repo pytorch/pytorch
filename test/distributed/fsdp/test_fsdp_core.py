@@ -20,7 +20,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.utils import _p_assert
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipHPUIf,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     AlwaysWrapNestedWrappedModule,
@@ -28,7 +31,6 @@ from torch.testing._internal.common_fsdp import (
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
-    get_devtype,
     MixtureOfExperts,
     NestedWrappedModule,
     NestedWrappedModuleWithDelay,
@@ -36,10 +38,10 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     run_tests,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -54,7 +56,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.device(get_devtype())
 params = "cpu_offload,sharding_strategy"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
 sharding_strategy_config = [
@@ -77,6 +78,8 @@ class TestParityWithDDP(FSDPTest):
     Compare losses and parameter values after several updates when using
     PyTorch DDP vs. FullyShardedDataParallel.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _get_device_init_modes(self, cpu_offload: CPUOffload) -> list[DEVICEInitMode]:
         modes = [
@@ -110,6 +113,7 @@ class TestParityWithDDP(FSDPTest):
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -120,12 +124,14 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
+            device_id=torch.device(device).type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model_single_iteration_mixed_precision(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -143,12 +149,14 @@ class TestParityWithDDP(FSDPTest):
             sharding_strategy=sharding_strategy,
             num_iters=1,
             mixed_precision=mixed_precision,
+            device_id=torch.device(device).type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_always_wrap_model(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -159,12 +167,14 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
+            device_id=torch.device(device).type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_transformer(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -175,12 +185,14 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
+            device_id=torch.device(device).type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_optim_step(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -197,12 +209,14 @@ class TestParityWithDDP(FSDPTest):
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
             init_kwargs={"delay_after_loss_ms": 250},
+            device_id=torch.device(device).type,
         )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_reduce_scatter(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
@@ -218,6 +232,7 @@ class TestParityWithDDP(FSDPTest):
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
             init_kwargs={"delay_before_reduction_ms": 250},
+            device_id=torch.device(device).type,
         )
 
     def _dummy_ddp_fn(self, model):
@@ -229,10 +244,10 @@ class TestParityWithDDP(FSDPTest):
     @parametrize(params, configs, subtest_name)
     def test_mixture_of_experts(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
-        fsdp_kwargs = {"device_id": device_type.type}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -241,20 +256,18 @@ class TestParityWithDDP(FSDPTest):
             ref_init_fn=self._dummy_ddp_fn,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            **fsdp_kwargs,
+            device_id=torch.device(device).type,
         )
 
-    @unittest.skipIf(
-        TEST_HPU, "HPU doesn't has HW sleep API support (like CUDA), skipping"
-    )
+    @skipHPUIf(True, "HPU doesn't has HW sleep API support (like CUDA), skipping")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_mixture_of_experts_with_delay_before_free(
         self,
+        device,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
-        fsdp_kwargs = {"device_id": device_type.type}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -264,20 +277,22 @@ class TestParityWithDDP(FSDPTest):
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
             init_kwargs={"delay_before_free_ms": 250},
-            **fsdp_kwargs,
+            device_id=torch.device(device).type,
         )
 
 
 class TestParamInit(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
-    def test_param_change_after_init(self, mixed_precision):
+    def test_param_change_after_init(self, device, mixed_precision):
         """
         Tests that changing FSDP model parameter values in-place after FSDP
         initialization persist.
         """
         # Establish reference behavior
-        fsdp_kwargs = {"device_id": device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -287,7 +302,7 @@ class TestParamInit(FSDPTest):
             fsdp_kwargs,
             deterministic=True,
         )
-        input = fsdp_model.module.get_input(device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         ref_output = fsdp_model(*input)
         # Initialize the same model but change its first parameter value
         # in-place after FSDP initialization
@@ -309,25 +324,27 @@ class TestParamInit(FSDPTest):
 
 
 class TestHooks(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
-    def test_pre_backward_hook_registration(self, cuda_first: bool):
+    def test_pre_backward_hook_registration(self, device, cuda_first: bool):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
             DEVICEInitMode.DEVICE_BEFORE if cuda_first else DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs,
         )
-        self._test_pre_backward_hook_registration(fsdp_model)
+        self._test_pre_backward_hook_registration(fsdp_model, device)
 
     @skip_if_lt_x_gpu(2)
-    def test_pre_backward_hook_registration_after_state_dict(self):
+    def test_pre_backward_hook_registration_after_state_dict(self, device):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs after saving and loading the model from a checkpoint."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -337,17 +354,17 @@ class TestHooks(FSDPTest):
         self._train_for_several_steps(fsdp_model, num_steps=2, autocast=False)
         state_dict = fsdp_model.state_dict()
         fsdp_model.load_state_dict(state_dict)
-        self._test_pre_backward_hook_registration(fsdp_model)
+        self._test_pre_backward_hook_registration(fsdp_model, device)
 
-    def _test_pre_backward_hook_registration(self, model):
+    def _test_pre_backward_hook_registration(self, model, device):
         optim = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
         optim.zero_grad()
         # Inputs always cuda, as computation happens on CUDA device only
-        input = model.module.get_input(device_type)
+        input = model.module.get_input(torch.device(device).type)
         output = model(*input)
         # this is pre-bwd hook
         self.assertEqual(len(output._backward_hooks), 1)
-        loss = model.module.get_loss(input, output).to(device_type.type)
+        loss = model.module.get_loss(input, output).to(torch.device(device).type)
         loss.backward()
         # It doesn't get removed
         self.assertEqual(len(output._backward_hooks), 1)
@@ -357,10 +374,12 @@ class TestHooks(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
     @parametrize("mixed_precision", [True, False])
-    def test_register_functions_called(self, cuda_first: bool, mixed_precision: bool):
+    def test_register_functions_called(
+        self, device, cuda_first: bool, mixed_precision: bool
+    ):
         """Tests that ``_register_{pre|post}_backward_hooks()`` are called
         during the FSDP forward."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -369,7 +388,7 @@ class TestHooks(FSDPTest):
             DEVICEInitMode.DEVICE_BEFORE if cuda_first else DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs,
         )
-        input = fsdp_model.module.get_input(device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         # Since `_register_pre_backward_hooks()` modifies the forward output,
         # we cannot directly mock it. We implement our own counter instead.
         orig_register_pre_backward_hooks = (
@@ -399,14 +418,16 @@ class TestHooks(FSDPTest):
 
 
 class TestNoGrad(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
-    def test_transformer_no_grad(self, mixed_precision):
+    def test_transformer_no_grad(self, device, mixed_precision):
         """Tests that for an FSDP-wrapped transformer model with shared
         parameters, after training for one iteration, running a forward pass in
         ``eval()`` mode gives the same output as running a forward pass in
         ``torch.no_grad()``."""
-        fsdp_kwargs = {"device_id": device_type.type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision(
                 param_dtype=torch.float16,
@@ -427,7 +448,7 @@ class TestNoGrad(FSDPTest):
             autocast=False,
             mixed_precision=fsdp_kwargs["mixed_precision"],
         )
-        input = fsdp_model.module.get_input(device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         # Run a forward in eval mode
         fsdp_model.eval()
         ref_output = fsdp_model(*input)
@@ -438,9 +459,12 @@ class TestNoGrad(FSDPTest):
 
 
 class TestAutograd(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_as_tensors(
         self,
+        device,
     ):
         """
         Tests that FSDP always unshards the logical parameters as ``Tensor``
@@ -466,6 +490,7 @@ class TestAutograd(FSDPTest):
                 ],
             },
             self._test_unshard_params_as_tensors,
+            device=device,
         )
 
     def _test_unshard_params_as_tensors(
@@ -474,6 +499,7 @@ class TestAutograd(FSDPTest):
         use_orig_params: bool,
         forward_prefetch: bool,
         backward_prefetch: BackwardPrefetch | None,
+        device,
     ):
         orig_use_unsharded_views = FlatParamHandle._use_unsharded_views
 
@@ -491,17 +517,20 @@ class TestAutograd(FSDPTest):
             "forward_prefetch": forward_prefetch,
             "backward_prefetch": backward_prefetch,
             "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
-            "device_id": device_type,
+            "device_id": torch.device(device).type,
         }
         # Define a model with enough FSDP instances to exercise prefetching
         NUM_LINEARS = 5
         model = nn.Sequential(
-            *[nn.Linear(3, 3, device=device_type) for _ in range(NUM_LINEARS)]
+            *[
+                nn.Linear(3, 3, device=torch.device(device).type)
+                for _ in range(NUM_LINEARS)
+            ]
         )
         fsdp_model = FSDP(model, **fsdp_kwargs)
         self.assertEqual(len(list(FSDP.fsdp_modules(fsdp_model))), NUM_LINEARS + 1)
         for _ in range(3):
-            inp = torch.randn((2, 3), device=device_type)
+            inp = torch.randn((2, 3), device=torch.device(device).type)
             with self._patch_use_unsharded_views(
                 _use_unsharded_views_assert_as_tensors
             ):
@@ -518,15 +547,18 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestHooks, globals(), except_for=("cpu",), allow_xpu=True)
 instantiate_device_type_tests(
-    TestParityWithDDP, globals(), only_for=devices, allow_xpu=True
+    TestParityWithDDP, globals(), except_for=("cpu",), allow_xpu=True
 )
-instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices, allow_xpu=True)
 instantiate_device_type_tests(
-    TestParamInit, globals(), only_for=devices, allow_xpu=True
+    TestNoGrad, globals(), except_for=("cpu",), allow_xpu=True
 )
-instantiate_device_type_tests(TestAutograd, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(
+    TestParamInit, globals(), except_for=("cpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAutograd, globals(), except_for=("cpu",), allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
