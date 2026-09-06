@@ -2101,14 +2101,14 @@ static void svd_kernel_mps(const Tensor& A,
   SvdParams params{static_cast<uint32_t>(wm),
                    static_cast<uint32_t>(k),
                    /*max_sweeps=*/30u,
-                   static_cast<uint32_t>(compute_uv ? 1 : 0),
+                   compute_uv,
                    /*tol=*/1e-6f,
                    static_cast<uint32_t>(u_ld),
                    static_cast<uint32_t>(u_bs),
                    static_cast<uint32_t>(v_ld),
                    static_cast<uint32_t>(v_bs),
-                   static_cast<uint32_t>(transposed ? 1 : 0),
-                   static_cast<uint32_t>(stage_v ? 1 : 0)};
+                   transposed,
+                   stage_v};
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2216,8 +2216,8 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
 
   EighParams params{static_cast<uint32_t>(n),
                     /*max_sweeps=*/80u,
-                    static_cast<uint32_t>(compute_eigenvectors ? 1 : 0),
-                    static_cast<uint32_t>(upper ? 1 : 0),
+                    compute_eigenvectors,
+                    upper,
                     /*tol=*/1e-6f};
 
   MPSStream* stream = getCurrentMPSStream();
