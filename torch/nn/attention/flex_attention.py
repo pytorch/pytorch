@@ -2187,9 +2187,6 @@ def _apply_kernel_options(
             # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
-        if any_inputs_on_mps_device:
-            # MPS supports inference only; backward / LSE not yet implemented
-            kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
     if "OUTPUT_MAX" in kernel_options:
@@ -2235,7 +2232,7 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
+            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, or MPS devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
