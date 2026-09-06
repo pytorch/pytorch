@@ -6,10 +6,12 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class ONNXProgramRenameAxesTest(common_utils.TestCase):
     """Tests for ONNXProgram.rename_axes method."""
+    hw_classification = HardwareClassification.GENERIC
 
     def _create_onnx_program_with_dynamic_shapes(
         self, input_shapes: list[list[str | int]]
