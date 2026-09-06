@@ -35,7 +35,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
-from torch._dynamo.utils import CleanupManager
+from torch._dynamo.utils import CleanupManager, counters
 from torch._functorch import config as functorch_config
 from torch._inductor import cpu_vec_isa
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -597,12 +597,18 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
 
-        # The bindings install() is responsible for: its per-install names plus
-        # the builtins dict. The capture-time __compiled_fn global is not among
-        # them (install binds a renamed twin), so its hook popping it is fine.
-        installed = set(package._installed_globals[sys.modules[fn.__module__]])
+        # A stale capture-time hook on __compiled_fn does not strip the fresh
+        # binding: _install_global calls CleanupHook.disown for every name it
+        # writes, dropping the old hook's ownership so its __call__ returns
+        # early instead of popping the name. It is an ownership handoff, not a
+        # rename -- install() binds backend_id verbatim.
+        #
+        # Observe the names install() actually placed in the live module dict,
+        # not its own bookkeeping: the stale hooks below run against the
+        # module, so the module is what must survive them.
+        installed = {name for name in scope if name.startswith(prefixes)}
+        installed -= preexisting
         self.assertTrue(installed)
-        self.assertTrue(installed - preexisting)
 
         del pinned
         gc.collect()
@@ -913,6 +919,46 @@ def add(x, y):
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), counts[0])
         pkg.uninstall()
 
+    def test_failed_install_is_torn_down_when_the_package_dies(self):
+        # install() registers its teardown finalizer BEFORE binding any global,
+        # so a mid-install failure leaves nothing behind: whatever it bound is
+        # gone once the package dies, even though install() raised and handed
+        # the caller no handle to undo it. Force the failure by handing
+        # install() a backends dict missing a required backend.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),), guard_filter_fn)
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+
+        pkg, backends = ctx.load_package(fn, self.path())
+        # Drop the resume entry's backend: install() binds that entry's renamed
+        # resume global and installs the earlier entry's precompile entry, then
+        # raises on the missing backend -- a genuinely partial install.
+        resume_entry = next(e for e in pkg._codes.values() if e.install_to_global)
+        del backends[resume_entry.backend_ids[0]]
+        with self.assertRaisesRegex(RuntimeError, "is not found in the given backends"):
+            pkg.install(backends)
+        # Reaching that error means install() bound the resume global and an
+        # entry before it raised: a genuinely partial install to tear down.
+
+        del pkg, backends
+        gc.collect()
+        # Nothing partial survives -- only the shared builtins dict, left in
+        # place by design, may remain -- and no entries are left.
+        leaked = set(module_dict) - before
+        self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
     def test_rename_globals_rewrites_nested_code(self):
         def outer(x):
             def inner(y):
@@ -983,13 +1029,20 @@ def add(x, y):
         self.assertTrue(resume_b)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 2 * count)
 
+        # Either package serves the frame while the other is live: both loads'
+        # entries and resume functions coexist on the one code object.
         compiled_fn = torch._dynamo.optimize(package=pkg_a)(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), expected)
-        # a's unload takes only a's entries and a's resume functions. (An
-        # import alias both loads bind to the same module object still goes
-        # with the first unload, so b is not called here; teardown by owner
-        # count for shared names is a separate change.)
+        compiled_b = torch._dynamo.optimize(package=pkg_b)(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_b(x), expected)
+        # a's unload takes only a's entries and a's resume functions. Names
+        # both loads share go with the FIRST unload: an import alias, whose
+        # loss is a failed guard and a silent cache miss, and the capture-time
+        # __compiled_fn, whose loss is a NameError in live user code -- so b is
+        # NOT served after this. Teardown by owner count for shared names is
+        # #195915, a separate change.
         pkg_a.uninstall()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), count)
         self.assertFalse(resume_a & set(module_dict))
@@ -1246,11 +1299,16 @@ def add(x, y):
         DynamoCache.clear()
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+        counters.clear()
         warm = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             fn, isolate_recompiles=isolate_recompiles
         )
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(warm(arg), expected)
+        # The warm call loaded the package from the transparent cache (a hit,
+        # not a fresh compile); fail_on_recompile above proves it then served
+        # the frame rather than loading and serving nothing.
+        self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
