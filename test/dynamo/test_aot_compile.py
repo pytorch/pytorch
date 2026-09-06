@@ -1572,6 +1572,16 @@ from user code:
             backend="eager",
             options={"guard_filter_fn": keep_global_guards},
         )
+        # The load seeds __import_*/__builtins_dict__ aliases into this module's
+        # globals; strip whatever it adds so sibling tests do not inherit them.
+        g = globals()
+        preexisting = frozenset(g)
+
+        def _restore_globals() -> None:
+            for k in [k for k in g if k not in preexisting]:
+                del g[k]
+
+        self.addCleanup(_restore_globals)
         with open(path, "rb") as f:
             model._load_aot_compiled_module(f.read())
         (result,) = model.forward.compiled_results
@@ -2268,6 +2278,40 @@ from user code:
         self.assertEqual(_graph_device_types(graph), frozenset())
         self.assertEqual(_graph_device_types(None), frozenset())
 
+    def test_graph_device_types_ignores_autocast_device_strings(self):
+        # An autocast device type is a plain string positional arg of
+        # _enter_autocast, not a device position, so it must not inject a
+        # device no tensor lives on. torch.autocast("cuda", enabled=False) in
+        # an otherwise CPU-only graph -- the recipe in autocast_mode's own
+        # docstring -- would otherwise make the artifact refuse to load on the
+        # very host that saved it. .to()/device= are still read.
+        with FakeTensorMode():
+            cpu = torch.empty(2)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cpu
+        graph.call_function(torch.amp._enter_autocast, ("cuda", None, True, None))
+        graph.call_function(torch.ops.aten.add.Tensor, (x, 1)).meta["val"] = cpu
+        self.assertEqual(_graph_device_types(graph), frozenset(("cpu",)))
+
+        # A checkpointed accelerator module enters torch.amp.autocast("cpu")
+        # unconditionally; that "cpu" string must not arm the CPU codegen gate.
+        with FakeTensorMode():
+            cuda_meta = torch.empty(2, device="cuda")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = cuda_meta
+        graph.call_function(torch.amp._enter_autocast, ("cpu", None, True, None))
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        # Real device positions are still read: a .to() device arg and a
+        # device= kwarg both count.
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.call_method("to", (x, "mps"))
+        graph.call_function(torch.ops.aten.ones.default, ([2],), {"device": "cuda"})
+        self.assertEqual(_graph_device_types(graph), frozenset(("mps", "cuda")))
+
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_mixed_device_graph_arms_cpu_codegen_target(self):
         # A mixed cpu+accelerator graph collapses device_type to the
@@ -2690,6 +2734,31 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__annotations__, {"y": int, "return": int})
         self.assertEqual(out(object(), 5), 5)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 695 type params are 3.12+")
+    def test_pickler_drops_unpicklable_type_params(self):
+        # A PEP 695 function-scoped TypeVar pickles to its bare name and then
+        # fails the module lookup, so a nested generic used to abort the dump
+        # even after its annotations were pruned. The whole __type_params__
+        # tuple is now dropped and the function still reloads and runs. Defined
+        # via exec so this file still parses below 3.12.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        ns = {"__name__": __name__}
+        exec(
+            "def outer():\n"
+            "    def inner[T](x: T) -> T:\n"
+            "        return x\n"
+            "    return inner\n",
+            ns,
+        )
+        fn = ns["outer"]()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__type_params__, ())
+        self.assertEqual(out.__annotations__, {})
+        self.assertEqual(out(5), 5)
 
     @unittest.skipIf(
         sys.version_info < (3, 14), "PEP 649 FORWARDREF annotations are 3.14+"
