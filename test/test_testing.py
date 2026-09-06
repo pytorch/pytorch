@@ -31,7 +31,7 @@ from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, DeviceTypeTestBase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -2313,6 +2313,52 @@ class TestTestParametrization(TestCase):
 
 
 class TestTestParametrizationDeviceType(TestCase):
+    def test_preserves_non_test_descriptors(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @staticmethod
+            def static_helper(x, y):
+                return x, y
+
+            @classmethod
+            def class_helper(cls):
+                return cls.device_type
+
+            def test_device_specific(self, device):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+
+        device_cls = locals_dict[f"TestParametrized{device.upper()}"]
+        self.assertIsInstance(
+            inspect.getattr_static(device_cls, "static_helper"), staticmethod
+        )
+        self.assertIsInstance(
+            inspect.getattr_static(device_cls, "class_helper"), classmethod
+        )
+        test = device_cls(f"test_device_specific_{device}")
+        self.assertEqual(test.static_helper(1, 2), (1, 2))
+        self.assertEqual(test.class_helper(), device)
+
+    def test_tolerance_defaults_on_uninitialized_thread_local(self, device):
+        import threading
+
+        base = DeviceTypeTestBase
+        original_tls = base._tls
+        try:
+            base._tls = threading.local()
+            instance = base.__new__(base)
+            self.assertEqual(instance.precision, TestCase._precision)
+            self.assertEqual(instance.rel_tol, TestCase._rel_tol)
+            instance.precision = 1e-3
+            instance.rel_tol = 1e-4
+            self.assertEqual(instance.precision, 1e-3)
+            self.assertEqual(instance.rel_tol, 1e-4)
+        finally:
+            base._tls = original_tls
+
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
         # due to parametrization logic.
