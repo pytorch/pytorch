@@ -2,7 +2,6 @@
 """Backend-neutral FX graph and runtime argument helpers for GEMM epilogues."""
 
 import dataclasses
-import operator
 from collections.abc import Iterator, Sequence
 from typing import Any, ClassVar, Literal
 
@@ -289,22 +288,6 @@ class GemmReductionArguments:
 
 
 @dataclasses.dataclass(frozen=True)
-class NormalizedView:
-    """Canonical source and shape for an FX view or reshape."""
-
-    source: torch.fx.Node
-    shape: tuple[Any, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class NormalizedDtypeView:
-    """Canonical source and target dtype for a storage reinterpretation."""
-
-    source: torch.fx.Node
-    dtype: torch.dtype
-
-
-@dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
     """Canonical arguments for a supported FX reduction."""
 
@@ -323,44 +306,7 @@ class NormalizedPrepareSoftmax:
     dim: Any
 
 
-@dataclasses.dataclass(frozen=True)
-class NormalizedSqueeze:
-    """Canonical source for an FX squeeze alias."""
-
-    source: torch.fx.Node
-
-
-@dataclasses.dataclass(frozen=True)
-class NormalizedGetItem:
-    """Canonical aggregate source and literal FX getitem index."""
-
-    source: torch.fx.Node
-    index: int
-
-
-@dataclasses.dataclass(frozen=True)
-class NormalizedSplit:
-    """Canonical source, width, and dimension for an FX tensor split."""
-
-    source: torch.fx.Node
-    split_size: Any
-    dim: int
-
-
-@dataclasses.dataclass(frozen=True)
-class NormalizedSelect:
-    """Canonical source, dimension, and index for an FX tensor select."""
-
-    source: torch.fx.Node
-    dim: int
-    index: Any
-
-
-@dataclasses.dataclass(frozen=True)
-class NormalizedToBlocked:
-    """Canonical logical source for a blocked-output transform."""
-
-    source: torch.fx.Node
+NormalizedGemmReduction = NormalizedReduction | NormalizedPrepareSoftmax
 
 
 @dataclasses.dataclass(frozen=True)
@@ -371,18 +317,7 @@ class NormalizedUnsupportedReduction:
     target: str
 
 
-NormalizedNode = (
-    NormalizedView
-    | NormalizedDtypeView
-    | NormalizedReduction
-    | NormalizedPrepareSoftmax
-    | NormalizedSqueeze
-    | NormalizedGetItem
-    | NormalizedSplit
-    | NormalizedSelect
-    | NormalizedToBlocked
-    | NormalizedUnsupportedReduction
-)
+NormalizedNode = NormalizedGemmReduction | NormalizedUnsupportedReduction
 
 
 FUNCTION_REDUCTION_TYPES: dict[Any, tuple[GemmReductionType, bool]] = {
@@ -415,37 +350,6 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
     """Return canonical arguments for a selected epilogue FX node."""
     if node.op != "call_function":
         return None
-    if node.target is torch.ops.aten.view.dtype:
-        source, dtype = node.args
-        if not isinstance(source, torch.fx.Node) or not isinstance(dtype, torch.dtype):
-            raise AssertionError(
-                f"malformed GEMM epilogue dtype view: {node.format_node()}"
-            )
-        return NormalizedDtypeView(source, dtype)
-    if node.target in (
-        torch.ops.aten.view.default,
-        torch.ops.aten.reshape.default,
-    ):
-        source = node.args[0]
-        shape = node.args[1]
-        if not isinstance(source, torch.fx.Node) or not isinstance(
-            shape, (tuple, list, torch.Size)
-        ):
-            raise AssertionError(f"malformed GEMM epilogue view: {node.format_node()}")
-        return NormalizedView(
-            source,
-            tuple(
-                arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
-                for arg in shape
-            ),
-        )
-    if node.target is torch.ops.flex_gemm.to_blocked.default:
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed GEMM epilogue output transform: {node.format_node()}"
-            )
-        return NormalizedToBlocked(source)
     if node.target in FUNCTION_REDUCTION_TYPES:
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
@@ -473,36 +377,6 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
             )
         dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
         return NormalizedPrepareSoftmax(source, dim)
-    if node.target is torch.ops.aten.split.Tensor:
-        source = node.args[0]
-        dim = node.args[2] if len(node.args) > 2 else node.kwargs.get("dim", 0)
-        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
-            raise AssertionError(f"malformed GEMM epilogue split: {node.format_node()}")
-        return NormalizedSplit(source, node.args[1], dim)
-    if node.target is torch.ops.aten.select.int:
-        source = node.args[0]
-        dim = node.args[1]
-        if not isinstance(source, torch.fx.Node) or not isinstance(dim, int):
-            raise AssertionError(
-                f"malformed GEMM epilogue select: {node.format_node()}"
-            )
-        return NormalizedSelect(source, dim, node.args[2])
-    if node.target in (
-        torch.ops.aten.squeeze.dim,
-        torch.ops.aten.squeeze.dims,
-        torch.ops.aten.squeeze.default,
-    ):
-        source = node.args[0]
-        if not isinstance(source, torch.fx.Node):
-            raise AssertionError(
-                f"malformed GEMM epilogue squeeze: {node.format_node()}"
-            )
-        return NormalizedSqueeze(source)
-    if node.target is operator.getitem:
-        source, index = node.args
-        if isinstance(source, torch.fx.Node) and isinstance(index, int):
-            return NormalizedGetItem(source, index)
-        return None
     if node.target in FUNCTION_UNSUPPORTED_REDUCTIONS:
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
