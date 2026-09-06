@@ -104,6 +104,12 @@ inline bool cudnnv8_enabled_check_debug() {
   return cudnnv8_flag == 1;
 }
 
+inline bool cudnnv8_conv_bias_enabled() {
+  static const bool enabled =
+      c10::utils::check_env("TORCH_CUDNN_V8_API_CONV_BIAS_ENABLED") == true;
+  return enabled && cudnnv8_enabled_check_debug();
+}
+
 inline bool cudnnv8_use_heur_mode_b() {
   return is_cudnnv8_heuristic_mode_b();
 }

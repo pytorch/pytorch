@@ -39,7 +39,8 @@
 //
 // NOTE [ Convolution design ]
 //
-// cuDNN convolutions does not handle bias. Bias is handled outside.
+// The ordinary cuDNN convolution path does not handle bias. An experimental
+// cuDNN v8 operation-graph path can fuse bias for forward convolutions.
 //
 // The general strategy:
 //
@@ -276,6 +277,86 @@ Tensor cudnn_convolution(
       allow_tf32);
   return *output;
 }
+
+Tensor cudnn_convolution_bias(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_t,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  if (!bias_t.has_value()) {
+    return cudnn_convolution(
+        input_t,
+        weight_t,
+        padding,
+        stride,
+        dilation,
+        groups,
+        benchmark,
+        deterministic,
+        allow_tf32);
+  }
+
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
+      bias{*bias_t, "bias", 3};
+  CheckedFrom c = "cudnn_convolution";
+  checkAllSameType(c, {input, weight, bias});
+  checkAllSameGPU(c, {input, weight, bias});
+  checkSize(c, bias, {weight_t.size(0)});
+
+  const auto scalar_type = input_t.scalar_type();
+  const bool supported_graph_dtype = scalar_type == kFloat ||
+      scalar_type == kHalf || scalar_type == kBFloat16;
+  if (!cudnnv8_enabled_check_debug() || !supported_graph_dtype) {
+    Tensor output = cudnn_convolution(
+        input_t,
+        weight_t,
+        padding,
+        stride,
+        dilation,
+        groups,
+        benchmark,
+        deterministic,
+        allow_tf32);
+    output.add_(reshape_bias(input_t.dim(), *bias_t));
+    return output;
+  }
+
+  auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      input->options().memory_format(memory_format));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  TensorArg output{output_t, "result", 0};
+  convolution_shape_check(
+      c, input, weight, output, padding, stride, dilation, groups);
+  Tensor input_contig = input->contiguous(memory_format);
+  Tensor weight_contig = weight->contiguous(memory_format);
+  Tensor bias_contig = bias->contiguous();
+  raw_cudnn_convolution_bias_out(
+      *output,
+      input_contig,
+      weight_contig,
+      bias_contig,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
+  return *output;
+}
+
 at::Tensor& cudnn_convolution_out(
     const Tensor& input_t,
     const Tensor& weight_t,

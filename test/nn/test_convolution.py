@@ -4435,6 +4435,60 @@ class TestConvolutionNNCUDA(NNTestCase):
         o.sum().backward()
 
     @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    @dtypes(torch.float, torch.float16, torch.bfloat16)
+    @torch.backends.cudnn.flags(
+        enabled=True, deterministic=True, benchmark=False, allow_tf32=False
+    )
+    @precisionOverride({torch.half: 5e-3, torch.bfloat16: 5e-2, torch.float: 1e-5})
+    def test_cudnn_convolution_bias(self, device, dtype):
+        if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
+            self.skipTest("bfloat16 is not supported on this GPU")
+
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            inp = torch.randn(
+                2, 4, 8, 8, device=device, dtype=dtype, requires_grad=True
+            ).to(memory_format=memory_format)
+            weight = torch.randn(
+                6, 4, 3, 3, device=device, dtype=dtype, requires_grad=True
+            ).to(memory_format=memory_format)
+            bias = torch.randn(6, device=device, dtype=dtype, requires_grad=True)
+
+            actual = torch.ops.aten.cudnn_convolution.bias(
+                inp,
+                weight,
+                bias,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                1,
+                False,
+                True,
+                False,
+            )
+            expected = torch.ops.aten.cudnn_convolution.default(
+                inp,
+                weight,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                1,
+                False,
+                True,
+                False,
+            ) + bias.view(1, -1, 1, 1)
+
+            self.assertTrue(actual.is_contiguous(memory_format=memory_format))
+            self.assertEqual(actual, expected)
+
+            grad = torch.randn_like(actual)
+            actual_grads = torch.autograd.grad(actual, (inp, weight, bias), grad)
+            expected_grads = torch.autograd.grad(
+                expected, (inp, weight, bias), grad
+            )
+            self.assertEqual(actual_grads, expected_grads)
+
+    @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
