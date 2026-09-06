@@ -61,7 +61,7 @@ deprecation cycle.
 % precompile is a module whose members are documented manually below.
 
 ```{eval-rst}
-.. py:function:: torch.compiler.precompile.capture(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
+.. py:function:: precompile.capture(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
 
    Return a caller-driven capture of ``fn`` as a :class:`precompile.Capture`. Capture is
    caller-driven: this runs nothing on its own. Enter the returned object as a context
@@ -179,7 +179,7 @@ deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:function:: torch.compiler.precompile.accumulate(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
+.. py:function:: precompile.accumulate(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
 
    Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
 
@@ -256,7 +256,7 @@ deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:function:: torch.compiler.precompile.load(artifact_path, cache_path, *, fn=None)
+.. py:function:: precompile.load(artifact_path, cache_path, *, fn=None)
 
    Reconstruct a runnable from the two files a precompile capture wrote -- the
    ``python_code`` artifact and its ``cache``. They load only as a matched pair (the cache
