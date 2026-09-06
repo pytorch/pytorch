@@ -12,17 +12,28 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
     skipMeta,
 )
-from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
+    all_types_and_complex_and,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
 class TestNumPyInterop(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Note: the warning this tests for only appears once per program, so
     # other instances of this warning should be addressed to avoid
     # the tests depending on the order in which they're run.
@@ -563,9 +574,10 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(
                 torch.tensor(arr, device=device, dtype=torch.float32).storage()
             )
-            self.assertIsNotNone(
-                torch.tensor(arr, device=device, dtype=torch.double).storage()
-            )
+            if torch.device(device).type != "mps":
+                self.assertIsNotNone(
+                    torch.tensor(arr, device=device, dtype=torch.double).storage()
+                )
             self.assertIsNotNone(
                 torch.tensor(arr, device=device, dtype=torch.int).storage()
             )
@@ -576,6 +588,7 @@ class TestNumPyInterop(TestCase):
                 torch.tensor(arr, device=device, dtype=torch.uint8).storage()
             )
 
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
@@ -706,7 +719,9 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y, f(x))
 
 
-instantiate_device_type_tests(TestNumPyInterop, globals())
+instantiate_device_type_tests(
+    TestNumPyInterop, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
