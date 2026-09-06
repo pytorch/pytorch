@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -39,11 +40,13 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    gradcheck,
     HardwareClassification,
     markDynamoStrictTest,
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -96,6 +99,129 @@ def _bf16_state_init_hook(optimizer, args, kwargs):
                         dtype=torch.bfloat16,
                         memory_format=torch.preserve_format,
                     )
+
+
+def _inplace_diff_fn(p, grad, opt_state, opt_cls, kwargs, *ignored):
+    """Helper for gradcheck: runs one optimizer step and returns outputs."""
+    p = p.clone()
+    p.grad = grad
+    opt_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in opt_state.items()
+    }
+    opt = opt_cls([p], **kwargs)
+    opt.state[p].update(opt_state)
+    opt.step()
+    return (p,) + tuple(
+        v
+        for v in opt.state[p].values()
+        if isinstance(v, torch.Tensor) and v.requires_grad
+    )
+
+
+def _get_optim_state_bytes(opt):
+    """Sum actual bytes of all state tensors via introspection."""
+    total = 0
+    for group in opt.param_groups:
+        for p in group["params"]:
+            if p in opt.state:
+                for v in opt.state[p].values():
+                    if isinstance(v, torch.Tensor):
+                        total += v.numel() * v.element_size()
+    return total
+
+
+def _radam_reference_pre_patch(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    state_steps,
+    *,
+    beta1,
+    beta2,
+    lr,
+    weight_decay,
+    eps,
+    decoupled_weight_decay,
+    differentiable,
+    maximize,
+    capturable,
+    has_complex,
+):
+    """RAdam before the in-place rewrite -- out-of-place multiply chain for the update computation."""
+    if not torch.jit.is_scripting():
+        if isinstance(lr, torch.Tensor) and lr.numel() == 1:
+            lr = lr.item()
+
+    for i, param in enumerate(params):
+        grad = grads[i] if not maximize else -grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        step_t = state_steps[i]
+
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+
+        step_t += 1
+        step = (
+            step_t
+            if capturable
+            else (step_t.item() if isinstance(step_t, torch.Tensor) else step_t)
+        )
+
+        if weight_decay != 0:
+            if decoupled_weight_decay:
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
+
+        exp_avg.lerp_(grad, 1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+        bias_correction1 = 1 - beta1**step
+        bias_correction2 = 1 - beta2**step
+        bias_corrected_exp_avg = exp_avg / bias_correction1
+
+        rho_inf = 2 / (1 - beta2) - 1
+        rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
+
+        def _compute_rect():
+            return (
+                (rho_t - 4)
+                * (rho_t - 2)
+                * rho_inf
+                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+            ) ** 0.5
+
+        def _compute_adaptive_lr():
+            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+            if differentiable:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+            else:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+            return (bias_correction2**0.5) / exp_avg_sq_sqrt
+
+        if capturable:
+            update = torch.where(
+                rho_t > 5.0,
+                _compute_rect() * _compute_adaptive_lr(),
+                1.0,
+            )
+            param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
+        else:
+            if rho_t > 5.0:
+                param.add_(
+                    bias_corrected_exp_avg
+                    * lr
+                    * _compute_adaptive_lr()
+                    * _compute_rect(),
+                    alpha=-1.0,
+                )
+            else:
+                param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
 
 @markDynamoStrictTest
@@ -2723,6 +2849,275 @@ class TestOptimRenewed(TestCase):
             optimizer.state[param]["momentum_buffer"],
             expected,
         )
+
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ == "RAdam"],
+        dtypes=[torch.float32],
+    )
+    @onlyCUDA
+    def test_peak_memory_inplace(self, device, dtype, optim_info):
+        """Peak memory budget check for RAdam in-place rewrite."""
+        N = 1024
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            kwargs = deepcopy(optim_input.kwargs)
+            kwargs["foreach"] = False
+            N_WARMUP = 10
+            param = torch.randn(N, device=device, dtype=dtype)
+            grad = torch.randn(N, device=device, dtype=dtype)
+            param.grad = grad
+            opt = optim_cls([param], **kwargs)
+            for _ in range(N_WARMUP):
+                opt.step()
+                param.grad = grad.clone()
+
+            param_bytes = param.numel() * param.element_size()
+            state_bytes = _get_optim_state_bytes(opt)
+            nintermediates = 4
+            budget = (
+                param_bytes + param_bytes + state_bytes + param_bytes * nintermediates
+            )
+
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.synchronize()
+            baseline = torch.cuda.memory_allocated()
+            opt.step()
+            torch.cuda.synchronize()
+            peak = torch.cuda.max_memory_allocated()
+
+            self.assertLessEqual(
+                peak - baseline,
+                budget,
+                f"Peak {peak - baseline} exceeds budget {budget}",
+            )
+
+            # Non-capturable tight assertion (4x param)
+            if (
+                not kwargs.get("capturable")
+                and not kwargs.get("differentiable")
+                and kwargs.get("weight_decay", 0) == 0
+            ):
+                tight_budget = param_bytes * 4
+                self.assertLessEqual(
+                    peak - baseline,
+                    tight_budget,
+                    f"Peak {peak - baseline} exceeds tight budget {tight_budget} "
+                    f"(regression of in-place rewrite) for {optim_cls.__name__}",
+                )
+
+            # Capturable tight assertion (4.375x param)
+            if (
+                kwargs.get("capturable")
+                and not kwargs.get("differentiable")
+                and kwargs.get("weight_decay", 0) == 0
+            ):
+                tight_budget = param_bytes * 35 // 8
+                self.assertLessEqual(
+                    peak - baseline,
+                    tight_budget,
+                    f"Peak {peak - baseline} exceeds capturable tight budget {tight_budget} "
+                    f"(regression of capturable-path rewrite) for {optim_cls.__name__}",
+                )
+
+    def test_radam_oracle_comparison(self, device):
+        """Oracle check: _single_tensor_radam matches the pre-patch reference."""
+        from torch.optim.radam import _single_tensor_radam
+
+        for dtype in [torch.float32, torch.float64]:
+            for differentiable in [False, True]:
+                torch.manual_seed(42)
+                shape = (128,)
+                grad = torch.rand(shape, dtype=dtype)
+                beta1 = 0.9
+                beta2 = 0.999
+                lr_val = 0.001
+                eps = 1e-8
+                step_before = 9
+
+                p_orig = torch.rand(shape, dtype=dtype)
+
+                # Oracle
+                p_oracle = p_orig.clone()
+                ea_o = torch.zeros_like(p_oracle)
+                esq_o = torch.zeros_like(p_oracle)
+                step_o = torch.tensor(float(step_before), dtype=dtype)
+                _radam_reference_pre_patch(
+                    [p_oracle],
+                    [grad.clone()],
+                    [ea_o],
+                    [esq_o],
+                    [step_o],
+                    beta1=beta1,
+                    beta2=beta2,
+                    lr=lr_val,
+                    weight_decay=0,
+                    eps=eps,
+                    decoupled_weight_decay=False,
+                    differentiable=differentiable,
+                    maximize=False,
+                    capturable=False,
+                    has_complex=False,
+                )
+
+                # Shipped
+                p_shipped = p_orig.clone()
+                ea_s = torch.zeros_like(p_shipped)
+                esq_s = torch.zeros_like(p_shipped)
+                step_s = torch.tensor(float(step_before), dtype=dtype)
+                _single_tensor_radam(
+                    [p_shipped],
+                    [grad.clone()],
+                    [ea_s],
+                    [esq_s],
+                    [step_s],
+                    beta1=beta1,
+                    beta2=beta2,
+                    lr=lr_val,
+                    weight_decay=0,
+                    eps=eps,
+                    decoupled_weight_decay=False,
+                    differentiable=differentiable,
+                    maximize=False,
+                    capturable=False,
+                    has_complex=False,
+                )
+
+                self.assertEqual(
+                    p_shipped,
+                    p_oracle,
+                    atol=1e-5,
+                    rtol=1e-5,
+                    msg=(f"dtype={dtype}, differentiable={differentiable}"),
+                )
+
+    @skipIfTorchDynamo(
+        "compiled_autograd does not support undefined-grad probes in gradcheck"
+    )
+    def test_diff_gradcheck_radam(self, device):
+        """Gradcheck on RAdam differentiable path, covering the rectified LR computation."""
+        state = {
+            "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
+            "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "exp_avg_sq": torch.rand(10, requires_grad=True, dtype=torch.float64),
+        }
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _inplace_diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.RAdam,
+                {
+                    "lr": 0.9,
+                    "differentiable": True,
+                    "foreach": False,
+                },
+                *state.values(),
+            ),
+            check_batched_grad=False,
+        )
+
+    def test_radam_orthogonality(self, device):
+        """weight_decay + maximize must produce different output."""
+        torch.manual_seed(42)
+        p1 = torch.randn(64)
+        p2 = p1.clone()
+        g = torch.randn(64)
+
+        opt1 = torch.optim.RAdam([p1], lr=1e-3, foreach=False)
+        p1.grad = g.clone()
+        opt1.step()
+
+        opt2 = torch.optim.RAdam(
+            [p2],
+            lr=1e-3,
+            weight_decay=0.01,
+            maximize=True,
+            foreach=False,
+        )
+        p2.grad = g.clone()
+        opt2.step()
+
+        self.assertNotEqual(p1, p2)
+
+    def test_radam_dtype_correctness(self, device):
+        """RAdam fp16/bf16 dtype correctness vs pre-patch oracle."""
+        from torch.optim.radam import _single_tensor_radam
+
+        for dtype in [torch.float16, torch.bfloat16]:
+            shape = (128,)
+            torch.manual_seed(42)
+            grad = torch.rand(shape, dtype=dtype, device=device)
+            beta1 = 0.9
+            beta2 = 0.999
+            lr_val = 0.001
+            eps = 1e-3
+            step_before = 2
+
+            p_orig = torch.rand(shape, dtype=dtype, device=device)
+
+            p_oracle = p_orig.clone()
+            ea_o = torch.zeros_like(p_oracle)
+            esq_o = torch.zeros_like(p_oracle)
+            step_o = torch.tensor(float(step_before), dtype=dtype, device=device)
+            _radam_reference_pre_patch(
+                [p_oracle],
+                [grad.clone()],
+                [ea_o],
+                [esq_o],
+                [step_o],
+                beta1=beta1,
+                beta2=beta2,
+                lr=lr_val,
+                weight_decay=0,
+                eps=eps,
+                decoupled_weight_decay=False,
+                differentiable=False,
+                maximize=False,
+                capturable=False,
+                has_complex=False,
+            )
+
+            p_shipped = p_orig.clone()
+            ea_s = torch.zeros_like(p_shipped)
+            esq_s = torch.zeros_like(p_shipped)
+            step_s = torch.tensor(float(step_before), dtype=dtype, device=device)
+            _single_tensor_radam(
+                [p_shipped],
+                [grad.clone()],
+                [ea_s],
+                [esq_s],
+                [step_s],
+                beta1=beta1,
+                beta2=beta2,
+                lr=lr_val,
+                weight_decay=0,
+                eps=eps,
+                decoupled_weight_decay=False,
+                differentiable=False,
+                maximize=False,
+                capturable=False,
+                has_complex=False,
+            )
+
+            self.assertFalse(
+                torch.isnan(p_shipped).any(),
+                "NaN in shipped output",
+            )
+            self.assertFalse(
+                torch.isinf(p_shipped).any(),
+                "Inf in shipped output",
+            )
+            self.assertEqual(
+                p_shipped,
+                p_oracle,
+                atol=1e-2,
+                rtol=1e-2,
+                msg=f"dtype={dtype}",
+            )
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
