@@ -7,10 +7,14 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import (
+    MultiThreadedTestCase,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -28,7 +32,9 @@ class MyTestModule(nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
 
-class TestSaveAndLoadAPI(DTensorTestBase):
+class TestSaveAndLoadAPIAccelerator(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -36,9 +42,10 @@ class TestSaveAndLoadAPI(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_auto_detect(self):
-        model = FSDP(MyTestModule().to(self.device_type))
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+    def test_auto_detect(self, device):
+        device_type = torch.device(device).type
+        model = FSDP(MyTestModule().to(device_type))
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         model = FSDP(model, device_mesh=device_mesh)
         dcp.save(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
         dcp.load(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
@@ -63,8 +70,18 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
             dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
 
-    @with_comms
-    @skip_if_lt_x_gpu(2)
+
+class TestAssertSameKeys(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_threads()
+
     def test_assert_same_keys(self):
         """Test the `_assert_same_keys` function."""
         model = MyTestModule()
@@ -80,6 +97,14 @@ class TestSaveAndLoadAPI(DTensorTestBase):
 
         with self.assertRaises(AssertionError):
             dcp.utils._assert_same_keys(state_dict)
+
+
+instantiate_device_type_tests(
+    TestSaveAndLoadAPIAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
