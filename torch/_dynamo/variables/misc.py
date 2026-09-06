@@ -1409,7 +1409,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def _resolve_staticmethod(
         self,
-        obj: Any,
+        obj: object,
         source: Source | None,
         descriptor_source: Source | None,
         name: str,

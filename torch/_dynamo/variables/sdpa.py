@@ -99,5 +99,5 @@ class SDPAParamsVariable(VariableTracker):
             return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     @staticmethod
-    def is_sdpa_params(value: Any) -> TypeGuard["SDPAParams"]:
+    def is_sdpa_params(value: object) -> TypeGuard["SDPAParams"]:
         return value is SDPAParams
