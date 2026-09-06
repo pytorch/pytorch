@@ -9,9 +9,11 @@ from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     MI350_ARCH,
     run_tests,
     skipIfRocmArch,
@@ -97,12 +99,14 @@ class _TestClipGradNormBase(FSDPTest):
 
 
 class TestClipGradNormWorldSize2(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_clip_grad_norm_1d(self):
+    def test_clip_grad_norm_1d(self, device):
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
@@ -123,6 +127,8 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 4)
@@ -130,7 +136,7 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
     @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     @skipIfRocmArch(MI350_ARCH)
-    def test_clip_grad_norm_2d(self):
+    def test_clip_grad_norm_2d(self, device):
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2
             global_mesh = init_device_mesh(
@@ -159,6 +165,20 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
                 0.5, norm_type, ref_model, ref_optim, model, optim, inp, dp_mesh
             )
 
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize2,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize4,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
