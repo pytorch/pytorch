@@ -1,17 +1,17 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 25b4a70..7b21e61 100644
+index 116a03d..2186e44 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -378,0 +379 @@ class EpiMod:
+@@ -383,0 +384 @@ class EpiMod:
 +        prepass_mode=None,
-@@ -438 +439,5 @@ class EpiMod:
+@@ -443 +444,5 @@ class EpiMod:
 -        if prepass is not None:
 +        if prepass is None:
 +            if prepass_mode is not None:
 +                raise ValueError("prepass_mode= requires prepass=")
 +            self.prepass_operand_names = ()
 +        else:
-@@ -443,2 +448,6 @@ class EpiMod:
+@@ -448,2 +453,6 @@ class EpiMod:
 -        else:
 -            self.prepass_operand_names = ()
 +            # The prepass loop is always element-domain, even when the main
@@ -20,9 +20,9 @@ index 25b4a70..7b21e61 100644
 +                raise ValueError("prepass + acc_pair requires explicit prepass_mode='element'")
 +            if prepass_mode not in (None, "element"):
 +                raise ValueError("prepass_mode only supports 'element'")
-@@ -1946,0 +1956 @@ def gemm_epilogue(
+@@ -1953,0 +1963 @@ def gemm_epilogue(
 +    prepass_mode=None,
-@@ -1988,0 +1999 @@ def gemm_epilogue(
+@@ -1995,0 +2006 @@ def gemm_epilogue(
 +            prepass_mode=prepass_mode,
 diff --git a/quack/epilogue/library.py b/quack/epilogue/library.py
 index 9096a86..ba3b897 100644
@@ -33,26 +33,26 @@ index 9096a86..ba3b897 100644
 @@ -395,0 +397 @@ def qk_rope_epi(acc, cs, qk, w):
 +    prepass_mode="element",
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index 3eaecdf..44f9c9d 100644
+index 83aeb4c..dc899e1 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -957,0 +958,4 @@ class TileStore(EpiOp):
+@@ -976,0 +977,4 @@ class TileStore(EpiOp):
 +    def min_epi_tile_n(self, arg_tensor):
 +        """Return a physical-N lower bound imposed by this store, if any."""
 +        return None
 +
-@@ -1185 +1189 @@ class GroupedMainStore(TileStore):
+@@ -1204 +1208 @@ class GroupedMainStore(TileStore):
 -    def __init__(self, name, group, paired=False):
 +    def __init__(self, name, group, paired=False, min_fragment_n=None):
-@@ -1189,0 +1194,2 @@ class GroupedMainStore(TileStore):
+@@ -1208,0 +1213,2 @@ class GroupedMainStore(TileStore):
 +        if min_fragment_n is not None and (min_fragment_n <= 0 or min_fragment_n % group):
 +            raise ValueError("min_fragment_n must be a positive multiple of group")
-@@ -1193,0 +1200 @@ class GroupedMainStore(TileStore):
+@@ -1212,0 +1219 @@ class GroupedMainStore(TileStore):
 +        self.min_fragment_n = min_fragment_n
-@@ -1197 +1204 @@ class GroupedMainStore(TileStore):
+@@ -1216 +1223 @@ class GroupedMainStore(TileStore):
 -        return (self.group, self.paired, *super().config_key())
 +        return (self.group, self.paired, self.min_fragment_n, *super().config_key())
-@@ -1254,0 +1262,9 @@ class GroupedMainStore(TileStore):
+@@ -1273,0 +1281,9 @@ class GroupedMainStore(TileStore):
 +    def min_epi_tile_n(self, arg_tensor):
 +        """Keep stores vectorizable and fragment reductions complete."""
 +        store_width = 0
@@ -102,115 +102,6 @@ index 5dd8bf1..0aace89 100644
 +                if not contiguous or self.cta_tile_shape_mnk[1] % store_min_n:
 +                    raise ValueError(f"epilogue N tile cannot satisfy required width {store_min_n}")
 +                self.epi_tile = (self.epi_tile[0], cute.make_layout(store_min_n))
-diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index aa234a7..5629ab5 100644
---- a/quack/grouped_reduce.py
-+++ b/quack/grouped_reduce.py
-@@ -534,0 +535 @@ class GroupedReduceBase(EpiOp):
-+        physical_span=1,
-@@ -552,0 +554,4 @@ class GroupedReduceBase(EpiOp):
-+        if physical_span not in (1, 2):
-+            raise ValueError("grouped reduction physical_span must be 1 or 2")
-+        if physical_span > 1 and (axis != 1 or reduce_planes != 1 or not isinstance(combine, str)):
-+            raise ValueError("grouped physical spans support scalar axis-N named reductions only")
-@@ -561,0 +567,6 @@ class GroupedReduceBase(EpiOp):
-+        self.physical_span = physical_span
-+
-+    @property
-+    def physical_group(self):
-+        """Physical accumulator elements covered by one logical group."""
-+        return self.group * self.physical_span
-@@ -581,0 +593 @@ class GroupedReduceBase(EpiOp):
-+                    "physical_span",
-@@ -598,0 +611 @@ class GroupedReduceBase(EpiOp):
-+            self.physical_span,
-@@ -603 +616 @@ class GroupedReduceBase(EpiOp):
--        if not grouped_reduce_supports_config(config, self.axis, self.group):
-+        if not grouped_reduce_supports_config(config, self.axis, self.physical_group):
-@@ -619 +632 @@ class GroupedReduceBase(EpiOp):
--                if grouped_reduce_supports_config(config, self.axis, self.group)
-+                if grouped_reduce_supports_config(config, self.axis, self.physical_group)
-@@ -717 +730,4 @@ class GroupedReduceBase(EpiOp):
--        dim = m if self.axis == 0 else n
-+        if n % self.physical_span:
-+            raise ValueError(f"{self.name}: physical span {self.physical_span} must divide N={n}")
-+        logical_n = n // self.physical_span
-+        dim = m if self.axis == 0 else logical_n
-@@ -725 +741 @@ class GroupedReduceBase(EpiOp):
--        if tile % self.group or self.group > tile:
-+        if tile % self.physical_group or self.physical_group > tile:
-@@ -727 +743,2 @@ class GroupedReduceBase(EpiOp):
--                f"{self.name}: group {self.group} must divide the CTA tile extent {tile}"
-+                f"{self.name}: physical group {self.physical_group} must divide "
-+                f"the CTA tile extent {tile}"
-@@ -730 +747 @@ class GroupedReduceBase(EpiOp):
--            expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
-+            expected = grouped_reduce_out_shape(m, logical_n, self.group, self.axis, batch)
-@@ -735 +752,3 @@ class GroupedReduceBase(EpiOp):
--        rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
-+        rows, cols = (
-+            (m, logical_n // self.group) if self.axis == 1 else (m // self.group, logical_n)
-+        )
-@@ -756,0 +776 @@ class GroupedReduceBase(EpiOp):
-+        logical_n = n // self.physical_span
-@@ -758 +778,3 @@ class GroupedReduceBase(EpiOp):
--            rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
-+            rows, cols = (
-+                (m, logical_n // self.group) if self.axis == 1 else (m // self.group, logical_n)
-+            )
-@@ -767 +789 @@ class GroupedReduceBase(EpiOp):
--        inner = (m, groups) if self.axis == 1 else (groups, n)
-+        inner = (m, groups) if self.axis == 1 else (groups, logical_n)
-@@ -782,0 +805 @@ class GroupedReduceBase(EpiOp):
-+            logical_n = gemm.caller_n // self.physical_span
-@@ -784 +807 @@ class GroupedReduceBase(EpiOp):
--                (gemm.caller_m, gemm.caller_n // self.group)
-+                (gemm.caller_m, logical_n // self.group)
-@@ -786 +809 @@ class GroupedReduceBase(EpiOp):
--                else (gemm.caller_n, gemm.caller_m // self.group)
-+                else (logical_n, gemm.caller_m // self.group)
-@@ -806 +829 @@ class GroupedReduceBase(EpiOp):
--        if self.group <= GROUPED_FRAGMENT_WIDTH:
-+        if self.physical_group <= GROUPED_FRAGMENT_WIDTH:
-@@ -854 +877 @@ class GroupedReduceBase(EpiOp):
--            self.group,
-+            self.physical_group,
-@@ -855,0 +879,3 @@ class GroupedReduceBase(EpiOp):
-+        assert not (
-+            self.fragment_reduced and self.physical_span > 1 and geom.fragments_per_group > 1
-+        ), "fragment-reduced logical groups must fit one epilogue fragment"
-@@ -965 +991 @@ class GroupedReduceBase(EpiOp):
--        groups_per_cta = const_expr(tile // self.group)
-+        groups_per_cta = const_expr(tile // self.physical_group)
-@@ -995 +1021 @@ class GroupedReduceBase(EpiOp):
--            self.group - state.geom.cols if self._is_temporal(state.geom) else 0
-+            self.physical_group - state.geom.cols if self._is_temporal(state.geom) else 0
-@@ -1002 +1028 @@ class GroupedReduceBase(EpiOp):
--            group_idx = pos // self.group
-+            group_idx = pos // self.physical_group
-@@ -1005 +1031 @@ class GroupedReduceBase(EpiOp):
--                pos % self.group == leader_off
-+                pos % self.physical_group == leader_off
-@@ -1033 +1059,5 @@ class GroupedLocalReduce(GroupedReduceBase):
--    supports_swap_ab = True
-+
-+    @property
-+    def supports_swap_ab(self):
-+        """Whether caller-axis geometry can be transposed physically."""
-+        return self.physical_span == 1
-@@ -1041 +1071,11 @@ class GroupedLocalReduce(GroupedReduceBase):
--            cute.autovec_copy(source, destination)
-+            if const_expr(self.physical_span == 1):
-+                cute.autovec_copy(source, destination)
-+                continue
-+            source = cute.make_tensor(source.iterator, cute.make_layout(cute.size(source)))
-+            paired = cute.flat_divide(destination, cute.make_layout(self.physical_span))
-+            logical, unused = paired[0, ...], paired[1, ...]
-+            assert cute.size(source) == cute.size(logical), (
-+                "grouped physical-span source must match the logical destination"
-+            )
-+            cute.autovec_copy(source, logical)
-+            unused.fill(const_expr(_COMBINE_IDENTITIES[self.combine]))
 diff --git a/tests/test_epilogue_iface.py b/tests/test_epilogue_iface.py
 index 463b6ae..0bd956c 100644
 --- a/tests/test_epilogue_iface.py
@@ -285,7 +176,7 @@ index 3b9f04d..ca8fb2a 100644
 +
 +
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
-index 745dc32..a6ee0de 100644
+index 04bfa59..b74d5d1 100644
 --- a/tests/test_grouped_reduce.py
 +++ b/tests/test_grouped_reduce.py
 @@ -29 +29 @@ from quack import epi_math
@@ -293,37 +184,7 @@ index 745dc32..a6ee0de 100644
 +from quack.epilogue.frontend import fragment_epilogue, gemm_epilogue
 @@ -30,0 +31 @@ from quack.epilogue.mixin import ComposableEpiMixin
 +from quack.epilogue.ops import GroupedMainStore
-@@ -787,0 +789,29 @@ def test_feed_capability_gate():
-+    paired = GroupedLocalReduce("g", axis=1, group=16, combine="max", physical_span=2)
-+    assert paired.physical_group == 32
-+    assert not paired.supports_swap_ab
-+    assert (
-+        paired.cache_key() != GroupedLocalReduce("g", axis=1, group=16, combine="max").cache_key()
-+    )
-+    out = torch.empty(8, 2)
-+    paired.host_validate(
-+        out,
-+        m=8,
-+        n=64,
-+        tile_M=128,
-+        tile_N=64,
-+        batch=None,
-+        varlen_m=False,
-+    )
-+    with pytest.raises(ValueError, match="expected compressed shape"):
-+        paired.host_validate(
-+            torch.empty(8, 4),
-+            m=8,
-+            n=64,
-+            tile_M=128,
-+            tile_N=64,
-+            batch=None,
-+            varlen_m=False,
-+        )
-+    with pytest.raises(ValueError, match="scalar axis-N named reductions only"):
-+        GroupedLocalReduce("g", axis=0, group=16, combine="max", physical_span=2)
-+
-@@ -973,0 +1004,82 @@ def _fragment_prepass_mod(group, combine, finalize=None):
+@@ -973,0 +975,55 @@ def _fragment_prepass_mod(group, combine, finalize=None):
 +def test_fragment_pair_domain_reduce_feeds_main():
 +    """One complete logical group reduces and feeds main in one fragment."""
 +    group = 32
@@ -343,15 +204,13 @@ index 745dc32..a6ee0de 100644
 +            reduction_profile=((None, 1, None), 1, 1),
 +        )
 +        broadcast = reduced.reshape(((1, 1, repeats), 1, 1)).broadcast_to(grouped.shape)
-+        return {"main": grouped / (broadcast + cute.full_like(broadcast, 1)), "g": broadcast}
++        physical = reduced.reshape(((1, 1, repeats), 1, 1)).broadcast_to(
++            ((1, 2 * group_width, repeats), 1, 1)
++        )
++        return {"main": grouped / (broadcast + cute.full_like(broadcast, 1)), "g": physical}
 +
 +    reduce_op = GroupedLocalReduce(
-+        "g",
-+        axis=1,
-+        group=group,
-+        combine="max",
-+        fragment_reduced=True,
-+        physical_span=2,
++        "g", axis=1, group=2 * group, combine="max", fragment_reduced=True
 +    )
 +    mod = fragment_epilogue(
 +        outputs=(GroupedMainStore("main", 2, min_fragment_n=2 * group),),
@@ -379,30 +238,5 @@ index 745dc32..a6ee0de 100644
 +    reduced = grouped.amax(-1)
 +    torch.testing.assert_close(result["main"], (grouped / (reduced[..., None] + 1)).flatten(1))
 +    torch.testing.assert_close(grouped_out, reduced)
-+
-+    unsafe = fragment_epilogue(
-+        outputs=(GroupedMainStore("main", 2),),
-+        outs={
-+            "g": GroupedLocalReduce(
-+                "g",
-+                axis=1,
-+                group=group,
-+                combine="max",
-+                fragment_reduced=True,
-+                physical_span=2,
-+            )
-+        },
-+    )(pair_reduce)
-+    unsafe_main = torch.empty((m, n // 2), device="cuda", dtype=torch.float8_e4m3fn)
-+    with pytest.raises(Exception, match="logical groups must fit one epilogue fragment"):
-+        unsafe(
-+            A,
-+            B,
-+            out={"main": unsafe_main},
-+            store_d=False,
-+            tuned=False,
-+            g=grouped_out,
-+            config_constraints={"tile_n": 256, "swap_ab": False, "cluster_n": 1},
-+        )
 +
 +

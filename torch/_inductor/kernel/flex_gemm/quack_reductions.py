@@ -57,13 +57,12 @@ class FlexGemmTensorSSAFact:
     """Track logical values derived from fixed physical accumulator lanes."""
 
     root: torch.fx.Node
-    logical_shape: tuple[Any, ...]
     physical_span: int
     chunked: bool
     lane_offsets: frozenset[int]
     storage_span: int = 1
     storage_offsets: frozenset[int] = frozenset((0,))
-    reduction_dependencies: frozenset[torch.fx.Node] = frozenset()
+    reduced: bool = False
     external_tensor_inputs: frozenset[torch.fx.Node] = frozenset()
 
     @property

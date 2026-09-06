@@ -1367,11 +1367,11 @@ def rmsnorm_bwd(
     if not per_head and weight is not None and not has_bias and x.numel() > 0:
         sm_count = get_sm_count(N, device)
         if dresidual_out is not None and dresidual_out.dtype != x.dtype:
-            dx, dw_partial, dresidual = torch.ops.quack.rmsnorm_bwd_f_dual(
+            dx, dw_partial, dresidual = torch.ops.torch_vendor_quack.rmsnorm_bwd_f_dual(
                 x, weight, dout, rstd, dresidual_out, sm_count, weight_offset=weight_offset
             )
         else:
-            dx, dw_partial = torch.ops.quack.rmsnorm_bwd_f(
+            dx, dw_partial = torch.ops.torch_vendor_quack.rmsnorm_bwd_f(
                 x, weight, dout, rstd, dresidual_out, sm_count, weight_offset=weight_offset
             )
             dresidual = None
