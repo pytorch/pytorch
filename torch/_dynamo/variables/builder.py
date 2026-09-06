@@ -5314,8 +5314,11 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            # pyrefly: ignore[bad-argument-type]  # TODO: create() accepts opaque constants as proxies
-            return CustomClassObjectVariable.create(value, value, tx=tx)
+            return CustomClassObjectVariable.create(
+                value,  # pyrefly: ignore[bad-argument-type]  # TODO: create() accepts opaque constants as proxies
+                value,
+                tx=tx,
+            )
         elif is_opaque_symbolic_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
