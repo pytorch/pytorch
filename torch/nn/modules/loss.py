@@ -31,6 +31,7 @@ __all__ = [
     "LinearCrossEntropyLoss",
     "MultiLabelSoftMarginLoss",
     "CosineEmbeddingLoss",
+    "InfoNCELoss",
     "MarginRankingLoss",
     "MultiMarginLoss",
     "TripletMarginLoss",
@@ -2144,6 +2145,115 @@ class TripletMarginWithDistanceLoss(_Loss):
             distance_function=self.distance_function,
             margin=self.margin,
             swap=self.swap,
+            reduction=self.reduction,
+        )
+
+
+class InfoNCELoss(_Loss):
+    r"""Compute a one-directional InfoNCE loss.
+
+    Computes a one-directional InfoNCE objective between paired query and
+    positive-key embeddings, using either cross-batch keys or an explicit shared
+    set of negative keys. Pairs are aligned by index: ``positive_key[i]`` is the
+    positive for ``query[i]``. Input embeddings are L2-normalized internally
+    before similarities are computed.
+
+    When ``negative_keys`` is given, every query is scored against its own
+    positive and against the same shared set of :math:`M` negatives, which is the
+    softmax classification form used by MoCo:
+
+    .. math::
+        \mathcal{L}_i = -\log \frac{\exp(\operatorname{sim}(q_i, k_i) / \tau)}
+            {\exp(\operatorname{sim}(q_i, k_i) / \tau)
+             + \sum_{j=1}^{M} \exp(\operatorname{sim}(q_i, n_j) / \tau)}
+
+    When ``negative_keys`` is ``None``, the remaining positive keys in the batch
+    act as in-batch negatives through the :math:`(N, N)` cross-view similarity
+    matrix, whose diagonal holds the positive pairs:
+
+    .. math::
+        \mathcal{L}_i = -\log \frac{\exp(\operatorname{sim}(q_i, k_i) / \tau)}
+            {\sum_{j=1}^{N} \exp(\operatorname{sim}(q_i, k_j) / \tau)}
+
+    where :math:`\operatorname{sim}(u, v) = u^\top v / (\|u\| \|v\|)` is cosine
+    similarity and :math:`\tau` is the temperature parameter.
+
+    Args:
+        temperature (float, optional): Temperature parameter :math:`\tau` for scaling
+            similarities. Lower values make the distribution sharper. Must be
+            finite and positive. Default: ``0.07``.
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of elements in
+            the output, ``'sum'``: the output will be summed. Default: ``'mean'``
+
+    Shape:
+        - query: :math:`(N, D)` where :math:`N` is batch size, :math:`D` is embedding dim.
+        - positive_key: :math:`(N, D)`, paired with query.
+        - negative_keys: :math:`(M, D)`, shared by every query, or ``None``.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N,)`.
+
+    Examples::
+
+        >>> loss_fn = nn.InfoNCELoss(temperature=0.07)
+        >>> query = torch.randn(32, 128, requires_grad=True)
+        >>> positive_key = torch.randn(32, 128)
+        >>> output = loss_fn(query, positive_key)
+        >>> output.backward()
+
+        >>> # With explicit negatives from a memory bank
+        >>> negative_keys = torch.randn(1024, 128)
+        >>> output = loss_fn(query, positive_key, negative_keys)
+
+    Reference:
+        Oord et al., "Representation Learning with Contrastive Predictive Coding", 2018.
+        https://arxiv.org/abs/1807.03748
+
+        He et al., "Momentum Contrast for Unsupervised Visual Representation
+        Learning" (MoCo), 2020. https://arxiv.org/abs/1911.05722
+
+    .. note::
+        This objective is one-directional. A symmetric cross-view objective
+        (CLIP-style) is obtained by averaging both directions:
+        ``0.5 * (loss_fn(query, key) + loss_fn(key, query))``. This is not the
+        exact NT-Xent objective of SimCLR, which treats both views as anchors
+        over a shared set of ``2N`` representations.
+
+    .. note::
+        The loss owns no state: it does not maintain a memory queue, a momentum
+        encoder, stop-gradient behavior, or data augmentation. A MoCo-style setup
+        passes its external queue as ``negative_keys`` and decides outside the
+        loss whether the keys should receive gradients.
+
+    .. note::
+        With ``negative_keys=None`` and a batch of one, no negatives exist, so the
+        loss is exactly ``0``. Gradients still flow (they are zero), so calling
+        ``backward()`` is safe.
+    """
+
+    __constants__ = ["temperature", "reduction"]
+    temperature: float
+
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        reduction: str = "mean",
+    ) -> None:
+        super().__init__(reduction=reduction)
+        self.temperature = temperature
+
+    def forward(
+        self,
+        query: Tensor,
+        positive_key: Tensor,
+        negative_keys: Tensor | None = None,
+    ) -> Tensor:
+        """Runs the forward pass."""
+        return F.info_nce_loss(
+            query,
+            positive_key,
+            negative_keys,
+            temperature=self.temperature,
             reduction=self.reduction,
         )
 
