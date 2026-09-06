@@ -589,6 +589,28 @@ def try_get_name(x):
     return x.get_name() if isinstance(x, Buffer) else None
 
 
+# Compute-node tracking for FQN annotation of fused kernels.
+# When active, every Loops.inner_fn that executes records its lowering_fx_node
+# into the sink. Tracing a fused buffer's inner_fn therefore collects ALL the
+# original FX nodes inlined into it — one per original layer that was fused.
+# Realized inputs are read via ops.load (not inner_fn descent), so they are
+# natural boundaries with no transitive cascade. None when collection is off.
+_active_compute_sink: OrderedSet[Any] | None = None
+
+
+@contextlib.contextmanager
+def collect_compute_nodes(
+    sink: OrderedSet[Any],
+) -> Generator[None, None, None]:
+    global _active_compute_sink
+    prev = _active_compute_sink
+    _active_compute_sink = sink
+    try:
+        yield
+    finally:
+        _active_compute_sink = prev
+
+
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -612,6 +634,9 @@ class IRNode:
     stream_idx: int | None = dataclasses.field(init=False)
     # User-annotated CUDA MemPool from FX node metadata (set during lowering)
     mempool: tuple[int, int] | None = dataclasses.field(init=False)
+    # The FX node that is being lowered when this IRNode is created.
+    # Set from V.current_node; None outside of lowering.
+    lowering_fx_node: torch.fx.Node | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -680,6 +705,11 @@ class IRNode:
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
         self._post_init_setattr("mempool", self._current_mempool)
+        current = V.get_current_node()
+        self._post_init_setattr(
+            "lowering_fx_node",
+            current if isinstance(current, torch.fx.Node) else None,
+        )
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -689,6 +719,9 @@ class IRNode:
 
     def get_origin_node(self) -> torch.fx.Node | None:
         return self.origin_node
+
+    def get_lowering_fx_node(self) -> torch.fx.Node | None:
+        return self.lowering_fx_node
 
     def get_defining_op(self) -> Operation | None:
         return None
@@ -1065,6 +1098,27 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Wrap inner_fn so executing it under an active collect_compute_nodes
+        # sink records this node's lowering_fx_node. When a fused kernel's
+        # outer inner_fn is traced, it calls each inlined Loops's inner_fn,
+        # which records that Loops's original layer FX node. This gives the
+        # complete set of original layers fused into the kernel.
+        # Only installed when both annotation flags are on.
+        if not config.triton.cudagraph_kernel_annotations:
+            return
+        orig_inner_fn = self.inner_fn
+
+        def _tracking_inner_fn(*args: Any, **kwargs: Any) -> Any:
+            if _active_compute_sink is not None:
+                node = self.lowering_fx_node
+                if node is not None:
+                    _active_compute_sink.add(node)
+            return orig_inner_fn(*args, **kwargs)
+
+        self._post_init_setattr("inner_fn", _tracking_inner_fn)
+
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -1130,6 +1184,24 @@ class Loops(IRNode):
         ):
             self.inner_fn(*self.inner_fn_args())
             return opcounter.getvalue()
+
+    def collect_compute_fx_nodes(self) -> OrderedSet[torch.fx.Node]:
+        """Return all FX nodes whose compute is inlined into this loop body.
+
+        Traces inner_fn under MockHandler with an active sink. Each inlined
+        Loops's _tracking_inner_fn fires and records its lowering_fx_node,
+        giving the complete set of original-layer FX nodes fused into this
+        kernel. Reads of realized buffers go through ops.load (not inner_fn
+        descent) so are natural boundaries — no transitive cascade.
+        """
+        sink: OrderedSet[torch.fx.Node] = OrderedSet()
+        with (
+            collect_compute_nodes(sink),
+            V.set_ops_handler(V.MockHandler()),
+            patch.object(FlexibleLayout, "allow_indexing", True),
+        ):
+            self.inner_fn(*self.inner_fn_args())
+        return sink
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         return (self._index(self.ranges),)

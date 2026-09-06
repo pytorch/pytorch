@@ -3605,6 +3605,43 @@ def _prune_redundant_deps(
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
 
 
+def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
+    """
+    Return a human-readable FQN annotation for a fused Triton kernel.
+
+    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    to map FX node names to FQN strings.
+
+    For each snode, collects the FX nodes whose compute is actually inlined
+    into its loop body (Loops.collect_compute_fx_nodes) rather than walking
+    the transitively accumulated origins. This prevents over-attribution to ops
+    that are only read, not computed, by the kernel, and correctly records all
+    original layers fused into a single kernel.
+    """
+    fqn_map: dict[str, str] = V.graph.fx_fqn_map
+    extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
+    log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
+
+    module_names: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        data = getattr(snode.node, "data", None)
+        if isinstance(data, ir.Loops):
+            compute_nodes = data.collect_compute_fx_nodes()
+        else:
+            lowering_node = snode.node.get_lowering_fx_node()
+            compute_nodes = [lowering_node] if lowering_node is not None else []
+        for fx_node in compute_nodes:
+            fqn = fqn_map.get(fx_node.name)
+            if fqn and fqn not in extern_fqns:
+                module_names.add(fqn)
+
+    result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
+    log.debug("get_fused_kernel_module_fqn: result=%s", result)
+    return result
+
+
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         super().__init__(scheduler)
@@ -3638,9 +3675,51 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return ([numel], [])
         return ([], [])
 
+    def _get_extern_module_fqn(self) -> str | None:
+        """Derive the FQN annotation string for this extern kernel.
+
+        Separated from codegen() so the Scheduler can pre-populate
+        fx_extern_fqns before any Triton kernel codegen runs, making
+        get_fused_kernel_module_fqn's pass-2 filter order-independent.
+        """
+        if not isinstance(self.node, ir.ExternKernel):
+            raise AssertionError("expected self.node to be an ir.ExternKernel")
+        from torch._inductor.fx_passes.graph_view import (
+            _clean_stack_name,
+            _strip_instance_suffix,
+        )
+
+        lowering_node = self.node.get_lowering_fx_node()
+        if lowering_node is not None:
+            stack = lowering_node.meta.get("nn_module_stack")
+            if stack:
+                module_path = _clean_stack_name(next(reversed(stack.values()))[0])
+                if module_path:
+                    return (
+                        f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
+                    )
+            return None
+        # lowering_fx_node not set (e.g. convolution); fall back to walking origins.
+        return get_fused_kernel_module_fqn([self])
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
+        if (
+            torch._inductor.config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+        ):
+            from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
+
+            module_fqn = self._get_extern_module_fqn()
+            if module_fqn:
+                V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
+                n_before = len(wrapper.lines)
+                self.node.codegen(wrapper)
+                inner_lines = wrapper.lines[n_before:]
+                del wrapper.lines[n_before:]
+                wrapper.writeline(AnnotatedExternKernelBlock(inner_lines, module_fqn))
+                return
         return self.node.codegen(wrapper)
 
 
@@ -12015,6 +12094,21 @@ class Scheduler:
                 multi = [name for name, ss in input_streams.items() if len(ss) > 1]
                 if multi:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
+
+        # Pre-populate fx_extern_fqns for all extern kernels before any Triton
+        # kernel is codegen'd.  get_fused_kernel_module_fqn's pass-2 filter
+        # reads this set to exclude extern-kernel FQNs from Triton annotations;
+        # if an extern kernel is codegen'd after a Triton kernel that shares the
+        # same block, the filter is incomplete and returns None, leaving the
+        # Triton kernel unannotated.  Walking all nodes up front makes the
+        # filter order-independent.
+        if config.triton.cudagraph_kernel_annotations and not V.graph.cpp_wrapper:
+            for node in nodes:
+                for snode in node.get_nodes():
+                    if isinstance(snode, ExternKernelSchedulerNode):
+                        fqn = snode._get_extern_module_fqn()
+                        if fqn:
+                            V.graph.fx_extern_fqns.add(fqn.removeprefix("L."))
 
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):

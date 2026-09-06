@@ -1609,6 +1609,23 @@ class FxGraphHashDetails:
                         (kernel_source, constant_args, configs)
                     )
 
+        # When cudagraph_kernel_annotations is on, the per-call-site nn.Module FQN
+        # is baked into the generated wrapper. nn_module_stack lives in node.meta,
+        # which is excluded from gm's reduce (see above), so include it in the key
+        # explicitly -- otherwise structurally-identical call sites (e.g. repeated
+        # transformer layers) share a cache entry and all bake the first site's FQN.
+        if config.triton.cudagraph_kernel_annotations and gm is not None:
+            self.fqn_annotations: list[tuple[str, tuple[str, ...]]] = []
+            for module in gm.modules():
+                if not isinstance(module, torch.fx.GraphModule):
+                    continue
+                for node in module.graph.nodes:
+                    stack = node.meta.get("nn_module_stack")
+                    if stack:
+                        self.fqn_annotations.append(
+                            (node.name, tuple(v[0] for v in stack.values()))
+                        )
+
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,
