@@ -2720,6 +2720,13 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
     while is_gloo_available() and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
+    # Non-member ranks split via split_from.perform_nocolor_split(), which
+    # only NCCL-style backends implement; backends such as gloo advertise
+    # supports_splitting for split_group() but cannot serve as a split
+    # source here (their creator functions ignore split_from).
+    if not hasattr(split_from, "perform_nocolor_split"):
+        return None
+
     return split_from
 
 
@@ -2814,9 +2821,9 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
