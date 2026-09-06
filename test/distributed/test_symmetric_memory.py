@@ -1629,7 +1629,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        for dtype, size_bytes, align_bytes, copy, offset in itertools.product(
+        for dtype, size_bytes, _align_bytes, copy, offset in itertools.product(
             [torch.float, torch.bfloat16],
             [4, 8192, 8196],
             [

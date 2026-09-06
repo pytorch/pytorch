@@ -12929,7 +12929,7 @@ get_out().sum().backward()
             barrier.wait()
             return weakref.ref(tensor.grad)
 
-        for i in range(NUM_ITERS):
+        for _ in range(NUM_ITERS):
             tensor = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
             (tensor**2).sum().backward()
 

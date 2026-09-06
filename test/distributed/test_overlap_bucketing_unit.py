@@ -2794,7 +2794,7 @@ class TestBitsetAncestors(TestCase):
 
         g = fx.Graph()
         nodes = [g.placeholder("x")]
-        for i in range(99):
+        for _ in range(99):
             nodes.append(g.call_function(torch.relu, (nodes[-1],)))
         g.output(nodes[-1])
 

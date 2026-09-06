@@ -1423,7 +1423,7 @@ from user code:
     def test_graph_break_in_loop(self, records):
         @torch.compile(backend="eager")
         def fn(x):
-            for i in range(2):
+            for _ in range(2):
                 torch._dynamo.graph_break()
             return x + 1
 
@@ -1465,7 +1465,7 @@ User code traceback:
 
         @torch.compile(backend="eager")
         def gn(x):
-            for i in range(2):
+            for _ in range(2):
                 if x.sum() > 0:
                     x = x + 1
                 else:
@@ -1518,7 +1518,7 @@ User code traceback:
     @make_logging_test(graph_breaks=True)
     def test_skip_frame_in_loop_message(self, records):
         def fn(x):
-            for i in range(2):
+            for _ in range(2):
                 with GenericCtxMgr():
                     if x.sum() > 0:
                         x = x + 1
@@ -2705,7 +2705,7 @@ User code traceback:
         global f1, f2, f3
 
         def f1(x):
-            for i in range(2):
+            for _ in range(2):
                 with GenericCtxMgr():
                     if x.sum() > 0:
                         x = x + 1
@@ -2999,7 +2999,7 @@ NOTE: the most recent `torch.compile` tracing attempt might not be where you app
     def test_stack_variable_source_attribution(self, records):
         @torch.compile(backend="eager")
         def fn(x):
-            for i in range(2):
+            for _ in range(2):
                 torch._dynamo.graph_break()
             return x + 1
 
@@ -3037,7 +3037,7 @@ graph break in loop
 Stack variable source attribution:
   RangeIteratorVariable() originated from:
   File "test_error_messages.py", line N
-                for i in range(2):
+                for _ in range(2):
                          ~~~~~^^^
 
 User code traceback:

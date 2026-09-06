@@ -752,7 +752,7 @@ class TestCreatePartialInput(TestCase):
         tensor = torch.tensor([-10.0, -1.0, 5.0, 8.0])
         value_range = (tensor.max() - tensor.min()).item()  # 18.0
 
-        for reduce_op, sign in [("min", 1), ("max", -1)]:
+        for reduce_op, _sign in [("min", 1), ("max", -1)]:
             local = _create_partial_input(tensor, Partial(reduce_op), world_size=2)
             r0, r1 = local._local_tensors[0], local._local_tensors[1]
             # The actual offset applied should exceed value_range

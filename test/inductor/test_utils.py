@@ -74,14 +74,14 @@ class TestUtils(TestCase):
         schema = result._opoverload._schema
         g = torch.tensor([11, 2])
         found = False
-        for arg, val in torch._library.utils.zip_schema(schema, [], {"x": g}):
+        for arg, _val in torch._library.utils.zip_schema(schema, [], {"x": g}):
             if arg.name == "x":
                 found = True
 
         self.assertTrue(found)
 
         found = False
-        for arg, val in torch._library.utils.zip_schema(schema, [g], {}):
+        for arg, _val in torch._library.utils.zip_schema(schema, [g], {}):
             if arg.name == "x":
                 found = True
         self.assertTrue(found)

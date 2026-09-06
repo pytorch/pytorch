@@ -2216,7 +2216,7 @@ class TestFullyShardNDTraining(FSDPTest):
         fully_shard(
             model, mesh=dp_mesh, reshard_after_forward=reshard_non_layer_modules
         )
-        for (name, param), (_, ref_param) in zip(
+        for (_name, param), (_, ref_param) in zip(
             model.named_parameters(), ref_model.named_parameters()
         ):
             full_param = param.full_tensor()

@@ -9686,7 +9686,7 @@ class TestMemPool(TestCase):
         # Generate trace entries
         with torch.cuda.use_mem_pool(pool):
             tensors = []
-            for i in range(1000):
+            for _ in range(1000):
                 tensors.append(torch.randn(1024, device="cuda"))
             del tensors
 
@@ -9938,7 +9938,7 @@ class TestMemPool(TestCase):
         tensor_sizes = [24 * 1024 * 1024, 32 * 1024 * 1024]
         alloc_cases = []
         case_no = 0
-        for idx in range(3):
+        for _ in range(3):
             for stream_idx, stream in enumerate([first_stream, second_stream]):
                 # for second stream in reverse order
                 reverse_order = stream_idx % 2 == 1
