@@ -10,8 +10,9 @@ from torch._inductor import config as inductor_config
 from torch._inductor.fuzzer import ConfigFuzzer, MODULE_DEFAULTS, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def create_simple_test_model_cpu():
@@ -27,23 +28,25 @@ def create_simple_test_model_cpu():
     return test_fn
 
 
-def create_simple_test_model_gpu():
+def create_simple_test_model_gpu(device):
     batch_size = 32
     seq_length = 50
     hidden_size = 768
 
-    inp = torch.randn(batch_size, seq_length, hidden_size, device=GPU_TYPE)
-    weight = torch.randn(hidden_size, hidden_size, device=GPU_TYPE)
+    inp = torch.randn(batch_size, seq_length, hidden_size, device=device)
+    weight = torch.randn(hidden_size, hidden_size, device=device)
 
     def test_fn() -> bool:
         matmul_output = inp @ weight
-        torch.nn.LayerNorm(hidden_size, device=GPU_TYPE)(matmul_output)
+        torch.nn.LayerNorm(hidden_size, device=device)(matmul_output)
         return True
 
     return test_fn
 
 
-class TestConfigFuzzer(TestCase):
+class TestConfigFuzzerGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sampling_method_toggle(self):
         toggle = SamplingMethod.dispatch(SamplingMethod.TOGGLE)
         self.assertEqual(toggle("", bool, False), True)
@@ -57,12 +60,6 @@ class TestConfigFuzzer(TestCase):
         random = SamplingMethod.dispatch(SamplingMethod.RANDOM)
         samp = [random("", bool, False) for i in range(1000)]
         self.assertTrue(not all(samp))
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_config_fuzzer_inductor_gpu(self):
-        fuzzer = ConfigFuzzer(inductor_config, create_simple_test_model_gpu, seed=30)
-        self.assertIsNotNone(fuzzer.default)
-        fuzzer.reproduce([{"max_fusion_size": 1}])
 
     def test_config_fuzzer_inductor_cpu(self):
         fuzzer = ConfigFuzzer(inductor_config, create_simple_test_model_cpu, seed=100)
@@ -210,6 +207,23 @@ class TestConfigFuzzer(TestCase):
         num_attempts = 20
         fuzzer.bisect(num_attempts=num_attempts, p=0.5)
         self.assertEqual(fuzzer.test_config.call_count, num_attempts)
+
+
+class TestConfigFuzzerAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_config_fuzzer_inductor_gpu(self, device):
+        fuzzer = ConfigFuzzer(
+            inductor_config, lambda: create_simple_test_model_gpu(device), seed=30
+        )
+        self.assertIsNotNone(fuzzer.default)
+        fuzzer.reproduce([{"max_fusion_size": 1}])
+
+
+instantiate_device_type_tests(
+    TestConfigFuzzerAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
