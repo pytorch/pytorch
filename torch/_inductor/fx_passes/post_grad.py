@@ -175,6 +175,22 @@ def respecialize_current_device_nodes(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
+def _maybe_apply_batch_addmm_fusion(
+    gm: torch.fx.GraphModule, graph_transform_observer: Callable[..., Any]
+) -> None:
+    """fbcode-only: whole-graph batching of independent same-(M, K, N) addmm ops
+    into a bmm, gated by config.batch_addmm_fusion_options (empty disables)."""
+    if not (config.is_fbcode() and config.batch_addmm_fusion_options):
+        return
+    from .fb.batch_addmm_fusion import apply_batch_addmm_fusion
+
+    graph_transform_observer(gm, "batch_addmm_fusion").apply_graph_pass(
+        functools.partial(
+            apply_batch_addmm_fusion, options=config.batch_addmm_fusion_options
+        )
+    )
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -210,6 +226,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
         )
+
+    _maybe_apply_batch_addmm_fusion(gm, GraphTransformObserver)
 
     if torch._C._has_mkldnn:
         if (
