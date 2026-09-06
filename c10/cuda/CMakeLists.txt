@@ -42,6 +42,7 @@ set(C10_CUDA_SRCS
 )
 set(C10_CUDA_HEADERS
     CUDAAllocatorConfig.h
+    CUDAArchList.h
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
     CUDAException.h
