@@ -13536,6 +13536,40 @@ if __name__ == '__main__':
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @parametrize_test('foreach', (False, True))
+    @parametrize_test('norm_type', (1.0, 2.0))
+    def test_get_total_norm_dtype(self, norm_type, foreach, device):
+        # With dtype=torch.float32 the total norm of bf16 gradients does not depend on how the
+        # tensors are grouped: the norm over all of them equals the norm of per-group norms.
+        # Without it each norm accumulates in bf16 and the total is returned in bf16.
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
+        torch.manual_seed(0)
+        grads = [
+            (torch.randn(4096, device=device) * scale).to(torch.bfloat16)
+            for scale in (1.0, 1e-2, 1e-2, 1e-2, 3.0, 1e-3)
+        ]
+        kwargs = dict(norm_type=norm_type, foreach=foreach, dtype=torch.float32)
+
+        total = get_total_norm(grads, **kwargs)
+        self.assertEqual(total.dtype, torch.float32)
+
+        group_norms = [get_total_norm(grads[:2], **kwargs), get_total_norm(grads[2:5], **kwargs),
+                       get_total_norm(grads[5:], **kwargs)]
+        grouped = get_total_norm(group_norms, **kwargs)
+        self.assertEqual(grouped.dtype, torch.float32)
+        self.assertEqual(total, grouped, atol=1e-5, rtol=1e-5)
+
+        reference = torch.linalg.vector_norm(torch.cat([g.float().flatten() for g in grads]), norm_type)
+        # The reference sums in one pass; the total is a norm of per-tensor norms. Both are
+        # fp32, so they agree to fp32 rounding, not to the last ulp.
+        self.assertEqual(total, reference, atol=1e-4, rtol=1e-4)
+
+        self.assertEqual(get_total_norm(grads, norm_type=norm_type, foreach=foreach).dtype, torch.bfloat16)
+        self.assertEqual(get_total_norm([], norm_type=norm_type, dtype=torch.float32).dtype, torch.float32)
+
     @skipIfMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
