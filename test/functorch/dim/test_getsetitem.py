@@ -1,10 +1,15 @@
 # Owner(s): ["module: functorch"]
 import torch
 from functorch.dim import Dim, DimList, dims, Tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestGetSetItem(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     """Comprehensive tests for first-class dimension indexing operations."""
 
     def setUp(self):
