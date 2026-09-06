@@ -1214,6 +1214,41 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32)
+    def test_aminmax_out_overlap(self, device, dtype):
+        x = torch.randn(3, 4, device=device, dtype=dtype)
+        expected = torch.aminmax(x, dim=1)
+
+        # `min` and `max` are written independently, so sharing storage makes
+        # whichever write lands last clobber the other, silently.
+        out = torch.empty(3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must not overlap"):
+            torch.aminmax(x, dim=1, out=(out, out))
+
+        buf = torch.empty(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must not overlap"):
+            torch.aminmax(x, dim=1, out=(buf[0:3], buf[2:5]))
+
+        # Disjoint views of one storage do not overlap and stay allowed.
+        buf = torch.empty(6, device=device, dtype=dtype)
+        result = torch.aminmax(x, dim=1, out=(buf[0:3], buf[3:6]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
+        # Non-contiguous outputs must keep working. get_overlap_status reports
+        # TooHard rather than No for these, so a check demanding No would
+        # reject them even though they provably do not overlap.
+        strided = [torch.empty(6, device=device, dtype=dtype)[::2] for _ in range(2)]
+        result = torch.aminmax(x, dim=1, out=(strided[0], strided[1]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
+        buf = torch.empty(6, device=device, dtype=dtype)
+        result = torch.aminmax(x, dim=1, out=(buf[0::2], buf[1::2]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
     @skipIfMPS
