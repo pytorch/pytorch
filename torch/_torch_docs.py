@@ -9040,7 +9040,7 @@ pow(input, exponent, *, out=None) -> Tensor
 Takes the power of each element in :attr:`input` with :attr:`exponent` and
 returns a tensor with the result.
 
-:attr:`exponent` can be either a single ``float`` number or a `Tensor`
+:attr:`exponent` can be either a single number or a `Tensor`
 with the same number of elements as :attr:`input`.
 
 When :attr:`exponent` is a scalar value, the operation applied is:
@@ -9059,7 +9059,7 @@ and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    exponent (float or tensor): the exponent value
+    exponent (Number or complex or Tensor): the exponent value
 
 Keyword args:
     {out}
@@ -9084,7 +9084,7 @@ Example::
 .. function:: pow(self, exponent, *, out=None) -> Tensor
    :noindex:
 
-:attr:`self` is a scalar ``float`` value, and :attr:`exponent` is a tensor.
+:attr:`self` is a scalar value, and :attr:`exponent` is a tensor.
 The returned tensor :attr:`out` is of the same shape as :attr:`exponent`
 
 The operation applied is:
@@ -9093,7 +9093,7 @@ The operation applied is:
     \text{{out}}_i = \text{{self}} ^ {{\text{{exponent}}_i}}
 
 Args:
-    self (float): the scalar base value for the power operation
+    self (Number or complex): the scalar base value for the power operation
     exponent (Tensor): the exponent tensor
 
 Keyword args:
