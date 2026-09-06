@@ -1655,6 +1655,43 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
+    def _test_sdpa_rewriter_25_commuted(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195782
+        # The masked SDPA fusion should also fuse when the attention-mask is the
+        # first operand of the (commutative) add, i.e. `mask + scores`.
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            masked_score = attn_mask + scores
+            attn_weights = masked_score.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(value)
+
+        tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.half, device=self.device)
+        args = [
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=True,
+            check_train=True,
+        )
+
     @torch._inductor.config.patch("cache_sdpa_constraint", True)
     def _test_cache_sdpa_constraint_shared_kv_enabled(self):
         """When cache_sdpa_constraint is True and the same tensor feeds both key
@@ -2054,6 +2091,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25
+            )
+            test_sdpa_rewriter_25_commuted_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25_commuted
             )
             test_sdpa_rewriter_26_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_26
