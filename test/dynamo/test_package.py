@@ -165,7 +165,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             check(neon, sve128)
         with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
             check(("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None), avx2)
-        with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
+        with self.assertRaisesRegex(RuntimeError, "reports no CPU codegen target"):
             check(avx2, None)
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
