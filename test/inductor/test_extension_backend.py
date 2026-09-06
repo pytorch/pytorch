@@ -27,13 +27,15 @@ except ImportError:
 
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
-from torch._inductor.codegen import cpp_utils
 from torch._inductor.codegen.common import (
+    device_op_overrides_dict,
+    DeviceOpOverrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
     register_device_op_overrides,
 )
+from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -42,6 +44,20 @@ from torch.testing._internal.common_utils import (
     parametrize,
     xfailIfS390X,
 )
+
+
+class ExtensionDeviceOpOverrides(CpuDeviceOpOverrides):
+    def aten_device_type(self) -> str:
+        return "at::kPrivateUse1"
+
+
+class MissingAtenDeviceTypeOverrides(DeviceOpOverrides):
+    pass
+
+
+class InvalidAtenDeviceTypeOverrides(CpuDeviceOpOverrides):
+    def aten_device_type(self) -> str:
+        return "c10::DeviceType::PrivateUse1"
 
 
 try:
@@ -59,7 +75,45 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
-@xfailIfS390X
+class DeviceToAtenTests(TestCase):
+    @parametrize(
+        "device, expected",
+        [
+            ("cpu", "at::kCPU"),
+            ("cuda", "at::kCUDA"),
+            ("xpu", "at::kXPU"),
+            ("mps", "at::kMPS"),
+            ("meta", "at::kMeta"),
+        ],
+    )
+    def test_builtin_device_types(self, device, expected):
+        self.assertEqual(device_to_aten(device), expected)
+
+    def test_unregistered_device_type(self):
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten("unregistered_aten_device_type")
+
+    def test_missing_aten_device_type(self):
+        device = "missing_aten_device_type"
+        register_device_op_overrides(device, MissingAtenDeviceTypeOverrides())
+        self.addCleanup(device_op_overrides_dict.pop, device, None)
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten(device)
+
+    def test_invalid_aten_device_type(self):
+        device = "invalid_aten_device_type"
+        register_device_op_overrides(device, InvalidAtenDeviceTypeOverrides())
+        self.addCleanup(device_op_overrides_dict.pop, device, None)
+        with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
+            device_to_aten(device)
+
+    @parametrize("device", ["tpu", "mtia"])
+    def test_unsupported_device_types(self, device):
+        # MTIA has no aoti_torch_device_type_mtia shim yet; update this when it does.
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten(device)
+
+
 class BaseExtensionBackendTests(TestCase):
     module = None
 
@@ -115,6 +169,7 @@ class BaseExtensionBackendTests(TestCase):
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(BaseExtensionBackendTests):
+    @xfailIfS390X
     @skipIfWindows
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
@@ -126,7 +181,11 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionWrapperCodegen,
             ExtensionCppWrapperCodegen,
         )
-        register_device_op_overrides("extension_device", CpuDeviceOpOverrides())
+        register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
+        self.assertEqual(
+            device_to_aten("extension_device"),
+            "at::kPrivateUse1",
+        )
         self.assertTrue(
             get_scheduling_for_device("extension_device") == ExtensionScheduling
         )
@@ -154,7 +213,6 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
         def fn(a, b, c):
             return a * b + c
 
-        cpp_utils.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
         for cpp_wrapper_flag in [True, False]:
             with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                 metrics.reset()
@@ -170,6 +228,8 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 FileCheck().check("void").check(load_expr).check(
                     "extension_device"
                 ).run(code)
+                if cpp_wrapper_flag:
+                    self.assertIn("CACHE_TORCH_DEVICE(privateuse1);", code)
                 opt_fn(x, y, z)
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))
@@ -198,6 +258,7 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
         self.assertTrue(has_cpp_wrapper_for_device(device))
 
 
+instantiate_parametrized_tests(DeviceToAtenTests)
 instantiate_parametrized_tests(ExtensionBackendTests)
 
 

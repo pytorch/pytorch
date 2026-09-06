@@ -105,8 +105,8 @@ mypy==1.16.0 ; platform_system == "Linux"
 #Pinned versions: 1.16.0
 #test that import: test_typing.py, test_type_hints.py
 
-networkx==2.8.8 ; python_version < "3.13"
-networkx==3.5 ; python_version >= "3.13"
+networkx==2.8.8 ; python_version < "3.13" and platform_machine != "s390x"
+networkx==3.5 ; python_version >= "3.13" or platform_machine == "s390x"
 # scikit-image 0.26.0 requires networkx>=3.0
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
@@ -246,11 +246,13 @@ pygments==2.20.0
 #Pinned versions: 14.1.0
 #test that import:
 
-scikit-image==0.22.0 ; python_version < "3.13"
-scikit-image==0.26.0 ; python_version >= "3.13"
+scikit-image==0.22.0 ; python_version < "3.13" and platform_machine != "s390x"
+scikit-image==0.26.0 ; python_version >= "3.13" or platform_machine == "s390x"
 # 0.22.0 has no cp313/cp314 wheel, so pip builds it from source and picks up an
 # unpinned pythran that no longer compiles under the -std=c++14 its meson build
 # uses. 0.26.0 ships cp313/cp313t/cp314/cp314t wheels, so there is no source build.
+# There are no binaries for scikit-image for s390x, but scikit-image 0.26.0
+# builds without any issues
 #Description: image processing routines
 #Pinned versions: 0.22.0, 0.26.0
 #test that import: test_nn.py
@@ -415,7 +417,7 @@ cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != 
 #test that import: test_cuda.py
 
 cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
-#Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
+#Description: required for Cuspy, the experimental in-process CUPTI activity collector (torch.profiler._cuspy). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
 #test that import: test_profiler.py
 
 setuptools-git-versioning==2.1.0

@@ -114,11 +114,6 @@ Note that you also have to specify these operations when you want to learn a heu
 Take a look at the following PRs in which AutoHeuristic has enabled for various optimizations.
 Looking at these examples may be helpful if you want to use AutoHeuristic yourself.
 - pad_mm: https://github.com/pytorch/pytorch/pull/128643
-- mixed_mm:
-    - Enabling of AutoHeuristic: https://github.com/pytorch/pytorch/pull/131610
-    - Script to collect data: https://github.com/pytorch/pytorch/pull/131611
-    - A100 heuristic: https://github.com/pytorch/pytorch/pull/131613
-    - H100 heuristic: https://github.com/pytorch/pytorch/pull/132685
 - flex_attention: https://github.com/pytorch/pytorch/pull/130398
 - mm (heuristic for ranking choices):
     - https://github.com/pytorch/pytorch/pull/131615

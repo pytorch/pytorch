@@ -224,10 +224,25 @@ class FlexKernelOptions(TypedDict, total=False):
     may have more numerical error. Default: False."""
 
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
-    """If True, guarantees that at least one value in each row is not masked out.
-    Allows skipping safety checks for better performance. Only set this if you are certain
-    your mask guarantees this property. For example, causal attention is guaranteed safe
-    because each query has at least 1 key-value to attend to. Default: False."""
+    """If True, skips the guard that sanitizes the softmax row maximum.
+
+    The condition this requires is stronger than "every row attends to at least one key".
+    The kernel carries a running row maximum across the KV blocks the block mask schedules,
+    starting from ``-inf``, and this option removes the only thing keeping it finite. Each
+    row must therefore have an unmasked key in the *first* block scheduled for it: if a
+    row's keys all fall in later blocks, the running maximum is still ``-inf`` when the
+    rescaling runs, and ``exp2`` overflows to NaN. Block metadata can mark a block live
+    because *other* rows in the query block need it, so a mask can look valid at block
+    granularity while individual rows are empty in their first block.
+
+    Causal attention satisfies this. Local or windowed masks often do not, since the
+    earliest key a late row attends to can sit beyond the first scheduled block. Eager
+    execution materializes the full row and is unaffected, so the NaN appears only under
+    ``torch.compile``.
+
+    Only set this if you are certain your mask satisfies the stronger condition; see the
+    ``ROWS_GUARANTEED_SAFE`` demo in attention-gym for a worked example of a mask that
+    looks safe and is not. Default: False."""
 
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.

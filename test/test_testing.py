@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import unittest.mock
 from typing import Any
 from collections.abc import Callable
@@ -663,6 +664,9 @@ class TestPeriodicDecorator(TestCase):
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
+    @unittest.skipIf(
+        IS_FBCODE, "run_test.py periodic filtering is only exercised by OSS CI"
+    )
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     def test_periodic_config_selects_only_periodic_tests(self):
         source = """\
@@ -2807,6 +2811,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.flydsl.intrinsics",  # depends on flydsl
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
@@ -2827,7 +2832,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
-                           "torch.profiler._cupti",  # depends on cupti-python
+                           "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
@@ -2904,6 +2909,63 @@ class TestImports(TestCase):
         ]
         out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
+
+    def test_reimport_after_failed_import(self) -> None:
+        # A failed `import torch` leaves its submodules and C++ global state behind,
+        # so retrying used to re-run one-time initialization and segfault at
+        # interpreter shutdown. See https://github.com/pytorch/pytorch/issues/194172
+        program = textwrap.dedent(
+            '''\
+            import importlib.metadata
+
+            class _FailingEntryPoint:
+                name = "injected_backend"
+
+                def load(self):
+                    raise ImportError("injected backend failure")
+
+            _real_entry_points = importlib.metadata.entry_points
+
+            def _entry_points(**kwargs):
+                if kwargs.get("group") == "torch.backends":
+                    return [_FailingEntryPoint()]
+                return _real_entry_points(**kwargs)
+
+            importlib.metadata.entry_points = _entry_points
+
+            for _ in range(3):
+                try:
+                    import torch
+                except Exception as e:
+                    print(f"{type(e).__name__}: {e}")
+            '''
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+            # The test relies on the autoload running, so don't inherit a disabling value
+            env={**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        lines = proc.stdout.splitlines()
+        self.assertEqual(len(lines), 3, msg=proc.stdout)
+        self.assertTrue(lines[0].startswith("RuntimeError: "), msg=lines[0])
+        self.assertIn("Failed to load the backend extension: injected_backend", lines[0])
+        for line in lines[1:]:
+            self.assertTrue(line.startswith("ImportError: "), msg=line)
+            self.assertIn("can only be initialized once per process", line)
+
+    def test_reload_is_rejected(self) -> None:
+        # Reloading re-executes the module body against live C++ state just like a
+        # retry does, so it is refused; torch must stay usable afterwards.
+        with self.assertRaisesRegex(ImportError, "can only be initialized once"):
+            importlib.reload(torch)
+        self.assertEqual(torch.tensor([1, 2]).sum().item(), 3)
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:

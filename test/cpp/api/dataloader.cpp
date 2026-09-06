@@ -1439,6 +1439,10 @@ TEST(DataLoaderTest, Reset) {
 TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   struct D : datasets::Dataset<DummyDataset, int> {
     int get(size_t index) override {
+      // Two assertions below depend on this: one rethrows e.original_exception
+      // and requires it to still be a std::invalid_argument, and one compares
+      // e.what() against an exact string a TORCH_CHECK message would not match.
+      // @allow-raw-throw: subject of the ASSERT_THROW below
       throw std::invalid_argument("badness");
     }
     std::optional<size_t> size() const override {

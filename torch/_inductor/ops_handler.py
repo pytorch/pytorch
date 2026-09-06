@@ -53,6 +53,12 @@ ReductionType = Literal[
     "xor_sum",
     "online_softmax_reduce",
 ]
+registered_pointwise_ops: OrderedSet[str] = OrderedSet()
+
+
+def register_pointwise_op(name: str) -> None:
+    """Record a deterministic scalar operation that commutes with broadcasting."""
+    registered_pointwise_ops.add(name)
 
 
 def _arg_str(a: object) -> str:

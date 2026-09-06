@@ -318,7 +318,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       std::stringstream err;
       err << "Expected " << input_names_.size() << " inputs, but got "
           << inputs.size() << '!';
-      throw std::runtime_error(std::move(err).str());
+      TORCH_CHECK(false, std::move(err).str());
     }
     for (size_t i = 0; i < inputs.size(); ++i) {
       environment[input_names_[i]] = inputs[i];
@@ -341,7 +341,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
         } else {
           std::stringstream err;
           err << "Instruction referenced unknown value " << input_name << '!';
-          throw std::runtime_error(std::move(err).str());
+          TORCH_CHECK(false, std::move(err).str());
         }
       }
 
@@ -350,18 +350,18 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       const auto& op = std::get<0>(instr);
       if (op == "add") {
         if (inputs.size() != 2) {
-          throw std::runtime_error("Unexpected number of inputs for add op!");
+          TORCH_CHECK(false, "Unexpected number of inputs for add op!");
         }
         result = inputs[0] + inputs[1];
       } else if (op == "mul") {
         if (inputs.size() != 2) {
-          throw std::runtime_error("Unexpected number of inputs for mul op!");
+          TORCH_CHECK(false, "Unexpected number of inputs for mul op!");
         }
         result = inputs[0] * inputs[1];
       } else {
         std::stringstream err;
         err << "Unknown operator " << op << '!';
-        throw std::runtime_error(std::move(err).str());
+        TORCH_CHECK(false, std::move(err).str());
       }
 
       // Write back result into environment
@@ -370,7 +370,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     }
 
     if (!output_name_) {
-      throw std::runtime_error("Output name not specified!");
+      TORCH_CHECK(false, "Output name not specified!");
     }
 
     return environment.at(*output_name_);

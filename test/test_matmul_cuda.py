@@ -5,6 +5,7 @@ import json
 import math
 import os
 import unittest
+import warnings
 from itertools import product
 from functools import partial
 from collections.abc import Callable
@@ -22,10 +23,11 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     _get_torch_cuda_version,
+    BF16X9_API_SUPPORTED,
+    BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
-    SM80OrLater,
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
@@ -66,6 +68,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 
 _IS_SM8X = False
 if TEST_CUDA:
@@ -135,6 +138,267 @@ class TestMatmulCuda(InductorTestCase):
     def tearDown(self):
         torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @serialTest()
+    def test_bfx9_does_not_affect_non_float32_matmuls(self, device):
+        for dtype in (torch.float64, torch.complex64):
+            with self.subTest(dtype=dtype):
+                a = torch.randn(32, 32, device=device, dtype=dtype)
+                torch.backends.cuda.matmul.fp32_precision = "ieee"
+                expected = torch.mm(a, a)
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
+                self.assertEqual(torch.mm(a, a), expected)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @torch._inductor.config.patch(coordinate_descent_tuning=True)
+    @serialTest()
+    def test_bfx9_does_not_change_float16_decomposition(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        a = torch.randn(8, 1, device=device, dtype=torch.float16)
+        b = torch.randn(1, 8, device=device, dtype=torch.float16)
+        actual, code = run_and_get_code(
+            torch.compile(lambda x, y: torch.mm(x, y), fullgraph=True), a, b
+        )
+        self.assertEqual(actual, torch.mm(a, b))
+        self.assertNotIn("extern_kernels.mm(", "\n".join(code))
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @serialTest()
+    def test_bfx9_gemm_backed_convolution(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        torch.manual_seed(1234)
+        input = torch.randn(2, 3, 16, 16, device=device)
+        weight = torch.randn(5, 3, 3, 3, device=device)
+        bias = torch.randn(5, device=device)
+        args = (input, weight, [3, 3], bias, [1, 1], [1, 1])
+        actual = torch.ops.aten._slow_conv2d_forward(*args)
+        reference = torch.ops.aten._slow_conv2d_forward(
+            input.double(), weight.double(), [3, 3], bias.double(), [1, 1], [1, 1]
+        )
+        self.assertEqual(actual, reference.float(), atol=2e-4, rtol=2e-4)
+
+    @unittest.skipIf(BF16X9_SUPPORTED, "requires a device without BF16x9 emulation")
+    @serialTest()
+    def test_bfx9_platform_fallback(self, device):
+        if not BF16X9_API_SUPPORTED:
+            expected_error = (
+                "only supported on NVIDIA CUDA"
+                if TEST_WITH_ROCM
+                else "CUDA 12.9 or later"
+            )
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            return
+
+        torch.manual_seed(1234)
+        a = torch.randn(32, 32, device=device)
+        b = torch.randn(32, 32, device=device)
+        bias = torch.randn(32, device=device)
+        batched_a = a.unsqueeze(0).expand(2, -1, -1).contiguous()
+        batched_b = b.unsqueeze(0).expand(2, -1, -1).contiguous()
+        cases = (
+            ("cublas", "gemm", lambda: torch.mm(a, b)),
+            ("cublas", "strided_batched_gemm", lambda: torch.bmm(batched_a, batched_b)),
+            ("cublaslt", "lt_matmul", lambda: torch.addmm(bias, a, b)),
+        )
+        for backend, api, op in cases:
+            with self.subTest(api=api), blas_library_context(backend):
+                torch.backends.cuda.matmul.fp32_precision = "ieee"
+                expected = op()
+                torch.backends.cuda.matmul.fp32_precision = "bfx9"
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    actual = op()
+                    self.assertEqual(actual, expected, atol=1e-5, rtol=1e-5)
+                self.assertFalse(
+                    any("attempt to recover" in str(w.message) for w in caught),
+                    msg=f"{api} rejected bfx9 and used PyTorch's fallback path",
+                )
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @parametrize("backend", ("cublas", "cublaslt"))
+    @serialTest()
+    def test_bfx9_matmul_precision(self, device, backend):
+        torch.manual_seed(1234)
+        a = make_tensor((257, 513), device=device, dtype=torch.float32)
+        b = make_tensor((513, 129), device=device, dtype=torch.float32)
+        reference = torch.mm(a.double(), b.double())
+
+        results = {}
+        with blas_library_context(backend):
+            for precision in ("ieee", "bfx9"):
+                torch.backends.cuda.matmul.fp32_precision = precision
+                results[precision] = torch.mm(a, b)
+
+        errors = {
+            precision: (result.double() - reference).abs()
+            for precision, result in results.items()
+        }
+        self.assertTrue(torch.isfinite(results["bfx9"]).all())
+        rounding_atol = (
+            math.sqrt(a.shape[1])
+            * torch.finfo(torch.float32).eps
+            * reference.abs().mean()
+        )
+        self.assertLessEqual(
+            errors["bfx9"].mean().item(),
+            (errors["ieee"].mean() + rounding_atol).item(),
+        )
+        max_rounding_atol = (
+            math.sqrt(a.shape[1])
+            * torch.finfo(torch.float32).eps
+            * reference.abs().max()
+        )
+        self.assertLessEqual(
+            errors["bfx9"].max().item(),
+            (errors["ieee"].max() + max_rounding_atol).item(),
+        )
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @serialTest()
+    def test_bfx9_matmul_operations(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        torch.manual_seed(1234)
+        a = make_tensor((65, 67), device=device, dtype=torch.float32)
+        b = make_tensor((67, 33), device=device, dtype=torch.float32)
+        bias = make_tensor((33,), device=device, dtype=torch.float32)
+        batch_a = a[:8].reshape(2, 4, 67)
+        batch_b = b.unsqueeze(0).expand(2, -1, -1)
+        batch_bias = make_tensor((2, 4, 33), device=device, dtype=torch.float32)
+        group_a = make_tensor((2, 64, 64), device=device, dtype=torch.float32)
+        group_b = make_tensor((2, 64, 64), device=device, dtype=torch.float32)
+
+        cases = (
+            (
+                "addmm",
+                lambda: torch.addmm(bias, a, b),
+                lambda: torch.addmm(bias.double(), a.double(), b.double()),
+            ),
+            (
+                "bmm",
+                lambda: torch.bmm(batch_a, batch_b),
+                lambda: torch.bmm(batch_a.double(), batch_b.double()),
+            ),
+            (
+                "baddbmm",
+                lambda: torch.baddbmm(batch_bias, batch_a, batch_b),
+                lambda: torch.baddbmm(
+                    batch_bias.double(), batch_a.double(), batch_b.double()
+                ),
+            ),
+            (
+                "grouped_mm",
+                lambda: torch._grouped_mm(group_a, group_b),
+                lambda: torch.bmm(group_a.double(), group_b.double()),
+            ),
+        )
+        for name, op, reference_op in cases:
+            with self.subTest(op=name):
+                actual = op()
+                self.assertTrue(torch.isfinite(actual).all())
+                self.assertEqual(
+                    actual,
+                    reference_op().float(),
+                    atol=1e-4,
+                    rtol=1e-4,
+                )
+
+        with self.subTest(op="mm_backward"):
+            a.requires_grad_()
+            b.requires_grad_()
+            grad_output = torch.randn(65, 33, device=device)
+            grad_a, grad_b = torch.autograd.grad(torch.mm(a, b), (a, b), grad_output)
+            reference_a = torch.mm(grad_output.double(), b.detach().double().t()).float()
+            reference_b = torch.mm(a.detach().double().t(), grad_output.double()).float()
+            self.assertEqual(grad_a, reference_a, atol=1e-4, rtol=1e-4)
+            self.assertEqual(grad_b, reference_b, atol=1e-4, rtol=1e-4)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @serialTest()
+    def test_bfx9_compile_uses_aten_gemm(self, device):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+
+        def matrix(*shape):
+            return torch.randn(*shape, device=device)
+
+        a, b = matrix(64, 64), matrix(64, 64)
+        batch_a, batch_b = matrix(2, 64, 64), matrix(2, 64, 64)
+
+        def check(name, fn, args, expected_call):
+            with self.subTest(op=name):
+                expected = fn(*args)
+                actual, code = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), *args
+                )
+                self.assertEqual(actual, expected)
+                source = "\n".join(code)
+                self.assertIn(expected_call, source)
+                self.assertNotIn("tl.dot", source)
+
+        cases = (
+            ("mm", torch.mm, (a, b), "extern_kernels.mm("),
+            (
+                "addmm_beta_zero",
+                lambda bias, x, y: torch.addmm(bias, x, y, beta=0, alpha=2),
+                (matrix(64), a, b),
+                "extern_kernels.addmm(",
+            ),
+            (
+                "baddbmm",
+                torch.baddbmm,
+                (matrix(2, 64, 64), batch_a, batch_b),
+                "extern_kernels.baddbmm(",
+            ),
+            (
+                "outer_mm",
+                torch.mm,
+                (matrix(8, 1), matrix(1, 8)),
+                "extern_kernels.mm(",
+            ),
+            (
+                "dot_bmm",
+                torch.bmm,
+                (matrix(2, 1, 64), matrix(2, 64, 1)),
+                "extern_kernels.bmm(",
+            ),
+            (
+                "outer_addmm",
+                torch.addmm,
+                (matrix(8), matrix(8, 1), matrix(1, 8)),
+                "extern_kernels.addmm(",
+            ),
+        )
+
+        with torch._inductor.config.patch(
+            coordinate_descent_tuning=True,
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+        ):
+            for case in cases:
+                check(*case)
+
+        with torch._inductor.config.patch(max_autotune=False, max_autotune_gemm=False):
+            check(
+                "small_mm",
+                torch.mm,
+                (matrix(64, 2), matrix(2, 4)),
+                "extern_kernels.mm(",
+            )
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
@@ -526,17 +790,6 @@ class TestMatmulCuda(InductorTestCase):
         for _ in range(10):
             self.assertEqual(first, torch.matmul(inp, inp), atol=0., rtol=0.)
 
-    def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
-        for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
-            a = a.clone().detach().requires_grad_()
-            b = b.clone().detach().requires_grad_()
-            out_ref = torch.mm(a, b.t())
-            out_ref.backward(gO)
-            self.assertEqual(out, out_ref)
-            if agrad is not None:
-                self.assertEqual(agrad, a.grad)
-                self.assertEqual(bgrad, b.grad)
-
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
@@ -569,182 +822,6 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(full[:1], out, atol=0.0, rtol=0.0)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-
-    @onlyOn(["cuda", "xpu"])
-    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, dtype):
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
-        else:
-            a = torch.randn(k * n_groups + k * int(strided), m, device=device, dtype=dtype).t()[:, :k * n_groups]
-
-        if b_row_major:
-            b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
-        else:
-            b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
-
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-
-        f = F.grouped_mm
-        out = f(a, b.t(), offs=offs, out_dtype=dtype)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        offs_cpu = offs.cpu()
-        alist, blist, agradlist, bgradlist = [], [], [], []
-        start = 0
-        for i in range(n_groups):
-            alist.append(a[:, start:offs_cpu[i]])
-            blist.append(b[:, start:offs_cpu[i]])
-            agradlist.append(a.grad[:, start:offs_cpu[i]])
-            bgradlist.append(b.grad[:, start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
-
-    @onlyOn(["cuda", "xpu"])
-    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
-        else:
-            a = torch.randn(k, (m + 2 * s_int) * n_groups, device=device, dtype=dtype).t()[:m * n_groups, :]
-
-        if b_row_major:
-            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-
-        a_contig = a if a_row_major else a.t()
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-        for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
-            a.grad = None
-            b.grad = None
-            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
-            if check_zero_size:
-                offs[0] = offs[1]
-
-            f = F.grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
-            gO = torch.rand_like(out)
-            if not check_zero_size:
-                out.backward(gO)
-            offs_cpu = offs.cpu()
-            alist, agradlist, gOlist, outlist = [], [], [], []
-            bgradlist = [None] * n_groups if check_zero_size else b.grad
-            start = 0
-            for i in range(n_groups):
-                alist.append(a[start:offs_cpu[i]])
-                agradlist.append(None if check_zero_size else a.grad[start:offs_cpu[i]])
-                outlist.append(out[start:offs_cpu[i]])
-                gOlist.append(gO[start:offs_cpu[i]])
-                start = offs_cpu[i]
-            self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
-
-
-    @onlyOn(["cuda", "xpu"])
-    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        if b_row_major:
-            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-
-        a_contig = a if a_row_major else a.transpose(-2, -1)
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-
-        f = F.grouped_mm
-        out = f(a, b.transpose(-2, -1), out_dtype=dtype)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
-
-    @onlyOn(["cuda", "xpu"])
-    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, dtype):
-        s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 64, 4
-        if a_row_major:
-            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
-        else:
-            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
-                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
-        if b_row_major:
-            b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
-        else:
-            b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
-
-        a.requires_grad_(True)
-        b.requires_grad_(True)
-
-        a_contig = a if a_row_major else a.transpose(-2, -1)
-        self.assertTrue(a_contig.is_contiguous() is not strided)
-        b_contig = b if b_row_major else b.transpose(-2, -1)
-        self.assertTrue(b_contig.is_contiguous() is not strided)
-        for check_zero_size in (False, True):
-            if check_zero_size and n_groups <= 1:
-                continue
-
-            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
-            if check_zero_size:
-                offs[0] = offs[1]
-
-            f = F.grouped_mm
-            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
-            gO = torch.rand_like(out)
-            if not check_zero_size:
-                out.backward(gO)
-            offs_cpu = offs.cpu()
-            blist, outlist, bgradlist, gOlist = [], [], [], []
-            agradlist = [None] * n_groups if check_zero_size else a.grad
-            start = 0
-            for i in range(n_groups):
-                blist.append(b[start:offs_cpu[i]])
-                bgradlist.append(b.grad[start:offs_cpu[i]])
-                outlist.append(out[:, start:offs_cpu[i]])
-                gOlist.append(gO[:, start:offs_cpu[i]])
-                start = offs_cpu[i]
-            self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @onlyOn(["cuda", "xpu"])

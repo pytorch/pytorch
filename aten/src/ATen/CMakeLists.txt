@@ -55,6 +55,31 @@ set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
 set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
+# The architectures CK SDPA kernels are built for: the candidates that
+# PYTORCH_ROCM_ARCH also asks for. The CK codegen target families, the ck_sdpa
+# target's HIP_ARCHITECTURES and the runtime check in Context.cpp are all
+# derived from this one list.
+#
+# gfx1200/gfx1201 (RDNA4, WMMA) is opt-in through USE_ROCM_CK_SDPA_GFX12 (OFF by
+# default): those arches are already in the ROCm wheel arch list, so building CK
+# SDPA for them would add code generation and compile cost to existing builds.
+set(AT_ROCM_CK_SDPA_ARCHS "")
+if(USE_ROCM AND USE_ROCM_CK_SDPA AND USE_FLASH_ATTENTION)
+  set(_ck_sdpa_candidate_archs gfx942 gfx950)
+  if(USE_ROCM_CK_SDPA_GFX12)
+    list(APPEND _ck_sdpa_candidate_archs gfx1200 gfx1201)
+  endif()
+  foreach(ARCH IN LISTS _ck_sdpa_candidate_archs)
+    if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+      list(APPEND AT_ROCM_CK_SDPA_ARCHS ${ARCH})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES AT_ROCM_CK_SDPA_ARCHS)
+endif()
+string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
+# Alongside the other generated ATen headers (see cmake/Codegen.cmake).
+configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
 # At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
@@ -200,21 +225,12 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
-    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
-    # empty HIP_ARCHITECTURES and CMake errors out.
-    if(USE_ROCM_CK_SDPA)
-      set(_have_ck_sdpa_arch FALSE)
-      foreach(ARCH gfx942 gfx950)
-        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-          set(_have_ck_sdpa_arch TRUE)
-          break()
-        endif()
-      endforeach()
-      if(NOT _have_ck_sdpa_arch)
-        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
-        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
-      endif()
+    # AT_ROCM_CK_SDPA_ARCHS, resolved at the top of this file, is what CK SDPA
+    # is built for. Auto-disable when it is empty; otherwise the ck_sdpa target
+    # ends up with an empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA AND NOT AT_ROCM_CK_SDPA_ARCHS)
+      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
+      caffe2_update_option(USE_ROCM_CK_SDPA OFF)
     endif()
   endif()
   if(USE_ROCM AND USE_ROCM_CK_SDPA)
@@ -297,23 +313,22 @@ if(USE_FLASH_ATTENTION)
     file(GLOB ck_sdpa_sources_hip CONFIGURE_DEPENDS
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+    # Take the generated FMHA instances from the blob lists this configure
+    # wrote instead of from the glob: they are generated into the source tree,
+    # which can also hold instances from an earlier configure that asked for
+    # different target families.
+    list(FILTER ck_sdpa_sources_hip EXCLUDE REGEX "/fmha_[^/]*\\.hip$")
+    list(APPEND ck_sdpa_sources_hip ${CK_FMHA_GENERATED_SOURCES})
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
-
-    # Only build for MI3xx series architectures as building for all targets takes too long
-    # We will selectively add supported architectures when/if needed
-    set(_ck_sdpa_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
-      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND _ck_sdpa_hip_arches ${ARCH})
-      endif()
-    endforeach()
 
     add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
     target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
     set_target_properties(ck_sdpa PROPERTIES
       POSITION_INDEPENDENT_CODE ON
-      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
+      # Only the architectures CK SDPA instances were generated for, to limit
+      # build cost.
+      HIP_ARCHITECTURES "${AT_ROCM_CK_SDPA_ARCHS}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC

@@ -11,6 +11,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
@@ -446,6 +447,27 @@ using at::Tensor;
 
 VariableHooks variableHooks;
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
+
+// See [Note: multi-output view replay]. Functionalization rebuilds one output
+// of a multi-output view as a plain select or slice, which autograd would
+// otherwise let the user mutate in place.
+static void mark_multi_output_view(const at::Tensor& self) {
+  auto* meta = impl::get_view_autograd_meta(self);
+  // Only DEFAULT is ours to overwrite: a view created under no-grad or
+  // inference mode already holds a more specific reason to reject a mutation.
+  if (meta != nullptr && meta->has_bw_view() &&
+      meta->get_creation_meta() == CreationMeta::DEFAULT) {
+    meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
+  }
+}
+
+struct MultiOutputViewMarkerRegisterer {
+  MultiOutputViewMarkerRegisterer() {
+    at::functionalization::impl::setMultiOutputViewMarker(
+        &mark_multi_output_view);
+  }
+};
+MultiOutputViewMarkerRegisterer registerMultiOutputViewMarker;
 
 at::TensorBase VariableHooks::variable_data(const at::TensorBase& self) const {
   TORCH_CHECK(
