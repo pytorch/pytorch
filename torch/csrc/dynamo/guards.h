@@ -102,7 +102,8 @@ class TensorCheck {
  private:
   // True when the tensor's device index matches what this guard should accept.
   // Normally that is the index recorded at construction; under
-  // compile_on_one_rank it is instead whatever device this rank is currently on.
+  // compile_on_one_rank it is instead whatever device this rank is currently
+  // on.
   bool deviceIndexMatches(const c10::Device& device) const;
 
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
