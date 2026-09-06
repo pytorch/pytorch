@@ -17,10 +17,16 @@ from torch.distributed.checkpoint._experimental.checkpointer import (
 from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
 from torch.distributed.checkpoint._experimental.staging import CheckpointStagerConfig
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestMakeCheckpointer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         # Create a temporary directory for checkpoints
