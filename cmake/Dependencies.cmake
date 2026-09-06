@@ -958,6 +958,26 @@ if(USE_MPI)
   endif()
 endif()
 
+# ---[ TCCL (Thunderbolt RDMA over macOS librdma)
+# Only probed when the user explicitly opts in with -DUSE_TCCL=ON. Gated on
+# APPLE at the top-level option definition; here we verify that librdma.dylib
+# and <infiniband/verbs.h> are actually reachable on this system. If the probe
+# fails, USE_TCCL is turned off (with a warning) so Dependencies.cmake doesn't
+# carry the flag into the caffe2 source lists.
+if(USE_TCCL)
+  find_library(LIBRDMA_LIBRARY rdma)
+  find_path(LIBRDMA_INCLUDE_DIR infiniband/verbs.h)
+  if(LIBRDMA_LIBRARY AND LIBRDMA_INCLUDE_DIR)
+    message(STATUS "TCCL: found librdma at ${LIBRDMA_LIBRARY}")
+    message(STATUS "TCCL: verbs.h in ${LIBRDMA_INCLUDE_DIR}")
+  else()
+    message(WARNING
+      "USE_TCCL was requested but librdma.dylib or <infiniband/verbs.h> was "
+      "not found. Requires macOS 26.2+. Disabling TCCL.")
+    caffe2_update_option(USE_TCCL OFF)
+  endif()
+endif()
+
 # ---[ OpenMP
 if(USE_OPENMP AND NOT TARGET caffe2::openmp)
   include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
