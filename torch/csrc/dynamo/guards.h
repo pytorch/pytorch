@@ -70,7 +70,8 @@ class TensorCheck {
       const at::Tensor& v,
       c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      bool device_index_is_current = false);
 
   TensorCheck(
       const LocalState& state,
@@ -99,12 +100,25 @@ class TensorCheck {
   PyTypeObject* pytype;
 
  private:
+  // True when the tensor's device index matches what this guard should accept.
+  // Normally that is the index recorded at construction; under
+  // compile_on_one_rank it is instead whatever device this rank is currently on.
+  bool deviceIndexMatches(const c10::Device& device) const;
+
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   at::ScalarType dtype_;
   // Note(voz): While dispatch_key_ is sufficiently representative of a device
   // In that keys are more granular AND device specific - they do not
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
+  // compile_on_one_rank: the guarded tensor sat on the current accelerator when
+  // this guard was built, and CooR's single-accelerator invariant means it must
+  // sit there on every rank too. Compare against the current device instead of
+  // the index recorded above, so one guard (and one compiled artifact) is valid
+  // on every rank. Only accelerator tensors are relaxed -- cpu is portable and
+  // keeps its recorded index -- and the device *type* is untouched either way,
+  // since that rides in dispatch_key_.
+  bool device_index_is_current_;
   bool requires_grad_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
