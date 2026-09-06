@@ -25,7 +25,9 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -61,8 +63,8 @@ class LocalTensorTestBase(TestCase):
     def world_size(self):
         raise NotImplementedError("override world-size in your subclass")
 
-    def build_device_mesh(self) -> DeviceMesh:
-        return init_device_mesh("cpu", (self.world_size,))
+    def build_device_mesh(self, device_type) -> DeviceMesh:
+        return init_device_mesh(device_type, (self.world_size,))
 
 
 class LocalTensorRankTest(LocalTensorTestBase):
@@ -122,114 +124,13 @@ class LocalTensorWorldTest(LocalTensorTestBase):
 
 
 class TestLocalTensorWorld2(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.GENERIC
     world_size = 2
-
-    def test_local_tensor_dtype_consistency(self):
-        """Test that LocalTensor enforces dtype consistency."""
-        device = torch.device("cpu")
-        shape = (2, 3)
-
-        inconsistent_tensors = {
-            0: torch.randn(shape, dtype=torch.float32, device=device),
-            1: torch.randn(
-                shape, dtype=torch.float64, device=device
-            ),  # Different dtype
-        }
-
-        with self.assertRaises(AssertionError):
-            LocalTensor(inconsistent_tensors)
-
-    def test_local_tensor_creation_fails_with_grad_tensors(self):
-        """Test that LocalTensor creation fails when local tensors have requires_grad=True."""
-        device = torch.device("cpu")
-        shape = (2, 3)
-        dtype = torch.float32
-
-        # Create sample local tensors for different ranks
-        local_tensors = {
-            0: torch.randn(shape, dtype=dtype, device=device, requires_grad=True),
-            1: torch.randn(shape, dtype=dtype, device=device, requires_grad=True),
-        }
-
-        with self.assertRaises(AssertionError):
-            LocalTensor(local_tensors)
-
-    def test_local_tensor_mode(self):
-        """Test LocalTensorMode functionality."""
-        device = torch.device("cpu")
-        shape = (2, 3)
-        dtype = torch.float32
-
-        # Create identical local tensors for consistency tests
-        base_tensor = torch.randn(shape, dtype=dtype, device=device)
-        identical_local_tensors = {
-            0: base_tensor.clone(),
-            1: base_tensor.clone(),
-        }
-
-        lt = LocalTensor(identical_local_tensors)
-
-        with LocalTensorMode(lt._ranks):
-            result = lt + 1.0
-            self.assertIsInstance(result, LocalTensor)
-
-            regular = torch.ones(2, 2)
-            regular_result = regular + 1.0
-            self.assertIsInstance(regular, LocalTensor)
-            self.assertIsInstance(regular_result, LocalTensor)
 
     def test_empty_local_tensors(self):
         """Test behavior with empty local tensors dict."""
         with self.assertRaises(ValueError):
             LocalTensor({})
-
-    def test_scalar_mul_reduction_bug(self):
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-
-            tensor = torch.tensor([10, 10]).float()
-            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
-            y = dt.sum() * 1  # noqa: F841
-
-            tensor = torch.arange(10).reshape(10, 1).float().requires_grad_()
-            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
-
-            print(dt.sum() * 1, dt.sum() * 2, dt.sum() * 3)
-
-    def test_uneven_sharding_mean_bug(self):
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-            tensor = torch.arange(12).reshape(-1, 4).float()
-
-            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
-
-            mean = dt.mean()
-            self.assertEqual(mean.placements, [Replicate()])
-            full = mean.full_tensor()
-            self.assertEqual(tensor.mean(), full)
-
-    def test_uneven_sharding_prod(self):
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-            tensor = (torch.arange(12) + 1).reshape(-1, 4).float()
-
-            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
-
-            x = dt.prod()
-            full = x.full_tensor()
-            self.assertEqual(tensor.prod(), full)
-
-    def test_even_sharding_mean_is_partial(self):
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-            tensor = torch.arange(16).reshape(4, 4).float()
-
-            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
-
-            mean = dt.mean()
-            full = mean.full_tensor()
-            self.assertEqual(tensor.mean(), full)
-            self.assertEqual(mean.placements, [Partial("avg")])
 
     def test_local_int_node_sym_min(self):
         node1 = LocalIntNode({0: 10, 1: 5})
@@ -276,115 +177,43 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
             self.assertEqual(scaled._local_tensors[r], torch.full((2, 3), float(r) * 2))
 
 
-class TestLocalTensorRankWorld2(LocalTensorRankTest):
+class TestLocalTensorWorld2CPU(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.CPU
     world_size = 2
 
-    def test_standalone_rank_map_and_tensor_map(self):
-        # Real-dist path: rank_map should call cb with dist.get_rank()
-        t = rank_map(lambda r: torch.full((2, 3), float(r)))
-        self.assertNotIsInstance(t, LocalTensor)
-        self.assertEqual(t, torch.full((2, 3), float(self.rank)))
-        t2 = tensor_map(t, lambda r, t: t + 1)
-        self.assertEqual(t2, torch.full((2, 3), float(self.rank) + 1))
+    def test_local_tensor_dtype_consistency(self, device):
+        """Test that LocalTensor enforces dtype consistency."""
+        device = torch.device(device)
+        shape = (2, 3)
 
-    def test_flatten_unflatten(self):
-        """Test that LocalTensor can be flattened and unflattened correctly."""
-        device = torch.device("cpu")
-        dtype = torch.float32
-        # test samples
-        test_cases = [
-            {
-                i: torch.randn(2, 3, dtype=dtype, device=device)
-                for i in range(self.world_size)
-            },
-            {
-                0: torch.randn(2, 3, dtype=dtype, device=device),
-                1: torch.randn(3, 3, dtype=dtype, device=device),
-            },
-        ]
+        inconsistent_tensors = {
+            0: torch.randn(shape, dtype=torch.float32, device=device),
+            1: torch.randn(
+                shape, dtype=torch.float64, device=device
+            ),  # Different dtype
+        }
 
-        for local_tensors in test_cases:
-            lt = LocalTensor(local_tensors)
-            attrs, spec = lt.__tensor_flatten__()
-            inner_tensors = {attr: getattr(lt, attr) for attr in attrs}
-            lt_reconstruct = LocalTensor.__tensor_unflatten__(
-                inner_tensors, spec, lt.size(), lt.stride()
-            )
+        with self.assertRaises(AssertionError):
+            LocalTensor(inconsistent_tensors)
 
-            self.assertEqual(
-                lt._local_tensors[self.rank], lt_reconstruct._local_tensors[self.rank]
-            )
-
-    def test_basic_arithmetic_operations(self):
-        """Test basic arithmetic operations on LocalTensors."""
-        device = torch.device("cpu")
+    def test_local_tensor_creation_fails_with_grad_tensors(self, device):
+        """Test that LocalTensor creation fails when local tensors have requires_grad=True."""
+        device = torch.device(device)
         shape = (2, 3)
         dtype = torch.float32
 
-        # Create identical local tensors for consistency tests
-        base_tensor = torch.randn(shape, dtype=dtype, device=device)
-        identical_local_tensors = {
-            0: base_tensor.clone(),
-            1: base_tensor.clone(),
-        }
-
-        lt1 = LocalTensor(identical_local_tensors)
-        lt2 = LocalTensor(identical_local_tensors)
-
-        # Test addition
-        result_add = lt1 + lt2
-        self.assertIsInstance(result_add, LocalTensor)
-        self.assertEqual(len(result_add._local_tensors), 2)
-
-        # Verify the operation was applied to each local tensor
-        expected = (
-            identical_local_tensors[self.rank] + identical_local_tensors[self.rank]
-        )
-        self.assertEqual(result_add._local_tensors[self.rank], expected)
-
-        # Test multiplication
-        result_mul = lt1 * 2.0
-        self.assertIsInstance(result_mul, LocalTensor)
-        expected = identical_local_tensors[self.rank] * 2.0
-        self.assertEqual(result_mul._local_tensors[self.rank], expected)
-
-    def test_view_ops(self):
-        """Test that view operations work correctly on LocalTensor (standard subclass style)."""
-        device = torch.device("cpu")
-        base_tensor = torch.arange(8, device=device).reshape(2, 4).float()
+        # Create sample local tensors for different ranks
         local_tensors = {
-            0: base_tensor.clone(),
-            1: base_tensor.clone(),
+            0: torch.randn(shape, dtype=dtype, device=device, requires_grad=True),
+            1: torch.randn(shape, dtype=dtype, device=device, requires_grad=True),
         }
-        lt = LocalTensor(local_tensors)
 
-        test_cases = [
-            (torch.flip, (lt,), {"dims": [1]}),
-            (torch.fliplr, (lt,), {}),
-            (torch.flipud, (lt,), {}),
-            (torch.flatten, (lt,), {}),
-            (torch.ravel, (lt,), {}),
-            (torch.reshape, (lt, (8,)), {}),
-            (torch.transpose, (lt, 0, 1), {}),
-            (torch.t, (lt,), {}),
-            (torch.squeeze, (lt,), {}),
-            (torch.unsqueeze, (lt, 0), {}),
-        ]
+        with self.assertRaises(AssertionError):
+            LocalTensor(local_tensors)
 
-        for op_func, args, kwargs in test_cases:
-            with self.subTest(op=op_func.__name__):
-                result = op_func(*args, **kwargs)
-                self.assertIsInstance(result, LocalTensor)
-
-                ref_args = tuple(
-                    local_tensors[self.rank] if a is lt else a for a in args
-                )
-                expected = op_func(*ref_args, **kwargs)
-                self.assertEqual(result._local_tensors[self.rank], expected)
-
-    def test_mixed_operations_with_regular_tensors(self):
-        """Test operations between LocalTensors and regular tensors."""
-        device = torch.device("cpu")
+    def test_local_tensor_mode(self, device):
+        """Test LocalTensorMode functionality."""
+        device = torch.device(device)
         shape = (2, 3)
         dtype = torch.float32
 
@@ -396,14 +225,80 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
         }
 
         lt = LocalTensor(identical_local_tensors)
-        regular_tensor = torch.ones_like(identical_local_tensors[0])
 
-        # Test LocalTensor + regular tensor
-        result = lt + regular_tensor
-        self.assertIsInstance(result, LocalTensor)
+        with LocalTensorMode(lt._ranks):
+            result = lt + 1.0
+            self.assertIsInstance(result, LocalTensor)
 
-        expected = identical_local_tensors[self.rank] + regular_tensor
-        self.assertEqual(result._local_tensors[self.rank], expected)
+            regular = torch.ones(2, 2)
+            regular_result = regular + 1.0
+            self.assertIsInstance(regular, LocalTensor)
+            self.assertIsInstance(regular_result, LocalTensor)
+
+    def test_scalar_mul_reduction_bug(self, device):
+        device_type = torch.device(device).type
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh(device_type)
+
+            tensor = torch.tensor([10, 10]).float()
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+            y = dt.sum() * 1  # noqa: F841
+
+            tensor = torch.arange(10).reshape(10, 1).float().requires_grad_()
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            print(dt.sum() * 1, dt.sum() * 2, dt.sum() * 3)
+
+    def test_uneven_sharding_mean_bug(self, device):
+        device_type = torch.device(device).type
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh(device_type)
+            tensor = torch.arange(12).reshape(-1, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            mean = dt.mean()
+            self.assertEqual(mean.placements, [Replicate()])
+            full = mean.full_tensor()
+            self.assertEqual(tensor.mean(), full)
+
+    def test_uneven_sharding_prod(self, device):
+        device_type = torch.device(device).type
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh(device_type)
+            tensor = (torch.arange(12) + 1).reshape(-1, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            x = dt.prod()
+            full = x.full_tensor()
+            self.assertEqual(tensor.prod(), full)
+
+    def test_even_sharding_mean_is_partial(self, device):
+        device_type = torch.device(device).type
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh(device_type)
+            tensor = torch.arange(16).reshape(4, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            mean = dt.mean()
+            full = mean.full_tensor()
+            self.assertEqual(tensor.mean(), full)
+            self.assertEqual(mean.placements, [Partial("avg")])
+
+
+class TestLocalTensorRankWorld2(LocalTensorRankTest):
+    hw_classification = HardwareClassification.GENERIC
+    world_size = 2
+
+    def test_standalone_rank_map_and_tensor_map(self):
+        # Real-dist path: rank_map should call cb with dist.get_rank()
+        t = rank_map(lambda r: torch.full((2, 3), float(r)))
+        self.assertNotIsInstance(t, LocalTensor)
+        self.assertEqual(t, torch.full((2, 3), float(self.rank)))
+        t2 = tensor_map(t, lambda r, t: t + 1)
+        self.assertEqual(t2, torch.full((2, 3), float(self.rank) + 1))
 
     def test_collectives_within_local_tensor_mode(self):
         """Test that collective operations work within LocalTensorMode context."""
@@ -439,8 +334,132 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
             self.assertIsInstance(result, LocalTensor)
 
 
+class TestLocalTensorRankWorld2CPU(LocalTensorRankTest):
+    hw_classification = HardwareClassification.CPU
+    world_size = 2
+
+    def test_flatten_unflatten(self, device):
+        """Test that LocalTensor can be flattened and unflattened correctly."""
+        device = torch.device(device)
+        dtype = torch.float32
+        # test samples
+        test_cases = [
+            {
+                i: torch.randn(2, 3, dtype=dtype, device=device)
+                for i in range(self.world_size)
+            },
+            {
+                0: torch.randn(2, 3, dtype=dtype, device=device),
+                1: torch.randn(3, 3, dtype=dtype, device=device),
+            },
+        ]
+
+        for local_tensors in test_cases:
+            lt = LocalTensor(local_tensors)
+            attrs, spec = lt.__tensor_flatten__()
+            inner_tensors = {attr: getattr(lt, attr) for attr in attrs}
+            lt_reconstruct = LocalTensor.__tensor_unflatten__(
+                inner_tensors, spec, lt.size(), lt.stride()
+            )
+
+            self.assertEqual(
+                lt._local_tensors[self.rank], lt_reconstruct._local_tensors[self.rank]
+            )
+
+    def test_basic_arithmetic_operations(self, device):
+        """Test basic arithmetic operations on LocalTensors."""
+        device = torch.device(device)
+        shape = (2, 3)
+        dtype = torch.float32
+
+        # Create identical local tensors for consistency tests
+        base_tensor = torch.randn(shape, dtype=dtype, device=device)
+        identical_local_tensors = {
+            0: base_tensor.clone(),
+            1: base_tensor.clone(),
+        }
+
+        lt1 = LocalTensor(identical_local_tensors)
+        lt2 = LocalTensor(identical_local_tensors)
+
+        # Test addition
+        result_add = lt1 + lt2
+        self.assertIsInstance(result_add, LocalTensor)
+        self.assertEqual(len(result_add._local_tensors), 2)
+
+        # Verify the operation was applied to each local tensor
+        expected = (
+            identical_local_tensors[self.rank] + identical_local_tensors[self.rank]
+        )
+        self.assertEqual(result_add._local_tensors[self.rank], expected)
+
+        # Test multiplication
+        result_mul = lt1 * 2.0
+        self.assertIsInstance(result_mul, LocalTensor)
+        expected = identical_local_tensors[self.rank] * 2.0
+        self.assertEqual(result_mul._local_tensors[self.rank], expected)
+
+    def test_view_ops(self, device):
+        """Test that view operations work correctly on LocalTensor (standard subclass style)."""
+        device = torch.device(device)
+        base_tensor = torch.arange(8, device=device).reshape(2, 4).float()
+        local_tensors = {
+            0: base_tensor.clone(),
+            1: base_tensor.clone(),
+        }
+        lt = LocalTensor(local_tensors)
+
+        test_cases = [
+            (torch.flip, (lt,), {"dims": [1]}),
+            (torch.fliplr, (lt,), {}),
+            (torch.flipud, (lt,), {}),
+            (torch.flatten, (lt,), {}),
+            (torch.ravel, (lt,), {}),
+            (torch.reshape, (lt, (8,)), {}),
+            (torch.transpose, (lt, 0, 1), {}),
+            (torch.t, (lt,), {}),
+            (torch.squeeze, (lt,), {}),
+            (torch.unsqueeze, (lt, 0), {}),
+        ]
+
+        for op_func, args, kwargs in test_cases:
+            with self.subTest(op=op_func.__name__):
+                result = op_func(*args, **kwargs)
+                self.assertIsInstance(result, LocalTensor)
+
+                ref_args = tuple(
+                    local_tensors[self.rank] if a is lt else a for a in args
+                )
+                expected = op_func(*ref_args, **kwargs)
+                self.assertEqual(result._local_tensors[self.rank], expected)
+
+    def test_mixed_operations_with_regular_tensors(self, device):
+        """Test operations between LocalTensors and regular tensors."""
+        device = torch.device(device)
+        shape = (2, 3)
+        dtype = torch.float32
+
+        # Create identical local tensors for consistency tests
+        base_tensor = torch.randn(shape, dtype=dtype, device=device)
+        identical_local_tensors = {
+            0: base_tensor.clone(),
+            1: base_tensor.clone(),
+        }
+
+        lt = LocalTensor(identical_local_tensors)
+        regular_tensor = torch.ones_like(identical_local_tensors[0])
+
+        # Test LocalTensor + regular tensor
+        result = lt + regular_tensor
+        self.assertIsInstance(result, LocalTensor)
+
+        expected = identical_local_tensors[self.rank] + regular_tensor
+        self.assertEqual(result._local_tensors[self.rank], expected)
+
+
 @instantiate_parametrized_tests
 class TestLocalTensorRankWorld3(LocalTensorRankTest):
+    hw_classification = HardwareClassification.GENERIC
     world_size = 3
 
     def test_collective_reduction_operations(self):
@@ -645,6 +664,7 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
 
 @instantiate_parametrized_tests
 class TestLocalTensorWorld3(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.GENERIC
     world_size = 3
 
     def test_reduce_scatter_tensor_collective(self):
@@ -831,6 +851,7 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
 
 @instantiate_parametrized_tests
 class TestLocalTensorWorld4(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.GENERIC
     world_size = 4
 
     def test_dist_get_rank_default_group(self):
@@ -866,20 +887,6 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         with LocalTensorMode(self.world_size):
             pass
         self.assertIs(dist.get_rank, orig_get_rank)
-
-    def test_dtensor_cat(self):
-        with LocalTensorMode(self.world_size):
-            device_mesh = self.build_device_mesh()
-
-            t1 = torch.arange(16).view(4, 4).float()
-            d1 = distribute_tensor(t1, device_mesh, [Replicate()])
-            t2 = (torch.arange(16) + 16).view(4, 4).float()
-            d2 = distribute_tensor(t2, device_mesh, [Shard(0)])
-
-            local_res = torch.cat([t1, t2], dim=-1)
-            dist_res = torch.cat([d1, d2], dim=-1)
-            full_tensor = dist_res.full_tensor()
-            self.assertEqual(full_tensor, local_res)
 
     def test_compile_all_gather(self):
         fake_pg = dist.distributed_c10d._get_default_group()
@@ -1007,8 +1014,27 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             for r in range(ws):
                 self.assertEqual(result._local_tensors[r], expected)
 
-    @parametrize("call_style", ["positional", "kwargs"])
-    def test_runtime_compute_coordinate_on_dim_per_rank(self, call_style):
+
+class TestLocalTensorWorld4CPU(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.CPU
+    world_size = 4
+
+    def test_dtensor_cat(self, device):
+        device_type = torch.device(device).type
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh(device_type)
+
+            t1 = torch.arange(16).view(4, 4).float()
+            d1 = distribute_tensor(t1, device_mesh, [Replicate()])
+            t2 = (torch.arange(16) + 16).view(4, 4).float()
+            d2 = distribute_tensor(t2, device_mesh, [Shard(0)])
+
+            local_res = torch.cat([t1, t2], dim=-1)
+            dist_res = torch.cat([d1, d2], dim=-1)
+            full_tensor = dist_res.full_tensor()
+            self.assertEqual(full_tensor, local_res)
+
+    def test_runtime_compute_coordinate_on_dim_per_rank(self, device):
         # Under LocalTensorMode the device_mesh op must return per-rank
         # coordinates wrapped in a LocalIntNode-backed SymInt, instead of
         # falling back to dist.get_rank() (which is always 0 under the fake
@@ -1016,30 +1042,35 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         # also accept keyword call sites. See pytorch/pytorch#184746.
         from torch.distributed._ops import device_mesh as _dm_ops  # noqa: F401
 
-        with LocalTensorMode(self.world_size):
-            mesh = self.build_device_mesh()
-            full_mesh = mesh._layout.remap_to_tensor(mesh._rank_map)
-            if call_style == "positional":
-                coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
-                    full_mesh, 0
-                )
-            else:
-                coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
-                    full_mesh=full_mesh, index=0
-                )
+        device_type = torch.device(device).type
+        for call_style in ("positional", "kwargs"):
+            with self.subTest(call_style=call_style):
+                with LocalTensorMode(self.world_size):
+                    mesh = self.build_device_mesh(device_type)
+                    full_mesh = mesh._layout.remap_to_tensor(mesh._rank_map)
+                    if call_style == "positional":
+                        coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                            full_mesh, 0
+                        )
+                    else:
+                        coord = torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                            full_mesh=full_mesh, index=0
+                        )
 
-        self.assertIsInstance(coord, torch.SymInt)
-        self.assertIsInstance(coord.node, LocalIntNode)
-        expected = {r: r for r in range(self.world_size)}
-        self.assertEqual(coord.node._local_ints, expected)
+                self.assertIsInstance(coord, torch.SymInt)
+                self.assertIsInstance(coord.node, LocalIntNode)
+                expected = {r: r for r in range(self.world_size)}
+                self.assertEqual(coord.node._local_ints, expected)
 
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.CPU
     world_size = 8
 
-    def test_dtensor_addmm(self):
+    def test_dtensor_addmm(self, device):
+        device_type = torch.device(device).type
         with LocalTensorMode(self.world_size):
-            device_mesh = self.build_device_mesh()
+            device_mesh = self.build_device_mesh(device_type)
 
             shard_spec = [Shard(0)]
             replica_spec = [Replicate()]
@@ -1061,10 +1092,10 @@ from torch.distributed._local_tensor._c10d import local_p2p_op, wait_all
 
 
 class TestLocalRunner(LocalTensorWorldTest):
+    hw_classification = HardwareClassification.CPU
     world_size = 6
 
-    @staticmethod
-    def _get_pp_peer(pp_index, mesh, dim, dir):
+    def _get_pp_peer(self, pp_index, mesh, dim, dir):
         with maybe_disable_local_tensor_mode():
             pp_meshes = mesh._get_all_submeshes(dim)
             pp_ret = {}
@@ -1096,7 +1127,7 @@ class TestLocalRunner(LocalTensorWorldTest):
 
             if pp_index != pp_mesh.size(0) - 1:
                 # Send to next pp rank
-                pp_next_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", +1)
+                pp_next_rank = self._get_pp_peer(pp_index, mesh, "pp", +1)
                 local_p2p_op(pp_next_rank, xd, dist.isend)
                 expected[pp_index + 1] = ltm.tensor_map(
                     x,
@@ -1107,17 +1138,18 @@ class TestLocalRunner(LocalTensorWorldTest):
 
             if pp_index != 0:
                 # Receive from prev pp rank
-                pp_prev_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", -1)
+                pp_prev_rank = self._get_pp_peer(pp_index, mesh, "pp", -1)
                 rw = local_p2p_op(pp_prev_rank, yd, dist.irecv)
                 wait_all(rw)
 
                 y = yd.full_tensor()
                 actual[pp_index] = y
 
-    def test_dp_pp(self):
+    def test_dp_pp(self, device):
+        device_type = torch.device(device).type
         pp_size = 3
         mesh = init_device_mesh(
-            "cpu", (self.world_size // pp_size, pp_size), mesh_dim_names=("dp", "pp")
+            device_type, (self.world_size // pp_size, pp_size), mesh_dim_names=("dp", "pp")
         )
         actual: list[torch.Tensor | None] = [None] * pp_size
         expected: list[torch.Tensor | None] = [None] * pp_size
@@ -1130,6 +1162,12 @@ class TestLocalRunner(LocalTensorWorldTest):
 
         self.assertEqual(actual, expected)
 
+
+instantiate_device_type_tests(TestLocalTensorWorld2CPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLocalTensorRankWorld2CPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLocalTensorWorld4CPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLocalTensorWorld8, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLocalRunner, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
