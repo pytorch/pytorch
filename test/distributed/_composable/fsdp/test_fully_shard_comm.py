@@ -46,7 +46,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -63,6 +64,7 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -95,6 +97,8 @@ device_module = torch.get_device_module(device_type)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 128
@@ -150,7 +154,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return fsdp_param_group
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_fp32(self):
+    def test_all_gather_fp32(self, device):
         param_sizes = self._get_param_sizes()
         default_stream = device_module.current_stream()
         stream1, stream2 = (
@@ -241,7 +245,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         check_all_gathered_params(orig_params, module)
 
     @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_fp32(self):
+    def test_reduce_scatter_fp32(self, device):
         param_sizes = self._get_param_sizes()
         default_stream = device_module.current_stream()
         stream = device_module.Stream()
@@ -253,7 +257,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_fp16(self):
+    def test_reduce_scatter_fp16(self, device):
         param_sizes = self._get_param_sizes()
         default_stream = torch.get_device_module(device_type).current_stream()
         stream = device_module.Stream()
@@ -339,12 +343,14 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
 
 class TestFullyShardCommunication(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_communication_count(self):
+    def test_fully_shard_communication_count(self, device):
         """
         Tests that FSDP issues the expected number of all-gathers and
         reduce-scatters during forward and backward.
@@ -397,7 +403,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_manual_reshard_with_reshard_after_forward_false(self):
+    def test_manual_reshard_with_reshard_after_forward_false(self, device):
         """
         Tests that we can manually call ``reshard`` on FSDP modules that were
         initialized with ``reshard_after_forward=False`` and still run unshard.
@@ -436,7 +442,7 @@ class TestFullyShardCommunication(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1571
-    def test_set_reduce_scatter_divide_factor(self):
+    def test_set_reduce_scatter_divide_factor(self, device):
         self.run_subtests(
             {
                 "divide_factor": [self.world_size * 2, self.world_size],
@@ -549,7 +555,7 @@ class TestFullyShardCommunication(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    def test_set_reduce_scatter_max_input_buffers(self):
+    def test_set_reduce_scatter_max_input_buffers(self, device):
         """
         Tests that ``set_reduce_scatter_max_input_buffers`` is a pure
         scheduling change: changing the in-flight reduce-scatter copy-in buffer
@@ -619,7 +625,7 @@ class TestFullyShardCommunication(FSDPTest):
             optim.zero_grad()
 
     @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_max_input_buffers_resolves_to_max(self):
+    def test_reduce_scatter_max_input_buffers_resolves_to_max(self, device):
         """
         Per-module reduce-scatter input-buffer caps share one pipeline (a single
         ``comm_ctx.reduce_scatter_states`` list), so mixed caps must resolve to
@@ -652,7 +658,7 @@ class TestFullyShardCommunication(FSDPTest):
         self.assertEqual(block1_pg.reduce_scatter_max_input_buffers, 1)
 
     @skip_if_lt_x_gpu(2)
-    def test_set_reduce_scatter_max_input_buffers_validation(self):
+    def test_set_reduce_scatter_max_input_buffers_validation(self, device):
         model = fully_shard(nn.Linear(16, 16))
         # Non-positive -> ValueError
         with self.assertRaises(ValueError):
@@ -667,7 +673,7 @@ class TestFullyShardCommunication(FSDPTest):
         model.set_reduce_scatter_max_input_buffers(2)
 
     @skip_if_lt_x_gpu(2)
-    def test_set_reshard_after_forward(self):
+    def test_set_reshard_after_forward(self, device):
         """
         Tests that FSDP issues the expected number of all-gathers and
         reduce-scatters during a train step when setting reshard_after_forward.
@@ -744,12 +750,14 @@ class TestFullyShardCommunication(FSDPTest):
 
 
 class TestFullyShardPrefetch(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_backward_prefetch(self):
+    def test_fully_shard_backward_prefetch(self, device):
         # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
             {
@@ -973,7 +981,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_set_modules_to_forward_prefetch(self):
+    def test_set_modules_to_forward_prefetch(self, device):
         n_layers = 4
         reshard_after_forward = True
         checkpoint_impl = "utils"
@@ -1068,7 +1076,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_set_modules_to_backward_prefetch(self):
+    def test_set_modules_to_backward_prefetch(self, device):
         n_layers = 4
         reshard_after_forward = True
         checkpoint_impl = "utils"
@@ -1170,7 +1178,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_set_modules_to_backward_prefetch_inside_ac(self):
+    def test_set_modules_to_backward_prefetch_inside_ac(self, device):
         n_layers = 3
         reshard_after_forward = True
         # use checkpoint wrapper instead of torch.utils
@@ -1396,7 +1404,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_multi_module_backward_prefetch(self):
+    def test_fully_shard_multi_module_backward_prefetch(self, device):
         n_layers = 5
         model_args = ModelArgs(
             n_layers=n_layers, checkpoint_activations=True, weight_tying=False
@@ -1479,7 +1487,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.zero_grad()
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_multi_module_unused_module(self):
+    def test_fully_shard_multi_module_unused_module(self, device):
         class ModuleWithUnusedLinear(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1548,7 +1556,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.zero_grad()
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_misprefetch(self):
+    def test_backward_misprefetch(self, device):
         torch.manual_seed(42)
         model = MLP(dim=16, device=device_type)
         ref_model = copy.deepcopy(model)
@@ -1647,13 +1655,15 @@ class TestFullyShardPrefetch(FSDPTest):
 
 
 class TestFullyShardUnshardMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
-    def test_unshard_async(self):
+    def test_unshard_async(self, device):
         class ReduceModule(nn.Module):
             def __init__(self, dim: int, mesh: DeviceMesh):
                 super().__init__()
@@ -1731,6 +1741,8 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
 
 
 class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1758,6 +1770,8 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
 
 
 class TestFullyShardAllocFromPG(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
     MEMORY_REGISTER_RE = (
@@ -1775,7 +1789,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
     @skip_if_lt_x_gpu(2)
     # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
     # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
-    def test_fully_shard_alloc_from_pg(self):
+    def test_fully_shard_alloc_from_pg(self, device):
         # Run this check inside test instead of using @requires_multicast_support().
         # The decorator would trigger an initialization of SymmMem allocator
         # when Python statically initializes classes in this file, causing
@@ -1819,7 +1833,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
 
     @skip_if_lt_x_gpu(2)
-    def test_exception_when_used_together_with_comm_hooks(self):
+    def test_exception_when_used_together_with_comm_hooks(self, device):
         model = nn.Linear(16, 16)
         model = fully_shard(model)
         # ok
@@ -1843,6 +1857,8 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @skipCUDAIf(TEST_WITH_ROCM, "requires NVIDIA GPUs")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str | None:
         return "nccl"
@@ -1861,7 +1877,7 @@ class TestFullyShardSymmMem(MultiProcContinuousTest):
         return torch.device("cuda", self.rank)
 
     @parametrize("sum_reduction", [True, False])
-    def test_fully_shard_symm_mem(self, sum_reduction: bool):
+    def test_fully_shard_symm_mem(self, device, sum_reduction: bool):
         torch.manual_seed(42 + self.rank)
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
@@ -1894,6 +1910,8 @@ instantiate_parametrized_tests(TestFullyShardSymmMem)
 
 
 class TestFullyShardForceSumReduction(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
 
@@ -1923,10 +1941,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
     # Test reduce-scatter only on plain FSDP on 2 GPUs
     # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
-    )
-    def test_fully_shard_force_sum_reduce_scatter(self):
+    def test_fully_shard_force_sum_reduce_scatter(self, device):
         torch.manual_seed(42)
         model_args = ModelArgs()
         model = Transformer(model_args)
@@ -1979,10 +1994,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
     # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(
-        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
-    )
-    def test_fully_shard_force_sum_both_reductions(self):
+    def test_fully_shard_force_sum_both_reductions(self, device):
         mesh = init_device_mesh(
             device_type.type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
         )
@@ -2047,6 +2059,8 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
 
 class TestFullyShardReduceOpWorldSize1(FSDPTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 1
@@ -2094,6 +2108,52 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
 
+
+instantiate_device_type_tests(
+    TestFullyShardCollectiveOps,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardCommunication,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardPrefetch,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardUnshardMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardAllocFromPG,
+    globals(),
+    only_for=["cuda"],
+)
+
+instantiate_device_type_tests(
+    TestFullyShardSymmMem,
+    globals(),
+    only_for=["cuda"],
+)
+
+instantiate_device_type_tests(
+    TestFullyShardForceSumReduction,
+    globals(),
+    only_for=["cuda"],
+)
 
 if __name__ == "__main__":
     run_tests()
