@@ -80,7 +80,9 @@ TensorFloat-32(TF32) on ROCm
 TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
 same ``torch.backends.cuda.matmul.fp32_precision`` and
 ``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
-also apply on ROCm. The TF32 path on MI300 has hardware-level numerical
+also apply on ROCm, except that the ``"bfx9"`` precision mode is NVIDIA-only
+and raises an error on ROCm because rocBLAS and hipBLASLt have no corresponding
+nine-product compute mode. The TF32 path on MI300 has hardware-level numerical
 differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
 details.
 
@@ -115,6 +117,8 @@ To debug memory errors, set
 
 hipBLAS workspaces
 ------------------
+
+Unlike CUDA, ROCm continues to cache workspaces by default.
 
 For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
 handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to

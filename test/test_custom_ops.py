@@ -2885,6 +2885,32 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
             torch._C._dispatch_call_boxed(op, x, y, out=out)
 
+    @scoped_load_inline
+    def test_torch_ops_out_of_range_raises_index_error(self, load_inline):
+        load_inline(
+            name="test_out_of_range_index_error",
+            cpp_sources="""
+#include <torch/extension.h>
+
+#include <stdexcept>
+
+torch::Tensor out_of_range_op(const torch::Tensor& x) {
+  throw std::out_of_range("index 5 is out of bounds");
+}
+
+TORCH_LIBRARY(_test_out_of_range_index_error, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(out_of_range_op));
+}
+""",
+            is_python_module=False,
+            verbose=True,
+        )
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(IndexError, "index 5 is out of bounds"):
+            torch.ops._test_out_of_range_index_error.foo.default(x)
+
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.
     def test_load_library(self):

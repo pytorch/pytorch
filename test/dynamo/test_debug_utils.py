@@ -93,8 +93,9 @@ class TestDebugUtils(TestCase):
             def tensor(self, buf, shape, stride=None, *, storage_offset=0, **kwargs):
                 self.tensors.append((shape, stride, storage_offset))
 
-        # The generated preamble provides math; the symbol is bound by the caller.
-        namespace = {"math": math, str(symbol): 64}
+        # The repro preamble imports math and torch (sym_max shows up in
+        # contiguous strides); the symbol is bound by the caller.
+        namespace = {"math": math, "torch": torch, str(symbol): 64}
         exec(source, namespace)
         reader = Reader()
         namespace["load_args"](reader)

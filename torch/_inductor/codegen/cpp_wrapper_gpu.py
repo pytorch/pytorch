@@ -94,6 +94,56 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
     def braced(values: list[int]) -> str:
         return "{" + ", ".join(str(v) for v in values) + "}"
 
+    def tma_metadata_initializer(params: dict[str, Any]) -> str:
+        triton_meta = params.get("triton_meta") or {}
+        signature = triton_meta.get("signature", {})
+        tma_arg_names = [
+            name
+            for name, sig_type in signature.items()
+            if isinstance(sig_type, str) and sig_type.startswith("tensordesc<")
+        ]
+        if not tma_arg_names:
+            return "{}"
+
+        tensordesc_meta = params.get("tensordesc_meta")
+        if tensordesc_meta is None or len(tensordesc_meta) != len(tma_arg_names):
+            raise RuntimeError(
+                f"Expected final TMA metadata for {len(tma_arg_names)} descriptors, "
+                f"got {tensordesc_meta}"
+            )
+
+        entries = []
+        for name, metadata in zip(tma_arg_names, tensordesc_meta):
+            if metadata is None:
+                raise RuntimeError(f"Missing final TMA metadata for {name}")
+            if metadata.get("is_im2col", False):
+                raise RuntimeError(
+                    "AOTInductor does not support TMA im2col descriptors"
+                )
+            if metadata.get("fp4_padded", False):
+                raise RuntimeError(
+                    "Inductor C++ wrappers do not support fp4-padded TMA descriptors"
+                )
+            block_size = [int(value) for value in metadata["block_size"]]
+            elem_size = int(metadata["elem_size"])
+            elem_type = _tma_dtype_device_to_host(int(metadata["elem_type"]))
+            swizzle = int(metadata["swizzle"])
+            fp4_padded = str(bool(metadata.get("fp4_padded", False))).lower()
+            entries.append(
+                "{"
+                + ", ".join(
+                    [
+                        braced(block_size),
+                        str(elem_size),
+                        str(elem_type),
+                        str(swizzle),
+                        fp4_padded,
+                    ]
+                )
+                + "}"
+            )
+        return "{" + ", ".join(entries) + "}"
+
     buf = IndentedBuffer()
     buf.splice("""
         #pragma once
@@ -169,6 +219,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         ci = config_index if config_index is not None else -1
         gs = params.get("global_scratch", -1) or -1
         ps = params.get("profile_scratch", -1) or -1
+        tensordesc_meta = tma_metadata_initializer(params)
 
         buf.writeline("")
         buf.splice(f"""
@@ -186,6 +237,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
             #define {macro_prefix}_CONFIG_INDEX {ci}
             #define {macro_prefix}_GLOBAL_SCRATCH {gs}
             #define {macro_prefix}_PROFILE_SCRATCH {ps}
+            #define {macro_prefix}_TENSORDESC_META {tensordesc_meta}
         """)
 
     return buf.getvalue()
@@ -210,23 +262,32 @@ def signature_is_tma_desc(sig: str | None) -> bool:
     return False
 
 
+def _tma_signature_rank(sig_type: str) -> int:
+    match = re.match(r"tensordesc<[^[]*\[([^\]]*)\]", sig_type)
+    if match is None:
+        raise AssertionError(f"Cannot parse tensordesc signature: {sig_type}")
+    return match.group(1).count(",") + 1
+
+
 def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
     """Unpack a StableTMADescriptor into kernel launch args.
 
     Given a variable name holding a StableTMADescriptor and its tensordesc<...>
-    signature, returns the list of pointer args: &var.m, &var.block_shape[i]...,
+    signature, returns the list of pointer args: &var.m, &var.kernel_shape[i]...,
     &var.strides[i]...
     """
-    match = re.match(r"tensordesc<[^[]*\[([^\]]*)\]", sig_type)
-    if match is None:
-        raise AssertionError(f"Cannot parse tensordesc signature: {sig_type}")
-    ndim = match.group(1).count(",") + 1
+    ndim = _tma_signature_rank(sig_type)
     result = [f"&{var_name}.m"]
     for i in range(ndim):
-        result.append(f"&{var_name}.block_shape[{i}]")
+        result.append(f"&{var_name}.kernel_shape[{i}]")
     for i in range(ndim):
         result.append(f"&{var_name}.strides[{i}]")
     return result
+
+
+def _tma_dtype_device_to_host(elem_type: int) -> int:
+    """Map Triton's device TMA dtype enum to CUtensorMapDataType."""
+    return {8: 10, 9: 8, 10: 9}.get(elem_type, elem_type)
 
 
 class _LazyTritonCompileKickoffLine(DeferredLineBase):
@@ -274,15 +335,125 @@ class DeferredTritonCallWrapper:
             if isinstance(sig_type, str) and sig_type.startswith("tensordesc<")
         }
 
+    def _generate_tma_descriptor_initializers(
+        self,
+        prefix: IndentedBuffer,
+        def_args: list[str],
+        params: dict[str, Any],
+    ) -> None:
+        triton_meta = params.get("triton_meta") or self.triton_meta or {}
+        signature = triton_meta.get("signature", {})
+        tma_arg_names = [
+            name
+            for name, sig_type in signature.items()
+            if isinstance(sig_type, str) and sig_type.startswith("tensordesc<")
+        ]
+        if not tma_arg_names:
+            return
+
+        tensordesc_meta = params.get("tensordesc_meta")
+        if tensordesc_meta is None or len(tensordesc_meta) != len(tma_arg_names):
+            raise RuntimeError(
+                f"Expected final TMA metadata for {len(tma_arg_names)} descriptors "
+                f"in {self.kernel_name}, got {tensordesc_meta}"
+            )
+
+        for name, metadata in zip(tma_arg_names, tensordesc_meta):
+            if name not in def_args:
+                raise RuntimeError(
+                    f"TMA descriptor argument {name} is missing from {self.kernel_name}"
+                )
+            if metadata is None:
+                raise RuntimeError(
+                    f"AOTInductor requires final TMA metadata for {name} "
+                    f"in {self.kernel_name}"
+                )
+            if metadata.get("is_im2col", False):
+                raise RuntimeError(
+                    "AOTInductor does not support TMA im2col descriptors"
+                )
+            if metadata.get("fp4_padded", False):
+                raise RuntimeError(
+                    "Inductor C++ wrappers do not support fp4-padded TMA descriptors"
+                )
+
+            block_size = [int(value) for value in metadata["block_size"]]
+            rank = len(block_size)
+            if not 1 <= rank <= 5:
+                raise RuntimeError(f"Unsupported TMA descriptor rank: {rank}")
+            for i, value in enumerate(block_size):
+                prefix.writeline(f"{name}.block_shape[{i}] = {value};")
+
+            elem_size = int(metadata["elem_size"])
+            elem_type = _tma_dtype_device_to_host(int(metadata["elem_type"]))
+            swizzle = int(metadata["swizzle"])
+            fp4_padded = int(bool(metadata.get("fp4_padded", False)))
+            args = ", ".join(
+                [
+                    f"&{name}.m",
+                    f"{name}.global_address",
+                    str(elem_size),
+                    str(elem_type),
+                    str(rank),
+                    f"{name}.block_shape",
+                    f"{name}.global_shape",
+                    f"{name}.strides",
+                    str(swizzle),
+                    str(fp4_padded),
+                ]
+            )
+            prefix.writeline(f"initTMADescriptorWithMetadata({args});")
+
+    def _generate_lazy_tma_descriptor_initializers(
+        self,
+        prefix: IndentedBuffer,
+    ) -> None:
+        tma_args = self._get_tma_args()
+        if not tma_args:
+            return
+
+        metadata = f"{self.kernel_name}_result.tensordesc_meta"
+        prefix.writeline(
+            f"if ({metadata}.size() != {len(tma_args)}) "
+            'throw std::runtime_error("Unexpected TMA descriptor metadata count");'
+        )
+        for index, (name, sig_type) in enumerate(tma_args.items()):
+            rank = _tma_signature_rank(sig_type)
+            per_desc = f"{metadata}[{index}]"
+            prefix.writeline(
+                f"if ({per_desc}.block_size.size() != {rank}) "
+                'throw std::runtime_error("Unexpected TMA descriptor rank");'
+            )
+            for dim in range(rank):
+                prefix.writeline(
+                    f"{name}.block_shape[{dim}] = {per_desc}.block_size[{dim}];"
+                )
+            args = ", ".join(
+                [
+                    f"&{name}.m",
+                    f"{name}.global_address",
+                    f"{per_desc}.elem_size",
+                    f"{per_desc}.elem_type",
+                    str(rank),
+                    f"{name}.block_shape",
+                    f"{name}.global_shape",
+                    f"{name}.strides",
+                    f"{per_desc}.swizzle",
+                    f"{per_desc}.fp4_padded",
+                ]
+            )
+            prefix.writeline(f"initTMADescriptorWithMetadata({args});")
+
     def _get_cpp_param_type(
         self, name: str, arg_type: Any, signature: dict[str, str] | None = None
     ) -> str:
         """Get the C++ parameter declaration for a given arg type."""
         if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
-            # TMA descriptors need non-const references since their fields
-            # are passed as void* pointers to kernel launch args
+            # Each formal TMA argument needs its own copy: the same descriptor
+            # may be passed to multiple formals whose compiler-selected metadata
+            # differs, and each copy is initialized immediately before launch.
             if signature and signature_is_tma_desc(signature.get(name)):
-                return f"{name}_type_& {name}"
+                return f"{name}_type_ {name}"
             return f"const {name}_type_& {name}"
         elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
             return f"int64_t {name}"
@@ -388,7 +559,12 @@ class DeferredTritonCallWrapper:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
         # Write wrapper function signature
-        self._write_wrapper_signature(prefix, wrapper, def_args, arg_types)
+        signature = (params.get("triton_meta") or self.triton_meta or {}).get(
+            "signature", {}
+        )
+        self._write_wrapper_signature(
+            prefix, wrapper, def_args, arg_types, signature=signature
+        )
 
         with prefix.indent():
             if V.graph.aot_mode:
@@ -398,6 +574,7 @@ class DeferredTritonCallWrapper:
                 prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
+            self._generate_tma_descriptor_initializers(prefix, def_args, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
 
@@ -524,24 +701,6 @@ class DeferredTritonCallWrapper:
                 """
             )
 
-    def _generate_lazy_tma_args(
-        self,
-        prefix: IndentedBuffer,
-        call_args_str: str,
-        kernel_arg_names: list[str],
-        tma_arg_names: OrderedSet[str],
-        signature: dict[str, str],
-    ) -> str:
-        """Unpack TMA descriptor args into kernel launch args."""
-        for arg_name in kernel_arg_names:
-            if arg_name in tma_arg_names:
-                tma_parts = _unpack_tma_descriptor_args(arg_name, signature[arg_name])
-                tma_str = ", ".join(tma_parts)
-                call_args_str = (
-                    f"{call_args_str}, {tma_str}" if call_args_str else tma_str
-                )
-        return call_args_str
-
     def _generate_lazy_scratch(
         self,
         prefix: IndentedBuffer,
@@ -572,7 +731,10 @@ class DeferredTritonCallWrapper:
             """
                 )
             )
-            call_args_str += f", &{var}"
+            scratch_arg = f"&{var}"
+            call_args_str = (
+                f"{call_args_str}, {scratch_arg}" if call_args_str else scratch_arg
+            )
         return call_args_str
 
     def _generate_lazy_launch(
@@ -602,23 +764,27 @@ class DeferredTritonCallWrapper:
         # so we just unpack them directly (no need to reconstruct from tensors).
         tma_arg_names = OrderedSet(self._get_tma_args().keys())
 
-        # Non-TMA args go through generate_args_decl
-        non_tma_arg_names = [n for n in kernel_arg_names if n not in tma_arg_names]
-        non_tma_arg_types = [
-            arg_type_lookup[n] for n in non_tma_arg_names if n in arg_type_lookup
-        ]
-        non_tma_arg_sigs = [signature.get(n) for n in non_tma_arg_names]
+        kernel_args = []
+        for arg_name in kernel_arg_names:
+            if arg_name in tma_arg_names:
+                kernel_args.extend(
+                    _unpack_tma_descriptor_args(arg_name, signature[arg_name])
+                )
+                continue
+            if arg_name not in arg_type_lookup:
+                raise AssertionError(
+                    f"Missing lazy kernel arg type for {arg_name} in {kernel_name}"
+                )
+            kernel_args.append(
+                wrapper.generate_args_decl(
+                    prefix,
+                    [arg_name],
+                    [arg_type_lookup[arg_name]],
+                    [signature.get(arg_name)],
+                )
+            )
 
-        call_args_str = wrapper.generate_args_decl(
-            prefix,
-            non_tma_arg_names,
-            non_tma_arg_types,
-            non_tma_arg_sigs,
-        )
-
-        call_args_str = self._generate_lazy_tma_args(
-            prefix, call_args_str, kernel_arg_names, tma_arg_names, signature
-        )
+        call_args_str = ", ".join(kernel_args)
         call_args_str = self._generate_lazy_scratch(prefix, wrapper, call_args_str)
 
         launch_pdl = (
@@ -732,6 +898,7 @@ class DeferredTritonCallWrapper:
                 {macro_prefix}_CONFIG_INDEX,
                 {macro_prefix}_GLOBAL_SCRATCH,
                 {macro_prefix}_PROFILE_SCRATCH,
+                {macro_prefix}_TENSORDESC_META,
             }};
             """
         )
@@ -822,6 +989,7 @@ class DeferredTritonCallWrapper:
 
             # Shared: grid computation and launch using result struct
             self._generate_lazy_grid(prefix)
+            self._generate_lazy_tma_descriptor_initializers(prefix)
             self._generate_lazy_launch(
                 prefix,
                 wrapper,
@@ -1566,34 +1734,27 @@ static inline void ensure_triton_kernel_compiles_started() {{
         desc_name = desc.name
         # Pack the relevant information into a StableTMADescriptor struct.
         # See [Note: AOTI TMA Stable handling] for more details.
-        self.writeline(f"alignas(64) StableTMADescriptor {desc_name};")
+        self.writeline(f"alignas(64) StableTMADescriptor {desc_name}{{}};")
 
         def fill_array(name, values):
             for i, val in enumerate(values):
                 self.writeline(f"{name}[{i}] = {val};")
 
         ptr = f"reinterpret_cast<void*>(*({source}))"
-        rank = len(desc.tensor.get_size())
 
+        self.writeline(f"{desc_name}.global_address = {ptr};")
         fill_array(f"{desc_name}.block_shape", desc.block_shape)
-        fill_array(f"{desc_name}.global_shape", desc.tensor.get_size())
+        global_shape = desc.tensor.get_size()
+        fill_array(f"{desc_name}.global_shape", global_shape)
+        for i in range(len(global_shape)):
+            self.writeline(
+                f"{desc_name}.kernel_shape[{i}] = "
+                f"static_cast<int32_t>({desc_name}.global_shape[{i}]);"
+            )
         fill_array(f"{desc_name}.strides", desc.tensor.get_stride())
 
-        element_size = self.val_to_arg_str(desc.tensor.get_dtype().itemsize)
-        fn = "initTMADescriptor"
-        args = ", ".join(
-            str(x)
-            for x in [
-                f"&{desc_name}.m",
-                ptr,
-                element_size,
-                rank,
-                f"{desc_name}.block_shape",
-                f"{desc_name}.global_shape",
-                f"{desc_name}.strides",
-            ]
-        )
-        self.writeline(f"{fn}({args});")
+        # The deferred kernel wrapper initializes the CUtensorMap immediately
+        # before launch from Triton's final per-formal descriptor metadata.
 
     def generate_args_decl(
         self,
@@ -1788,7 +1949,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 arg_types,
             )
 
-            # For lazy compile mode with TMA, extract underlying tensor names
+            # For lazy compile mode with TMA, preserve tensor view expressions
             tma_tensor_args: dict[str, str] = {}
             is_lazy_compile = config.triton.autotune_at_compile_time is False
             if is_lazy_compile and raw_args and triton_meta:
@@ -1798,9 +1959,10 @@ static inline void ensure_triton_kernel_compiles_started() {{
                     sig_type = signature.get(key, "")
                     if isinstance(sig_type, str) and signature_is_tma_desc(sig_type):
                         if isinstance(raw_arg, TMADescriptorStable):
-                            # Get the underlying tensor name
-                            tensor_name = raw_arg.get_tensor().get_name()
-                            tma_tensor_args[key] = tensor_name
+                            tensor_arg = self.create_tmp_raii_handle_var_if_needed(
+                                self.val_to_arg_str(raw_arg.get_tensor())
+                            )
+                            tma_tensor_args[key] = tensor_arg
                         else:
                             raise AssertionError("Unsupported TMA descriptor type")
 
@@ -1818,8 +1980,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
 
             # For TMA in lazy compile mode, add tensor args to the call
             if is_lazy_compile and tma_tensor_args:
-                for tensor_name in tma_tensor_args.values():
-                    call_args.append(tensor_name)
+                for tensor_arg in tma_tensor_args.values():
+                    call_args.append(tensor_arg)
                     arg_types.append(
                         torch.float32
                     )  # dtype doesn't matter, just need tensor type

@@ -16,6 +16,7 @@ import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
+from textwrap import dedent
 from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import Self, TypeVar
 
@@ -402,6 +403,14 @@ class DeviceOpOverrides:
     def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
+    def aten_device_type(self) -> str:
+        """Return the C++ ATen DeviceType expression for this device.
+
+        The returned value must use the ``at::k...`` form, for example
+        ``at::kPrivateUse1``.
+        """
+        raise NotImplementedError
+
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
@@ -410,6 +419,28 @@ class DeviceOpOverrides:
     ) -> tuple[list[str], str] | None:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
+
+
+class NoOpDeviceOpOverrides(DeviceOpOverrides):
+    def import_get_raw_stream_as(self, name: str) -> str:
+        return dedent(
+            """
+            def get_raw_stream(_):
+                return 0
+            """
+        )
+
+    def cpp_kernel_type(self) -> str:
+        return "void*"
+
+    def set_device(self, device_idx: DeviceIdx) -> str:
+        return "pass"
+
+    def synchronize(self) -> str:
+        return "pass"
+
+    def device_guard(self, device_idx: DeviceIdx) -> str:
+        return "torch._ops.contextlib.nullcontext()"
 
 
 # Thread-safe lazy initialization for device op overrides
@@ -730,14 +761,16 @@ def _initialize_device_op_overrides():
         if _device_op_overrides_initialized:
             return
 
-        from . import mps_device_op_overrides  # noqa: F401
-        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+        from . import (
+            cpu_device_op_overrides,  # noqa: F401
+            mps_device_op_overrides,  # noqa: F401
+        )
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
         # TPU uses Pallas for codegen and only needs no-op overrides
-        register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        register_device_op_overrides("tpu", NoOpDeviceOpOverrides())
 
         _device_op_overrides_initialized = True
 

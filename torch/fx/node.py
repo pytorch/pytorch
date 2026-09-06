@@ -112,6 +112,8 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
+    torch.autograd.grad_mode._enter_inference_mode,
+    torch.autograd.grad_mode._exit_inference_mode,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
 }
 
