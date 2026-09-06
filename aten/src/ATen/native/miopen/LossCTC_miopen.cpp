@@ -94,8 +94,9 @@ bool _use_miopen_ctc_loss(
       (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
 
   if (use_miopen) {
-    // we don't know that input_lengths and target_lengths have the same size
-    // (they should, but we didn't check yet)
+    // The two length lists should be the same size, but nothing has compared
+    // them by the time this runs; see the note in the cuDNN copy.
+    use_miopen = use_miopen && (input_lengths.size() == target_lengths.size());
     int64_t max_input_length = log_probs.size(0);
     for (const auto input_length : input_lengths) {
       use_miopen = use_miopen && ((input_length == max_input_length) ? 1 : 0);
@@ -130,6 +131,7 @@ bool _use_miopen_ctc_loss_tensor(
     Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
     IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
     IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
+    use_miopen = use_miopen && (il.size() == tl.size());
     for (const auto b : c10::irange(tl.size())) {
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for MIOpen (same as cuDNN)
