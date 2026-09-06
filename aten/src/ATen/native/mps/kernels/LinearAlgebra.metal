@@ -3413,6 +3413,69 @@ kernel void svd_jacobi(
   }
   threadgroup_barrier(mem_flags::mem_device);
 
+  // The Jacobi update forms the range factor's columns as (A V)_j / sigma_j,
+  // which collapses to 0 when sigma_j <= eps, leaving U (or V, when transposed)
+  // non-orthonormal for rank-deficient inputs. Replace those null columns with
+  // an orthonormal basis of the complement of the emitted columns (two-pass
+  // Gram-Schmidt of canonical vectors), matching LAPACK gesdd. Columns are
+  // sorted by descending sigma, so the null ones are a contiguous tail. One
+  // simd-group runs it (each lane owns a strided slice of the working column,
+  // so the projections are simd_sum reductions needing no barriers); the rare
+  // degenerate path. Reuses Atg as scratch.
+  if (params.compute_uv && simd_group == 0) {
+    device T* out = (params.transposed == 0u) ? U_b : V_b;
+    const uint32_t ld = (params.transposed == 0u) ? params.u_ld : params.v_ld;
+    // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
+    // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
+    // gets completed. An absolute eps would keep noise-amplified columns.
+    const float thresh = eps * sig[ord[0]] * static_cast<float>(m);
+    uint32_t rank = 0;
+    while (rank < n && sig[ord[rank]] > thresh) {
+      ++rank;
+    }
+    // Accept a candidate as a null-space column when its squared residual after
+    // orthogonalization clears this: loose (well above the fp32 roundoff floor),
+    // but enough that the canonicals span the complement. Cf. Rutishauser/DGKS
+    // Gram-Schmidt reorthogonalization.
+    constexpr float kIndepThreshSq = 1e-2f;
+    threadgroup T* col = Atg;
+    uint32_t cand = 0;
+    for (uint32_t j = rank; j < n; ++j) {
+      while (cand < m) {
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          col[i] = (i == cand) ? svd_one(T(0)) : T(0);
+        }
+        ++cand;
+        for (uint32_t pass = 0; pass < 2; ++pass) {
+          for (uint32_t l = 0; l < j; ++l) {
+            device T* cl = out + l * ld;
+            T partial = T(0);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              partial += svd_conjmul(cl[i], col[i]);
+            }
+            T dot = svd_simd_sum(partial);
+            for (uint32_t i = simd_lane; i < m; i += kSimd) {
+              col[i] -= svd_mul(dot, cl[i]);
+            }
+          }
+        }
+        float partial_n = 0;
+        for (uint32_t i = simd_lane; i < m; i += kSimd) {
+          partial_n += svd_abs2(col[i]);
+        }
+        const float nrm_sq = c10::metal::simd_sum(partial_n);
+        if (nrm_sq > kIndepThreshSq) {
+          const float inv = 1.0f / precise::sqrt(nrm_sq);
+          device T* cj = out + j * ld;
+          for (uint32_t i = simd_lane; i < m; i += kSimd) {
+            cj[i] = col[i] * inv;
+          }
+          break;
+        }
+      }
+    }
+  }
+
   if (tid == 0) {
     // NaN/Inf never triggers a rotation, so flag info to raise like the CPU
     // path.

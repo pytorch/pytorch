@@ -12413,6 +12413,22 @@ class TestLinalgMPS(TestCaseMPS):
         # solution is sensitive to conditioning of individual batch members.
         self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
 
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_svd_rank_deficient(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196112:
+        # the native Jacobi kernel forms U as (A V) / sigma, which collapses to
+        # zero for sigma ~ 0, leaving U non-orthonormal for rank-deficient
+        # inputs. The null-space columns must be an orthonormal completion.
+        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        spectrum = torch.linspace(0.5, 2.0, 32)
+        spectrum[:16] = 0  # exact rank 16, 16384 elements over the gate
+        A = (q * spectrum) @ v.mH
+        U, S, Vh = torch.linalg.svd(A.to(device), full_matrices=False)
+        gram = U.mH @ U
+        self.assertEqual(gram, torch.eye(32, dtype=dtype, device=device).expand_as(gram), atol=1e-4, rtol=1e-4)
+        self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+
     def test_linalg_svd_large_batch_conj(self, device="mps"):
         # Regression test for https://github.com/pytorch/pytorch/issues/196113:
         # for m<n the native SVD runs the kernel on A.mH(); .contiguous() leaves
