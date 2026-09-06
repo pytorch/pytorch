@@ -92,6 +92,46 @@ def _update_param_group_val(
         param_group[key] = val
 
 
+def _callable_repr(fn: Any) -> str:
+    """Name a callable without printing its address.
+
+    ``repr`` of a function or of an instance of a callable class embeds the
+    object's id, which is exactly what ``__repr__`` here exists to remove.
+    """
+    return getattr(fn, "__qualname__", None) or type(fn).__qualname__
+
+
+def _param_group_setting(optimizer: Optimizer, key: str) -> list[Any] | None:
+    """Collect group[key] across param groups, or None if any group lacks it.
+
+    ``OneCycleLR`` writes max_lr and the momentum bounds into the param groups
+    only when ``last_epoch == -1``, so a scheduler built to resume a run can
+    legitimately be missing them and ``__repr__`` must not raise.
+    """
+    groups = optimizer.param_groups
+    if any(key not in group for group in groups):
+        return None
+    return [group[key] for group in groups]
+
+
+def _schedulers_repr(schedulers: Sequence[LRScheduler]) -> str:
+    """Render nested schedulers one per line, indented one level.
+
+    ``LRScheduler.__repr__`` indents everything ``_extra_repr`` returns by one
+    more level, so indenting the children once here is what makes nesting
+    compound at arbitrary depth. Interpolating the list instead would go
+    through ``list.__repr__`` and splice ``[``, ``]`` and ``, `` into the
+    middle of each child's own multi-line block.
+    """
+    if not schedulers:
+        return "schedulers: []"
+    children = "\n".join(
+        "\n".join(f"    {line}" for line in repr(scheduler).split("\n"))
+        for scheduler in schedulers
+    )
+    return f"schedulers: [\n{children}\n]"
+
+
 class LRScheduler:
     r"""Base class for all learning rate schedulers.
 
@@ -300,6 +340,37 @@ class LRScheduler:
             self.optimizer, "lr"
         )
 
+    def _extra_repr(self) -> str:
+        """Return the scheduler-specific part of :meth:`__repr__`.
+
+        Subclasses re-implement this to name the settings that define their
+        schedule. Both single-line and multi-line strings are accepted.
+        """
+        return ""
+
+    def __repr__(self) -> str:
+        """Return a readable summary of the scheduler and its settings."""
+        lines = [f"{self.__class__.__name__} ("]
+
+        extra = self._extra_repr()
+        if extra:
+            lines += [f"    {line}" for line in extra.split("\n")]
+
+        # ``ChainedScheduler`` never sets ``last_epoch``, and neither it,
+        # ``SequentialLR`` nor ``ReduceLROnPlateau`` sets ``base_lrs``, so
+        # both are reported only when the subclass actually has them.
+        if hasattr(self, "last_epoch"):
+            lines.append(f"    last_epoch: {self.last_epoch}")
+        if hasattr(self, "base_lrs"):
+            base_lrs = ", ".join(
+                f"{lr.item()}" if isinstance(lr, Tensor) else f"{lr}"
+                for lr in self.base_lrs
+            )
+            lines.append(f"    base_lrs: [{base_lrs}]")
+
+        lines.append(")")
+        return "\n".join(lines)
+
 
 def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler) -> None:
     if not lr_scheduler._get_lr_called_within_step:
@@ -465,6 +536,11 @@ class LambdaLR(LRScheduler):
             for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs, strict=True)
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        names = ", ".join(_callable_repr(fn) for fn in self.lr_lambdas)
+        return f"lr_lambdas: [{names}]"
+
 
 class MultiplicativeLR(LRScheduler):
     """Multiply the learning rate of each parameter group by the factor given in the specified function.
@@ -588,6 +664,11 @@ class MultiplicativeLR(LRScheduler):
         else:
             return _param_groups_val_list(self.optimizer, "lr")
 
+    @override
+    def _extra_repr(self) -> str:
+        names = ", ".join(_callable_repr(fn) for fn in self.lr_lambdas)
+        return f"lr_lambdas: [{names}]"
+
 
 class StepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every step_size epochs.
@@ -674,6 +755,10 @@ class StepLR(LRScheduler):
             base_lr * self.gamma ** (self.last_epoch // self.step_size)
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"step_size: {self.step_size}\ngamma: {self.gamma}"
 
 
 class MultiStepLR(LRScheduler):
@@ -768,6 +853,11 @@ class MultiStepLR(LRScheduler):
             base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        milestones = list(self.milestones.elements())
+        return f"milestones: {milestones}\ngamma: {self.gamma}"
 
 
 class ConstantLR(LRScheduler):
@@ -872,6 +962,10 @@ class ConstantLR(LRScheduler):
             * (self.factor + (self.last_epoch >= self.total_iters) * (1 - self.factor))
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"factor: {self.factor}\ntotal_iters: {self.total_iters}"
 
 
 class LinearLR(LRScheduler):
@@ -1003,6 +1097,14 @@ class LinearLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        return (
+            f"start_factor: {self.start_factor}\n"
+            f"end_factor: {self.end_factor}\n"
+            f"total_iters: {self.total_iters}"
+        )
+
 
 class ExponentialLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
@@ -1077,6 +1179,10 @@ class ExponentialLR(LRScheduler):
             same types as their current ``group["lr"]``\s.
         """
         return [base_lr * self.gamma**self.last_epoch for base_lr in self.base_lrs]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"gamma: {self.gamma}"
 
 
 class SequentialLR(LRScheduler):
@@ -1233,6 +1339,10 @@ class SequentialLR(LRScheduler):
         for idx, s in enumerate(_schedulers):
             self._schedulers[idx].load_state_dict(s)
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"milestones: {self._milestones}\n{_schedulers_repr(self._schedulers)}"
+
 
 class PolynomialLR(LRScheduler):
     """Decays the learning rate of each parameter group using a polynomial function in the given total_iters.
@@ -1333,6 +1443,10 @@ class PolynomialLR(LRScheduler):
             )
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"total_iters: {self.total_iters}\npower: {self.power}"
 
 
 class CosineAnnealingLR(LRScheduler):
@@ -1474,6 +1588,10 @@ class CosineAnnealingLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"T_max: {self.T_max}\neta_min: {self.eta_min}"
+
 
 class ChainedScheduler(LRScheduler):
     """Chains a list of learning rate schedulers.
@@ -1579,6 +1697,10 @@ class ChainedScheduler(LRScheduler):
 
         for idx, s in enumerate(_schedulers):
             self._schedulers[idx].load_state_dict(s)
+
+    @override
+    def _extra_repr(self) -> str:
+        return _schedulers_repr(self._schedulers)
 
 
 class ReduceLROnPlateau(LRScheduler):
@@ -1782,6 +1904,19 @@ class ReduceLROnPlateau(LRScheduler):
         self.__dict__.update(state_dict)
         self._init_is_better(
             mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode
+        )
+
+    @override
+    def _extra_repr(self) -> str:
+        return (
+            f"mode: {self.mode}\n"
+            f"factor: {self.factor}\n"
+            f"patience: {self.patience}\n"
+            f"threshold: {self.threshold}\n"
+            f"threshold_mode: {self.threshold_mode}\n"
+            f"cooldown: {self.cooldown}\n"
+            f"min_lrs: {self.min_lrs}\n"
+            f"eps: {self.eps}"
         )
 
 
@@ -2101,6 +2236,31 @@ class CyclicLR(LRScheduler):
             self._scale_fn_custom.__dict__.update(fn)
         self._init_scale_fn()
 
+    @override
+    def _extra_repr(self) -> str:
+        lines = [
+            f"max_lrs: {self.max_lrs}",
+            f"total_size: {self.total_size}",
+            f"step_ratio: {self.step_ratio}",
+        ]
+        if self._scale_fn_custom is not None:
+            # A custom scale_fn leaves mode unvalidated and gamma unread, so
+            # reporting either would describe a schedule this scheduler does
+            # not follow.
+            lines.append(f"scale_fn: {_callable_repr(self._scale_fn_custom)}")
+        else:
+            lines += [f"mode: {self.mode}", f"gamma: {self.gamma}"]
+        lines += [
+            f"scale_mode: {self.scale_mode}",
+            f"cycle_momentum: {self.cycle_momentum}",
+        ]
+        if self.cycle_momentum:
+            lines += [
+                f"base_momentums: {self.base_momentums}",
+                f"max_momentums: {self.max_momentums}",
+            ]
+        return "\n".join(lines)
+
 
 class CosineAnnealingWarmRestarts(LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing schedule.
@@ -2272,6 +2432,10 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"T_0: {self.T_0}\nT_mult: {self.T_mult}\neta_min: {self.eta_min}"
 
 
 class _SchedulePhase(TypedDict):
@@ -2604,3 +2768,33 @@ class OneCycleLR(LRScheduler):
                     group["momentum"] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs
+
+    @override
+    def _extra_repr(self) -> str:
+        lines = []
+        # OneCycleLR keeps max_lr on the param groups rather than on self, and
+        # sets initial_lr -- which the base __repr__ reports as base_lrs -- to
+        # max_lr / div_factor, so without this the value the caller passed
+        # appears nowhere.
+        max_lrs = _param_group_setting(self.optimizer, "max_lr")
+        if max_lrs is not None:
+            lines.append(f"max_lrs: {max_lrs}")
+        lines.append(f"total_steps: {self.total_steps}")
+        # pct_start is not stored; the first phase ends at
+        # ``pct_start * total_steps - 1``.
+        lines.append(
+            f"pct_start: {(self._schedule_phases[0]['end_step'] + 1) / self.total_steps}"
+        )
+        # Guarded for the same reason _anneal_func guards it: a scheduler
+        # restored from a checkpoint written before this attribute existed
+        # does not have it, and __repr__ must not raise on one.
+        if hasattr(self, "_anneal_func_type"):
+            lines.append(f"anneal_strategy: {self._anneal_func_type}")
+        lines.append(f"three_phase: {len(self._schedule_phases) == 3}")
+        lines.append(f"cycle_momentum: {self.cycle_momentum}")
+        if self.cycle_momentum:
+            for key in ("base_momentum", "max_momentum"):
+                momentums = _param_group_setting(self.optimizer, key)
+                if momentums is not None:
+                    lines.append(f"{key}s: {momentums}")
+        return "\n".join(lines)
