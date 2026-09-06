@@ -7,6 +7,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 import weakref
 from functools import cache
@@ -508,12 +509,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     # ===== Basic isolation: independent caches per compile call =====
 
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
-        """lookup() holds the ExtraState cache lock across guard evaluation,
-        and guard evaluation runs Python -- a LAMBDA_GUARD calls straight back
-        into the interpreter, so the GIL can drop mid-iteration. A thread that
-        blocks on that lock while HOLDING the GIL wedges the owner, who needs
-        the GIL to finish. The lock therefore has to release the GIL before it
-        waits. A short switch interval makes the handoff frequent.
+        """lookup() takes the ExtraState cache lock only to snapshot the
+        cache entries -- brief, but it touches Python objects, so the GIL can
+        drop under it -- then releases the lock before evaluating guards. A
+        thread that blocks on that lock while HOLDING the GIL wedges the
+        owner, who needs the GIL to finish. The lock therefore has to release
+        the GIL before it waits. A short switch interval makes the handoff
+        frequent.
 
         Stress test; not a deterministic reproduction. A wedge shows up as a
         harness timeout, since join() never returns.
@@ -551,7 +553,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
+        # Re-raise the worker's exception so its traceback survives -- for
+        # a concurrency failure the traceback is the finding. Threads joined.
+        if raised:
+            raise raised[0]
 
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
         """reset_code can run while other threads are parked on the same
@@ -611,18 +616,23 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
+        # Re-raise the worker's exception so its traceback survives -- for
+        # a concurrency failure the traceback is the finding. Threads joined.
+        if raised:
+            raise raised[0]
         self.assertEqual(opt(args[0]), f(args[0]))
 
     def test_concurrent_install_and_reset_against_lookups(self):
         """Eight threads look f up while two install and reset precompile
-        entries on its code object. lookup() walks precompile_entries under
-        the cache lock and runs their guards -- Python, so the GIL can drop --
-        while an installer takes the same lock to append to or splice the
-        list being walked; without the lock that is a use-after-free. A wedge
-        in the locking cannot fail an assertion, so faulthandler dumps every
-        thread's stack at the deadline, surfacing the wedge as stacks in the
-        log rather than a silent harness timeout. Stress test; not a deterministic
+        entries on its code object. lookup() snapshots precompile_entries
+        under the cache lock and raises cache_python_depth, then releases the
+        lock and runs their guards -- Python, so the GIL can drop. An
+        installer takes the same lock to append to or splice the list; the
+        raised depth parks any destroy until the readers holding the snapshot
+        finish, so a reader never touches a freed node. The threads are joined
+        with a timeout and asserted not alive, so a wedge fails this test; the
+        faulthandler timer only dumps every thread's stack for diagnostics if
+        the run overruns its deadline. Stress test; not a deterministic
         reproduction, and it passes on the lock-free parent as well: it
         guards the locking against regressions.
         """
@@ -699,7 +709,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
+        # Re-raise the worker's exception so its traceback survives -- for
+        # a concurrency failure the traceback is the finding. Threads joined.
+        if raised:
+            raise raised[0]
         # A reset that arrived while a lookup held the lock was parked; the
         # entry reader applies whatever is still parked, and nothing survives.
         for owner in owners:
@@ -738,8 +751,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
 
     def test_reset_code_from_python_run_by_lookup_is_safe(self):
-        """lookup() holds the recursive cache lock across guard evaluation
-        and backend comparison, both of which run Python -- which can call
+        """try_lookup_without_guard_eval() holds the recursive cache lock
+        across the backend comparison it runs -- Python, which can call
         torch._dynamo back in on the SAME thread. reset_code arriving there
         used to free the very list nodes the interrupted lookup was walking
         (a same-thread use-after-free); it must instead land as if it ran
@@ -771,13 +784,16 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
         self.assertEqual(opt1(x), f(x))
         self.assertEqual(_get_total_cache_entry_count(code), 1)
-        # A second-but-equal backend makes lookup compare it against the
-        # saved one, and that __eq__ resets this very code object mid-lookup.
+        # A second-but-equal backend makes try_lookup_without_guard_eval
+        # compare it against the saved one under the fast-path lock; that
+        # __eq__ resets this code object, parking the eviction.
         opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+        # The fast path bails (the entry is guarded), so the fallback lookup
+        # runs at depth 0, drains the parked reset, and compiles fresh -- all
+        # on this one call.
         self.assertEqual(opt2(x), f(x))
         self.assertGreater(len(resets), 0)
-        # The parked reset lands at the next cache operation: the stale entry
-        # is gone and this call compiles fresh.
+        # The backend is now pointer-identical, so this is a plain cache hit.
         self.assertEqual(opt2(x), f(x))
         self.assertEqual(_get_total_cache_entry_count(code), 1)
 
@@ -830,7 +846,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         thread = threading.Thread(target=caller, daemon=True)
         thread.start()
         try:
-            self.assertTrue(in_eq.wait(timeout=120))
+            # If the caller raised before reaching __eq__, in_eq never fires;
+            # surface that exception instead of waiting out the full timeout.
+            deadline = time.monotonic() + 120
+            while not in_eq.wait(timeout=1):
+                if not errors.empty():
+                    raise errors.get_nowait()
+                self.assertTrue(thread.is_alive(), "caller exited before __eq__")
+                now = time.monotonic()
+                self.assertLess(now, deadline, "caller never reached __eq__")
             # The caller thread is inside lookup, holding the cache lock.
             # This is exactly what a guarded object's weakref.finalize runs;
             # it must park rather than block behind that lock.
@@ -853,7 +877,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
+        # Re-raise the worker's exception so its traceback survives -- for
+        # a concurrency failure the traceback is the finding. Threads joined.
+        if raised:
+            raise raised[0]
         # A later lock holder drains the parked request: the entry reports
         # itself invalidated and a fresh compile serves the next call.
         self.assertEqual(opt1(x), f(x))
@@ -977,8 +1004,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ctx(f)(x), f(x))
         # Still walked by the interrupted lookup, so nothing was gone yet.
         self.assertEqual(seen, [1])
-        # The guard-evaluating lookup that follows the fast-path hit applied
-        # the parked clear, then missed and recompiled into the region.
+        # The guard-evaluating lookup that runs after the fast-path bail
+        # applied the parked clear, then missed and recompiled into the region.
         self.assertEqual(len(compiles), 2)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
 
