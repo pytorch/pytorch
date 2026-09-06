@@ -8089,6 +8089,92 @@ def logcumsumexp(x, dim):
     return result
 
 
+fallback_associative_scan = fallback_handler(aten.associative_scan.default)
+fallback_associative_scan_tensor_list = fallback_handler(
+    aten.associative_scan.TensorList
+)
+fallback_flip = fallback_handler(aten.flip.default)
+
+
+def _associative_scan_combine_fn(combine_mode):
+    if combine_mode == "add":
+        return lambda a, b: (ops.add(a[0], b[0]),)
+    if combine_mode == "mul":
+        return lambda a, b: (ops.mul(a[0], b[0]),)
+    if combine_mode == "max":
+        return lambda a, b: (ops.maximum(a[0], b[0]),)
+    if combine_mode == "min":
+        return lambda a, b: (ops.minimum(a[0], b[0]),)
+    if combine_mode == "linear_recurrence":
+        # combine((a1, b1), (a2, b2)) = (a2 * a1, a2 * b1 + b2)
+        return lambda a, b: (
+            ops.mul(a[0], b[0]),
+            ops.add(ops.mul(b[0], a[1]), b[1]),
+        )
+    raise AssertionError(f"associative_scan: unsupported combine_mode '{combine_mode}'")
+
+
+def _associative_scan_lowering(x, combine_mode, dim, reverse):
+    if not isinstance(combine_mode, str):
+        raise AssertionError("combine_mode must be a string literal")
+    if len(x.get_size()) == 0:
+        if dim not in [0, -1]:
+            raise AssertionError("expected: dim in [0, -1]")
+        return clone(x)
+    combine_fn = _associative_scan_combine_fn(combine_mode)
+    if reverse:
+        x = fallback_flip(x, [dim])
+    kwargs = _make_scan_inner(x, axis=dim, dtype=None)
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    if result is None:
+        # x is already flipped for reverse; scan it forward, then flip back.
+        result = fallback_associative_scan(x, combine_mode, dim, False)
+        if reverse:
+            result = fallback_flip(result, [dim])
+        return result
+    if reverse:
+        result = fallback_flip(result, [dim])
+    return result
+
+
+@register_lowering(aten.associative_scan, type_promotion_kind=None)
+def associative_scan_lowering(x, combine_mode, dim=0, reverse=False):
+    return _associative_scan_lowering(x, combine_mode, dim, reverse)
+
+
+@register_lowering(aten.associative_scan.TensorList, type_promotion_kind=None)
+def associative_scan_tensor_list_lowering(xs, combine_mode, dim=0, reverse=False):
+    if not isinstance(combine_mode, str):
+        raise AssertionError("combine_mode must be a string literal")
+    if combine_mode != "linear_recurrence":
+        raise AssertionError(
+            f"tensor-list associative_scan only supports combine_mode="
+            f"'linear_recurrence', got '{combine_mode}'"
+        )
+    if len(xs) != 2:
+        raise AssertionError("linear_recurrence requires exactly 2 tensors")
+    a, b = xs
+    if len(a.get_size()) == 0:
+        return (clone(a), clone(b))
+    combine_fn = _associative_scan_combine_fn(combine_mode)
+    if reverse:
+        a = fallback_flip(a, [dim])
+        b = fallback_flip(b, [dim])
+    kwargs = _make_scan_inner(a, axis=dim, dtype=None)
+    kwargs["dtypes"] = (a.get_dtype(), b.get_dtype())
+    kwargs["inner_fns"] = (a.make_loader(), b.make_loader())
+    result = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    if result is None or any(r is None for r in result):
+        result = fallback_associative_scan_tensor_list((a, b), combine_mode, dim, False)
+        if reverse:
+            result = [fallback_flip(r, [dim]) for r in result]
+        return result
+    result = list(result)
+    if reverse:
+        result = [fallback_flip(r, [dim]) for r in result]
+    return tuple(result)
+
+
 @register_lowering(aten.cummax, type_promotion_kind=None)
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:

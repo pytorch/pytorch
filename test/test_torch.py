@@ -11361,6 +11361,167 @@ class TestViewOps(TestCase):
 class TestTensorDeviceOps(TestCase):
     pass
 
+
+class TestAssociativeScan(TestCase):
+    """Tests for the native aten::associative_scan operator.
+
+    The reference implementations below mirror the semantics of
+    jax.lax.associative_scan for the built-in combine modes.
+    """
+
+    def _scan_ref(self, x, combine_mode, dim, reverse=False):
+        dim = dim if dim >= 0 else dim + x.ndim
+        out = torch.empty_like(x)
+        idxs = range(x.size(dim) - 1, -1, -1) if reverse else range(x.size(dim))
+        acc = None
+        for i in idxs:
+            sl = [slice(None)] * x.ndim
+            sl[dim] = i
+            v = x[sl]
+            if acc is None:
+                acc = v.clone()
+            elif combine_mode == "add":
+                acc = acc + v
+            elif combine_mode == "mul":
+                acc = acc * v
+            elif combine_mode == "max":
+                acc = torch.maximum(acc, v)
+            elif combine_mode == "min":
+                acc = torch.minimum(acc, v)
+            else:
+                raise AssertionError(f"unknown combine_mode {combine_mode}")
+            out[sl] = acc
+        return out
+
+    # The native kernels are parallel scans, so on CUDA the fp16/bf16
+    # accumulation order legitimately differs from the sequential references by
+    # a few ulps; return a dtype-scaled tolerance for those comparisons.
+    def _scan_tol(self, dtype):
+        if dtype == torch.float16:
+            return 0.02, 0.02
+        if dtype == torch.bfloat16:
+            return 0.1, 0.1
+        return None, None
+
+    def _linrec_ref(self, a, b, dim):
+        dim = dim if dim >= 0 else dim + a.ndim
+        n = a.size(dim)
+        A = torch.empty_like(a)
+        H = torch.empty_like(b)
+        sl0 = [slice(None)] * a.ndim
+        sl0[dim] = 0
+        A[sl0] = a[sl0].clone()
+        H[sl0] = b[sl0].clone()
+        for i in range(1, n):
+            sl = [slice(None)] * a.ndim
+            sl[dim] = i
+            prev = [slice(None)] * a.ndim
+            prev[dim] = i - 1
+            A[sl] = a[sl] * A[prev]
+            H[sl] = a[sl] * H[prev] + b[sl]
+        return A, H
+
+    @parametrize("combine_mode", ["add", "mul", "max", "min"])
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_matches_sequential(self, device, combine_mode, reverse, dtype):
+        atol, rtol = self._scan_tol(dtype)
+        x = torch.randn(16, 8, device=device, dtype=dtype)
+        for dim in range(x.ndim):
+            expected = self._scan_ref(x, combine_mode, dim, reverse=reverse)
+            actual = torch.associative_scan(x, combine_mode, dim, reverse=reverse)
+            self.assertEqual(actual, expected, exact_dtype=True, atol=atol, rtol=rtol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_associative_scan_add_matches_cumsum(self, device, dtype):
+        # The native scan is a parallel scan, so fp16/bf16 accumulation order
+        # legitimately differs from cumsum's by a few ulps.
+        atol = 0.02 if dtype == torch.float16 else 0.05 if dtype == torch.bfloat16 else 1e-5
+        rtol = 0.02 if dtype == torch.float16 else 0.05 if dtype == torch.bfloat16 else 1.3e-6
+        x = torch.randn(5, 32, device=device, dtype=dtype)
+        for dim in range(x.ndim):
+            self.assertEqual(
+                torch.associative_scan(x, "add", dim),
+                torch.cumsum(x, dim),
+                atol=atol,
+                rtol=rtol,
+            )
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_associative_scan_mul_matches_cumprod(self, device, dtype):
+        atol = 0.02 if dtype == torch.float16 else 0.05 if dtype == torch.bfloat16 else 1e-5
+        rtol = 0.02 if dtype == torch.float16 else 0.05 if dtype == torch.bfloat16 else 1.3e-6
+        x = torch.randn(5, 32, device=device, dtype=dtype).abs() + 0.1
+        for dim in range(x.ndim):
+            self.assertEqual(
+                torch.associative_scan(x, "mul", dim),
+                torch.cumprod(x, dim),
+                atol=atol,
+                rtol=rtol,
+            )
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_linear_recurrence(self, device, reverse, dtype):
+        atol, rtol = self._scan_tol(dtype)
+        a = torch.rand(7, 4, device=device, dtype=dtype) * 0.5 + 0.5
+        b = torch.randn(7, 4, device=device, dtype=dtype)
+        expected = self._linrec_ref(a, b, 0)
+        actual = torch.associative_scan([a, b], "linear_recurrence", 0, reverse=reverse)
+        if reverse:
+            fa = torch.flip(a, [0])
+            fb = torch.flip(b, [0])
+            ea, eh = self._linrec_ref(fa, fb, 0)
+            expected = (torch.flip(ea, [0]), torch.flip(eh, [0]))
+        for e, a in zip(expected, actual):
+            self.assertEqual(a, e, atol=atol, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_functional_dispatch(self, device, dtype):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        atol, rtol = self._scan_tol(dtype)
+        x = torch.randn(16, 8, device=device, dtype=dtype)
+        combines = [
+            (lambda u, v: u + v, "add"),
+            (lambda u, v: u * v, "mul"),
+            (torch.maximum, "max"),
+            (torch.minimum, "min"),
+        ]
+        for combine, mode in combines:
+            expected = self._scan_ref(x, mode, 0)
+            actual = associative_scan(combine, x, dim=0)
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+    def test_associative_scan_errors(self, device):
+        x = torch.randn(4, 4, device=device)
+        with self.assertRaises(RuntimeError):
+            torch.associative_scan(x, "bogus_mode")
+        with self.assertRaises(RuntimeError):
+            torch.associative_scan(x, "linear_recurrence")
+        with self.assertRaises(RuntimeError):
+            torch.associative_scan([x, x, x], "linear_recurrence")
+        with self.assertRaises(RuntimeError):
+            torch.associative_scan([x], "linear_recurrence")
+        with self.assertRaises(IndexError):
+            torch.associative_scan(x, "add", dim=5)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_edge_cases(self, device, dtype):
+        empty = torch.empty(0, 4, device=device, dtype=dtype)
+        for mode in ["add", "mul", "max", "min"]:
+            self.assertEqual(torch.associative_scan(empty, mode).shape, empty.shape)
+            self.assertEqual(torch.associative_scan(empty, mode, reverse=True).shape, empty.shape)
+        one = torch.randn(1, 4, device=device, dtype=dtype)
+        for mode in ["add", "mul", "max", "min"]:
+            self.assertEqual(torch.associative_scan(one, mode), one)
+        scalar = torch.tensor(3.0, device=device, dtype=dtype)
+        for mode in ["add", "mul", "max", "min"]:
+            self.assertEqual(torch.associative_scan(scalar, mode), scalar)
+
+
+instantiate_device_type_tests(TestAssociativeScan, globals())
+
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.

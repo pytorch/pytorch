@@ -2003,6 +2003,22 @@
     CPU, CUDA, XPU: cumsum_out
     MPS: cumsum_out_mps
 
+- func: associative_scan(Tensor self, str combine_mode, int dim=0, bool reverse=False) -> Tensor
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: associative_scan
+    Meta: associative_scan_meta
+  tags: core
+
+- func: associative_scan.TensorList(Tensor[] xs, str combine_mode, int dim=0, bool reverse=False) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: associative_scan_tensor_list
+    Meta: associative_scan_tensor_list_meta
+  tags: core
+
 - func: cumulative_trapezoid.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
 - func: cumulative_trapezoid.dx(Tensor y, *, Scalar dx=1, int dim=-1) -> Tensor
