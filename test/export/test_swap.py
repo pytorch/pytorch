@@ -13,7 +13,12 @@ from torch._export import config
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch.export import export, register_dataclass
 from torch.export._swap import _swap_modules
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -28,6 +33,8 @@ from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
     params: f"{cls.__name__}_{'strict' if params['strict'] else 'nonstrict'}",
 )
 class TestSwap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):
             def forward(self, zx, y):

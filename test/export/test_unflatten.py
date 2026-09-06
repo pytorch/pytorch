@@ -11,6 +11,7 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -22,6 +23,8 @@ from torch.utils._pytree import TreeSpec
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestUnflatten(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def compare_outputs(self, eager, unflattened, args):
         orig_output = eager(*args)
         unflattened_output = unflattened(*args)
