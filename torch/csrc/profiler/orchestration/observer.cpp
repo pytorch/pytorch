@@ -25,7 +25,8 @@ ExperimentalConfig::ExperimentalConfig(
     bool expose_kineto_event_metadata,
     std::string custom_profiler_config,
     bool adjust_timestamps,
-    bool trace_only)
+    bool trace_only,
+    std::optional<int64_t> max_stack_events)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
@@ -39,7 +40,12 @@ ExperimentalConfig::ExperimentalConfig(
       expose_kineto_event_metadata{expose_kineto_event_metadata},
       custom_profiler_config(std::move(custom_profiler_config)),
       adjust_timestamps{adjust_timestamps},
-      trace_only{trace_only} {}
+      trace_only{trace_only},
+      max_stack_events{max_stack_events} {
+  TORCH_CHECK(
+      !max_stack_events || *max_stack_events > 0,
+      "max_stack_events must be greater than zero");
+}
 
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,

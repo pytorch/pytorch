@@ -71,8 +71,10 @@ class _ExperimentalConfig:
         custom_profiler_config: str = ...,
         adjust_timestamps: bool = ...,
         trace_only: bool = ...,
+        max_stack_events: int | None = ...,
     ) -> None: ...
     trace_only: bool
+    max_stack_events: int | None
     # Deprecated no-ops; retained only so the Python layer can detect and warn.
     profiler_metrics: list[str]
     profiler_measure_per_kernel: bool

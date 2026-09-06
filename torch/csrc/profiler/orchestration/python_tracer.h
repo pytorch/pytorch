@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -57,7 +58,8 @@ struct TORCH_API PythonTracerBase {
   virtual std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<CompressedEvent>& enters,
-      c10::time_t end_time_ns) = 0;
+      c10::time_t end_time_ns,
+      size_t max_stack_events) = 0;
 };
 
 using MakeFn = std::unique_ptr<PythonTracerBase> (*)(RecordQueue*);
