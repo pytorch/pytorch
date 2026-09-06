@@ -8,10 +8,12 @@ import torch
 from torch.fx import subgraph_rewriter, symbolic_trace
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.traceback import NodeSourceAction
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestGraphTransformObserver(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_graph_transform_observer(self):
         class M(torch.nn.Module):
             def forward(self, x):
