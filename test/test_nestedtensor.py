@@ -8984,7 +8984,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
-        error_msg="'NestedIntNode' object has no attribute 'sub'",
+        error_msg="'NestedIntNode' object has no attribute 'sym_float'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
