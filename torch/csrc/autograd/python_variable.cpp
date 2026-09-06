@@ -315,6 +315,17 @@ void pushPyOutToStack(
         stack, torch::jit::toIValue(out.ptr(), schema_returns[0].real_type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
+    TORCH_CHECK(
+        outs.size() == num_returns,
+        "Expected ",
+        msg,
+        " for ",
+        op.operator_name(),
+        " to return ",
+        num_returns,
+        " values but it returned ",
+        outs.size(),
+        " instead.");
     for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(
           stack,
