@@ -1763,7 +1763,7 @@ class TestSDPAFailureModes(NNTestCase):
                 flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
     @onlyAccelerator
-    @skipIfMPS(msg="No viable backend for scaled_dot_product_attention was found.")
+    @skipIfMPS   # No viable backend for scaled_dot_product_attention was found on MPS
     def test_dispatch_fails_no_backend(self, device):
         dtype = torch.float16
         with sdpa_kernel(backends=[SDPBackend.ERROR]):
