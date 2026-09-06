@@ -1612,6 +1612,7 @@ def _slow_gradcheck(
     complex_indices=None,
     test_imag=False,
     masked=False,
+    equal_nan=False,
 ):
     func_out = _as_tuple(func_out)
     if not outputs:
@@ -1641,7 +1642,9 @@ def _slow_gradcheck(
         for i, n_per_out in enumerate(numerical):
             for j, n in enumerate(n_per_out):
                 a = analytical_forward[j][i]
-                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
+                if not _allclose_with_type_promotion(
+                    a, n.to(a.device), rtol, atol, equal_nan
+                ):
                     raise GradcheckError(
                         _get_notallclose_msg(
                             a, n, i, j, complex_indices, test_imag, is_forward_ad=True
@@ -1654,7 +1657,9 @@ def _slow_gradcheck(
             )
 
             for j, (a, n) in enumerate(zip(analytical, numerical[i])):
-                if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
+                if not _allclose_with_type_promotion(
+                    a, n.to(a.device), rtol, atol, equal_nan
+                ):
                     raise GradcheckError(
                         _get_notallclose_msg(a, n, i, j, complex_indices, test_imag)
                     )
@@ -1670,11 +1675,11 @@ def _dot_with_type_promotion(u, v):
     return (u * v).sum()
 
 
-def _allclose_with_type_promotion(a, b, rtol, atol):
+def _allclose_with_type_promotion(a, b, rtol, atol, equal_nan=False):
     promoted_type = torch.promote_types(a.dtype, b.dtype)
     a = a.to(dtype=promoted_type)
     b = b.to(dtype=promoted_type)
-    return torch.allclose(a, b, rtol, atol)
+    return torch.allclose(a, b, rtol, atol, equal_nan)
 
 
 def _to_real_dtype(dtype):
@@ -1793,7 +1798,16 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
+    func,
+    tupled_inputs,
+    outputs,
+    input_idx,
+    output_idx,
+    rtol,
+    atol,
+    eps,
+    is_forward_ad,
+    equal_nan=False,
 ):
     # Compute jacobians in slow mode for better error message
     if is_forward_ad:
@@ -1833,7 +1847,9 @@ def _run_slow_mode_and_get_error(
     # Assume jacobians are non-empty and have the same shape
     slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 
-    slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol)
+    slow_allclose = torch.allclose(
+        slow_analytical, slow_numerical, rtol, atol, equal_nan
+    )
     msg = (
         "\nThe above quantities relating the numerical and analytical jacobians are computed \n"
         "in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background \n"
@@ -1901,6 +1917,7 @@ def _check_analytical_numerical_equal(
     test_imag,
     *,
     is_forward_ad=False,
+    equal_nan=False,
 ):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
@@ -1911,9 +1928,20 @@ def _check_analytical_numerical_equal(
                 a = all_analytical[j][i]
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
-            if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
+            if not _allclose_with_type_promotion(
+                a, n.to(a.device), rtol, updated_atol, equal_nan
+            ):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
+                    func,
+                    tupled_inputs,
+                    outputs,
+                    i,
+                    j,
+                    rtol,
+                    atol,
+                    eps,
+                    is_forward_ad,
+                    equal_nan,
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1938,6 +1966,7 @@ def _fast_gradcheck(
     complex_indices=None,
     test_imag=False,
     masked=False,
+    equal_nan=False,
 ):
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
@@ -2000,6 +2029,7 @@ def _fast_gradcheck(
         eps,
         test_imag,
         is_forward_ad=use_forward_ad,
+        equal_nan=equal_nan,
     )
 
     return True
@@ -2028,6 +2058,7 @@ def gradcheck(
     check_backward_ad: bool = True,
     fast_mode: bool = False,
     masked: bool | None = None,
+    equal_nan: bool = False,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
@@ -2092,6 +2123,12 @@ def gradcheck(
             is run; otherwise, we fall back to the slow implementation.
         masked (bool, optional): if ``True``, the gradients of unspecified elements of
             sparse tensors are ignored. Defaults to ``False``.
+        equal_nan (bool, optional): if ``True``, two ``NaN`` entries in the same position of
+            the numerical and the analytical Jacobian compare as equal, as in
+            :func:`~torch.allclose`. Useful when the function is only defined on part of the
+            sampled domain, so that both Jacobians are ``NaN`` and agree; without it the
+            check reports a mismatch between two identical ``NaN`` values.
+            Defaults to ``False``.
     Returns:
         ``True`` if all differences satisfy allclose condition
 
@@ -2134,6 +2171,7 @@ def _gradcheck_helper(
     check_backward_ad,
     fast_mode,
     masked,
+    equal_nan,
 ):
     tupled_inputs = _as_tuple(inputs)
     _check_inputs(tupled_inputs)
@@ -2143,7 +2181,9 @@ def _gradcheck_helper(
     _check_outputs(outputs)
 
     gradcheck_fn = functools.partial(
-        _fast_gradcheck if fast_mode else _slow_gradcheck, masked=masked
+        _fast_gradcheck if fast_mode else _slow_gradcheck,
+        masked=masked,
+        equal_nan=equal_nan,
     )
     _gradcheck_real_imag(
         gradcheck_fn,
@@ -2197,6 +2237,7 @@ def gradgradcheck(
     check_rev_over_rev: bool = True,
     fast_mode: bool = False,
     masked: bool = False,
+    equal_nan: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
@@ -2249,6 +2290,9 @@ def gradgradcheck(
             no longer computes the entire jacobian.
         masked (bool, optional): if True, the gradients of unspecified elements of
             sparse tensors are ignored (default, False).
+        equal_nan (bool, optional): if True, two NaN entries in the same position of the
+            numerical and the analytical Jacobian compare as equal, as in
+            :func:`~torch.allclose` (default, False).
     Returns:
         True if all differences satisfy allclose condition
     """
@@ -2336,4 +2380,5 @@ def gradgradcheck(
         check_forward_ad=check_fwd_over_rev,
         check_backward_ad=check_rev_over_rev,
         masked=masked,
+        equal_nan=equal_nan,
     )
