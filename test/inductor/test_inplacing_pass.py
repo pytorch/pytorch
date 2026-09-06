@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
@@ -255,6 +256,58 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm(actual_field, indices, gain, actual_workspace)
         self.assertEqual(actual_field, expected_field)
         self.assertEqual(actual_workspace, expected_workspace)
+
+    @parametrize("effect", ["none", "valid", "invalid"])
+    def test_index_put_multiple_copy_back_candidates(self, effect):
+        def f(fields, indices, gain, workspaces, other, other_indices, other_values):
+            for i in range(3):
+                gathered = aten.index.Tensor(fields[i], [indices])
+                values = aten.mul.Tensor(gathered, gain)
+                updated = aten.index_put.default(fields[i], [indices], values)
+                aten.copy_.default(fields[i], updated)
+                if i == 1 and effect != "none":
+                    other_updated = aten.index_put.default(
+                        other, [other_indices], other_values
+                    )
+                    aten.copy_.default(other, other_updated)
+                aten.copy_.default(workspaces[i], values)
+
+        args = (
+            tuple(torch.randn(8) for _ in range(3)),
+            torch.tensor([2, 5, 2]),
+            torch.tensor([2.0, 3.0, 5.0]),
+            tuple(torch.full((3,), -1.0) for _ in range(3)),
+            torch.randn(8),
+            torch.tensor([4]),
+            torch.randn(1),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*tree_map(torch.clone, args))
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        reused_workspaces = sum(
+            node.args[2].target is aten.copy_.default
+            for node in gm.graph.nodes
+            if node.target is aten.index_put_.default
+        )
+        self.assertEqual(reused_workspaces, 3 if effect == "none" else 2)
+
+        expected_args = tree_map(torch.clone, args)
+        actual_args = tree_map(torch.clone, args)
+        if effect == "invalid":
+            expected_args[5].fill_(99)
+            actual_args[5].fill_(99)
+            with self.assertRaises(IndexError):
+                f(*expected_args)
+            with self.assertRaises(IndexError):
+                gm(*actual_args)
+            for workspace in actual_args[3][1:]:
+                self.assertEqual(workspace, torch.full_like(workspace, -1.0))
+        else:
+            f(*expected_args)
+            gm(*actual_args)
+        self.assertEqual(actual_args, expected_args)
 
     @parametrize("alias", ["field", "indices", "gain"])
     def test_index_put_does_not_reuse_aliasing_copy_back(self, alias):

@@ -729,14 +729,18 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ):
             return None
 
+        if len(src.users) != 2:
+            return None
         candidates = [
-            (dst, copy_node)
-            for (dst, copy_src), copy_node in copy_args_to_copy_nodes.items()
-            if copy_src is src
+            copy_node
+            for copy_node in src.users
+            if copy_node.target is aten.copy_.default
+            and copy_args_to_copy_nodes.get((copy_node.args[0], src)) is copy_node
         ]
         if len(candidates) != 1:
             return None
-        dst, copy_node = candidates[0]
+        copy_node = candidates[0]
+        dst = cast(torch.fx.Node, copy_node.args[0])
         non_blocking = (
             copy_node.args[2]
             if len(copy_node.args) > 2
@@ -746,7 +750,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if (
             copy_nodes.get(dst) is not copy_node
             or node_order[copy_node] <= node_order[node]
-            or len(src.users) != 2
             or non_blocking is not False
             or not can_inplace(node, dst)
         ):
@@ -1136,12 +1139,20 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
+    surviving_node_order: dict[torch.fx.Node, int] = {}
+    if copy_back_reuses:
+        # Count surviving nodes once, before moving any copy-back nodes.
+        surviving_count = 0
+        for other in graph.nodes:
+            if other not in replace_dict:
+                surviving_count += 1
+            surviving_node_order[other] = surviving_count
+
     for node, copy_node in copy_back_reuses:
         # Do not move a mutation across nodes whose effects remain observable.
-        if copy_node in replace_dict or any(
-            node_order[node] < node_order[other] < node_order[copy_node]
-            and other not in replace_dict
-            for other in graph.nodes
+        if (
+            copy_node in replace_dict
+            or surviving_node_order[copy_node] != surviving_node_order[node] + 1
         ):
             continue
         node.update_arg(2, copy_node)
