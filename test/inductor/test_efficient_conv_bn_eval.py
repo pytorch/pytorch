@@ -2,31 +2,27 @@
 import copy
 import importlib
 import itertools
-import os
-import sys
 
 import torch
 from torch import nn
-
-
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
-
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCPUIf,
+    skipCUDAIf,
+    skipXPUIf,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_triton
 
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
-
-from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-    copy_tests,
-)
 
 
 class ConvOp(nn.Module):
@@ -94,10 +90,15 @@ class MultiUserConvOp(nn.Module):
         return x
 
 
-class EfficientConvBNEvalTemplate(TestCase):
+class EfficientConvBNEvalTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
-    def test_functional_batch_norm_defaults(self):
+    def test_functional_batch_norm_defaults(self, device):
         class Model(torch.nn.Module):
             def forward(self, x, mean, var):
                 return torch.nn.functional.batch_norm(x, mean, var)
@@ -107,7 +108,6 @@ class EfficientConvBNEvalTemplate(TestCase):
         mean = torch.randn(3)
         var = torch.abs(torch.randn(3))
 
-        device = getattr(self, "device", "cpu")
         mod.to(device)
         x = x.to(device)
         mean = mean.to(device)
@@ -116,9 +116,12 @@ class EfficientConvBNEvalTemplate(TestCase):
         opt = torch.compile(mod, backend="inductor")
         opt(x, mean, var)
 
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
-    def test_fx_graph_batch_norm_defaults(self):
+    def test_fx_graph_batch_norm_defaults(self, device):
         """Regression test for issue #169011.
 
         Tests that torch.compile handles FX graphs containing F.batch_norm
@@ -143,7 +146,6 @@ class EfficientConvBNEvalTemplate(TestCase):
         # Wrap in a GraphModule
         gm = GraphModule({}, graph)
 
-        device = getattr(self, "device", "cpu")
         gm.to(device)
         gm_compiled = torch.compile(gm, backend="inductor")
 
@@ -158,10 +160,13 @@ class EfficientConvBNEvalTemplate(TestCase):
         expected = gm(inp_tensor, mean_tensor, var_tensor)
         self.assertEqual(out, expected)
 
+    @skipCPUIf(not HAS_CPU, "requires C++ compiler")
+    @skipCUDAIf(not has_triton(), "requires triton")
+    @skipXPUIf(not has_triton(), "requires triton")
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     @functorch_config.patch({"enable_autograd_cache": False})
-    def test_basic(self):
+    def test_basic(self, device):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module
         ):
@@ -175,7 +180,7 @@ class EfficientConvBNEvalTemplate(TestCase):
                 use_bias,
                 3,
                 32,
-                self.device,
+                device,
                 **kwargs,
             ).eval()
             # Copy module to test backward
@@ -198,7 +203,7 @@ class EfficientConvBNEvalTemplate(TestCase):
                 inps += [spatial_d] * 2
             if module[0] is nn.Conv3d or module[0] is nn.ConvTranspose3d:
                 inps += [spatial_d] * 3
-            inp = torch.rand(inps).to(self.device)
+            inp = torch.rand(inps).to(device)
 
             if decompose_nn_module:
                 with enable_python_dispatcher():
@@ -266,24 +271,15 @@ class EfficientConvBNEvalTemplate(TestCase):
             )
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
-
-    class EfficientConvBNEvalCpuTests(TestCase):
-        device = "cpu"
-
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
-
-if HAS_GPU:
-
-    class EfficientConvBNEvalGpuTests(TestCase):
-        device = GPU_TYPE
-
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalGpuTests, GPU_TYPE)
-
-del EfficientConvBNEvalTemplate
+instantiate_device_type_tests(
+    EfficientConvBNEvalTests,
+    globals(),
+    allow_xpu=True,
+    except_for="cpu" if torch.backends.mps.is_available() else None,
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or has_triton():
         run_tests(needs="filelock")
