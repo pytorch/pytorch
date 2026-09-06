@@ -326,8 +326,15 @@ void ExtraState::clear_in_place() {
       // holds live iterators into these lists, so neither destroying nor even
       // relinking their nodes is safe. Park the clear; the next depth-zero
       // cache_mutex holder applies it. The clear landing "just after" the
-      // interrupted lookup matches the pre-existing asynchrony of a reset
-      // racing a lookup from another thread.
+      // interrupted lookup makes reset()'s clean-slate contract asynchronous: a
+      // reset() on another thread parks here while this thread's lookup holds
+      // depth > 0 and returns with the entries still present and servable,
+      // until the next depth-zero holder drains them. Every reader that matters
+      // (lookup, _get_total_cache_entry_count, _debug_get_cache_entry_list)
+      // drains before it reads, so the stale state is not observable from
+      // Python afterward. This cross-thread park is new with releasing
+      // cache_mutex during guard evaluation; the old recursive mutex would have
+      // blocked the peer instead.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
       // Split state until that holder runs: the strategy, frame state and
@@ -652,6 +659,15 @@ void lookup(
   // inserts (front under use_lru, else back) and another thread's hit may
   // move_to_front, but std::list splice preserves node addresses, so neither
   // invalidates the snapshot; a newly inserted entry is simply absent from it.
+  // This covers node LIFETIME and address stability, not the mutability of a
+  // node's fields: the lock-free reads of cache_entry.backend / root_mgr /
+  // diff_guard_root_mgr below assume those members are stable. invalidate()
+  // nulls the manager pointers only under CachePythonDepth so it parks, but
+  // update_diff_guard_root_manager (bound with no lock) can overwrite
+  // diff_guard_root_mgr from guards.py while a concurrent lookup dereferences
+  // it under skip_guard_eval_unsafe. That race predates this change (base
+  // lookup() held no lock at all) and needs skip_guard_eval_unsafe plus two
+  // threads recompiling one code object.
   std::optional<CachePythonDepth> python_depth;
   std::vector<const PrecompileEntry*> precompile_candidates;
   struct CacheCandidate {
