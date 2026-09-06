@@ -1,0 +1,10 @@
+#pragma once
+
+// Comma-separated list of the architectures this build compiled ROCm CK SDPA
+// kernels for, empty when CK SDPA was not built. Generated from the same CMake
+// list that drives the codegen targets and HIP_ARCHITECTURES, so the runtime
+// check stays in step with what was built.
+//
+// Keep this generated configuration header out of public headers; include it
+// only from implementation files.
+#define AT_ROCM_CK_SDPA_ARCHS "@AT_ROCM_CK_SDPA_ARCHS_STR@"

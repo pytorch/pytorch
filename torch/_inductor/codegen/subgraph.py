@@ -509,7 +509,7 @@ class SubgraphTemplate(KernelTemplate):
         if not kwargs:
             return base_name
 
-        def sanitize_value(v: Any) -> str:
+        def sanitize_value(v: object) -> str:
             """Convert a value to a valid Python identifier component."""
             s = str(v)
             # Replace invalid characters with underscores

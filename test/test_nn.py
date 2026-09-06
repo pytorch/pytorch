@@ -10712,6 +10712,58 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
 
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    def test_log_softmax_64bit_indexing(self, device, dtype):
+        # The last row begins exactly at element offset 2**32; 32-bit index
+        # math would wrap it back onto row 0.
+        x = torch.ones(2**22 + 1, 1024, device=device, dtype=dtype)
+        x[0] = torch.randn(1024, device=device, dtype=dtype)
+        x[-1] = torch.randn(1024, device=device, dtype=dtype)
+        y = F.log_softmax(x, dim=-1)
+        self.assertEqual(y[0], F.log_softmax(x[0].clone(), dim=-1))
+        self.assertEqual(y[-1], F.log_softmax(x[-1].clone(), dim=-1))
+
+    @onlyAccelerator
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test(
+        "layout,dim",
+        [
+            ("slice", -1),
+            ("slice", 1),
+            ("transpose_last", -1),
+            ("expanded_outer", -1),
+            ("outer_transpose", -1),
+        ],
+    )
+    def test_log_softmax_strided_input(self, device, dtype, layout, dim):
+        cpu_base = torch.randn(4, 6, 16, dtype=dtype)
+        device_base = cpu_base.to(device)
+
+        if layout == "slice":
+            cpu_input = cpu_base[..., ::2]
+            device_input = device_base[..., ::2]
+        elif layout == "transpose_last":
+            cpu_input = cpu_base.transpose(-2, -1)
+            device_input = device_base.transpose(-2, -1)
+        elif layout == "expanded_outer":
+            cpu_input = cpu_base[:1].expand(4, -1, -1)
+            device_input = device_base[:1].expand(4, -1, -1)
+        elif layout == "outer_transpose":
+            cpu_input = cpu_base.transpose(0, 1)
+            device_input = device_base.transpose(0, 1)
+        else:
+            raise AssertionError(f"unknown layout: {layout}")
+
+        self.assertFalse(device_input.is_contiguous())
+        atol = 4e-2 if dtype == torch.bfloat16 else 1e-3
+        rtol = 2e-2 if dtype == torch.bfloat16 else 2e-3
+        self.assertEqual(
+            F.log_softmax(device_input, dim=dim).cpu(),
+            F.log_softmax(cpu_input, dim=dim),
+            atol=atol,
+            rtol=rtol,
+        )
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -11871,7 +11923,7 @@ class TestNNDeviceType(NNTestCase):
 
         input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
         target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
-        targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
+        targets = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
 
         ctc_loss = torch.nn.functional.ctc_loss(
             log_probs=log_probs,

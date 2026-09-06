@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Lerp.h>
+#include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -61,6 +62,10 @@ void binary_op_kernel(const std::string func_name,
 
 static void atan2_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "atan2");
+}
+
+static void pow_tensor_tensor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "pow");
 }
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
@@ -363,6 +368,18 @@ static void ge_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+static void logical_and_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_and", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_or_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_or", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_xor_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -401,6 +418,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
 REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_mps_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)
@@ -412,4 +430,7 @@ REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
 REGISTER_DISPATCH(le_stub, &le_mps_kernel)
 REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
 REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_mps_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_mps_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_mps_kernel)
 } // namespace at::native
