@@ -110,7 +110,12 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // name this no longer tracks dynamic dims.
   py::dict frame_state;
   // Per-region frame_state, so an isolated compile's frame_id numbers
-  // independently of the default scope.
+  // independently of the default scope. That also makes the frame_compile_id
+  // fallback in exceeds_recompile_limit (cache_size.py) per-region: it caps
+  // frame_compile_id at accumulated_recompile_limit to catch a cache that
+  // stops growing, and a per-region counter gives each region its own cap
+  // instead of one global cap. The primary accumulated check stays global
+  // (total_cache_entries_all_regions).
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
   // Guards frame_state and region_frame_state_map alike: the module runs
   // without the GIL on free-threaded builds, so the default dict's move in
