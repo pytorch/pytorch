@@ -94,7 +94,10 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // do). cache_mutex is recursive and drops the GIL while waiting; taking it
   // before compile_lock anywhere would risk a cycle against that path.
   mutable std::recursive_mutex cache_mutex;
-  // Frame state to detect dynamic shape dims in the default compile scope.
+  // Frame-id source for the default compile scope: holds only "_id", the
+  // counter behind CompileId.frame_id for this code object. Dynamic-shape
+  // generalization moved to PGO's process-global code state, so despite the
+  // name this no longer tracks dynamic dims.
   py::dict frame_state;
   // Per-region frame_state, so an isolated compile's frame_id numbers
   // independently of the default scope.
