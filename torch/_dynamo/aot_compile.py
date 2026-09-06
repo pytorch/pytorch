@@ -4,7 +4,6 @@ import io
 import logging
 import os
 import pickle
-import sys
 import tempfile
 import types
 from collections.abc import Callable, Sequence
@@ -93,27 +92,21 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except a 3.14 FORWARDREF
-            # proxy for an unresolved annotation, which carries an owner
-            # back-reference to obj that pickle cannot follow. The runtime
-            # assigns annotations back verbatim and never evaluates them, so
-            # dropping an unresolvable one costs nothing.
-            annotations = self._read_raw_annotations(obj)
-            if sys.version_info >= (3, 14):
-                import annotationlib
-
-                annotations = {
-                    name: value
-                    for name, value in annotations.items()
-                    if not isinstance(value, annotationlib.ForwardRef)
-                }
+            # pickler nothing it holds is pruned. Its annotations are the
+            # exception: a 3.14 FORWARDREF proxy is not picklable, and it hides
+            # inside a container too (list[Bar] reads back as
+            # list[ForwardRef('Bar')]), so a shallow filter would miss it.
+            # resolve=True asks for real values and drops the whole set if a
+            # TYPE_CHECKING-only name will not resolve; the runtime assigns
+            # annotations back verbatim and never evaluates them, so dropping an
+            # unresolvable one costs nothing.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
-                annotations=annotations,
+                annotations=self._read_raw_annotations(obj, resolve=True),
                 type_params=getattr(obj, "__type_params__", None),
             )
 
