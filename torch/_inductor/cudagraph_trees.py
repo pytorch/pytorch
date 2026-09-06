@@ -2488,6 +2488,49 @@ class CUDAGraphTreeManager:
             else lambda _: False
         )
 
+    def _check_for_mutated_input_from_prior_generation(
+        self, function_id: FunctionID, inputs: list[InputType]
+    ) -> bool:
+        """Return whether eager fallback must precede generation teardown."""
+        mutated_input_idxs = self.ids_to_funcs[function_id].mutated_input_idxs
+        if (
+            not mutated_input_idxs
+            or self.current_node is None
+            or not self.can_start_new_generation()
+        ):
+            return False
+
+        is_cuda_graph_recorded_tensor = self._get_cuda_graph_recorded_tensor_checker()
+        user_visible_storage_ptrs: OrderedSet[int] = OrderedSet()
+        if self.has_live_user_visible_output_cloning:
+            for entries in self.current_node.path_user_visible_storage_groups:
+                for output_weakrefs, _tensor_weakrefs, _cached_tensors, idx in entries:
+                    output_ref = output_weakrefs[idx]
+                    if output_ref is not None:
+                        user_visible_storage_ptrs.add(output_ref.data_ptr())
+        for idx in mutated_input_idxs:
+            inp = inputs[idx]
+            if (
+                isinstance(inp, torch.Tensor)
+                and is_cuda_graph_recorded_tensor(inp)
+                and inp.untyped_storage().data_ptr() not in user_visible_storage_ptrs
+            ):
+                node_id = self._get_node_id()
+                if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+                    self._update_non_cudagraph_managed_mutation(function_id, inputs)
+                if self.non_cudagraph_managed_mutation_hint[node_id][
+                    function_id
+                ] or self.exceed_rerecord_limit(node_id, function_id):
+                    return True
+                raise RuntimeError(
+                    "Error: a tensor output of CUDAGraphs from a previous invocation "
+                    "is being passed back as a mutated input. Manually clone the tensor "
+                    "outside torch.compile() before passing it back, or set "
+                    "torch._inductor.config.triton.cudagraph_trees_generation_cloning "
+                    "= 'user_visible' before compiling the function."
+                )
+        return False
+
     def new_warmup_node_id(self) -> GraphID:
         return GraphID(next(self.warmup_node_counter))
 
@@ -2526,6 +2569,12 @@ class CUDAGraphTreeManager:
         )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
+        # A graph-pool output is safe to mutate only while it remains on the same
+        # tree path. At a generation boundary, ending the old path invalidates its
+        # storage before an eager fallback or a new recording can consume it.
+        if self._check_for_mutated_input_from_prior_generation(function_id, new_inputs):
+            return self.ids_to_funcs[function_id].model(new_inputs)
+
         # we will try to end the current execution lazily, since
         # we don't want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -2535,6 +2584,19 @@ class CUDAGraphTreeManager:
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
+
+        node_id = self._get_node_id()
+        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+
+        # Early exit if the function mutates inputs which are neither parameters/buffers nor
+        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
+        # and `try_end_curr_warmup` which may change self.current_node, but before a
+        # user-visible generation transition clears the current path below.
+        if self.non_cudagraph_managed_mutation_hint[node_id][
+            function_id
+        ] or self.exceed_rerecord_limit(node_id, function_id):
+            return self.ids_to_funcs[function_id].model(new_inputs)
 
         if (
             self.has_live_user_visible_output_cloning
@@ -2549,18 +2611,6 @@ class CUDAGraphTreeManager:
                     curr_generation,
                     skip_dead_output_cleanup=True,
                 )
-
-        node_id = self._get_node_id()
-        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
-            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
-
-        # Early exit if the function mutates inputs which are neither parameters/buffers nor
-        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
-        # and `try_end_curr_warmup` which may change self.current_node.
-        if self.non_cudagraph_managed_mutation_hint[node_id][
-            function_id
-        ] or self.exceed_rerecord_limit(node_id, function_id):
-            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
