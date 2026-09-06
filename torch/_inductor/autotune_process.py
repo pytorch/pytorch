@@ -1690,7 +1690,15 @@ class AsyncAutotuner:
 
     @staticmethod
     def get_choice_hash(choice: ChoiceCaller, inputs_key: str) -> str:
-        return choice.hash_key() + inputs_key
+        # The generated module path is part of the identity: a Future benchmarks one
+        # specific generated module, but hash_key() + inputs_key repeats across
+        # compilations that share shapes and config. Without the path, start() sees the
+        # key already present and skips submitting, so get_results() hands back a Future
+        # from an earlier compilation. If that compilation aborted -- or its cache dir
+        # has since been removed -- the subprocess cannot load the module, returns inf,
+        # and every choice looks unbenchmarkable ("All choices failed to benchmark").
+        module_path = getattr(getattr(choice, "bmreq", None), "module_path", "") or ""
+        return choice.hash_key() + inputs_key + module_path
 
     @classmethod
     def start(cls, choices: list[ChoiceCaller], inputs_key: str):

@@ -22,6 +22,7 @@ from torch._inductor.codegen.triton_combo_kernel import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -855,6 +856,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -934,6 +936,7 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -1076,6 +1079,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
