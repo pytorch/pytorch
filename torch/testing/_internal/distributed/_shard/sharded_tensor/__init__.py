@@ -21,7 +21,21 @@ class ShardedTensorTestBase(MultiProcessTestCase):
     def world_size(self):
         return TEST_GPU_NUM
 
-    def init_pg(self, backend="nccl"):
+    @property
+    def backend(self) -> str:
+        device_type = getattr(self, "device_type", None)
+        if device_type is None:
+            return "nccl"
+        return dist.get_default_backend_for_device(device_type)
+
+    @property
+    def current_device(self) -> torch.device:
+        if self.rank < 0:
+            return torch.device(self.device_type)
+        return torch.device(self.device_type, self.rank)
+
+    def init_pg(self, backend=None):
+        backend = backend or self.backend
         # Ask the distributed framework rather than matching a fixed list, so a
         # backend registered by an out-of-tree device is accepted the same way
         # the built-in ones are.
@@ -58,7 +72,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             rpc_backend_options=rpc_backend_options,
         )
 
-    def init_comms(self, init_rpc=True, backend="nccl"):
+    def init_comms(self, init_rpc=True, backend=None):
         if init_rpc:
             self.init_rpc()
         self.init_pg(backend=backend)
@@ -89,7 +103,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(func=None, init_rpc=True, backend="nccl"):
+def with_comms(func=None, init_rpc=True, backend=None):
     if func is None:
         return partial(
             with_comms,
@@ -100,13 +114,8 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
-        acc = torch.accelerator.current_accelerator()
-        if backend != dist.Backend.GLOO:
-            if (
-                acc is None
-                or backend != dist.get_default_backend_for_device(acc)
-                or torch.accelerator.device_count() < self.world_size
-            ):
+        if (backend or self.backend) != dist.Backend.GLOO:
+            if torch.accelerator.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
