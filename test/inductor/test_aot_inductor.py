@@ -609,6 +609,76 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
+        "Pinned async constant copy is CUDA-only",
+    )
+    @patch.dict(
+        os.environ,
+        {
+            "AOTI_COPY_USE_PINNED_ASYNC": "1",
+            "AOTI_COPY_STAGE_BUFFER_BYTES": "4194304",
+            "AOTI_COPY_STAGE_CPU_THREADS": "2",
+            "AOTI_LOG_LOADING": "1",
+        },
+    )
+    def test_constants_pinned_async_parallel_copy_tasks(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                # The two 1 MiB weights are separate tasks; the larger weight
+                # crosses a 4 MiB staging boundary and is split further.
+                self.small1 = torch.nn.Linear(512, 512, bias=False)
+                self.small2 = torch.nn.Linear(512, 512, bias=False)
+                self.linear = torch.nn.Linear(1025, 1025)
+
+            def forward(self, x, small):
+                return self.linear(x), self.small1(small) + self.small2(small)
+
+        example_inputs = (
+            torch.randn(2, 1025, device=self.device),
+            torch.randn(2, 512, device=self.device),
+        )
+        model = Model().to(self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.force_mmap_weights": True,
+            }
+        ):
+            package_path = AOTIRunnerUtil.compile(model, example_inputs)
+
+        original_stderr_fd = os.dup(2)
+        with tempfile.TemporaryFile(mode="w+") as captured_stderr:
+            try:
+                os.dup2(captured_stderr.fileno(), 2)
+                optimized = torch._inductor.aoti_load_package(package_path)
+            finally:
+                os.dup2(original_stderr_fd, 2)
+                os.close(original_stderr_fd)
+            captured_stderr.seek(0)
+            loading_log = captured_stderr.read()
+
+        self.assertIn("copy_tasks=1 cpu_copy_threads=2", loading_log)
+        self.assertRegex(
+            loading_log, r"completed \d+ bytes in 2 H2D submissions using 2"
+        )
+        parallel_tasks = re.search(
+            r"(\d+) staging window\(s\) copied in parallel as (\d+) task\(s\)",
+            loading_log,
+        )
+        self.assertIsNotNone(parallel_tasks)
+        parallel_windows = int(parallel_tasks.group(1))
+        task_count = int(parallel_tasks.group(2))
+        # The large weight fills a window and exceeds the 2 MiB parallel-copy
+        # threshold regardless of constant emission order.
+        self.assertGreaterEqual(parallel_windows, 1)
+        self.assertGreater(task_count, parallel_windows)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+
     def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
