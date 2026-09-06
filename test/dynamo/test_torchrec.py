@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import NoTest
+from torch.testing._internal.common_utils import HardwareClassification, NoTest
 
 
 try:
@@ -67,6 +67,8 @@ if not HAS_TORCHREC:
 
 @unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
 class TorchRecTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pooled(self):
         tables = [
             (nn.EmbeddingBag(2000, 8), ["a0", "b0"]),
