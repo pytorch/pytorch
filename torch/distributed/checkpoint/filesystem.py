@@ -715,49 +715,48 @@ class _FileSystemWriter(StorageWriter):
         file_queue: queue.Queue,
     ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
+        error_queue: queue.Queue = queue.Queue()
+
+        def _target():
+            try:
+                _write_files_from_queue(
+                    create_stream=self.fs.create_stream,
+                    file_queue=file_queue,
+                    result_queue=result_queue,
+                    planner=planner,
+                    transforms=self.transforms,
+                    inflight_threshhold=self.per_thread_copy_ahead,
+                    use_fsync=self.sync_files,
+                    thread_count=self.thread_count,
+                    serialization_format=self.serialization_format,
+                )
+            except Exception as e:
+                error_queue.put(e)
 
         threads = []
         for _ in range(1, self.thread_count):
-            t = threading.Thread(
-                target=_write_files_from_queue,
-                args=(
-                    self.fs.create_stream,
-                    file_queue,
-                    result_queue,
-                    planner,
-                    self.transforms,
-                    self.per_thread_copy_ahead,
-                    self.sync_files,
-                    self.thread_count,
-                    self.serialization_format,
-                ),
-            )
+            t = threading.Thread(target=_target)
             t.start()
             threads.append(t)
 
-        _write_files_from_queue(
-            create_stream=self.fs.create_stream,
-            file_queue=file_queue,
-            result_queue=result_queue,
-            planner=planner,
-            transforms=self.transforms,
-            inflight_threshhold=self.per_thread_copy_ahead,
-            use_fsync=self.sync_files,
-            thread_count=self.thread_count,
-            serialization_format=self.serialization_format,
-        )
+        _target()
 
         for t in threads:
             t.join()
 
-        res = []
+        fut: Future[list[WriteResult]] = Future()
         try:
-            while True:
-                res += result_queue.get_nowait()
+            error = error_queue.get_nowait()
+            fut.set_exception(error)
         except queue.Empty:
-            fut: Future[list[WriteResult]] = Future()
+            res = []
+            try:
+                while True:
+                    res += result_queue.get_nowait()
+            except queue.Empty:
+                pass
             fut.set_result(res)
-            return fut
+        return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         metadata.version = CURRENT_DCP_VERSION
