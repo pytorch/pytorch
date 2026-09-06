@@ -12,7 +12,7 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -21,6 +21,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DTensorInitOpsTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -56,6 +58,8 @@ class DTensorInitOpsTest(DTensorTestBase):
 
 
 class DTensorConstructorTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
