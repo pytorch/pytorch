@@ -6,6 +6,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -15,7 +16,6 @@
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
 #include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/native/cuda/KernelUtils.cuh>
 #endif
 
 #include <algorithm>
