@@ -14,6 +14,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -32,6 +33,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestDistributedLaunch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_launch_user_script(self):
         nnodes = 1
         nproc_per_node = 4
