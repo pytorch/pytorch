@@ -1520,5 +1520,49 @@ class TestFullyShardNonFloatParam(FSDPTest):
             loss.backward()
 
 
+class TestFullyShardPostForwardMeshDedup(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_post_forward_mesh_dedup(self):
+        """
+        Tests that multiple fully_shard calls with the same int
+        reshard_after_forward share the same post-forward mesh info
+        object rather than creating duplicate communicators.
+        """
+        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, reshard_after_forward=self.world_size)
+        fully_shard(model, mesh=mesh, reshard_after_forward=self.world_size)
+
+        # Collect post_forward_mesh_info from all param groups
+        mesh_infos = []
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for pg in state._fsdp_param_groups:
+                    if pg.post_forward_mesh_info is not None:
+                        mesh_infos.append(pg.post_forward_mesh_info)
+
+        self.assertGreater(len(mesh_infos), 1)
+        # All should be the exact same object (deduplication via cache)
+        for info in mesh_infos[1:]:
+            self.assertIs(info, mesh_infos[0])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_post_forward_mesh_dedup_with_module_list(self):
+        """
+        Tests that fully_shard([module_a, module_b]) with an int
+        reshard_after_forward does not crash (list form support).
+        """
+        mlp1 = MLP(8)
+        mlp2 = MLP(8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        fully_shard([mlp1, mlp2], mesh=mesh, reshard_after_forward=self.world_size)
+
+
 if __name__ == "__main__":
     run_tests()

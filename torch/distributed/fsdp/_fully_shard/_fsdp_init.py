@@ -1,5 +1,6 @@
 import itertools
 import logging
+import weakref
 from typing import TYPE_CHECKING
 
 import torch
@@ -149,8 +150,14 @@ def _get_mesh_info_from_named_dims(
     )
 
 
+_post_forward_mesh_info_cache: weakref.WeakValueDictionary[
+    tuple[int, DeviceMesh], FSDPMeshInfo
+] = weakref.WeakValueDictionary()
+
+
 def _get_post_forward_mesh_info(
-    reshard_after_forward: bool | int, mesh_info: FSDPMeshInfo
+    reshard_after_forward: bool | int,
+    mesh_info: FSDPMeshInfo,
 ) -> FSDPMeshInfo | None:
     shard_mesh_size = mesh_info.shard_mesh_size
     if not isinstance(reshard_after_forward, (bool, int)):
@@ -184,14 +191,24 @@ def _get_post_forward_mesh_info(
     if reshard_after_forward is True:
         post_forward_mesh_info = mesh_info
     elif reshard_after_forward is not False:  # int case
-        # For HSDP, we can flatten the two replicate dims into the 0th dim
-        post_forward_mesh_tensor = mesh_info.mesh.mesh.view(-1, reshard_after_forward)
-        post_forward_mesh = DeviceMesh(
-            mesh_info.mesh.device_type, post_forward_mesh_tensor
-        )
-        post_forward_mesh_info = HSDPMeshInfo(
-            post_forward_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
-        )
+        cache_key = (reshard_after_forward, mesh_info.mesh)
+        post_forward_mesh_info = _post_forward_mesh_info_cache.get(cache_key)
+        if post_forward_mesh_info is None:
+            # For HSDP, we can flatten the two replicate dims into the 0th dim
+            post_forward_mesh_tensor = mesh_info.mesh.mesh.view(
+                -1, reshard_after_forward
+            )
+            post_forward_mesh = DeviceMesh(
+                mesh_info.mesh.device_type, post_forward_mesh_tensor
+            )
+            post_forward_mesh_info = HSDPMeshInfo(
+                post_forward_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
+            )
+            # Cache so subsequent fully_shard calls with the same
+            # (reshard_after_forward, mesh) reuse this communicator.
+            # The entry is evicted automatically once no FSDPParamGroup
+            # holds a strong reference to the mesh info.
+            _post_forward_mesh_info_cache[cache_key] = post_forward_mesh_info
     return post_forward_mesh_info
 
 
