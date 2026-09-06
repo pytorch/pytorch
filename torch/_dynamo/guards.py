@@ -64,6 +64,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -98,6 +99,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
@@ -5198,6 +5200,23 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices})"
+                )
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )

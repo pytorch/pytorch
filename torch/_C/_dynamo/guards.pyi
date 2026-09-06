@@ -468,6 +468,12 @@ def install_storage_overlapping_guard(
     verbose_code_parts: list[str],
     user_stack: traceback.StackSummary | None,
 ) -> None: ...
+def install_storage_overlap_partition_guard(
+    guard_managers: list[GuardManager],
+    overlapping_indices: tuple[tuple[int, ...], ...],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_symbolic_shape_guard(
     guard_managers: list[GuardManager],
     nargs_int: int,
@@ -519,4 +525,7 @@ def dict_version(d: dict[Any, Any]) -> int: ...
 def compute_overlapping_tensors(
     tensors: list[torch.Tensor], symbolic: bool = True
 ) -> set[int]: ...
+def compute_overlapping_tensor_groups(
+    tensors: list[torch.Tensor], symbolic: bool = True
+) -> list[list[int]]: ...
 def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None: ...
