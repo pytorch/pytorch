@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
     xfailIf,
     setSdpaBackendsToDefaultFinally,
     skipIfXpu,
-    skipIfMps,
+    skipIfMPS,
     HardwareClassification,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -1760,7 +1760,7 @@ class TestSDPAFailureModes(NNTestCase):
                 flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
     @onlyAccelerator
-    @skipIfMps(msg="No viable backend for scaled_dot_product_attention was found.")
+    @skipIfMPS(msg="No viable backend for scaled_dot_product_attention was found.")
     def test_dispatch_fails_no_backend(self, device):
         dtype = torch.float16
         with sdpa_kernel(backends=[SDPBackend.ERROR]):
