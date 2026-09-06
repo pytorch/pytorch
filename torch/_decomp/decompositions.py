@@ -1650,7 +1650,9 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
-    return out + beta * self
+    # `expand_as` mirrors the expand_size() that addmm_out_cpu applies to `self`:
+    # `input` broadcasts *to* the mm result shape, it does not widen it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition([aten.addmm.dtype, aten.addmm.dtype_out])
@@ -1666,7 +1668,7 @@ def addmm_dtype(
     out = alpha * torch.mm(mat1, mat2, out_dtype=out_dtype)
     if beta == 0:
         return out
-    return out + beta * self.to(out_dtype)
+    return out + beta * self.to(out_dtype).expand_as(out)
 
 
 @register_decomposition(aten._addmm_activation)
@@ -1698,8 +1700,12 @@ def _addmv_impl(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: i
     if beta == 0:
         return out
     if out.numel() == 0:  # handle empty matrix
+        # Left as-is: for an empty result eager keeps `self`'s own size rather
+        # than expanding, e.g. addmv(ones(1), empty(0, 0), empty(0)) -> shape 1.
         return beta * self
-    return out + beta * self
+    # Same constraint as addmm: addmv_impl_cpu expands `self` to the mv result
+    # shape, so `self` broadcasts *to* it rather than widening it.
+    return out + beta * self.expand_as(out)
 
 
 @register_decomposition(aten.addmv)

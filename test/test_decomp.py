@@ -1481,6 +1481,32 @@ class DecompOneOffTests(TestCase):
 
     @onlyCPU
     @skipIfCrossRef
+    def test_addmm_addmv_decomp_reject_input_wider_than_output(self, device):
+        # addmm_out_cpu and addmv_impl_cpu expand `self` to the mm/mv result
+        # shape, so `input` broadcasts *to* it rather than widening it. The
+        # decompositions have to reject the same shapes, otherwise a compiled
+        # addmm/addmv returns a result eager refuses to produce.
+        addmm_decomp = get_decompositions([aten.addmm.default])[aten.addmm.default]
+        addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
+
+        input = torch.randn(500, 1, device=device)
+        mat1 = torch.randn(1, 1, device=device)
+        mat2 = torch.randn(1, 1, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            torch.addmm(input, mat1, mat2)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmm_decomp(input, mat1, mat2)
+
+        vec_input = torch.randn(500, device=device)
+        mat = torch.randn(1, 5, device=device)
+        vec = torch.randn(5, device=device)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+            torch.addmv(vec_input, mat, vec)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmv_decomp(vec_input, mat, vec)
+
+    @onlyCPU
+    @skipIfCrossRef
     def test_linalg_vector_norm_decomp_correctness(self, device):
         decomp = decomposition_table[aten.linalg_vector_norm.default]
 
