@@ -12064,6 +12064,41 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
+    @parametrize_test("backward", [False, True])
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    def test_gelu_tail_accuracy(self, device, dtype, backward):
+        # gh-187806: the erf form of exact gelu, 0.5 * x * (1 + erf(x/sqrt(2))),
+        # cancels catastrophically for negative x (fp32 flushed to 0 from
+        # x ~ -6). Compare both sides of zero against float64 references built
+        # on the cancellation-free erfc identity.
+        kAlpha = math.sqrt(0.5)
+        kBeta = math.sqrt(2.0 / math.pi) * 0.5
+        x = torch.arange(-12.0, 12.0, 2**-6, dtype=dtype, device=device)
+        xref = x.cpu().double()
+        if backward:
+            grad = torch.ones_like(x)
+            # the composite infinitely_differentiable_gelu_backward computes
+            # the same cdf subterm and must not cancel either
+            actuals = [
+                torch.ops.aten.gelu_backward(grad, x),
+                torch.ops.aten.infinitely_differentiable_gelu_backward(grad, x),
+            ]
+            expected = 0.5 * torch.erfc(-xref * kAlpha) + xref * kBeta * torch.exp(
+                -0.5 * xref * xref
+            )
+        else:
+            actuals = [F.gelu(x)]
+            expected = 0.5 * xref * torch.erfc(-xref * kAlpha)
+        tail = xref.abs() >= 2
+        for actual in actuals:
+            actual = actual.cpu().double()
+            # gelu'(x) crosses zero near x = -0.75, hence the small atol; the
+            # masked check below keeps the tail strictly relative
+            self.assertEqual(actual, expected, rtol=5e-5, atol=1e-6)
+            rel = ((actual - expected)[tail] / expected[tail]).abs().max()
+            self.assertLess(rel.item(), 5e-5)
+
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float16)
     def test_activations_bfloat16_half_cpu(self, device, dtype):

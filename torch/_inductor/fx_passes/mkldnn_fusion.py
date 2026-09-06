@@ -315,12 +315,8 @@ if torch._C._has_mkldnn:
             aten.mul,
             CallFunction(aten.mul, computation_call, 0.5),
             CallFunction(
-                aten.add,
-                CallFunction(
-                    aten.erf,
-                    CallFunction(aten.mul, computation_call, 0.7071067811865476),
-                ),
-                1,
+                aten.erfc,
+                CallFunction(aten.mul, computation_call, -0.7071067811865476),
             ),
         )
 
