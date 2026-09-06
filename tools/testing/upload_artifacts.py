@@ -84,7 +84,7 @@ def upload_to_s3_artifacts(failed: bool) -> None:
         f"{s3_prefix}/{Path(test_logs_zip_path).name}",
     )
     get_s3_resource().upload_file(
-        test_logs_zip_path,
+        jsons_zip_path,
         "gha-artifacts",
         f"{s3_prefix}/{Path(jsons_zip_path).name}",
     )
