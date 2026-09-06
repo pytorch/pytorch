@@ -2332,6 +2332,28 @@ def forward(self):
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
+    def test_cond_dunder_dict_read_then_outer_mutation(self):
+        # The first __dict__ access on `inner` happens inside the cond body,
+        # whose side effects table is discarded after tracing. The later
+        # mutation outside the cond must still be recorded and replayed.
+        def fn(pred, x):
+            def inner():
+                return x + 1
+
+            def branch():
+                return x + len(inner.__dict__)
+
+            out = control_flow.cond(pred, branch, branch)
+            inner.tag = 42
+            return out, inner
+
+        x = torch.randn(4)
+        out, inner = torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.tensor(True), x
+        )
+        self.assertEqual(out, x)
+        self.assertEqual(inner.tag, 42)
+
     def test_cond_with_constant_pred(self):
         def test(pred, x):
             def true_fn(x):
