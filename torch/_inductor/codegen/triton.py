@@ -5958,6 +5958,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
+                # When codegen_upcast_to_fp32 is disabled the accumulator keeps
+                # the low-precision src dtype, but an op in the reduction body
+                # (e.g. truediv/libdevice, which upcast unconditionally) can
+                # leave `value` in fp32. Reconcile it to the accumulator dtype so
+                # the loop-carried accumulator type stays consistent; strict
+                # backends reject a fp16 accumulator reassigned to fp32.
+                if (
+                    isinstance(value, CSEVariable)
+                    and value.dtype is not None
+                    and value.dtype != torch_acc_type
+                ):
+                    value = self.cse.generate(
+                        self.compute,
+                        f"{value}.to({acc_type})",
+                        dtype=torch_acc_type,
+                        shape=value.shape,
+                    )
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
                 if reduction_type == "dot":
