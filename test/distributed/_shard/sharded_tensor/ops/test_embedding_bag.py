@@ -5,11 +5,17 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
@@ -22,11 +28,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -36,6 +37,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedEmbeddingBag(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _run_sharded_embedding_bag(
         self,
         spec,
@@ -164,17 +167,17 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_embedding_bag_colwise(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_embedding_bag_colwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._test_sharded_embedding_bag_with_test_cases(spec, 1)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_embedding_bag_rowwise(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_sharded_embedding_bag_rowwise(self, device):
         for spec in generate_chunk_sharding_specs_for_test(0):
             self._test_sharded_embedding_bag_with_test_cases(spec, 0)
 
@@ -280,6 +283,11 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             max_norm=1.15,
             padding_idx=10,
         )
+
+
+instantiate_device_type_tests(
+    TestShardedEmbeddingBag, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
