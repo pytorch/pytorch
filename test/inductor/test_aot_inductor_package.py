@@ -331,7 +331,7 @@ model(torch.ones(2))
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
-                        package_path=f.name,
+                        package_path=Path(f.name),
                     )  # type: ignore[arg-type]
                 loaded = torch._inductor.aoti_load_package(package_path)
                 actual = loaded(*example_inputs)
