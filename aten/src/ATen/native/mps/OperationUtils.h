@@ -688,6 +688,18 @@ inline bool needsGather(const TensorBase& t) {
   return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
 }
 
+// On Apple7/8 (M1/M2), for an (m x k) @ (k x n) product, the MPS matmul kernels
+// can read past the end of the operands once k >= 32767 and m, n >= 16: the
+// last tile of the reduction is not clipped, and what lands in the result
+// depends on the chunking and on neighboring memory (#177116, #193487).
+// PyTorch's own Metal kernels are unaffected.
+inline bool mps_matmul_overreads_k(int64_t m, int64_t k, int64_t n) {
+  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  constexpr int64_t min_affected_k = 32767;
+  constexpr int64_t min_matrix_dim = 16;
+  return is_affected_gpu && k >= min_affected_k && m >= min_matrix_dim && n >= min_matrix_dim;
+}
+
 template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
