@@ -5,6 +5,9 @@ namespace torch::nn {
 LayerNormOptions::LayerNormOptions(std::vector<int64_t> normalized_shape)
     : normalized_shape_(std::move(normalized_shape)) {}
 
+RMSNormOptions::RMSNormOptions(std::vector<int64_t> normalized_shape)
+    : normalized_shape_(std::move(normalized_shape)) {}
+
 CrossMapLRN2dOptions::CrossMapLRN2dOptions(int64_t size) : size_(size) {}
 
 GroupNormOptions::GroupNormOptions(int64_t num_groups, int64_t num_channels)
@@ -14,6 +17,9 @@ namespace functional {
 
 LayerNormFuncOptions::LayerNormFuncOptions(
     std::vector<int64_t> normalized_shape)
+    : normalized_shape_(std::move(normalized_shape)) {}
+
+RMSNormFuncOptions::RMSNormFuncOptions(std::vector<int64_t> normalized_shape)
     : normalized_shape_(std::move(normalized_shape)) {}
 
 GroupNormFuncOptions::GroupNormFuncOptions(int64_t num_groups)
