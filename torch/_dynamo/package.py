@@ -225,6 +225,20 @@ class FunctionPicklerBase(pickle.Pickler):
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
 
+    @staticmethod
+    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+        # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name; FORWARDREF
+        # returns a ForwardRef proxy for the unresolved ones instead. Each
+        # subclass decides what to do with a returned proxy.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
+
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
         try:
             contents = cell.cell_contents
