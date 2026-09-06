@@ -5,10 +5,13 @@ from torch import quantize_per_tensor
 from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
+from torch.testing._internal.common_utils import HardwareClassification
 import unittest
 import random
 
 class TestQuantizer(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r""" Tests quantize_APoT result on random 1-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
@@ -17,6 +20,7 @@ class TestQuantizer(unittest.TestCase):
         * b: 8
         * k: 1
     """
+
     def test_quantize_APoT_rand_k1(self):
         # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
