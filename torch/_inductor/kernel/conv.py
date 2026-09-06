@@ -1084,6 +1084,21 @@ def convolution_backward_lowering(
     # https://github.com/pytorch/pytorch/issues/187081.
     disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
 
+    if disable_triton_conv_bwd and not (V.graph.layout_opt and ndim == 2):
+        return aten_convolution_backward_fallback(
+            grad_out,
+            input,
+            weight,
+            bias_sizes,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask,
+        )
+
     conv_configs = V.choices.get_conv_configs(device_type)
     dtype_size = input.get_dtype().itemsize
 
