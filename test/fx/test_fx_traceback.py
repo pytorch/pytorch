@@ -4,13 +4,19 @@ import torch
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import default_decompositions
 from torch.fx.traceback import get_graph_provenance_json, NodeSource, NodeSourceAction
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 CREATE_STR = NodeSourceAction.CREATE.name.lower()
 
 
 class TestFXNodeSource(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_node_source_shallow_copies_provenance_list(self):
         ancestor = NodeSource(
             node=None,
