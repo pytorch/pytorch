@@ -305,14 +305,24 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__globals__.update(globals_snapshot)
 
     @staticmethod
-    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+    def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
-        # 3.14+, raising NameError for a TYPE_CHECKING-only name; FORWARDREF
-        # returns a ForwardRef proxy for the unresolved ones instead. Each
-        # subclass decides what to do with a returned proxy.
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
+        # pickler wants the unevaluated shape, so it takes FORWARDREF and prunes
+        # the proxies later. A caller that must SERIALIZE the annotations passes
+        # resolve=True instead: it gets real values, and an empty dict when a
+        # name will not resolve, because a ForwardRef -- even nested in
+        # list[Bar] -- is not picklable and the runtime never reads annotations.
         if sys.version_info >= (3, 14):
             import annotationlib
 
+            if resolve:
+                try:
+                    return annotationlib.get_annotations(
+                        obj, format=annotationlib.Format.VALUE
+                    )
+                except Exception:
+                    return {}
             return annotationlib.get_annotations(
                 obj, format=annotationlib.Format.FORWARDREF
             )
