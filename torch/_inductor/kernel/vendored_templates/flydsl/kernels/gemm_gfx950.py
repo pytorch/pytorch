@@ -3,8 +3,6 @@
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl._mlir import ir
-from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr, range_constexpr, rocdl
 from flydsl.runtime.device import get_rocm_arch
 
@@ -242,41 +240,9 @@ class BlockSwizzle:
         )
 
 
-# TODO: Move common ROCm synchronization and buffer-load helpers to FlyDSL.
-def __barrier(vmcnt=0):
-    llvm.InlineAsmOp(
-        None,
-        [],
-        f"s_waitcnt vmcnt({vmcnt})\n\ts_barrier",
-        "",
-        has_side_effects=True,
-    )
-
-
-def __waitcnt(vmcnt=0):
-    llvm.InlineAsmOp(None, [], f"s_waitcnt vmcnt({vmcnt})", "", has_side_effects=True)
-
-
-def buffer_load_lds_inline(rsrc, lds_ptr, global_offset, dma_bytes):
-    buffer_load_asm_dict = {
-        16: "buffer_load_dwordx4",
-        8: "buffer_load_dwordx2",
-        4: "buffer_load_dword",
-    }
-    llvm.InlineAsmOp(
-        None,
-        [
-            llvm.IntToPtrOp(
-                ir.Type.parse("!llvm.ptr<3>"),
-                fx.as_ir_value(fx.ptrtoint(lds_ptr)),
-            ).result,
-            fx.as_ir_value(global_offset),
-            fx.as_ir_value(rsrc),
-        ],
-        f"s_mov_b32 m0, $0\n\t{buffer_load_asm_dict[dma_bytes]} $1, $2, 0 offen sc0 lds",
-        "s,v,s",
-        has_side_effects=True,
-    )
+def wait_vmcnt_and_barrier(vmcnt=0):
+    rocdl.s_waitcnt(vmcnt=vmcnt)
+    rocdl.s_barrier()
 
 
 def _elem_dtype(param: GemmGfx950Param):
@@ -309,7 +275,6 @@ def gemm_gfx950_kernel(
     block_threads = param.block_threads
     ldg_a_iters = param.ldg_a_iters
     ldg_b_iters = param.ldg_b_iters
-    ldg_wait_count = ldg_a_iters + ldg_b_iters
     elem_dtype = _elem_dtype(param)
 
     tid = fx.thread_idx.x
@@ -344,12 +309,12 @@ def gemm_gfx950_kernel(
     else:
         bias_buf = None
 
-    a_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf))
-    b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
-
     s2r_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     g2r_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
     r2g_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
+    async_g2s_copy_atom = fx.make_copy_atom(
+        fx.rocdl.cdna4.BufferLoadAsyncLDS128b(), 128
+    )
 
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
@@ -431,9 +396,10 @@ def gemm_gfx950_kernel(
         fx.Int64.ir_type,
         fx.Int64(tid // GFX950_WAVE_SIZE * GFX950_WAVE_SIZE * async_load_bytes),
     )
+    g2s_copy_layout = fx.make_layout(async_load_vec_size, 1)
 
     def make_wave_lds_ptr(ptr):
-        return fx.recast_iter(fx.Int8, ptr) + fx.Int32(wave_offset)
+        return ptr + fx.Int32(wave_offset) // in_data_bytes
 
     def swizzled_col_idx(row, col, layout):
         elem_offset = fx.get_scalar(fx.crd2idx((row, col), layout))
@@ -456,12 +422,14 @@ def gemm_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (
-                safe_global_m_idx * a_row_stride + safe_global_k_idx
-            ) * in_data_bytes
-            buffer_load_lds_inline(a_rsrc, lds_ptr, global_offset, async_load_bytes)
+            global_offset = safe_global_m_idx * a_row_stride + safe_global_k_idx
+            src = fx.make_view(fx.get_iter(a_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
+            rocdl.sched_barrier(0)
+            fx.copy_atom_call(async_g2s_copy_atom, src, dst)
+            rocdl.sched_barrier(0)
             if i < ldg_a_iters - 1:
-                lds_ptr = lds_ptr + block_threads * async_load_bytes
+                lds_ptr = lds_ptr + block_threads * async_load_vec_size
 
     def async_load_b_to_lds(k_tile, stage):
         lds_ptr = make_wave_lds_ptr(smem_b + stage * block_n * block_k)
@@ -480,12 +448,14 @@ def gemm_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (
-                safe_global_n_idx * b_row_stride + safe_global_k_idx
-            ) * in_data_bytes
-            buffer_load_lds_inline(b_rsrc, lds_ptr, global_offset, async_load_bytes)
+            global_offset = safe_global_n_idx * b_row_stride + safe_global_k_idx
+            src = fx.make_view(fx.get_iter(b_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
+            rocdl.sched_barrier(0)
+            fx.copy_atom_call(async_g2s_copy_atom, src, dst)
+            rocdl.sched_barrier(0)
             if i < ldg_b_iters - 1:
-                lds_ptr = lds_ptr + block_threads * async_load_bytes
+                lds_ptr = lds_ptr + block_threads * async_load_vec_size
 
     def compute_stage(read_stage, k_tile):
         sA_stage = fx.make_view(smem_a + read_stage * block_m * block_k, a_lds_layout)
@@ -524,6 +494,7 @@ def gemm_gfx950_kernel(
     for stage in range_constexpr(stages - 1):
         async_load_b_to_lds(stage, stage)
         async_load_a_to_lds(stage, stage)
+        rocdl.asyncmark()
     rocdl.sched_barrier(0)
 
     if const_expr(has_k_tail):
@@ -533,14 +504,17 @@ def gemm_gfx950_kernel(
     for k_tile in range(0, main_loop_end, 1):
         current_stage = k_tile % stages
         write_stage = (current_stage + stages - 1) % stages
-        __barrier((stages - 2) * ldg_wait_count)
+        rocdl.wait_asyncmark(stages - 2)
+        rocdl.s_barrier()
         async_load_b_to_lds(k_tile + (stages - 1), write_stage)
         async_load_a_to_lds(k_tile + (stages - 1), write_stage)
+        rocdl.asyncmark()
         compute_stage(current_stage, k_tile)
 
     current_stage = main_loop_end % stages
     for s in range_constexpr(0, stages - 1):
-        __barrier((stages - 2 - s) * ldg_wait_count)
+        rocdl.wait_asyncmark(stages - 2 - s)
+        rocdl.s_barrier()
         compute_stage(current_stage, main_loop_end + s)
         current_stage = (current_stage + 1) % stages
 
@@ -622,12 +596,12 @@ def gemm_hti_gfx950_kernel(
     else:
         bias_buf = None
 
-    a_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf))
-    b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
-
     s2r_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     g2r_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
     r2g_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
+    async_g2s_copy_atom = fx.make_copy_atom(
+        fx.rocdl.cdna4.BufferLoadAsyncLDS128b(), 128
+    )
 
     thr_mma = tiled_mma.thr_slice(tid)
     thr_copy_A = fx.make_tiled_copy_A(g2r_copy_atom, tiled_mma).get_slice(tid)
@@ -649,9 +623,10 @@ def gemm_hti_gfx950_kernel(
         fx.Int64.ir_type,
         fx.Int64(tid // GFX950_WAVE_SIZE * GFX950_WAVE_SIZE * async_load_bytes),
     )
+    g2s_copy_layout = fx.make_layout(async_load_vec_size, 1)
 
     def make_wave_lds_ptr(ptr):
-        return fx.recast_iter(fx.Int8, ptr) + fx.Int32(wave_offset)
+        return ptr + fx.Int32(wave_offset) // in_data_bytes
 
     def swizzled_col_idx(row, col, layout):
         elem_offset = fx.get_scalar(fx.crd2idx((row, col), layout))
@@ -680,12 +655,14 @@ def gemm_hti_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (
-                safe_global_m_idx * a_row_stride + safe_global_k_idx
-            ) * in_data_bytes
-            buffer_load_lds_inline(a_rsrc, lds_ptr, global_offset, async_load_bytes)
+            global_offset = safe_global_m_idx * a_row_stride + safe_global_k_idx
+            src = fx.make_view(fx.get_iter(a_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
+            rocdl.sched_barrier(0)
+            fx.copy_atom_call(async_g2s_copy_atom, src, dst)
+            rocdl.sched_barrier(0)
             if i < half_ldg_a_iters - 1:
-                lds_ptr = lds_ptr + block_threads * async_load_bytes
+                lds_ptr = lds_ptr + block_threads * async_load_vec_size
 
     def async_load_b_to_lds(n_part, k_tile, stage):
         lds_ptr = make_wave_lds_ptr(half_b_base(stage, n_part))
@@ -704,12 +681,14 @@ def gemm_hti_gfx950_kernel(
                 safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
             else:
                 safe_global_k_idx = global_k_idx
-            global_offset = (
-                safe_global_n_idx * b_row_stride + safe_global_k_idx
-            ) * in_data_bytes
-            buffer_load_lds_inline(b_rsrc, lds_ptr, global_offset, async_load_bytes)
+            global_offset = safe_global_n_idx * b_row_stride + safe_global_k_idx
+            src = fx.make_view(fx.get_iter(b_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
+            rocdl.sched_barrier(0)
+            fx.copy_atom_call(async_g2s_copy_atom, src, dst)
+            rocdl.sched_barrier(0)
             if i < half_ldg_b_iters - 1:
-                lds_ptr = lds_ptr + block_threads * async_load_bytes
+                lds_ptr = lds_ptr + block_threads * async_load_vec_size
 
     def make_gC(m_part, n_part):
         return fx.flat_divide(out, (half_block_m, half_block_n))[
@@ -885,7 +864,7 @@ def gemm_hti_gfx950_kernel(
     async_load_b_to_lds(0, 1, 1)
     async_load_a_to_lds(0, 1, 1)
     async_load_b_to_lds(1, 1, 1)
-    __barrier(half_ldg_b_iters + half_ldg_a_iters)
+    wait_vmcnt_and_barrier(half_ldg_b_iters + half_ldg_a_iters)
 
     def compute_double_tile(k_tile, prefetch_next):
         next_k_tile = k_tile + 2
@@ -914,10 +893,10 @@ def gemm_hti_gfx950_kernel(
         b0 = load_b_fragment(0, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile, 0)
-            __barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
+            wait_vmcnt_and_barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
         consume(k_tile, c11, a1, b1, True)
         if const_expr(not prefetch_next):
-            __waitcnt(0)
+            rocdl.s_waitcnt(vmcnt=0)
         rocdl.s_barrier()
 
         a0 = load_a_fragment(0, 1, k_tile + 1)
@@ -943,7 +922,7 @@ def gemm_hti_gfx950_kernel(
 
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile + 1, 1)
-            __barrier(half_ldg_b_iters + half_ldg_a_iters)
+            wait_vmcnt_and_barrier(half_ldg_b_iters + half_ldg_a_iters)
         consume(k_tile + 1, c11, a1, b1, True)
         rocdl.s_barrier()
 
