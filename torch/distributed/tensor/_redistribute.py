@@ -1847,7 +1847,7 @@ def _redistribute_backward(
     grad_output: "dtensor.DTensor",
     previous_spec: DTensorSpec,
     *,
-    out_dtype: torch.dtype,
+    out_dtype: torch.dtype | None,
     op_dtype: torch.dtype,
     async_op: bool = False,
 ):
@@ -1859,7 +1859,8 @@ def _redistribute_backward(
         grad_output: The output gradient tensor.
         previous_spec: DTensorSpec prior to redistribution.
         out_dtype: dtype to cast the returned gradient to. Pinned by autograd
-                to match the dtype of the input of the node above this one.
+                to match the grad dtype of the input of the node above this
+                one. If None, the returned gradient is not cast.
         op_dtype: dtype to run the backward collective at.
         async_op: whether to perform the DTensor redistribute operation
                 asynchronously or not. Default: False
@@ -1921,7 +1922,7 @@ def _redistribute_backward(
         async_op=async_op,
     )
 
-    if output.dtype != out_dtype:
+    if out_dtype is not None and output.dtype != out_dtype:
         output = output.to(out_dtype)
 
     spec = DTensorSpec(
@@ -1939,7 +1940,7 @@ def _redistribute_backward(
 
 class _BackwardDtypeConfig(TypedDict):
     op_dtype: torch.dtype  # dtype the backward collective runs at
-    out_dtype: torch.dtype  # dtype the returned gradient is cast to
+    out_dtype: torch.dtype | None  # dtype the returned gradient is cast to
 
 
 class _DtypeConfig(TypedDict):
@@ -1963,6 +1964,8 @@ class Redistribute(torch.autograd.Function):
         bwd = dtype_config["backward_options"]
         ctx.bwd_op_dtype = bwd["op_dtype"]
         ctx.bwd_out_dtype = bwd["out_dtype"]
+        if input.requires_grad:
+            ctx.set_output_grad_dtype(ctx.bwd_out_dtype)
 
         op_dtype = dtype_config["op_dtype"]
         out_dtype = dtype_config["out_dtype"]
@@ -2061,12 +2064,16 @@ class NestedRedistribute(torch.autograd.Function):
         previous_spec: DTensorSpec,
         async_op: bool,
         op_dtype: torch.dtype,
-        out_dtype: torch.dtype,
+        out_dtype: torch.dtype | None,
     ):
         # Persist op_dtype so the double-backward reuses the same collective
         # dtype one level down.
         ctx.async_op = async_op
-        ctx.original_dtype = grad_output._local_tensor.dtype
+        ctx.input_grad_dtype = (
+            grad_output.grad_dtype
+            if grad_output.requires_grad
+            else grad_output._local_tensor.dtype
+        )
         ctx.op_dtype = op_dtype
 
         output, spec = _redistribute_backward(
@@ -2080,26 +2087,28 @@ class NestedRedistribute(torch.autograd.Function):
         ctx.current_spec = spec
 
         # pyrefly: ignore [bad-argument-type]
-        return dtensor.DTensor(
+        output_dtensor = dtensor.DTensor(
             # pyrefly: ignore [bad-argument-count]
             output,
             spec,
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=grad_output.requires_grad,
         )
+        if grad_output.requires_grad:
+            ctx.set_output_grad_dtype(ctx.input_grad_dtype)
+        return output_dtensor
 
     @staticmethod
     def backward(ctx, grad2_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        # Reuse the same op_dtype one level down; pin out_dtype to the dtype
-        # of the grad we received at this level, since that's what the node
-        # above us expects back.
+        # Reuse the same op_dtype one level down. The returned gradient must
+        # follow this Function's input grad dtype.
         output_dtensor = NestedRedistribute.apply(
             grad2_output,
             previous_spec,
             ctx.async_op,
             ctx.op_dtype,
-            ctx.original_dtype,
+            ctx.input_grad_dtype,
         )
 
         return (
