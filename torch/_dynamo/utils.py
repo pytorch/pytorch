@@ -1744,8 +1744,8 @@ class CompilationMetrics:
         def us_to_ms(metric: int | None) -> int | None:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Any | None) -> str | None:
-            def safe_str(item: Any) -> str:
+        def collection_to_str(metric: object | None) -> str | None:
+            def safe_str(item: object) -> str:
                 try:
                     return str(item)
                 except Exception:
@@ -1759,11 +1759,11 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Any | None) -> str | None:
+        def collection_to_json_str(metric: object | None) -> str | None:
             if metric is None:
                 return None
             try:
-                return json.dumps(list(metric))
+                return json.dumps(list(cast("Iterable[object]", metric)))
             except Exception:
                 return "<unknown>"
 
@@ -4459,7 +4459,7 @@ def run_node(
 
     with set_current_node(node):
 
-        def make_error_message(e: Any) -> str:
+        def make_error_message(e: object) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)
