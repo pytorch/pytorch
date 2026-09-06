@@ -1386,8 +1386,29 @@ class CachingAutotuner(KernelInterface):
         if not ASTSource:
             raise RuntimeError("Installed triton version too old, please upgrade")
 
+        # Pick the ASTSource for the kernel's language. A JITFunction only
+        # publishes self.ASTSource lazily (in create_binder, on first launch), so
+        # compiling ahead of time has to ask the function what it is. Gluon needs
+        # GluonASTSource, which stamps ttg.threads-per-warp from options.warp_size
+        # onto the module before codegen; with the plain ASTSource the module
+        # keeps the default and Gluon's explicit wave64 layouts fail verification.
+        ast_source_cls = getattr(self.fn, "ASTSource", None)
+        is_gluon = getattr(self.fn, "is_gluon", None)
+        if ast_source_cls is None and is_gluon is not None and is_gluon():
+            try:
+                from triton.experimental.gluon._runtime import GluonASTSource
+            except ImportError as e:
+                # The function says it is Gluon, so falling back to the plain
+                # ASTSource would fail later and less legibly.
+                raise RuntimeError(
+                    "kernel is a Gluon function but this Triton has no "
+                    "triton.experimental.gluon runtime; please upgrade"
+                ) from e
+            ast_source_cls = GluonASTSource
+        if ast_source_cls is None:
+            ast_source_cls = ASTSource
         compile_args = (
-            ASTSource(
+            ast_source_cls(
                 self.fn,
                 compile_meta["signature"],
                 compile_meta["constants"],
