@@ -1679,6 +1679,34 @@ class FxGraphHashDetails:
                 ):
                     self.cudagraph_annotation = annotation
 
+        # Post-grad passes (bucket_all_gathers_fx, enable_overlap_scheduling)
+        # embed dist.get_rank() as a compile-time narrow offset into the packed
+        # all-gather buffer. The cache key is computed before these passes run,
+        # so we include rank to prevent cross-rank collisions.
+        #
+        # This is load-bearing for the CUDA_VISIBLE_DEVICES-per-rank deployment
+        # (every process sees cuda:0) and the AOTAutogradCache path where
+        # DTensor ops only expand to device-specific all-gathers during
+        # lowering. In multi-device setups (rank N on cuda:N), the device
+        # index in TensorMetadata already differentiates keys, but this guard
+        # is still needed because device-index separation is not guaranteed.
+        #
+        # Uses global rank (conservative-correct, unique per process). Narrowing
+        # to group-relative rank or to graphs containing all_gather nodes is
+        # unsafe: the AOTAutogradCacheDetails subclass sees Dynamo-level graphs
+        # before collective expansion.
+        #
+        # See https://github.com/pytorch/pytorch/issues/188332
+        if (
+            (
+                config.bucket_all_gathers_fx != "none"
+                or config.aten_distributed_optimizations.enable_overlap_scheduling
+            )
+            and dist.is_available()
+            and dist.is_initialized()
+        ):
+            self.distributed_rank = dist.get_rank()
+
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
