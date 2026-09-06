@@ -810,9 +810,9 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if factor > 1.0 or factor < 0:
+        if factor > 1.0 or factor <= 0:
             raise ValueError(
-                "Constant multiplicative factor expected to be between 0 and 1."
+                "Constant multiplicative factor expected to be greater than 0 and less or equal to 1."
             )
 
         self.factor = factor
