@@ -257,6 +257,7 @@ rewrite_package_references() {
             s|^([ \t]*)from quack import |\1from torch._vendor.quack import |
             s|^([ \t]*)import quack\b|\1import torch._vendor.quack|
             s|"quack::|"torch_vendor_quack::|g
+            s|torch\.ops\.quack\.|torch.ops.torch_vendor_quack.|g
             s|"quack\.|"torch._vendor.quack.|g
             s|== "quack"|== "torch._vendor.quack"|g
             s|^PACKAGE_NAME = "quack"$|PACKAGE_NAME = "torch_vendor_quack"|

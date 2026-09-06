@@ -63,10 +63,10 @@ _PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
 
 # Note [Preserving FlexGEMM body GEMMs]
 # FlexGEMM lowering materializes the captured epilogue by finding the body GEMM
-# node whose target matches the HOP-carried gemm_op. Generic graph passes can
-# rewrite batch-size-1 bmm into mm(...).unsqueeze(0), which removes the matching
-# node. This body pass tags FlexGEMM GEMM nodes so bmm_to_mm in joint_graph.py
-# skips them.
+# node whose target matches the HOP-carried gemm_op. Generic graph passes must
+# not replace that node with a different GEMM plus wrappers or padded operands.
+# This body pass tags the node so joint- and post-grad rewrites keep the captured
+# GEMM contract intact until FlexGEMM lowering owns the graph.
 
 
 def mark_flex_gemm_body_gemm_node(
