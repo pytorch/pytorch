@@ -127,32 +127,10 @@ def _move_wait_users_after_latest_inputs(
             ):
                 initial_users.add(user)
 
-    pending = sorted(initial_users, key=lambda n: node_positions[n])
-    queued = OrderedSet(pending)
-    while pending:
-        node = pending.pop(0)
-        queued.discard(node)
+    if initial_users:
+        from torch._dynamo.graph_deduplication import _stable_topological_sort
 
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        if node not in node_positions:
-            continue
-
-        input_nodes = [inp for inp in node.all_input_nodes if inp in node_positions]
-        if not input_nodes:
-            continue
-
-        latest_input = max(input_nodes, key=lambda n: node_positions[n])
-        if node_positions[node] >= node_positions[latest_input]:
-            continue
-
-        # Replacing old waits can leave existing consumers before the new bucket
-        # outputs. Pull each affected consumer after its latest input.
-        latest_input.append(node)
-        node_positions = {n: i for i, n in enumerate(graph.nodes)}
-        for user in node.users:
-            if user in node_positions and user.op != "output" and user not in queued:
-                queued.add(user)
-                pending.append(user)
+        _stable_topological_sort(graph, {})
 
 
 def _move_overlap_nodes(
