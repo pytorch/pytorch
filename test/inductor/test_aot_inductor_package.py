@@ -13,6 +13,7 @@ import unittest
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 from parameterized import parameterized_class
 
@@ -73,6 +74,28 @@ def compile(
     )  # type: ignore[arg-type]
     loaded = load_package(package_path)
     return loaded
+
+
+class TestAOTInductorPackageAPI(TestCase):
+    def test_load_pt2_loads_only_selected_aoti_models(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "artifact.txt"
+            artifact.write_text("artifact")
+            package_path = Path(temp_dir) / "models.pt2"
+            package_aoti(
+                package_path,
+                {"model1": [str(artifact)], "model2": [str(artifact)]},
+            )
+
+            with patch(
+                "torch.export.pt2_archive._package._load_aoti",
+                side_effect=lambda _path, name, *_args: name,
+            ) as load_aoti:
+                loaded = load_package(package_path, "model2")
+
+        self.assertEqual(loaded, "model2")
+        self.assertEqual(load_aoti.call_count, 1)
+        self.assertEqual(load_aoti.call_args.args[1], "model2")
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
