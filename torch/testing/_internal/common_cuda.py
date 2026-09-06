@@ -6,7 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -46,13 +46,13 @@ def _rocm_major_minor():
 
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
-# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# Cuspy needs both the cupti-python bindings and the build-generated
 # _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
     _check_module_exists("cupti")
-    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and _check_module_exists("torch.profiler._cuspy._cupti_stubs")
     and not TEST_WITH_ROCM
 )
 
@@ -60,7 +60,7 @@ def _cupti_version():
     if not TEST_CUPTI:
         return 0
     try:
-        from torch.profiler._cupti.cupti_python import pylibcupti
+        from torch.profiler._cuspy.cupti_python import pylibcupti
         return pylibcupti().get_version()
     except Exception:
         return 0
@@ -196,6 +196,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_MTIA:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -218,6 +220,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_MTIA:
         return True
     return False
 
@@ -289,9 +293,12 @@ PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_sup
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
-            # gfx120 and gfx95 only support OCP fp8 (e4m3fn/e5m2), which every
-            # supported ROCm provides.
-            archs = ['gfx94', 'gfx95', 'gfx120']
+            archs = ['gfx94']
+            if ROCM_VERSION >= (6, 5):
+                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
+                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
+                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
+                archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:

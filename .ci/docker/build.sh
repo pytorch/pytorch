@@ -216,7 +216,7 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=10.1.0a20260805
+    ROCM_VERSION=10.1.0a20260821
     THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
     USE_MSLK=0
     TRITON=yes
