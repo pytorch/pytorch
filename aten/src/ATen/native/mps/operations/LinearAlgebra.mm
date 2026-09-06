@@ -1452,6 +1452,10 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
   if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
     using namespace mps;
 
+    // Encodes through MPSNDArrayMatrixMultiplication, whose encodeToCommandEncoder:
+    // drives the encoder past the selectors MPSRecordingEncoder intercepts.
+    getCurrentMPSStream()->assertCapturable("bmm (tiled path for >2**32 elements)");
+
     id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
     id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
     id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
@@ -1698,6 +1702,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 Tensor& out) {
   using namespace mps;
 
+  getCurrentMPSStream()->assertCapturable("linalg.solve_triangular");
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
   TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
               "linalg.solve.triangular(); Only float is supported!");
@@ -2052,6 +2057,7 @@ static void svd_kernel_mps(const Tensor& A,
   const bool too_small = (batch * m * n < 8192);
 
   if (too_large || too_small) {
+    getCurrentMPSStream()->assertCapturable("linalg.svd (CPU fallback path)");
     if (too_large) {
       TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
                       staging_bytes,
@@ -2191,6 +2197,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const bool too_small = (batch * n * n < 12288);
 
   if (unsupported_dtype || !fits || too_small) {
+    getCurrentMPSStream()->assertCapturable("linalg.eigh (CPU fallback path)");
     if (!fits) {
       TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
                       2 * staging_bytes,

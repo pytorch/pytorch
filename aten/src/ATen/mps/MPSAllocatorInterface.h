@@ -21,6 +21,8 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
   virtual id_t getBufferId(const void* ptr) const = 0;
+  virtual void pinBufferForCapture(const void* ptr) const = 0;
+  virtual void unpinBufferForCapture(const void* ptr) const = 0;
   virtual void setBufferShape(const void* ptr, const IntArrayRef& shape)
       const = 0;
   virtual bool isSharedBuffer(const void* ptr) const = 0;

@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/CPUFallback.h>
 #include <c10/util/env.h>
 #include <caffe2/core/common.h>
@@ -26,6 +27,10 @@ static void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 #ifdef USE_DISTRIBUTED
   mps_distributed_error(op);
 #endif
+
+  // Covers every CPU fallback in one place: the op runs on the CPU, so a
+  // MetalGraph capture records nothing for it and replay would silently skip it.
+  mps::getCurrentMPSStream()->assertCapturable(op.schema().name().c_str());
 
   TORCH_WARN_ONCE("The operator '",
                   op.schema().operator_name(),
