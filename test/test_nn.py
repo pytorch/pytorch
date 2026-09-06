@@ -3854,6 +3854,35 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
+    def test_batchnorm_raises_error_if_params_are_not_1d(self):
+        # A multidimensional weight/bias/running_mean/running_var whose numel
+        # matches the channel count used to be silently accepted in eager
+        # (element count was the only thing checked) but failed under
+        # torch.compile with a cryptic "TensorAccessor expected 1 dims but
+        # tensor has N" error. These params must be 1-dimensional, so eager now
+        # rejects them with a clear error too.
+        input = torch.rand(2, 8)
+        running_mean = torch.rand(8)
+        running_var = torch.rand(8)
+        multidim = torch.rand(2, 4)  # numel == 8 == num channels, but 2-D
+
+        # Control: properly-shaped 1-D params of the same numel still work, so
+        # the check below rejects only on rank, not on element count.
+        out = F.batch_norm(
+            input, running_mean, running_var,
+            weight=Parameter(torch.rand(8)), bias=Parameter(torch.rand(8)),
+        )
+        self.assertEqual(out.shape, input.shape)
+
+        with self.assertRaisesRegex(RuntimeError, "running_mean should be a 1-dimensional tensor"):
+            F.batch_norm(input, multidim, running_var)
+        with self.assertRaisesRegex(RuntimeError, "running_var should be a 1-dimensional tensor"):
+            F.batch_norm(input, running_mean, multidim)
+        with self.assertRaisesRegex(RuntimeError, "weight should be a 1-dimensional tensor"):
+            F.batch_norm(input, running_mean, running_var, weight=Parameter(multidim))
+        with self.assertRaisesRegex(RuntimeError, "bias should be a 1-dimensional tensor"):
+            F.batch_norm(input, running_mean, running_var, bias=Parameter(multidim))
+
     def test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad(self):
         args = (
             torch.randn(3, 2, 5),  # input

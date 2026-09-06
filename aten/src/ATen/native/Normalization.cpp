@@ -85,9 +85,19 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const SymInt& actual){
-    TORCH_CHECK(actual == expected,
-             arg_name, " should contain ", expected, " elements not ", actual);
+  void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const Tensor& actual){
+    // weight/bias/running_mean/running_var are expected to be 1-D tensors of
+    // size [num_features]. Checking element count alone (sym_numel) is not
+    // enough: a multidimensional tensor whose numel happens to match the
+    // channel count would silently pass here and be accepted by some eager
+    // fast paths, while other paths (e.g. the accessor<..., 1> based kernels
+    // exercised under torch.compile) reject it with a cryptic internal error.
+    // Enforce the dimensionality here so eager and compile behave consistently.
+    TORCH_CHECK(actual.dim() == 1,
+             arg_name, " should be a 1-dimensional tensor with ", expected,
+             " elements, but got a ", actual.dim(), "-dimensional tensor");
+    TORCH_CHECK(actual.sym_numel() == expected,
+             arg_name, " should contain ", expected, " elements not ", actual.sym_numel());
   }
 
   inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
@@ -588,20 +598,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   }
 
   if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
+    check_dims_match_num_input_features("running_mean", num_features, running_mean);
   } else if (!training) {
     TORCH_CHECK(false, "running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
+    check_dims_match_num_input_features("running_var", num_features, running_var);
   } else if (!training) {
     TORCH_CHECK(false, "running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
+    check_dims_match_num_input_features("weight", num_features, weight);
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
+    check_dims_match_num_input_features("bias", std::move(num_features), bias);
   }
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
