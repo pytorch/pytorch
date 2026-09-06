@@ -13,9 +13,11 @@ from torch._inductor.fx_passes.memory_estimator import (
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
+from torch.utils._triton import has_triton
 from torch.utils.weak import WeakIdKeyDictionary
 
 
@@ -23,8 +25,9 @@ def tensor_storage_id(tensor):
     return tensor._typed_storage()._cdata
 
 
-def device_filter(device):
-    return device.type == GPU_TYPE
+def make_device_filter(device):
+    dev_type = torch.device(device).type
+    return lambda d: d.type == dev_type
 
 
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
@@ -79,15 +82,17 @@ class FakeTensorMemoryProfilerMode(TorchDispatchMode):
 
 
 class TestMemoryProfilingResNet(InductorTestCase):
-    def test_simple_linear_layers(self):
-        """Test with a simple sequential model with explicit weights on CUDA."""
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_simple_linear_layers(self, device):
+        """Test with a simple sequential model with explicit weights on device."""
 
         def create_inputs_and_weights():
-            """Create inputs and weights on CUDA."""
-            x = torch.randn(32, 1000, device=GPU_TYPE)
-            w1 = torch.randn(500, 1000, device=GPU_TYPE)
-            w2 = torch.randn(100, 500, device=GPU_TYPE)
-            w3 = torch.randn(10, 100, device=GPU_TYPE)
+            """Create inputs and weights on device."""
+            x = torch.randn(32, 1000, device=device)
+            w1 = torch.randn(500, 1000, device=device)
+            w2 = torch.randn(100, 500, device=device)
+            w3 = torch.randn(10, 100, device=device)
             return x, w1, w2, w3
 
         def fn(x, w1, w2, w3):
@@ -124,15 +129,15 @@ class TestMemoryProfilingResNet(InductorTestCase):
 
             self.assertEqual(fx_peak, runtime_peak)
 
-    def test_conv_network(self):
+    def test_conv_network(self, device):
         """Test with a convolutional network."""
 
         def create_inputs_and_weights():
-            """Create inputs and weights on CUDA."""
-            x = torch.randn(8, 3, 224, 224, device=GPU_TYPE)
-            conv1_weight = torch.randn(64, 3, 3, 3, device=GPU_TYPE)
-            conv2_weight = torch.randn(128, 64, 3, 3, device=GPU_TYPE)
-            linear_weight = torch.randn(10, 128 * 56 * 56, device=GPU_TYPE)
+            """Create inputs and weights on device."""
+            x = torch.randn(8, 3, 224, 224, device=device)
+            conv1_weight = torch.randn(64, 3, 3, 3, device=device)
+            conv2_weight = torch.randn(128, 64, 3, 3, device=device)
+            linear_weight = torch.randn(10, 128 * 56 * 56, device=device)
             return x, conv1_weight, conv2_weight, linear_weight
 
         def fn(x, conv1_weight, conv2_weight, linear_weight):
@@ -171,14 +176,17 @@ class TestMemoryProfilingResNet(InductorTestCase):
 
 
 class TestMemoryTracker(InductorTestCase):
-    def test_memory_tracker_original_order(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_memory_tracker_original_order(self, device):
         """Test that MemoryTracker works correctly with original scheduling order and matches runtime profiling."""
+        device_filter = make_device_filter(device)
 
         def create_inputs_and_weights():
-            """Create inputs and weights on CUDA."""
-            x = torch.randn(32, 100, device=GPU_TYPE)
-            w1 = torch.randn(100, 50, device=GPU_TYPE)
-            w2 = torch.randn(50, 10, device=GPU_TYPE)
+            """Create inputs and weights on device."""
+            x = torch.randn(32, 100, device=device)
+            w1 = torch.randn(100, 50, device=device)
+            w2 = torch.randn(50, 10, device=device)
             return x, w1, w2
 
         def fn(x, w1, w2):
@@ -228,8 +236,9 @@ class TestMemoryTracker(InductorTestCase):
                 runtime_peak, 0, "Runtime profiler should track memory usage"
             )
 
-    def test_memory_tracker_different_scheduling(self):
+    def test_memory_tracker_different_scheduling(self, device):
         """Test that different scheduling orders produce different memory usage patterns."""
+        device_filter = make_device_filter(device)
 
         def foo(primals_1):
             zeros = torch.zeros_like(primals_1)  # Create zeros tensor
@@ -241,7 +250,7 @@ class TestMemoryTracker(InductorTestCase):
 
         with FakeTensorMode():
             # Create input
-            primals_1 = torch.randn(1000, 1000, device=GPU_TYPE)
+            primals_1 = torch.randn(1000, 1000, device=device)
 
             # Trace the function
             fx_graph = make_fx(foo)(primals_1)
@@ -341,6 +350,14 @@ class TestMemoryTracker(InductorTestCase):
             )
 
 
+instantiate_device_type_tests(
+    TestMemoryProfilingResNet, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(
+    TestMemoryTracker, globals(), except_for="cpu", allow_xpu=True
+)
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if has_triton():
         run_tests(needs="filelock")
