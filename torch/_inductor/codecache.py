@@ -631,6 +631,15 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
+    # compile-on-one-rank: the index is the compiling rank's, and every rank is on
+    # its own accelerator, so keeping it here means no rank can ever hit another's
+    # cache entry. This is the only place the device index reaches the key -- the
+    # graph hashed alongside it is the AOT one, which is already device-agnostic.
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+    if _coor_device_index_is_current(meta.device):
+        meta = dataclasses.replace(meta, device=torch.device(meta.device.type))
+
     return meta
 
 

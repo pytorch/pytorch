@@ -991,6 +991,22 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
+def _guard_device_index_is_current(value: torch.Tensor) -> bool:
+    """Whether this tensor's device index may be guarded as "the current device".
+
+    Only under compile_on_one_rank, and only when the tensor really is on the
+    current accelerator. CooR enforces a single-accelerator invariant while tracing
+    -- one accelerator device, though cpu tensors may coexist with it freely -- so
+    for an accelerator tensor the recorded index is just the compiling rank's and
+    carries no information. cpu is left alone: it is portable across ranks already,
+    and its index is not a rank identity. Outside CooR several accelerator devices
+    can legitimately be live at once, so there the index stays pinned.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+    return _coor_device_index_is_current(value.device)
+
+
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -1003,7 +1019,13 @@ def get_tensor_guard_code_part(
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    device_index = value.device.index
+    # Render the relaxed form as "current" rather than an index: this string is
+    # what gets serialized into a precompile artifact, so baking the compiling
+    # rank's index here would make the artifact rank-specific even though the
+    # runtime check no longer is.
+    device_index: int | str | None = (
+        "current" if _guard_device_index_is_current(value) else value.device.index
+    )
     requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
@@ -3817,6 +3839,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    _guard_device_index_is_current(value),
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
