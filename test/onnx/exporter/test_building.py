@@ -10,9 +10,12 @@ import onnxscript
 import torch
 from torch.onnx._internal.exporter import _building, _tensors
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestOpRecorder(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.opset_version = 17
