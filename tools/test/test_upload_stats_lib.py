@@ -14,7 +14,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
-from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
+from tools.stats.upload_stats_lib import (
+    download_gha_artifacts,
+    get_s3_resource,
+    remove_nan_inf,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -277,6 +281,73 @@ class TestUploadStats(unittest.TestCase):
                 unclean,
                 f"Expected {unclean} when input is {unclean}, got {unclean_output}",
             )
+
+
+class TestDownloadGhaArtifacts(unittest.TestCase):
+    def test_download_gha_artifacts_skips_invalid_run_attempt(self) -> None:
+        artifact_name = Path("test-reports-runattempt1-test-job.zip")
+
+        with (
+            mock.patch(
+                "tools.stats.upload_stats_lib._get_artifact_urls",
+                return_value={artifact_name: "https://example.com/artifact"},
+            ),
+            mock.patch("tools.stats.upload_stats_lib.requests.get") as mock_get,
+        ):
+            paths = download_gha_artifacts("test-reports", 12345, 2)
+
+        self.assertEqual(paths, [])
+        mock_get.assert_not_called()
+
+    def test_download_gha_artifacts_downloads_matching_run_attempt(self) -> None:
+        artifact_name = Path("test-reports-runattempt2-test-job.zip")
+        response = mock.Mock(content=b"zip-bytes")
+        mock_file = mock.mock_open()
+
+        with (
+            mock.patch(
+                "tools.stats.upload_stats_lib._get_artifact_urls",
+                return_value={artifact_name: "https://example.com/artifact"},
+            ),
+            mock.patch(
+                "tools.stats.upload_stats_lib._get_request_headers", return_value={}
+            ),
+            mock.patch(
+                "tools.stats.upload_stats_lib.requests.get", return_value=response
+            ) as mock_get,
+            mock.patch("builtins.open", mock_file),
+        ):
+            paths = download_gha_artifacts("test-reports", 12345, 2)
+
+        self.assertEqual(paths, [artifact_name])
+        mock_get.assert_called_once_with("https://example.com/artifact", headers={})
+        mock_file.assert_called_once_with(artifact_name, "wb")
+        mock_file().write.assert_called_once_with(b"zip-bytes")
+
+    def test_download_gha_artifacts_downloads_without_run_attempt_marker(self) -> None:
+        artifact_name = Path("test-reports-test-job.zip")
+        response = mock.Mock(content=b"zip-bytes")
+        mock_file = mock.mock_open()
+
+        with (
+            mock.patch(
+                "tools.stats.upload_stats_lib._get_artifact_urls",
+                return_value={artifact_name: "https://example.com/artifact"},
+            ),
+            mock.patch(
+                "tools.stats.upload_stats_lib._get_request_headers", return_value={}
+            ),
+            mock.patch(
+                "tools.stats.upload_stats_lib.requests.get", return_value=response
+            ) as mock_get,
+            mock.patch("builtins.open", mock_file),
+        ):
+            paths = download_gha_artifacts("test-reports", 12345, 2)
+
+        self.assertEqual(paths, [artifact_name])
+        mock_get.assert_called_once_with("https://example.com/artifact", headers={})
+        mock_file.assert_called_once_with(artifact_name, "wb")
+        mock_file().write.assert_called_once_with(b"zip-bytes")
 
 
 if __name__ == "__main__":
