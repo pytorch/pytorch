@@ -3387,6 +3387,107 @@ class NumpyNdarrayVariable(TensorVariable):
             kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
         return args, kwargs
 
+    def _call_numpy_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from ..utils import numpy_method_wrapper
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            numpy_method_wrapper(name),
+            *proxy_args_kwargs([self] + list(args), kwargs),
+        )
+        return NumpyNdarrayVariable.create(tx, proxy)
+
+    def method_astype(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        from .builtin import BuiltinVariable
+
+        dtype_arg = kwargs.get("dtype", args[0] if args else None)
+        is_object_str = dtype_arg is not None and dtype_arg.is_constant_match("O")
+        is_object_type = (
+            isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
+        )
+        if is_object_str or is_object_type:
+            unimplemented(
+                gb_type="ndarray.astype(object)",
+                context=f"call_method {self} astype {list(args)} {kwargs}",
+                explanation=(
+                    "`ndarray.astype('O')` / `astype(object)` is not supported by "
+                    "torch.compile (no object dtype on torch.Tensor); run eagerly."
+                ),
+                hints=[*graph_break_hints.FUNDAMENTAL],
+            )
+        return self._call_numpy_method(tx, "astype", list(args), dict(kwargs))
+
+    def method___len__(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return TensorVariable.method___len__(self, tx)
+
+    def method_size(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker | None:
+        return TensorVariable.method_size(self, tx, *args, **kwargs)
+
+    def method_tolist(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return TensorVariable.method_tolist(self, tx)
+
+    def method___iter__(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        return TensorVariable.method___iter__(self, tx)
+
+    def method_tostring(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="Unsupported ndarray method call",
+            context=f"call_method {self} tostring {list(args)} {kwargs}",
+            explanation="`ndarray.tostring()` is not modelled in `torch._numpy`.",
+            hints=[],
+        )
+
+    def method_tobytes(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="Unsupported ndarray method call",
+            context=f"call_method {self} tobytes {list(args)} {kwargs}",
+            explanation="`ndarray.tobytes()` is not modelled in `torch._numpy`.",
+            hints=[],
+        )
+
+    def method___delattr__(
+        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="Unsupported ndarray method call",
+            context=f"call_method {self} __delattr__ {list(args)} {kwargs}",
+            explanation="`ndarray.__delattr__()` is not modelled in `torch._numpy`.",
+            hints=[],
+        )
+
+    # Special-cased ndarray methods. The generic numpy_method_wrapper path for
+    # remaining names stays in call_method (see #195165).
+    tp_methods = {
+        "astype": Method(method_astype),
+        "__len__": Method(method___len__),
+        "size": Method(method_size),
+        "tolist": Method(method_tolist),
+        "__iter__": Method(method___iter__),
+        "tostring": Method(method_tostring),
+        "tobytes": Method(method_tobytes),
+        "__delattr__": Method(method___delattr__),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3394,50 +3495,27 @@ class NumpyNdarrayVariable(TensorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from ..exc import unimplemented
-        from ..utils import numpy_method_wrapper
-
         args, kwargs = self.patch_args(name, args, kwargs)
 
-        if name == "astype":
-            from .builtin import BuiltinVariable
-
-            dtype_arg = None
-            if "dtype" in kwargs:
-                dtype_arg = kwargs["dtype"]
-            elif len(args) > 0:
-                dtype_arg = args[0]
-            is_object_str = dtype_arg is not None and dtype_arg.is_constant_match("O")
-            is_object_type = (
-                isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
-            )
-            if is_object_str or is_object_type:
+        method = self.tp_methods.get(name)
+        if method is not None:
+            flags = _derive_method_flags(self, name)
+            _check_method_arity(self, tx, name, flags, args, kwargs)
+            realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
+            try:
+                result = method.handler(self, tx, *args, **realized_kwargs)
+            except TypeError as e:
                 unimplemented(
-                    gb_type="ndarray.astype(object)",
+                    gb_type="Unhandled args for method",
                     context=f"call_method {self} {name} {args} {kwargs}",
-                    explanation=(
-                        "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
-                        "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
-                        "This will be executed eagerly."
-                    ),
-                    hints=[*graph_break_hints.FUNDAMENTAL],
+                    explanation=f"Error while calling ndarray method `{name}`.",
+                    hints=[],
+                    from_exc=e,
                 )
-        if name in ["__len__", "size", "tolist", "__iter__"]:
-            # delegate back to TensorVariable
-            return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes", "__delattr__"):
-            unimplemented(
-                gb_type="Unsupported ndarray method call",
-                context=f"call_method {self} {name} {args} {kwargs}",
-                explanation=f"`ndarray.{name}()` is not modelled in `torch._numpy`.",
-                hints=[],
-            )
-        proxy = tx.output.create_proxy(
-            "call_function",
-            numpy_method_wrapper(name),
-            *proxy_args_kwargs([self] + list(args), kwargs),
-        )
-        return NumpyNdarrayVariable.create(tx, proxy)
+            if result is not None:
+                return result
+
+        return self._call_numpy_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
         if np is not None:
