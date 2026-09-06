@@ -1109,6 +1109,25 @@ class TestNoComm(MultiProcessTestCase):
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
+    def test_optim_state_dict_with_grad_dtype(self) -> None:
+        # A parameter may declare a gradient dtype that differs from its own
+        # dtype, e.g. an fp32 master weight accumulating bf16 gradients.
+        # _init_optim_state() has to prime the optimizer without tripping over
+        # that mismatch. See https://github.com/pytorch/pytorch/issues/191918.
+        self.assertFalse(dist.is_initialized())
+        for optim_class in (torch.optim.Adam, torch.optim.SGD):
+            model = nn.Linear(4, 4, dtype=torch.float32)
+            for param in model.parameters():
+                param.grad_dtype = torch.bfloat16
+            optim = optim_class(model.parameters(), lr=1e-2)
+
+            get_optimizer_state_dict(model, optim)
+
+            # Priming must leave the parameters exactly as it found them.
+            for param in model.parameters():
+                self.assertEqual(param.grad_dtype, torch.bfloat16)
+                self.assertIsNone(param.grad)
+
 
 if __name__ == "__main__":
     run_tests()
