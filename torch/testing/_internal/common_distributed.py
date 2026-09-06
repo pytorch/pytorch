@@ -2298,3 +2298,16 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
     def rank_to_device(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
+
+
+class MultiProcContinuousForInstantiateTest(MultiProcContinuousTest):
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return c10d.get_default_backend_for_device(cls.device_type)
+
+    @property
+    def current_device(self) -> torch.device:
+        if self.rank < 0 or self.device_type == "cpu":
+            return torch.device(self.device_type)
+        return torch.device(self.device_type, self.rank)
