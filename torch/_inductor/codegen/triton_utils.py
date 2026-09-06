@@ -94,6 +94,34 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     return DeviceProperties.create(device).cc < 89
 
 
+def triton_meta_device_props(device: torch.device) -> DeviceProperties:
+    """DeviceProperties for a kernel's triton_meta, respecting compile-on-one-rank.
+
+    Under CooR the rank-specific index is dropped so a kernel's triton_meta -- hence
+    its cache key and its generated source -- is byte-identical across ranks; the
+    launcher resolves the real device at load time.
+
+    NB: torch.device("cuda").index is None, not 0, and that None is what reaches
+    DeviceProperties. The None is load-bearing, not cosmetic: in triton_heuristics.py
+    it is the sentinel _resolve_load_device keys on to pick the running rank's current
+    device, and what sets kernel.device_agnostic -- which in turn forces the per-device
+    static launcher instead of the fast launcher, whose single baked function pointer
+    would be for the wrong GPU. Baking index=0 on every rank would make the source
+    byte-identical yet still launch on rank 0's device, so a byte-identity check alone
+    does not catch it.
+
+    Every site that builds triton_meta must go through here. Applying the rule in
+    TritonKernel alone left Triton templates (select_algorithm.py) and combo kernels
+    (triton_combo_kernel.py) baking DeviceProperties(index=N), which makes their
+    generated code differ across ranks.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if _coor_enabled():
+        device = torch.device(device.type)
+    return DeviceProperties.create(device)
+
+
 def signature_of(
     arg: KernelArgType,
     *,
