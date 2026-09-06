@@ -56,7 +56,7 @@
 #   USE_STATIC_MKL           prefer to link MKL statically (Unix only)
 #   USE_FLASH_ATTENTION=0    disables flash attention for scaled dot product attn
 #   USE_MEM_EFF_ATTENTION=0  disables memory efficient attention for SDPA
-#   USE_ROCM_KERNEL_ASSERT=1 enables kernel assert on ROCm
+#   USE_ROCM_KERNEL_ASSERT=0 disables kernel assert on ROCm (enabled by default)
 #   USE_ROCM_CK_GEMM=1       builds the CK GEMM backend on ROCm
 #   USE_ROCM_CK_SDPA=1       builds the CK SDPA backend on ROCm
 #   USE_ROCM_CK_SDPA_GFX12=1 enables CK SDPA for targeted gfx12 architectures

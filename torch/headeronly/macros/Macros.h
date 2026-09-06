@@ -531,11 +531,11 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-// ROCm disables kernel assert by default for performance considerations.
-// Though ROCm supports __assert_fail, it uses kernel printf which has
-// a non-negligible performance impact even if the assert condition is
-// never triggered. We choose to use abort() instead which will still
-// terminate the application but without a more useful error message.
+// Kernel asserts are enabled for ROCm by default (USE_ROCM_KERNEL_ASSERT=ON).
+// When disabled, CUDA_KERNEL_ASSERT uses abort() without a useful error
+// message. When enabled, device asserts use the OCKL device printf path, which
+// raises register pressure (VGPR/SGPR) and may reduce occupancy even if the
+// assert condition is never triggered.
 #if !defined(C10_USE_ROCM_KERNEL_ASSERT) && defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
