@@ -8,9 +8,12 @@ import torch
 from torch.onnx import InputObserver
 from torch.onnx._internal.exporter._input_observer import _infer_dynamic_dimensions
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestInputObserver(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_infer_dynamic_dimensions(self):
         self.assertEqual([2], _infer_dynamic_dimensions([(1, 2, 3), (1, 2, 4)]))
         self.assertEqual([0, 2], _infer_dynamic_dimensions([(1, 2, 3), (2, 2, 4)]))
