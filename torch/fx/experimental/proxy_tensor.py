@@ -1218,6 +1218,26 @@ def _coor_current_device() -> torch.device:
     return cur
 
 
+def _coor_device_index_is_current(device: torch.device) -> bool:
+    """Whether ``device``'s index is just "the device this rank happens to be on".
+
+    True only under compile-on-one-rank, and only for the current accelerator. CooR
+    enforces a single-accelerator invariant while tracing -- one accelerator device,
+    though cpu tensors may coexist with it -- so for an accelerator device the index
+    is the compiling rank's and conveys nothing that is true of any other rank.
+    Callers use this to leave the index out of anything that has to be identical
+    across ranks (a guard, a cache key, a traced constant).
+
+    cpu is excluded: it is portable already and its index is not a rank identity.
+    Outside CooR several accelerator devices can legitimately be live at once, so
+    the index is real information and this returns False.
+    """
+    if not _coor_enabled() or device.index is None:
+        return False
+    cur = _coor_current_accelerator()
+    return cur is not None and device.type == cur.type and device.index == cur.index
+
+
 # Registered as an op (not a bare function) so it is a serializable call_function target
 # with a stable identity for precompile/export and for consumers to match. It reads only
 # torch.accelerator, so it lives in core fx with no torch.distributed coupling.
