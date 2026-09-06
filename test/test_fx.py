@@ -732,6 +732,13 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_decorated_fn", m.code)
         self.assertEqual(m(1), 1)
 
+    def test_wrap_registers_function(self):
+        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
+
+        key = (id(globals()), "a_lifted_leaf")
+        self.assertIn(key, _wrapped_fns_to_patch)
+        self.assertIs(_wrapped_fns_to_patch[key], globals())
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
