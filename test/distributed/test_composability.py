@@ -21,22 +21,23 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_nccl,
+    MultiProcContinuousForInstantiateTest,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
 )
-
-
-device_type = "cuda"
 
 
 # MLP Layer
@@ -95,19 +96,12 @@ def loss_fn(y, target, scale=1e-4):
     return torch.nn.functional.cross_entropy(y, target) * scale
 
 
-class ComposabilityTest(MultiProcContinuousTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return "nccl"
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+class ComposabilityTest(MultiProcContinuousForInstantiateTest):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _rand_microbatches(self, dp_mesh, num_microbatches, dim, dtype=torch.float32):
         full = [
-            torch.rand((num_microbatches, dim), device=self.device, dtype=dtype)
+            torch.rand((num_microbatches, dim), device=self.current_device, dtype=dtype)
             for _ in range(dp_mesh.size())
         ]
         local = full[dp_mesh.get_local_rank()]
@@ -130,13 +124,13 @@ class ComposabilityTest(MultiProcContinuousTest):
         partial_model = nn.Sequential(
             *full_model[offset : (stage_idx + 1) * layers_per_stage]
         )
-        partial_model.to(self.device)
+        partial_model.to(self.current_device)
         dp_model = apply_dp(partial_model)
         stage = PipelineStage(
             dp_model,
             stage_idx,
             num_stages,
-            self.device,
+            self.current_device,
             group=pp_group,
         )
         return stage, offset
@@ -195,9 +189,9 @@ class ComposabilityTest(MultiProcContinuousTest):
             )
         return pipeline_schedule, partial_models, offsets
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -206,17 +200,17 @@ class ComposabilityTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_pp_ddp(self, ScheduleClass):
+    def test_pp_ddp(self, ScheduleClass, device):
         if ScheduleClass == ScheduleInterleavedZeroBubble:
             # TODO: DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
             # https://github.com/pytorch/pytorch/issues/144530
             return
 
-        torch.get_device_module(device_type).set_device(self.device)
+        torch.get_device_module(self.device_type).set_device(self.current_device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -227,7 +221,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         dim = 10
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
-        ref_model.to(self.device)
+        ref_model.to(self.current_device)
 
         # Prepare inputs
         inputs, input_local, _ = self._rand_microbatches(dp_mesh, num_microbatches, dim)
@@ -276,9 +270,9 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_p = ref_parameters[name]
                 torch.testing.assert_close(p.grad, ref_p.grad)
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
@@ -289,15 +283,15 @@ class ComposabilityTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_pp_fsdp(self, dp_type, ScheduleClass):
+    def test_pp_fsdp(self, dp_type, ScheduleClass, device):
         if TEST_WITH_ROCM:
             return
 
-        torch.get_device_module(device_type).set_device(self.device)
+        torch.get_device_module(self.device_type).set_device(self.current_device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -311,7 +305,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         dim = 10
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
-        ref_model.to(self.device)
+        ref_model.to(self.current_device)
         if dp_type == "FSDP_MP":
             ref_model.to(dtype=mp_dtype)
 
@@ -387,20 +381,20 @@ class ComposabilityTest(MultiProcContinuousTest):
                     p.grad.full_tensor(), ref_p.grad, atol=5e-5, rtol=2e-2
                 )
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
-    def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
+    def test_pp_fsdp_unshard_reshard_runtime(self, dp_type, device):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
         if TEST_WITH_ROCM:
             return
 
-        torch.get_device_module(device_type).set_device(self.device)
+        torch.get_device_module(self.device_type).set_device(self.current_device)
         mesh_shape = (self.world_size, 1)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -434,7 +428,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         partial_model = nn.Sequential(
             *full_model[offset : (stage_idx + 1) * layers_per_stage]
         )
-        partial_model.to(self.device)
+        partial_model.to(self.current_device)
         fsdp_model = apply_dp(partial_model)
         distributed_state = fully_shard.state(fsdp_model)
         distributed_state._lazy_init()
@@ -443,7 +437,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             fsdp_model,
             stage_idx,
             num_stages,
-            self.device,
+            self.current_device,
             group=pp_group,
         )
 
@@ -521,7 +515,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             [stage], n_microbatches=1, loss_fn=None, scale_grads=False
         )
         runtime.pipeline_order_with_comms = unshard_reshard_schedule
-        dummy_input = torch.randn(1, dim, device=self.device, dtype=mp_dtype)
+        dummy_input = torch.randn(1, dim, device=self.current_device, dtype=mp_dtype)
         runtime.step(dummy_input)
 
         # Verify parameters are now sharded again
@@ -535,6 +529,9 @@ class ComposabilityTest(MultiProcContinuousTest):
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
-instantiate_parametrized_tests(ComposabilityTest)
+instantiate_device_type_tests(
+    ComposabilityTest, globals(), except_for="cpu", allow_xpu=True
+)
+
 if __name__ == "__main__":
     run_tests()
