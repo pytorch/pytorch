@@ -49,15 +49,16 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import skipXPUIf
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     run_tests,
-    skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
     TEST_WITH_SLOW,
@@ -71,10 +72,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
-
-
-dev_type = torch.device(get_devtype())
 
 
 class PytreeTuple(torch._custom_class_base.CustomClassBase):
@@ -188,10 +187,6 @@ aot_eager_graph = aot_autograd(
     partition_fn=min_cut_rematerialization_partition,
 )
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-
 
 def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
     """
@@ -221,6 +216,8 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.config.canonicalize_output_graph_node_order = False
@@ -236,7 +233,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @property
     def device_type(self) -> str:
-        return device_type
+        return "cpu"
 
     @property
     def world_size(self) -> int:
@@ -417,161 +414,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out = fn(dt)
         out.to_local().sum().backward()
         self.assertIsNotNone(local.grad)
-
-    @unittest.skipIf(not HAS_GPU, "standalone_compile requires GPU and triton")
-    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
-    @skip_if_lt_x_gpu(1)
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    def test_aot_standalone_compile_dtensor_to_dtype_layout(self):
-        from torch._inductor import standalone_compile
-
-        device = torch.device(self.device_type, 0)
-        mesh = DeviceMesh(self.device_type, torch.arange(1))
-        index = DTensor.from_local(
-            torch.arange(2, device=device, dtype=torch.int64),
-            mesh,
-            [Replicate()],
-            run_check=False,
-        )
-        rope_cache = DTensor.from_local(
-            torch.randn(4, 4, device=device),
-            mesh,
-            [Replicate()],
-            run_check=False,
-        )
-
-        def backend(gm, example_inputs):
-            return standalone_compile(
-                gm,
-                example_inputs,
-                dynamic_shapes="from_graph",
-                options={"config_patches": {}},
-                aot=True,
-                donate_graph_module=True,
-            )
-
-        def index_to(index, rope_cache):
-            return rope_cache[index].to(device=device).to_local()
-
-        with torch._dynamo.config.patch(enable_aot_compile=True):
-            compiled = torch.compile(index_to, backend=backend, fullgraph=True)
-        with torch.inference_mode():
-            artifact = compiled.aot_compile(((index, rope_cache), {}))
-
-        self.assertIsNotNone(artifact)
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
-        "https://github.com/pytorch/pytorch/issues/178745",
-    )
-    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
-    def test_dtensor_basic_compile(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        param = torch.randn(4, 4)
-        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buffer = torch.nn.Buffer(param_x)
-
-            def forward(self, x):
-                inter = self.buffer + DTensor.from_local(
-                    x, self.buffer.device_mesh, [Shard(0)], run_check=False
-                )
-                return inter.to_local()
-
-        m = Foo()
-        inp = torch.randn(4, 4, dtype=torch.float64)
-        backend = AotEagerAndRecordGraphs()
-        res = torch.compile(m, backend=backend, fullgraph=True)(inp)
-        self.assertEqual(res, m(inp))
-        self.assertExpectedInline(
-            str(backend.graphs[0].code).strip(),
-            """\
-def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
-    l_self_buffers_buffer_ = L_self_buffers_buffer_
-    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
-    l_x_ = L_x_
-    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
-    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
-    to_local = inter.to_local();  inter = None
-    return (to_local,)""",
-        )
-        self.assertExpectedInline(
-            str(backend.fw_graphs[0].code).strip(),
-            f"""\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg3_1 = None
-    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
-    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",
-        )
-
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179690")
-    @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
-    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
-    def test_dtensor_basic_export(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        param = torch.randn(4, 4)
-        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buffer = torch.nn.Buffer(param_x)
-
-            def forward(self, x):
-                inter = self.buffer + DTensor.from_local(
-                    x, mesh, [Shard(0)], run_check=False
-                )
-                return inter.to_local()
-
-        m = Foo()
-        inp = (torch.randn(4, 4, dtype=torch.float64),)
-
-        gm = dynamo_graph_capture_for_export(m)(*inp)
-        tracing_context = gm.meta.get("tracing_context", None)
-
-        self.assertExpectedInline(
-            str(gm.code).strip(),
-            """\
-def forward(self, args_0):
-    _fn_args = (args_0, )
-    L_self_buffers_buffer_ , L_self_buffers_buffer_device_mesh , L_x_ , = self._dynamo_bytecode_flatten(*_fn_args)
-    l_self_buffers_buffer_ = L_self_buffers_buffer_
-    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
-    l_x_ = L_x_
-    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
-    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
-    to_local = inter.to_local();  inter = None
-    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",
-        )
-
-        with tracing(tracing_context):
-            with ExitStack() as stack:
-                joint_with_descriptors = aot_export_joint_with_descriptors(
-                    stack,
-                    gm,
-                    inp,
-                )
-                joint_gm = joint_with_descriptors.graph_module
-
-        # During tracing, sharding propagation cache is skipped, so an extra dry run for
-        # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
-        self.assertExpectedInline(
-            str(joint_gm.code).strip(),
-            f"""\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    _to_copy = torch.ops.aten._to_copy.default(arg2_1, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  arg2_1 = None
-    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
-    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
-    return (view_1,)""",
-        )
 
     def test_placement_compile(self):
         def fn(x):
@@ -875,7 +717,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
-    @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -897,7 +738,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -919,8 +759,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1981")
     def test_dtensor_dynamic_loss_parallel_log_softmax(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -1004,153 +842,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(cnt.frame_count, 1)
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
-
-    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
-    def test_dtensor_unbacked_matmuls(self):
-        from torch.distributed.tensor import randn as d_randn
-
-        # use 2x2 mesh for testing
-        dist.destroy_process_group()
-        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
-        device_mesh = init_device_mesh(self.device_type, (2, 2))
-
-        def test_placements(x_placements, y_placements, out_placements=None):
-            # create DTensors with unbacked outer/inner sizes
-            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=x_placements)
-            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=y_placements)
-            for i in range(2):
-                torch._dynamo.decorators.mark_unbacked(x_dt, i)
-                torch._dynamo.decorators.mark_unbacked(y_dt, i)
-
-            # full-graph capture
-            torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-            fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
-            out = fn(x_dt, y_dt)
-
-            # check output placements
-            if out_placements is not None:
-                self.assertEqual(out.placements, out_placements)
-
-            # test on uneven shardings
-            dx = d_randn(20, 17, device_mesh=device_mesh, placements=x_placements)
-            dy = d_randn(17, 5, device_mesh=device_mesh, placements=y_placements)
-            out, eager_out = fn(dx, dy), torch.mm(dx, dy)
-            self.assertEqual(cnt.frame_count, 1)
-            self.assertEqual(out.shape, eager_out.shape)
-
-        test_placements(
-            (Replicate(), Replicate()),
-            (Replicate(), Replicate()),
-            (Replicate(), Replicate()),
-        )
-        test_placements(
-            (Replicate(), Shard(1)), (Replicate(), Shard(0)), (Replicate(), Partial())
-        )
-        test_placements(
-            (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
-        )
-
-        # note: just check that these run; it's reasonable for the output placements to change,
-        # depending on how tie-breaking is done.
-        test_placements((Partial(), Partial()), (Partial(), Partial()))
-        test_placements((Partial(), Partial()), (Shard(0), Replicate()))
-        test_placements((Replicate(), Shard(0)), (Replicate(), Shard(0)))
-        test_placements((Shard(0), Shard(1)), (Shard(1), Shard(0)))
-        test_placements((Partial(), Replicate()), (Shard(0), Shard(0)))
-
-    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
-    def test_dtensor_matmul_zero_size_shards(self):
-        from torch.distributed.tensor import randn as d_randn
-
-        dist.destroy_process_group()
-        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
-        device_mesh = init_device_mesh(self.device_type, (2, 2))
-
-        # Placements that shard on the contracting/output dims so that
-        # zero-size local shards can arise at runtime.
-        px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
-        # batched variants: shard the non-batch dims the same way
-        bpx, bpy = (Replicate(), Shard(2)), (Replicate(), Shard(1))
-
-        def _run(torch_fn, make_args, unbacked_dims=None):
-            """Compile once on large tensors, then re-run on small/zero-size."""
-            torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-            fn = torch.compile(torch_fn, backend=cnt, fullgraph=True)
-
-            # initial compile with large shapes
-            args0 = make_args(64)
-            for arg_idx, a in enumerate(args0):
-                if unbacked_dims is not None:
-                    for i in unbacked_dims.get(arg_idx, []):
-                        torch._dynamo.decorators.mark_unbacked(a, i)
-                else:
-                    for i in range(a.dim()):
-                        torch._dynamo.decorators.mark_unbacked(a, i)
-            fn(*args0)
-
-            # re-run with m=3 which produces zero-size local shards
-            # (3 < world_size=4), verifying no recompilation
-            for m in [3]:
-                args = make_args(m)
-                c_out = fn(*args)
-                eager_out = torch_fn(*args)
-                self.assertEqual(c_out.shape, eager_out.shape)
-                self.assertEqual(cnt.frame_count, 1)
-
-        # mm: (m,k) @ (k,n) -> (m,n)
-        _run(
-            torch.mm,
-            lambda m: (
-                d_randn(m, 64, device_mesh=device_mesh, placements=px),
-                d_randn(64, 64, device_mesh=device_mesh, placements=py),
-            ),
-        )
-
-        # addmm: bias(n) + (m,k) @ (k,n) -> (m,n)
-        # Only mark mat1 dim 0 (m) as unbacked; bias dims must be backed
-        # because sharding prop checks bias_shape == 1 for broadcast.
-        _run(
-            torch.addmm,
-            lambda m: (
-                d_randn(
-                    64, device_mesh=device_mesh, placements=(Replicate(), Replicate())
-                ),
-                d_randn(m, 64, device_mesh=device_mesh, placements=px),
-                d_randn(64, 64, device_mesh=device_mesh, placements=py),
-            ),
-            unbacked_dims={1: [0]},
-        )
-
-        # bmm: (b,m,k) @ (b,k,n) -> (b,m,n)
-        _run(
-            torch.bmm,
-            lambda m: (
-                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
-                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
-            ),
-            unbacked_dims={0: [1]},
-        )
-
-        # baddbmm: bias(b,1,n) + (b,m,k) @ (b,k,n) -> (b,m,n)
-        # Use bias with m=1 (broadcast) so the bias shape doesn't change
-        # across m values, avoiding recompilation and unbacked broadcast guards.
-        _run(
-            torch.baddbmm,
-            lambda m: (
-                d_randn(
-                    2,
-                    1,
-                    64,
-                    device_mesh=device_mesh,
-                    placements=(Replicate(), Replicate()),
-                ),
-                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
-                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
-            ),
-            unbacked_dims={1: [1]},
-        )
 
     def test_dtensor_matmul_cost_hint_or_upper_bound(self):
         dist.destroy_process_group()
@@ -1446,7 +1137,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(fn(x3), opt_fn(x3))
         self.assertEqual(cnt.frame_count, 2)
 
-    @skipIfHpu
     def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -1483,41 +1173,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
-        # Partial -> Shard on an unbalanced tensor results in:
-        # - A contiguous DTensor
-        # - where the inner _local_tensor is noncontiguous
-        # When this tensor is a fwd graph output,
-        # AOTAutograd needs to make sure we trace the backward
-        # with a contiguous tangent
-        placement = Shard(1)
-
-        def fn(x):
-            out = x.redistribute(mesh, [placement])
-            return out
-
-        # Temporarily ignore setUp(), and use rank3 graphs during tracing
-        dist.destroy_process_group()
-        fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
-        mesh = DeviceMesh(self.device_type, [1, 3])
-
-        x = torch.randn(10, 257, 160, requires_grad=True)
-        x_dt = DTensor.from_local(
-            x,
-            mesh,
-            [Partial()],
-            run_check=False,
-            shape=(10, 257, 160),
-            stride=(41120, 160, 1),
-        )
-
-        out_dt = torch.compile(fn)(x_dt)
-        # If we don't properly contiguify our traced tangents,
-        # this fails with an inductor stride assert
-        out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
         placements = PytreeTuple([Shard(0)])
@@ -1663,32 +1318,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_dtensor_different_gradient_placement(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        def fn(x, y, z):
-            permute = x.permute(0, 2, 1)
-            x.device_mesh
-            permute2 = permute.contiguous()
-            layer_norm = torch.nn.functional.layer_norm(permute2, (4,), y, z, 1e-05)
-            out = layer_norm.permute(0, 2, 1)
-            return out
-
-        x = torch.randn(4, 2, 4, requires_grad=True, device=self.device_type)
-        x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
-
-        y = torch.randn(4, requires_grad=True, device=self.device_type)
-        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
-
-        z = torch.randn(4, requires_grad=True, device=self.device_type)
-        z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        tmp_dt = opt_fn(x_dt, y_dt, z_dt)
-        out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
-        out_dt.sum().backward()
-
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180656"
     )
@@ -1754,7 +1383,6 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         # This should not throw a BypassAOTAutogradCache error
         check_cacheable(backend.graphs[0])
 
-    @skipIfHpu
     def test_dynamo_dtensor_from_local_redistribute_async(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -1826,7 +1454,6 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
-    @skipIfHpu
     def test_graph_input_is_async(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -1887,112 +1514,6 @@ def forward(self, arg0_1):
                 AsyncCollectiveTensor(torch.randn(2, 3)),
             )
         )
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_dtensor_partial_placement_graph_output(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        def fn(x):
-            return x + x
-
-        x = torch.randn(4, 4, requires_grad=True)
-        x_dt = DTensor.from_local(x, mesh, [Partial()], run_check=False)
-
-        y = torch.randn(4, 4, requires_grad=True)
-        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        tmp_dt = opt_fn(x_dt)
-        out_dt = torch.matmul(tmp_dt, y_dt)
-        out_dt.sum().backward()
-
-    @unittest.skipIf(
-        torch._inductor.config.triton.native_matmul, "Matmul is now generated"
-    )
-    def _test_tp_compile_comm_reordering(self):
-        class FakeAttention(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.wq = nn.Linear(16, 16)
-                self.wk = nn.Linear(16, 16)
-                self.wv = nn.Linear(16, 16)
-                self.wo = nn.Linear(16, 16)
-
-            def forward(self, x):
-                xq = self.wq(x)
-                xk = self.wk(x)
-                xv = self.wv(x)
-                # fake attention:
-                xo = xq + xk + xv
-                return self.wo(xo)
-
-        class FakeTransformerBlock(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.attn = FakeAttention()
-
-            def forward(self, x):
-                return self.attn(x)
-
-        class FakeTransformer(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.block = FakeTransformerBlock()
-
-            def forward(self, input):
-                return self.block(input)
-
-        model = FakeTransformer().to(self.device_type)
-
-        tp_mesh = init_device_mesh(self.device_type, (2,), mesh_dim_names=("tp",))
-
-        # apply sequence parallel
-        parallel_plan = {
-            "attn": PrepareModuleInput(
-                input_layouts=Shard(0), desired_input_layouts=Replicate()
-            ),
-            "attn.wq": ColwiseParallel(),
-            "attn.wk": ColwiseParallel(),
-            "attn.wv": ColwiseParallel(),
-            "attn.wo": RowwiseParallel(output_layouts=Shard(0)),
-        }
-
-        parallelize_module(
-            module=model.block,
-            device_mesh=tp_mesh,
-            parallelize_plan=parallel_plan,
-        )
-
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        compiled_model = torch.compile(model, backend=cnt, fullgraph=True)
-        inp = torch.rand(20, 16).to(self.device_type)
-        out = compiled_model(inp)
-        out.sum().backward()
-        self.assertEqual(cnt.frame_count, 1)
-
-        code = run_and_get_triton_code(compiled_model, inp)
-        FileCheck().check(
-            "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
-        ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
-            "extern_kernels.mm(buf0,"
-        ).run(code)
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(1)
-    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    def test_tp_compile_comm_reordering(self):
-        self._test_tp_compile_comm_reordering()
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(1)
-    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @torch._inductor.config.patch("graph_partition", True)
-    def test_tp_compile_comm_reordering_graph_partition(self):
-        self._test_tp_compile_comm_reordering()
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_make_fx_with_invoke_subgraph_dtensor(self):
@@ -2485,172 +2006,6 @@ class outer_fn(torch.nn.Module):
         result = _resolve_group(mesh_1d)
         self.assertIsInstance(result, str)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
-    def test_no_device_mesh_getattr_in_tp_dp_joint_graph(self):
-        """Backward closures of DTensor ops should not capture DeviceMesh as
-        get_attr constants in the joint graph (they break AOTAutograd cache
-        serialization because ProcessGroups are unpicklable)."""
-        from torch._library.fake_class_registry import FakeScriptObject
-
-        # Need world_size=4 for a 2x2 mesh; re-init the fake PG.
-        dist.destroy_process_group()
-        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
-
-        def _distribute_dtensor(
-            tensor: DTensor,
-            device_mesh: DeviceMesh,
-            dp_placements: tuple[Placement, ...],
-        ) -> DTensor:
-            inner_spec = tensor._spec
-            spanned_mesh = DeviceMesh._concatenate([device_mesh, inner_spec.mesh])
-            shard_dim = dp_placements[0].dim
-            split_factor = inner_spec.num_shards_map[shard_dim]
-            tensor_placement = (
-                (
-                    _StridedShard(shard_dim, split_factor=split_factor)
-                    if split_factor > 1
-                    else dp_placements[0]
-                ),
-            ) + inner_spec.placements
-            current_spec = DTensorSpec(
-                mesh=device_mesh,
-                placements=(Replicate(),) * len(dp_placements),
-                tensor_meta=inner_spec.tensor_meta,
-            )
-            target_spec = DTensorSpec(
-                mesh=device_mesh,
-                placements=tuple(dp_placements),
-                tensor_meta=inner_spec.tensor_meta,
-            )
-            result_tensor = redistribute_local_tensor(
-                tensor._local_tensor,
-                current_spec=current_spec,
-                target_spec=target_spec,
-            )
-            return DTensor(
-                result_tensor.requires_grad_(tensor.requires_grad),
-                DTensorSpec(
-                    mesh=spanned_mesh,
-                    placements=tensor_placement,
-                    tensor_meta=inner_spec.tensor_meta,
-                ),
-                requires_grad=tensor.requires_grad,
-            )
-
-        class ReplicateComputation(nn.Module):
-            def __init__(self, device_mesh, param_sharding):
-                super().__init__()
-                self.device_mesh = device_mesh
-                self.param_sharding = param_sharding
-                self.compute_placements = [Replicate()] * device_mesh.ndim
-                self.grad_placements = [Partial(reduce_op="sum")] * device_mesh.ndim
-
-            def forward(self, x):
-                non_dp_mesh_dims = x._spec.mesh.ndim - self.device_mesh.ndim
-                sharded_dtensor = DTensor.from_local(
-                    x.to_local(), self.device_mesh, self.param_sharding
-                )
-                replicated_local_tensor = sharded_dtensor.redistribute(
-                    placements=self.compute_placements,
-                ).to_local(grad_placements=self.grad_placements)
-                non_dp_placements = tuple(x._spec.placements[-non_dp_mesh_dims:])
-                non_dp_mesh_dim_names = tuple(
-                    x._spec.mesh.mesh_dim_names[-non_dp_mesh_dims:]
-                )
-                non_dp_mesh = x._spec.mesh[non_dp_mesh_dim_names]
-                return DTensor.from_local(
-                    replicated_local_tensor, non_dp_mesh, non_dp_placements
-                )
-
-        param_sharding = (Shard(0),)
-        wrap_idx = [0]
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = nn.Linear(16, 16, bias=False)
-                self.linear2 = nn.Linear(16, 16, bias=False)
-
-            def forward(self, x):
-                return self.linear2(torch.relu(self.linear1(x))).sum()
-
-        with torch.compiler.config.patch("compile_on_one_rank", True):
-            device = torch.device(f"{self.device_type}:0")
-            torch.accelerator.set_device_index(0)
-            mesh_2d = init_device_mesh(
-                self.device_type, (2, 2), mesh_dim_names=("fsdp", "tp")
-            )
-            dp_mesh = mesh_2d["fsdp"]
-
-            with torch.device("meta"):
-                model = Model()
-            parallelize_module(
-                model,
-                mesh_2d["tp"],
-                {
-                    "linear1": ColwiseParallel(),
-                    "linear2": RowwiseParallel(),
-                },
-            )
-            # Apply data parallelism with parametrization
-            for mod in model.modules():
-                params_dict = dict(mod.named_parameters(recurse=False))
-                for p_name, p in params_dict.items():
-                    mod.register_parameter(
-                        p_name,
-                        nn.Parameter(_distribute_dtensor(p, dp_mesh, param_sharding)),
-                    )
-                parametrization = ReplicateComputation(dp_mesh, param_sharding)
-                props = {
-                    pn: property(
-                        lambda self, _pn=pn: parametrization(self._parameters[_pn])
-                    )
-                    for pn in params_dict
-                }
-                idx = wrap_idx[0]
-                wrap_idx[0] += 1
-                cls = type(
-                    f"SimpleFSDP{mod.__class__.__name__}_{idx}",
-                    (mod.__class__,),
-                    props,
-                )
-                mod.__class__ = cls
-                import sys
-
-                sys.modules[cls.__module__].__dict__[cls.__name__] = cls
-
-            model.to_empty(device=device)
-            with (
-                torch.compiler.config.patch("compile_on_one_rank", False),
-                torch.no_grad(),
-            ):
-                for p in model.parameters():
-                    p.fill_(0.01)
-            model.train()
-
-            x = torch.randn(4, 16, device=device)
-            with (
-                torch._dynamo.config.patch(fake_tensor_cache_enabled=False),
-                torch.fx.traceback.preserve_node_meta(),
-            ):
-                gm = dynamo_graph_capture_for_export(model)(x)
-                tracing_context = gm.meta["tracing_context"]
-
-            with tracing(tracing_context), ExitStack() as stack:
-                jwd = aot_export_joint_with_descriptors(stack, gm, (x,))
-
-            for node in jwd.graph_module.graph.nodes:
-                if node.op != "get_attr":
-                    continue
-                val = getattr(jwd.graph_module, node.target, None)
-                if isinstance(val, FakeScriptObject):
-                    val = getattr(val, "real_obj", val)
-                self.assertNotIsInstance(
-                    val,
-                    DeviceMesh,
-                    "DeviceMesh should not appear as get_attr in the joint graph",
-                )
-
     def test_compile_optimizer_grad_view_base_dim_mismatch(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/176667
         # When param._local_tensor is a view of an N-D base but
@@ -2787,22 +2142,706 @@ class outer_fn(torch.nn.Module):
         h1 = dt._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
-    def test_stable_hash_for_caching_cuda_ranks(self):
+
+class TestDTensorStandaloneCompileAccelerator(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not has_triton(), "Triton is not available")
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_aot_standalone_compile_dtensor_to_dtype_layout(self, device):
+        from torch._inductor import standalone_compile
+
+        mesh = DeviceMesh(torch.device(device).type, torch.arange(1))
+        index = DTensor.from_local(
+            torch.arange(2, device=device, dtype=torch.int64),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+        rope_cache = DTensor.from_local(
+            torch.randn(4, 4, device=device),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+
+        def backend(gm, example_inputs):
+            return standalone_compile(
+                gm,
+                example_inputs,
+                dynamic_shapes="from_graph",
+                options={"config_patches": {}},
+                aot=True,
+                donate_graph_module=True,
+            )
+
+        def index_to(index, rope_cache):
+            return rope_cache[index].to(device=device).to_local()
+
+        with torch._dynamo.config.patch(enable_aot_compile=True):
+            compiled = torch.compile(index_to, backend=backend, fullgraph=True)
+        with torch.inference_mode():
+            artifact = compiled.aot_compile(((index, rope_cache), {}))
+
+        self.assertIsNotNone(artifact)
+
+
+class TestDTensorCompileAccelerator(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
+        "https://github.com/pytorch/pytorch/issues/178745",
+    )
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
+    def test_dtensor_basic_compile(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+
+        param = torch.randn(4, 4)
+        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(param_x)
+
+            def forward(self, x):
+                inter = self.buffer + DTensor.from_local(
+                    x, self.buffer.device_mesh, [Shard(0)], run_check=False
+                )
+                return inter.to_local()
+
+        m = Foo()
+        inp = torch.randn(4, 4, dtype=torch.float64)
+        backend = AotEagerAndRecordGraphs()
+        res = torch.compile(m, backend=backend, fullgraph=True)(inp)
+        self.assertEqual(res, m(inp))
+        self.assertExpectedInline(
+            str(backend.graphs[0].code).strip(),
+            """\
+def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_self_buffers_buffer_device_mesh : torch.distributed.device_mesh.DeviceMesh, L_x_ : torch.Tensor):
+    l_self_buffers_buffer_ = L_self_buffers_buffer_
+    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
+    l_x_ = L_x_
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
+    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
+    to_local = inter.to_local();  inter = None
+    return (to_local,)""",
+        )
+        self.assertExpectedInline(
+            str(backend.fw_graphs[0].code).strip(),
+            f"""\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='{device_type}', index=0));  arg3_1 = None
+    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+    add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    return (view_1,)""",
+        )
+
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179690")
+    @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
+    def test_dtensor_basic_export(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+
+        param = torch.randn(4, 4)
+        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(param_x)
+
+            def forward(self, x):
+                inter = self.buffer + DTensor.from_local(
+                    x, mesh, [Shard(0)], run_check=False
+                )
+                return inter.to_local()
+
+        m = Foo()
+        inp = (torch.randn(4, 4, dtype=torch.float64),)
+
+        gm = dynamo_graph_capture_for_export(m)(*inp)
+        tracing_context = gm.meta.get("tracing_context", None)
+
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, args_0):
+    _fn_args = (args_0, )
+    L_self_buffers_buffer_ , L_self_buffers_buffer_device_mesh , L_x_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_buffers_buffer_ = L_self_buffers_buffer_
+    l_self_buffers_buffer_device_mesh = L_self_buffers_buffer_device_mesh
+    l_x_ = L_x_
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_self_buffers_buffer_device_mesh, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_self_buffers_buffer_device_mesh = None
+    inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
+    to_local = inter.to_local();  inter = None
+    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",
+        )
+
+        with tracing(tracing_context):
+            with ExitStack() as stack:
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inp,
+                )
+                joint_gm = joint_with_descriptors.graph_module
+
+        # During tracing, sharding propagation cache is skipped, so an extra dry run for
+        # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
+        self.assertExpectedInline(
+            str(joint_gm.code).strip(),
+            f"""\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg2_1, dtype = torch.float64, layout = torch.strided, device = device(type='{device_type}', index=0));  arg2_1 = None
+    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+    add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    return (view_1,)""",
+        )
+
+    def test_dtensor_unbacked_matmuls(self, device):
+        from torch.distributed.tensor import randn as d_randn
+
+        # use 2x2 mesh for testing
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(torch.device(device).type, (2, 2))
+        device_module = torch.get_device_module(torch.device(device).type)
+        if not hasattr(device_module, "set_rng_state"):
+            self.skipTest(f"DTensor RNG is not supported on {device}")
+
+        def test_placements(x_placements, y_placements, out_placements=None):
+            # create DTensors with unbacked outer/inner sizes
+            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=x_placements)
+            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=y_placements)
+            for i in range(2):
+                torch._dynamo.decorators.mark_unbacked(x_dt, i)
+                torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+            # full-graph capture
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
+            out = fn(x_dt, y_dt)
+
+            # check output placements
+            if out_placements is not None:
+                self.assertEqual(out.placements, out_placements)
+
+            # test on uneven shardings
+            dx = d_randn(20, 17, device_mesh=device_mesh, placements=x_placements)
+            dy = d_randn(17, 5, device_mesh=device_mesh, placements=y_placements)
+            out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(out.shape, eager_out.shape)
+
+        test_placements(
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+        )
+        test_placements(
+            (Replicate(), Shard(1)), (Replicate(), Shard(0)), (Replicate(), Partial())
+        )
+        test_placements(
+            (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
+        )
+
+        # note: just check that these run; it's reasonable for the output placements to change,
+        # depending on how tie-breaking is done.
+        test_placements((Partial(), Partial()), (Partial(), Partial()))
+        test_placements((Partial(), Partial()), (Shard(0), Replicate()))
+        test_placements((Replicate(), Shard(0)), (Replicate(), Shard(0)))
+        test_placements((Shard(0), Shard(1)), (Shard(1), Shard(0)))
+        test_placements((Partial(), Replicate()), (Shard(0), Shard(0)))
+
+    def test_dtensor_matmul_zero_size_shards(self, device):
+        from torch.distributed.tensor import randn as d_randn
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(torch.device(device).type, (2, 2))
+        device_module = torch.get_device_module(torch.device(device).type)
+        if not hasattr(device_module, "set_rng_state"):
+            self.skipTest(f"DTensor RNG is not supported on {device}")
+
+        # Placements that shard on the contracting/output dims so that
+        # zero-size local shards can arise at runtime.
+        px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
+        # batched variants: shard the non-batch dims the same way
+        bpx, bpy = (Replicate(), Shard(2)), (Replicate(), Shard(1))
+
+        def _run(torch_fn, make_args, unbacked_dims=None):
+            """Compile once on large tensors, then re-run on small/zero-size."""
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch_fn, backend=cnt, fullgraph=True)
+
+            # initial compile with large shapes
+            args0 = make_args(64)
+            for arg_idx, a in enumerate(args0):
+                if unbacked_dims is not None:
+                    for i in unbacked_dims.get(arg_idx, []):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+                else:
+                    for i in range(a.dim()):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+            fn(*args0)
+
+            # re-run with m=3 which produces zero-size local shards
+            # (3 < world_size=4), verifying no recompilation
+            for m in [3]:
+                args = make_args(m)
+                c_out = fn(*args)
+                eager_out = torch_fn(*args)
+                self.assertEqual(c_out.shape, eager_out.shape)
+                self.assertEqual(cnt.frame_count, 1)
+
+        # mm: (m,k) @ (k,n) -> (m,n)
+        _run(
+            torch.mm,
+            lambda m: (
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+        )
+
+        # addmm: bias(n) + (m,k) @ (k,n) -> (m,n)
+        # Only mark mat1 dim 0 (m) as unbacked; bias dims must be backed
+        # because sharding prop checks bias_shape == 1 for broadcast.
+        _run(
+            torch.addmm,
+            lambda m: (
+                d_randn(
+                    64, device_mesh=device_mesh, placements=(Replicate(), Replicate())
+                ),
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+            unbacked_dims={1: [0]},
+        )
+
+        # bmm: (b,m,k) @ (b,k,n) -> (b,m,n)
+        _run(
+            torch.bmm,
+            lambda m: (
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={0: [1]},
+        )
+
+        # baddbmm: bias(b,1,n) + (b,m,k) @ (b,k,n) -> (b,m,n)
+        # Use bias with m=1 (broadcast) so the bias shape doesn't change
+        # across m values, avoiding recompilation and unbacked broadcast guards.
+        _run(
+            torch.baddbmm,
+            lambda m: (
+                d_randn(
+                    2,
+                    1,
+                    64,
+                    device_mesh=device_mesh,
+                    placements=(Replicate(), Replicate()),
+                ),
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={1: [1]},
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self, device):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        # When this tensor is a fwd graph output,
+        # AOTAutograd needs to make sure we trace the backward
+        # with a contiguous tangent
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=4)
+        mesh = DeviceMesh(torch.device(device).type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        out_dt = torch.compile(fn)(x_dt)
+        # If we don't properly contiguify our traced tangents,
+        # this fails with an inductor stride assert
+        out_dt.to_local().sum().backward()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_different_gradient_placement(self, device):
+        mesh = DeviceMesh(torch.device(device).type, torch.arange(self.world_size))
+
+        def fn(x, y, z):
+            permute = x.permute(0, 2, 1)
+            x.device_mesh
+            permute2 = permute.contiguous()
+            layer_norm = torch.nn.functional.layer_norm(permute2, (4,), y, z, 1e-05)
+            out = layer_norm.permute(0, 2, 1)
+            return out
+
+        x = torch.randn(4, 2, 4, requires_grad=True, device=device)
+        x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        y = torch.randn(4, requires_grad=True, device=device)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        z = torch.randn(4, requires_grad=True, device=device)
+        z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt, y_dt, z_dt)
+        out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
+        out_dt.sum().backward()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_partial_placement_graph_output(self, device):
+        mesh = DeviceMesh(torch.device(device).type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x + x
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [Partial()], run_check=False)
+
+        y = torch.randn(4, 4, requires_grad=True)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt)
+        out_dt = torch.matmul(tmp_dt, y_dt)
+        out_dt.sum().backward()
+
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul, "Matmul is now generated"
+    )
+    def _test_tp_compile_comm_reordering(self, device):
+        device_type = torch.device(device).type
+
+        class FakeAttention(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.wq = nn.Linear(16, 16)
+                self.wk = nn.Linear(16, 16)
+                self.wv = nn.Linear(16, 16)
+                self.wo = nn.Linear(16, 16)
+
+            def forward(self, x):
+                xq = self.wq(x)
+                xk = self.wk(x)
+                xv = self.wv(x)
+                # fake attention:
+                xo = xq + xk + xv
+                return self.wo(xo)
+
+        class FakeTransformerBlock(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attn = FakeAttention()
+
+            def forward(self, x):
+                return self.attn(x)
+
+        class FakeTransformer(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.block = FakeTransformerBlock()
+
+            def forward(self, input):
+                return self.block(input)
+
+        model = FakeTransformer().to(device)
+
+        tp_mesh = init_device_mesh(device_type, (2,), mesh_dim_names=("tp",))
+
+        # apply sequence parallel
+        parallel_plan = {
+            "attn": PrepareModuleInput(
+                input_layouts=Shard(0), desired_input_layouts=Replicate()
+            ),
+            "attn.wq": ColwiseParallel(),
+            "attn.wk": ColwiseParallel(),
+            "attn.wv": ColwiseParallel(),
+            "attn.wo": RowwiseParallel(output_layouts=Shard(0)),
+        }
+
+        parallelize_module(
+            module=model.block,
+            device_mesh=tp_mesh,
+            parallelize_plan=parallel_plan,
+        )
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(model, backend=cnt, fullgraph=True)
+        inp = torch.rand(20, 16).to(device)
+        out = compiled_model(inp)
+        out.sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+
+        code = run_and_get_triton_code(compiled_model, inp)
+        FileCheck().check(
+            "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
+        ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
+            "extern_kernels.mm(buf0,"
+        ).run(code)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    def test_tp_compile_comm_reordering(self, device):
+        self._test_tp_compile_comm_reordering(device)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_tp_compile_comm_reordering_graph_partition(self, device):
+        self._test_tp_compile_comm_reordering(device)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
+    def test_no_device_mesh_getattr_in_tp_dp_joint_graph(self, device):
+        """Backward closures of DTensor ops should not capture DeviceMesh as
+        get_attr constants in the joint graph (they break AOTAutograd cache
+        serialization because ProcessGroups are unpicklable)."""
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        # Need world_size=4 for a 2x2 mesh; re-init the fake PG.
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        def _distribute_dtensor(
+            tensor: DTensor,
+            device_mesh: DeviceMesh,
+            dp_placements: tuple[Placement, ...],
+        ) -> DTensor:
+            inner_spec = tensor._spec
+            spanned_mesh = DeviceMesh._concatenate([device_mesh, inner_spec.mesh])
+            shard_dim = dp_placements[0].dim
+            split_factor = inner_spec.num_shards_map[shard_dim]
+            tensor_placement = (
+                (
+                    _StridedShard(shard_dim, split_factor=split_factor)
+                    if split_factor > 1
+                    else dp_placements[0]
+                ),
+            ) + inner_spec.placements
+            current_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=(Replicate(),) * len(dp_placements),
+                tensor_meta=inner_spec.tensor_meta,
+            )
+            target_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=tuple(dp_placements),
+                tensor_meta=inner_spec.tensor_meta,
+            )
+            result_tensor = redistribute_local_tensor(
+                tensor._local_tensor,
+                current_spec=current_spec,
+                target_spec=target_spec,
+            )
+            return DTensor(
+                result_tensor.requires_grad_(tensor.requires_grad),
+                DTensorSpec(
+                    mesh=spanned_mesh,
+                    placements=tensor_placement,
+                    tensor_meta=inner_spec.tensor_meta,
+                ),
+                requires_grad=tensor.requires_grad,
+            )
+
+        class ReplicateComputation(nn.Module):
+            def __init__(self, device_mesh, param_sharding):
+                super().__init__()
+                self.device_mesh = device_mesh
+                self.param_sharding = param_sharding
+                self.compute_placements = [Replicate()] * device_mesh.ndim
+                self.grad_placements = [Partial(reduce_op="sum")] * device_mesh.ndim
+
+            def forward(self, x):
+                non_dp_mesh_dims = x._spec.mesh.ndim - self.device_mesh.ndim
+                sharded_dtensor = DTensor.from_local(
+                    x.to_local(), self.device_mesh, self.param_sharding
+                )
+                replicated_local_tensor = sharded_dtensor.redistribute(
+                    placements=self.compute_placements,
+                ).to_local(grad_placements=self.grad_placements)
+                non_dp_placements = tuple(x._spec.placements[-non_dp_mesh_dims:])
+                non_dp_mesh_dim_names = tuple(
+                    x._spec.mesh.mesh_dim_names[-non_dp_mesh_dims:]
+                )
+                non_dp_mesh = x._spec.mesh[non_dp_mesh_dim_names]
+                return DTensor.from_local(
+                    replicated_local_tensor, non_dp_mesh, non_dp_placements
+                )
+
+        param_sharding = (Shard(0),)
+        wrap_idx = [0]
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(16, 16, bias=False)
+                self.linear2 = nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return self.linear2(torch.relu(self.linear1(x))).sum()
+
+        with torch.compiler.config.patch("compile_on_one_rank", True):
+            rank_device = torch.device(device)
+            device_type = rank_device.type
+            torch.accelerator.set_device_index(rank_device.index or 0)
+            mesh_2d = init_device_mesh(
+                device_type, (2, 2), mesh_dim_names=("fsdp", "tp")
+            )
+            dp_mesh = mesh_2d["fsdp"]
+
+            with torch.device("meta"):
+                model = Model()
+            parallelize_module(
+                model,
+                mesh_2d["tp"],
+                {
+                    "linear1": ColwiseParallel(),
+                    "linear2": RowwiseParallel(),
+                },
+            )
+            # Apply data parallelism with parametrization
+            for mod in model.modules():
+                params_dict = dict(mod.named_parameters(recurse=False))
+                for p_name, p in params_dict.items():
+                    mod.register_parameter(
+                        p_name,
+                        nn.Parameter(_distribute_dtensor(p, dp_mesh, param_sharding)),
+                    )
+                parametrization = ReplicateComputation(dp_mesh, param_sharding)
+                props = {
+                    pn: property(
+                        lambda self, _pn=pn: parametrization(self._parameters[_pn])
+                    )
+                    for pn in params_dict
+                }
+                idx = wrap_idx[0]
+                wrap_idx[0] += 1
+                cls = type(
+                    f"SimpleFSDP{mod.__class__.__name__}_{idx}",
+                    (mod.__class__,),
+                    props,
+                )
+                mod.__class__ = cls
+                import sys
+
+                sys.modules[cls.__module__].__dict__[cls.__name__] = cls
+
+            model.to_empty(device=rank_device)
+            with (
+                torch.compiler.config.patch("compile_on_one_rank", False),
+                torch.no_grad(),
+            ):
+                for p in model.parameters():
+                    p.fill_(0.01)
+            model.train()
+
+            x = torch.randn(4, 16, device=rank_device)
+            with (
+                torch._dynamo.config.patch(fake_tensor_cache_enabled=False),
+                torch.fx.traceback.preserve_node_meta(),
+            ):
+                gm = dynamo_graph_capture_for_export(model)(x)
+                tracing_context = gm.meta["tracing_context"]
+
+            with tracing(tracing_context), ExitStack() as stack:
+                jwd = aot_export_joint_with_descriptors(stack, gm, (x,))
+
+            for node in jwd.graph_module.graph.nodes:
+                if node.op != "get_attr":
+                    continue
+                val = getattr(jwd.graph_module, node.target, None)
+                if isinstance(val, FakeScriptObject):
+                    val = getattr(val, "real_obj", val)
+                self.assertNotIsInstance(
+                    val,
+                    DeviceMesh,
+                    "DeviceMesh should not appear as get_attr in the joint graph",
+                )
+
+    @deviceCountAtLeast(2)
+    def test_stable_hash_for_caching_cuda_ranks(self, devices):
         # Exercise the exact scenario from #188390: two DTensors with identical
-        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
-        local0 = torch.empty(2, 4, device="cuda:0")
-        local1 = torch.empty(2, 4, device="cuda:1")
+        mesh = DeviceMesh(torch.device(devices[0]).type, torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device=devices[0])
+        local1 = torch.empty(2, 4, device=devices[1])
         dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
         dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
         h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
 
-@instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -2817,10 +2856,11 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("use_ca", [True, False])
-    def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
 
         colwise_style = (
             ColwiseParallel(input_layouts=Shard(0))
@@ -2866,7 +2906,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         out = model(inp)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
@@ -2879,19 +2919,20 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_2d_fsdp_tp_compile(self, use_ca):
+    def test_2d_fsdp_tp_compile(self, use_ca, device):
+        device_type = torch.device(device).type
         data_parallel_size = 2
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            self.device_type,
+            device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -2901,7 +2942,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         tp_model = parallelize_module(model, twod_mesh["tp"], parallelize_plan)
         eager_2d = FSDP(
             tp_model,
-            device_id=dev_type.type,
+            device_id=device_type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -2913,7 +2954,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         fsdp_2d = FSDP(
             tp_model2,
-            device_id=dev_type.type,
+            device_id=device_type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -2931,20 +2972,21 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_2d_fsdp_tp_ac_compile(self, use_ca):
+    def test_2d_fsdp_tp_ac_compile(self, use_ca, device):
+        device_type = torch.device(device).type
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
+            device_type,
             mesh_shape=(dp_degree, tp_degree),
             mesh_dim_names=("dp", "tp"),
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -2986,10 +3028,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_compile_dtensor_redistribute_backward(self, use_ca):
-        mesh = DeviceMesh(
-            device_type=self.device_type, mesh=torch.arange(self.world_size)
-        )
+    def test_compile_dtensor_redistribute_backward(self, use_ca, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type=device_type, mesh=torch.arange(self.world_size))
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
@@ -3000,12 +3041,16 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
 
-        x_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
-        y_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        x_ref = torch.arange(
+            8, requires_grad=True, dtype=torch.float32, device=device_type
+        )
+        y_ref = torch.arange(
+            8, requires_grad=True, dtype=torch.float32, device=device_type
+        )
         ref = fn(x_ref, y_ref)
 
-        x = torch.arange(8, requires_grad=True, dtype=torch.float32)
-        y = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        x = torch.arange(8, requires_grad=True, dtype=torch.float32, device=device_type)
+        y = torch.arange(8, requires_grad=True, dtype=torch.float32, device=device_type)
         res = opt_fn(x, y)
 
         self.assertEqual(res, ref)
@@ -3019,8 +3064,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(y_ref.grad, y.grad)
 
     @with_comms
-    def test_compile_embedding_redistribute(self):
-        mesh = self.build_device_mesh()
+    def test_compile_embedding_redistribute(self, device):
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
 
         class Network(nn.Module):
             def __init__(self, embedding, mesh):
@@ -3033,8 +3079,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 x = x.redistribute(self.mesh, [Shard(1)])
                 return x
 
-        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
-        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        embedding = torch.nn.Embedding(10, 20, device=device_type)
+        inp = torch.randint(0, 10, (8,), device=device_type)
         ref_out = embedding(inp)
         sharded_net = torch.compile(Network(embedding, mesh))
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
@@ -3042,12 +3088,13 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(output.full_tensor(), ref_out)
 
     @with_comms
-    def test_unbacked_illegal_views(self):
+    def test_unbacked_illegal_views(self, device):
         """Test that views with unbacked shapes match eager behavior"""
-        device_mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def create_dt(shard_dim):
-            tensor = torch.randn(8, 8, 8)
+            tensor = torch.randn(8, 8, 8, device=device_type)
             dt = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
             for i in range(3):
                 torch._dynamo.decorators.mark_unbacked(dt, i)
@@ -3082,15 +3129,16 @@ class TestDTensorCompileE2E(DTensorTestBase):
             flatten(dt)
 
     @with_comms
-    def test_split_with_symint_split_size(self):
+    def test_split_with_symint_split_size(self, device):
         """
         Test that split works with symbolic integer split_size when using
         torch.compile with dynamic=True.
         """
-        mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
         placements = [Replicate()]
 
-        global_tensor = torch.randn(8, 8, device=self.device_type)
+        global_tensor = torch.randn(8, 8, device=device_type)
         input_dt = distribute_tensor(global_tensor, mesh, placements)
 
         def split_fn(x, split_size):
@@ -3108,20 +3156,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
     @with_comms
-    def test_dtensor_processgroup_backward(self):
+    def test_dtensor_processgroup_backward(self, device):
         """Test that ProcessGroups are correctly handled in backward graph."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt):
                 out = dt.redistribute(mesh, [Replicate()])
                 return out.sum()
 
-            local_tensor = torch.randn(
-                4, 8, device=self.device_type, requires_grad=True
-            )
+            local_tensor = torch.randn(4, 8, device=device_type, requires_grad=True)
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
             )
@@ -3165,18 +3212,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 )
 
     @with_comms
-    def test_dtensor_processgroup_extraction(self):
+    def test_dtensor_processgroup_extraction(self, device):
         """Test that with compile_on_one_rank, DeviceMesh becomes a graph input
         and ProcessGroups are extracted in-graph as placeholders."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt):
                 return dt.redistribute(mesh, [Replicate()])
 
-            local_tensor = torch.randn(4, 8, device=self.device_type)
+            local_tensor = torch.randn(4, 8, device=device_type)
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
             )
@@ -3214,21 +3262,22 @@ class TestDTensorCompileE2E(DTensorTestBase):
             )
 
     @with_comms
-    def test_dtensor_processgroup_deduplication(self):
+    def test_dtensor_processgroup_deduplication(self, device):
         """Test that multiple DTensors sharing the same ProcessGroup only pass
         it once as a graph placeholder."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt1, dt2):
                 out1 = dt1.redistribute(mesh, [Replicate()])
                 out2 = dt2.redistribute(mesh, [Replicate()])
                 return out1 + out2
 
-            local1 = torch.randn(4, 8, device=self.device_type)
-            local2 = torch.randn(4, 8, device=self.device_type)
+            local1 = torch.randn(4, 8, device=device_type)
+            local2 = torch.randn(4, 8, device=device_type)
             dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
             dt2 = DTensor.from_local(local2, mesh, [Shard(0)], run_check=False)
 
@@ -3277,14 +3326,17 @@ class TestDTensorACCompile(DTensorTestBase):
         to input of top-level.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_tp_ac_compile_dtensor_inner_symbol(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    def test_tp_ac_compile_dtensor_inner_symbol(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         # Embedding produces a DTensor whose inner/outer sizes get
         # independent symbols (outer = global seq_len, inner = local
@@ -3298,7 +3350,7 @@ class TestDTensorACCompile(DTensorTestBase):
             def forward(self, ids):
                 return self.block(self.embed(ids))
 
-        model = EmbedBlock(32, 10, self.device_type)
+        model = EmbedBlock(32, 10, device_type)
 
         parallelize_module(
             model,
@@ -3323,16 +3375,42 @@ class TestDTensorACCompile(DTensorTestBase):
 
         model.block.compile(backend="aot_eager", fullgraph=True)
 
-        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        ids1 = torch.randint(0, 32, (4, 20), device=device_type)
         out1 = model(ids1)
         out1.sum().backward()
         model.zero_grad()
 
         # Different seq_len triggers dynamic-shape recompilation where
         # the DTensor inner symbol gets lifted through the AC HOP.
-        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        ids2 = torch.randint(0, 32, (4, 25), device=device_type)
         out2 = model(ids2)
         out2.sum().backward()
+
+
+instantiate_device_type_tests(
+    TestDTensorCompileAccelerator,
+    globals(),
+    except_for=["cpu", "privateuse1"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorStandaloneCompileAccelerator,
+    globals(),
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorCompileE2E,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorACCompile,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
