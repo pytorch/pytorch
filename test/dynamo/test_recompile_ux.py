@@ -26,7 +26,6 @@ from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -603,7 +602,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             for thread in threads:
                 thread.start()
             for thread in threads:
-                thread.join()
+                thread.join(timeout=120)
+            self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         finally:
             sys.setswitchinterval(prior_interval)
         raised = []
@@ -655,7 +655,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             try:
                 while not stop.is_set():
                     for arg, want in zip(args, expected):
-                        self.assertEqual(opt(arg), want)
+                        if not torch.equal(opt(arg), want):
+                            raise AssertionError("lookup served the wrong result")
             except BaseException as e:
                 errors.put(e)
 
@@ -678,15 +679,18 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
         # A real fd: under pytest's capture sys.stderr has no fileno.
-        faulthandler.dump_traceback_later(120, exit=True, file=sys.__stderr__)
+        faulthandler.dump_traceback_later(120, exit=False, file=sys.__stderr__)
         try:
             for thread in callers + installers:
                 thread.start()
             for thread in installers:
-                thread.join()
+                thread.join(timeout=120)
             stop.set()
             for thread in callers:
-                thread.join()
+                thread.join(timeout=120)
+            self.assertFalse(
+                any(t.is_alive() for t in callers + installers), "a call wedged"
+            )
         finally:
             faulthandler.cancel_dump_traceback_later()
             sys.setswitchinterval(prior_interval)
@@ -2124,13 +2128,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             print("on_same_key", entries(True))
             """
         )
-        stdout, stderr = TestCase.run_process_no_exception(script)
+        stdout, stderr = self.run_process_no_exception(script)
         out = stdout.decode()
-        self.assertIn("off 1", out, stderr.decode())
-        self.assertIn("on 2", out, stderr.decode())
+        self.assertIn("off 1\n", out, stderr.decode())
+        self.assertIn("on 2\n", out, stderr.decode())
         # The key IS the identity, so two backends sharing one key still share
         # one cache entry -- the gate must not simply split every backend.
-        self.assertIn("on_same_key 1", out, stderr.decode())
+        self.assertIn("on_same_key 1\n", out, stderr.decode())
 
     def test_has_precompile_entries_is_region_exact(self):
         """_has_precompile_entries answers for one region only. lookup() never
@@ -2159,8 +2163,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         code = f.__code__
         self.assertFalse(_has_precompile_entries(code, 7))
 
-        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
-        _load_precompile_entry(code, guard_manager, code, 7)
+        entry = _debug_get_cache_entry_list(code)[0]
+        _load_precompile_entry(code, entry.guard_manager, entry.code, 7)
         try:
             self.assertTrue(_has_precompile_entries(code, 7))
             self.assertFalse(_has_precompile_entries(code, 9))
@@ -2189,11 +2193,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
         code = f.__code__
-        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+        entry = _debug_get_cache_entry_list(code)[0]
 
         first, second = object(), object()
-        _load_precompile_entry(code, guard_manager, code, -1, first)
-        _load_precompile_entry(code, guard_manager, code, -1, second)
+        _load_precompile_entry(code, entry.guard_manager, entry.code, -1, first)
+        _load_precompile_entry(code, entry.guard_manager, entry.code, -1, second)
         try:
             self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
             _reset_precompile_entries_for_owner(code, -1, first)
@@ -2330,8 +2334,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             reset_code(code)
 
     def test_clear_cache_entries_for_region_is_region_exact(self):
-        from torch._C._dynamo.eval_frame import _clear_cache_entries_for_region
-
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
