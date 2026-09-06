@@ -363,7 +363,7 @@ if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
         "Turn this warning off by USE_{Q/X}NNPACK=OFF.")
       set(DISABLE_NNPACK_AND_FAMILY ON)
     endif()
-    if(NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+    if(NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64|ARM64)$"))
       message(WARNING
         "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in {Q/X}NNPACK. "
         "Supported architectures are x86, x86-64, ARM, and ARM64. "
@@ -554,6 +554,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
+
+    # On MSVC ARM64, match scripts/build-windows-arm64-native.cmd: enable i8mm
+    # (MSVC arm64 builds it) and disable the clang-only assembly / ARM
+    # fp16-scalar micro-kernels.
+    if(CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+      set(XNNPACK_ENABLE_ARM_I8MM ON CACHE BOOL "" FORCE)
+      set(XNNPACK_ENABLE_ASSEMBLY OFF CACHE BOOL "" FORCE)
+      set(XNNPACK_ENABLE_ARM_FP16_SCALAR OFF CACHE BOOL "" FORCE)
+    endif()
 
     # Disable avxvnni int8
     set(XNNPACK_ENABLE_AVXVNNIINT8 OFF CACHE BOOL "")
