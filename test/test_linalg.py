@@ -4171,6 +4171,22 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float)
+    def test_qr_out_aliased(self, device, dtype):
+        # gh-180377: Q and R out tensors must not share storage, otherwise one
+        # silently overwrites the other (previously accepted for square inputs).
+        A = torch.randn(3, 3, device=device, dtype=dtype)
+        B = torch.empty_like(A)
+        with self.assertRaisesRegex(RuntimeError, "single memory location"):
+            torch.linalg.qr(A, out=(B, B))
+
+        # mode='r' does not compute Q, so the overlap check is skipped and
+        # aliasing the out tensors must not raise.
+        Q = torch.empty(0, device=device, dtype=dtype)
+        torch.linalg.qr(A, mode='r', out=(Q, Q))
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
     def test_linalg_qr_autograd(self, device, dtype):
         # Check differentiability for modes as specified in the docs.
         # Differentiability in all cases is only guaranteed if first k = min(m, n) columns are linearly independent.
