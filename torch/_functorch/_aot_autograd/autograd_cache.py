@@ -33,7 +33,6 @@ from torch._dynamo.utils import (
     warn_once,
 )
 from torch._functorch import config
-from torch._higher_order_ops.effects import is_cacheable_effectful_op
 from torch._inductor.codecache import (
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
@@ -222,12 +221,6 @@ def check_node_safe(node: Node) -> None:
         # Technically, FXGraphCache._check_for_hop already checks this,
         # but better to error earlier anyway
         if isinstance(target, torch._ops.HigherOrderOperator):
-            if (
-                target is torch.ops.higher_order.with_effects
-                and len(node.args) >= 2
-                and is_cacheable_effectful_op(node.args[1])
-            ):
-                return True
             return target.cacheable()
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         if is_builtin_fun_or_type:

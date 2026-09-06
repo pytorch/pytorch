@@ -2207,17 +2207,17 @@ class TestFxGraphCache(TestCase):
         # Verify the "miss" case
         res1 = compiled_fn(a)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertTrue(torch.allclose(res1, torch.linalg.cholesky(a)))
+        self.assertEqual(res1, torch.linalg.cholesky(a))
 
         # Verify the "hit" case
         self.reset()
         res2 = compiled_fn(a)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertTrue(torch.allclose(res2, torch.linalg.cholesky(a)))
+        self.assertEqual(res2, torch.linalg.cholesky(a))
 
         # Verify runtime error check still raises on invalid (non-PD) inputs even with cached graph
         bad_matrix = torch.zeros(4, 4, dtype=torch.float64)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "not positive-definite"):
             compiled_fn(bad_matrix)
 
     @config.patch({"fx_graph_cache": True})

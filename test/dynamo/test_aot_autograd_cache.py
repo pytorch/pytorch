@@ -4339,24 +4339,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Different value -> different hash
         self.assertNotEqual(data_a, data_c)
 
-    def test_with_effects_linalg_check_errors_cacheable(self):
-        graph = torch.fx.Graph()
-        token = graph.placeholder("token")
-        info = graph.placeholder("info")
-        out = graph.call_function(
-            torch.ops.higher_order.with_effects,
-            (
-                token,
-                torch.ops.aten._linalg_check_errors.default,
-                info,
-                "cholesky",
-            ),
-            {"is_matrix": False},
-        )
-        graph.output(out)
-        gm = torch.fx.GraphModule({}, graph)
-
-        check_cacheable(gm)
 
     def test_with_effects_other_effectful_op_bypassed(self):
         graph = torch.fx.Graph()
