@@ -3,6 +3,11 @@
 .. automodule:: torch.compiler
 ```
 
+```{eval-rst}
+.. py:module:: torch.compiler.precompile
+.. currentmodule:: torch.compiler
+```
+
 (torch.compiler_api)=
 # torch.compiler API reference
 
