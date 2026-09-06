@@ -1006,8 +1006,9 @@ def load_compiled_function(
                    global the dict lacks fails the guard (there is no fallback to
                    the values serialized with the artifact). Loading mutates the
                    dict: the ``__import_*`` module aliases and the
-                   ``__builtins_dict___N`` key recorded at capture are inserted,
-                   never overwriting an existing key. The compiled
+                   ``__builtins_dict___N`` key recorded at capture are inserted
+                   (plus ``__builtins__`` when the dict lacks it), never
+                   overwriting an existing key. The compiled
                    bytecode reads a copy of ``f_globals`` taken at load time, so
                    a rebind after load changes which graph the guards select but
                    not what a selected graph computes. (An ``nn.Module`` artifact
