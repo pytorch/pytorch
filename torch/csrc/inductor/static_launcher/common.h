@@ -13,10 +13,9 @@ namespace torch::inductor::static_launcher {
 // launchers.
 inline uint16_t unpackTritonFp16(PyObject* obj) {
   uint16_t bits = 0;
-  if (PyFloat_Pack2(
-          THPUtils_unpackDouble(obj), reinterpret_cast<char*>(&bits), 1) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyFloat_Pack2(
+          THPUtils_unpackDouble(obj), reinterpret_cast<char*>(&bits), 1) >= 0);
   return bits;
 }
 
