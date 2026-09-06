@@ -8665,6 +8665,9 @@ def _meta_grouped_mm_common(
         end_dim = mat.dim() - 1
         alignment = 16 // mat.element_size()
         mat_stride = mat.stride()
+        # Mirrors the ATen guard: an empty operand has no layout to validate.
+        if mat.numel() == 0:
+            return
         if mat_stride[end_dim - 1] == 1 and mat_stride[end_dim] >= max(
             1, mat.shape[end_dim - 1]
         ):

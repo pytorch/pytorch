@@ -27,6 +27,11 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   int end_dim = mat.dim() - 1;
   int alignment = 16 / mat.element_size();
   bool is_cpu = mat.device().is_cpu();
+  // An empty operand has no layout to validate and the branches below accept
+  // no stride vector for it; infer the orientation from the unit stride.
+  if (mat.numel() == 0) {
+    return tensor_strides[end_dim] != 1 && tensor_strides[end_dim - 1] == 1;
+  }
   TORCH_CHECK(is_cpu || uint64_t(mat.data_ptr()) % 16 == 0, "expected data_ptr to be aligned to 16 bytes");
   // 3D inputs: per-batch pointer is base + i*stride(0)*element_size. cuBLAS and cutlass
   // grouped GEMM kernels use TMA which requires 16-byte-aligned pointers, so
