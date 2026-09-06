@@ -250,6 +250,20 @@ class FunctionPicklerBase(pickle.Pickler):
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
 
+    @staticmethod
+    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+        # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name; FORWARDREF
+        # returns a ForwardRef proxy for the unresolved ones instead. Each
+        # subclass decides what to do with a returned proxy.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
+
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
         try:
             contents = cell.cell_contents
@@ -452,9 +466,9 @@ def _resume_global_renames(
     entries: Iterable[_DynamoCodeCacheEntry], install_token: str
 ) -> dict[str, str]:
     """
-    Pick a global name for every resume function that is unique to the code it
-    names and to the package installing it, rather than to the process that
-    captured it.
+    Pick a global name for every resume function that the installing package
+    owns exclusively, so two artifacts that share a capture-time name do not
+    collide in one module dict.
 
     ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
     capture process, so two artifacts captured separately both claim, say,
@@ -463,12 +477,12 @@ def _resume_global_renames(
     the first package's frame then resolves the name to a twin holding another
     region's entries and is served nothing at all.
 
-    The digest alone does not settle it: the shape that mints the same name
-    usually mints the same code with it -- one script captured in two
-    processes, or one artifact loaded twice to serve two model instances --
-    and both then hash to a single name. The token, unique to the loaded
-    package, is what separates those; the digest stays so the name still says
-    which code it belongs to.
+    The per-install token is what actually separates them: it is unique to the
+    loaded package. The code digest is only a readability hint so the name
+    still says which code it belongs to; it is NOT a stability guarantee
+    (pickling a code object is not byte-stable across processes -- constants
+    pass through by reference and a frozenset's byte order is
+    PYTHONHASHSEED-dependent), and nothing relies on it being one.
     """
     renames: dict[str, str] = {}
     for entry in entries:
@@ -484,6 +498,11 @@ def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.Code
     """
     Rewrite ``co_names`` so LOAD_GLOBAL follows the renamed bindings. Indices
     into ``co_names`` are preserved, so the bytecode itself is untouched.
+
+    ``co_names`` is one table shared with LOAD_ATTR/STORE_ATTR/IMPORT_NAME/
+    LOAD_NAME, and every matching slot is rewritten, not just LOAD_GLOBAL's.
+    That is safe only because the rename keys are ``__resume_at_*`` names minted
+    by ``unique_id``, which no attribute or import name plausibly collides with.
     """
     if not renames:
         return code
@@ -1120,11 +1139,13 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
-        # Resume functions install under a global name carrying this token, so
-        # two packages holding byte-identical resume code -- two loads of one
-        # artifact, or two artifacts of one script captured in separate
-        # processes -- do not take each other's name. See _resume_global_renames.
-        self._install_token = uuid.uuid4().hex
+        # Suffix minted once here (never refreshed) and appended to every
+        # resume function's global name, so two packages holding byte-identical
+        # resume code -- two loads of one artifact, or two artifacts of one
+        # script captured in separate processes -- do not take each other's
+        # name. Distinct from _install_owner, which is re-minted per install.
+        # See _resume_global_renames.
+        self._resume_name_token = uuid.uuid4().hex
         # Runtime guards stay intact; this filter applies only to the guard
         # state recorded in the package.
         self._serialization_guard_filter_fn = serialization_guard_filter_fn
@@ -1510,9 +1531,9 @@ class CompilePackage:
         from .output_graph import get_builtins_dict
 
         self.uninstall()
-        # A fresh token per install: the uninstall above may have PARKED
-        # its eviction (lock contended, or run from inside a lookup), and
-        # a parked eviction keyed on the old token must not take the
+        # A fresh owner identity per install: the uninstall above may have
+        # PARKED its eviction (lock contended, or run from inside a lookup),
+        # and a parked eviction keyed on the old owner must not take the
         # entries this install is about to add.
         self._install_owner = object()
         self._installed_precompile_region_id = isolate_recompiles_id
@@ -1520,7 +1541,7 @@ class CompilePackage:
         # this package, not under the name the capture process happened to
         # mint. Every reference to them lives in some frame's dynamo bytecode,
         # remapped below.
-        renames = _resume_global_renames(self._codes.values(), self._install_token)
+        renames = _resume_global_renames(self._codes.values(), self._resume_name_token)
         # Registered before anything is installed, so a failed install is still
         # torn down when the package dies. The callback must not capture self
         # (it would never fire); it works off the containers the loop below
@@ -1584,7 +1605,11 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
-                if target_code not in self._installed_precompile_codes:
+                # Dedup on identity: code objects compare structurally, so two
+                # distinct frames with identical bytecode would collapse under
+                # ``in``. input_codes above already keys on id() for the same
+                # reason.
+                if not any(target_code is c for c in self._installed_precompile_codes):
                     # Deliberately NOT clearing the region here. A frame reached
                     # through code_source is shared -- a library block two
                     # loaded models both call -- and several packages may hold
