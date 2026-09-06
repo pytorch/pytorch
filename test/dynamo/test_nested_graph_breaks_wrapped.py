@@ -108,7 +108,8 @@ xfails = [
     NestedGraphBreaksMiscTests.test_guard_sym_node_fstring_when_used_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_replay_side_effects_config_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_replay_side_effects_model_attr_nested_graph_breaks,  # noqa: F821
-    # doesn't work due to debug_force_nested_calls wrapping the top frame
+    # caching_precompile initializes the package before debug_force_nested_calls
+    # replaces the top frame, so the package is keyed to a different code object
     NestedGraphBreaksMiscTests.test_dynamo_cache_move_to_front_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_dynamo_reset_clears_cache_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_fail_on_recompile_error_message_nested_graph_breaks,  # noqa: F821
@@ -117,6 +118,7 @@ xfails = [
     NestedGraphBreaksMiscTests.test_precompile_entry_hit_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_fail_on_recompile_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksDecoratorTests.test_compile_staticmethod_caching_precompile_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksDecoratorTests.test_compile_class_caching_precompile_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_deep_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_nested_graph_breaks,  # noqa: F821
     # differing op_count
