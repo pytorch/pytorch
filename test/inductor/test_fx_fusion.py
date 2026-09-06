@@ -8,12 +8,17 @@ from torch._inductor.fx_passes.pre_grad import (
     linear_transpose,
     permute_linear_fusion,
     permute_matmul_fusion,
+    remove_identity,
     sink_cat_after_pointwise,
     transpose_linear,
     transpose_matmul,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
@@ -45,6 +50,26 @@ def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
 
 
 class TestFxFusion(TestCase):
+    @parametrize("call_form", ("positional", "keyword"))
+    def test_remove_identity(self, call_form: str):
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                if call_form == "keyword":
+                    return self.identity(input=x).tanh()
+                return self.identity(x).tanh()
+
+        module = Module()
+        inputs = [torch.randn(8, 8)]
+        trace_func = chain_passes(torch.fx.symbolic_trace, remove_identity)
+        traced = trace_func(module, inputs)
+
+        self.assertEqual(count_call(traced, "call_module", "identity"), 0)
+        torch.testing.assert_close(module(*inputs), traced(*inputs))
+
     def test_sink_cat_after_pointwise(self):
         def test_kwarg(x, y):
             return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
@@ -183,6 +208,9 @@ class TestFxFusion(TestCase):
         self.assertEqual(num_transpose_matmul, 1)
 
         torch.testing.assert_close(module(input), traced(input))
+
+
+instantiate_parametrized_tests(TestFxFusion)
 
 
 if __name__ == "__main__":
