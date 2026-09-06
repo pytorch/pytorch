@@ -15,6 +15,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._import_utils import import_dill
 
@@ -63,6 +64,7 @@ GraphPicklerCommonTemplate = make_test_cls(CommonTemplate)
 if HAS_CPU and HAS_DILL:
 
     class GraphPicklerCpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -71,6 +73,8 @@ if HAS_CPU and HAS_DILL:
 
 @unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphPickler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -101,6 +105,8 @@ class TestGraphPickler(TestCase):
 @unittest.skipUnless(HAS_DILL, "dill not available")
 class TestDebugDumps(TestCase):
     """Tests for GraphPickler.debug_dumps debugging utility."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -250,6 +256,8 @@ class TestDebugDumps(TestCase):
 class TestHigherOrderOperatorPickle(TestCase):
     """Tests for HigherOrderOperator pickling support in GraphPickler."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch.fx._graph_pickler import _OpPickleData, GraphPickler, Options
@@ -317,6 +325,8 @@ class TestHigherOrderOperatorPickle(TestCase):
 class TestHopSchemaPickle(TestCase):
     """Tests for HopSchema pickling support."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hop_schema_pickle_roundtrip(self):
         """
         Test that a HopSchema can be pickled and unpickled correctly.
@@ -377,6 +387,8 @@ class TestHopSchemaPickle(TestCase):
 class TestSerializedGraphModule(TestCase):
     """Tests for SerializedGraphModule using GraphPickler."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple_graph_module_roundtrip(self):
         """
         Test that a simple GraphModule can be serialized and deserialized.
@@ -423,6 +435,8 @@ class TestSerializedGraphModule(TestCase):
 @unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphModuleGetState(TestCase):
     """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_graph_module_getstate_is_called(self):
         """
@@ -499,6 +513,8 @@ class TestDillSerializationFeatures(TestCase):
     relies on module-level name lookup and cannot handle inner functions,
     lambdas, locally defined classes, and closures capturing runtime state.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -742,6 +758,8 @@ def forward(self, x):
 class TestNodeMetadataKeyFilter(TestCase):
     """Tests for the node_metadata_key_filter option in GraphPickler."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_filter_excludes_known_unserializable_keys(self):
         """
         The default _node_metadata_key_filter_safe should exclude known
@@ -859,6 +877,8 @@ class TestNodeMetadataKeyFilter(TestCase):
 
 
 class TestNodeStateSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_type_entry_preserved_in_getstate(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -875,6 +895,8 @@ class TestNodeStateSerialization(TestCase):
 @unittest.skipUnless(HAS_DILL, "dill not available")
 class TestIgnoreRawNode(TestCase):
     """Tests for the ignore_raw_node option in GraphPickler.Options."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -938,6 +960,8 @@ class _WeakrefTarget:
 @unittest.skipUnless(HAS_DILL, "dill not available")
 class TestWeakrefPickle(TestCase):
     """Tests that weakref objects are properly serialized and reconstructed."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1104,6 +1128,8 @@ class TestViewTensorPickle(TestCase):
     FakeTensorConverter -> MetaConverter.storage_memo graph into the pickle,
     which dies on a meta storage's data_ptr().
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
