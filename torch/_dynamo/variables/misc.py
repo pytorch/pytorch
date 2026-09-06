@@ -2262,7 +2262,7 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 gb_type="attempted to trace numpy function unsupported by PyTorch",
                 context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
-                explanation=f"Can't find numpy numpy function {self.value} in torch._numpy.",
+                explanation=f"Can't find numpy function {self.value} in torch._numpy.",
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
