@@ -329,10 +329,15 @@ void ExtraState::clear_in_place() {
       // interrupted lookup makes reset()'s clean-slate contract asynchronous: a
       // reset() on another thread parks here while this thread's lookup holds
       // depth > 0 and returns with the entries still present and servable,
-      // until the next depth-zero holder drains them. Every reader that matters
-      // (lookup, _get_total_cache_entry_count, _debug_get_cache_entry_list)
-      // drains before it reads, so the stale state is not observable from
-      // Python afterward. This cross-thread park is new with releasing
+      // until the next depth-zero holder drains them. The readers that could
+      // observe them -- lookup, _get_total_cache_entry_count,
+      // _debug_get_cache_entry_list -- all apply pending evictions before they
+      // read, so a Python caller never sees the parked entries as live. The one
+      // depth-zero op that does NOT drain first is
+      // _clear_cache_entries_for_region, which erases a single region in place;
+      // that is safe because a parked CLEAR_ALL swaps the whole map when it
+      // finally runs and does not mind that one region is already gone. This
+      // cross-thread park is new with releasing
       // cache_mutex during guard evaluation; the old recursive mutex would have
       // blocked the peer instead.
       this->park_eviction(
@@ -693,10 +698,11 @@ void lookup(
     // Precompile entries match their OWN region only, deliberately unlike the
     // cache-entry fallback below. The identity guards that would tell two
     // artifacts of one model apart are exactly the ones precompile has to drop,
-    // so a fallback here serves another artifact's graph for a call this region
-    // does not cover, instead of the miss that serving() turns into a loud
-    // error. Callers that install for an isolated region must pass its id (see
-    // CompilePackage.install) rather than rely on the default bucket.
+    // so a fallback here would serve another artifact's graph for a call this
+    // region does not cover. A miss is the correct outcome instead: it becomes
+    // a recompile the serving path can reject loudly. The installer therefore
+    // registers each isolated region under its own id, never the default
+    // bucket.
     for (const auto& entry : extra_state->precompile_entries) {
       if (entry.isolate_recompiles_id == isolate_recompiles_id) {
         precompile_candidates.push_back(&entry);
