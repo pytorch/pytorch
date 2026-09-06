@@ -263,7 +263,7 @@ class PyTreeSpec:
     def __len__(self, /) -> int:
         return self.num_leaves
 
-    def __eq__(self, other: Any, /) -> bool:
+    def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, PyTreeSpec):
             return NotImplemented
         if (
@@ -493,7 +493,9 @@ class PyTreeSpec:
         return self._unflatten_func(self._metadata, subtrees)
 
 
-def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
+def _is_pytreespec_instance(
+    obj: object, /
+) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
     return isinstance(obj, (PyTreeSpec, python_pytree.TreeSpec))
 
 
