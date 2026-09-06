@@ -43,25 +43,37 @@ inline GroupedScaleSpec make_grouped_scale_spec(
   bool is_src = (arg_type == GroupedGemmArgType::Src);
 
   switch (scaling_type) {
+      // Refer to
+      // https://uxlfoundation.github.io/oneDNN/dev_guide_attributes_quantization.html#relevant-apis-and-supported-granularity-levels
     case at::blas::ScalingType::RowWise:
-      // For FP8 rowwise with grouped matmul, use set_scales_mask (no groups)
-      // following the official grouped matmul example:
-      //   src: mask=(1<<0) -> per-token scale, shape [M]
-      //   wei: mask=(1<<0)|(1<<2) -> per-group-per-N scale, shape [G, N]
+      // For FP8 rowwise with grouped matmul, use mask only to configure the
+      // scales.
+      //   src: mask=(1<<0)=0x1 -> scale vary along 0th dimension, shape [M]
+      //   wei: mask=(1<<0)|(1<<2)=0x5 -> scale vary along 0th and 2nd
+      //   dimensions, shape [G, N]
       return {
-          is_src ? (1 << 0) : (1 << 0) | (1 << 2),
+          is_src ? 0x1 : 0x5,
           {},
           dnnl::memory::data_type::f32,
           /*use_mask_only=*/true};
     case at::blas::ScalingType::BlockWise1x32:
+      // For MxFP8/MxFP4 blockwise scaling, use mask and groups to configure the
+      // scales.
+      //   src: mask=(1<<0)|(1<<1)=0x3 -> the 0th and 1st dimensions will be
+      //   divided into groups,
+      //        group shape=[1, 32]
+      //   wei: mask=(1<<0)|(1<<1)|(1<<2)=0x7 -> the 0th, 1st, and 2nd
+      //   dimensions will be divided into groups,
+      //        group shape=[1, 32, 1] but OneDNN only accepts 2D group shapes
+      //        now so uses [32, 1].
       return {
-          is_src ? (1 << 0) | (1 << 1) : (1 << 0) | (1 << 1) | (1 << 2),
+          is_src ? 0x3 : 0x7,
           is_src ? dnnl::memory::dims{1, 32} : dnnl::memory::dims{32, 1},
           dnnl::memory::data_type::e8m0,
           /*use_mask_only=*/false};
     case at::blas::ScalingType::BlockWise1x16:
       return {
-          is_src ? (1 << 0) | (1 << 1) : (1 << 0) | (1 << 1) | (1 << 2),
+          is_src ? 0x3 : 0x7,
           is_src ? dnnl::memory::dims{1, 16} : dnnl::memory::dims{16, 1},
           dnnl::memory::data_type::f8_e4m3,
           /*use_mask_only=*/false};
