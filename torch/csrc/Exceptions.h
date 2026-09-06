@@ -2,12 +2,14 @@
 
 #include <exception>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
@@ -386,6 +388,41 @@ struct PyWarningHandler {
 };
 
 namespace detail {
+
+// Acquiring the GIL can throw; letting that escape a noexcept context
+// (destructors, refcount callbacks) calls std::terminate. Catches it and
+// reports success via the bool conversion -- check before touching any
+// GIL-dependent Python API. Also owns the rest of "is it safe to touch
+// Python right now": skips acquiring entirely if Python was never
+// initialized or has already fully finalized, so callers don't each need
+// their own Py_IsInitialized()/Py_IsFinalizing() guard.
+//
+// Finalization can start at any point, so this checks Py_IsFinalizing both
+// before acquiring (skip outright) and after (disarm(), since thread-state
+// deletion isn't allowed mid-shutdown).
+class SafeGilScopedAcquire {
+ public:
+  SafeGilScopedAcquire() {
+    if (!Py_IsInitialized() || Py_IsFinalizing()) {
+      return;
+    }
+    try {
+      guard_.emplace();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to acquire the GIL: " << e.what();
+      return;
+    }
+    if (Py_IsFinalizing()) {
+      guard_->disarm();
+    }
+  }
+  explicit operator bool() const {
+    return guard_.has_value();
+  }
+
+ private:
+  std::optional<pybind11::gil_scoped_acquire> guard_;
+};
 
 struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid

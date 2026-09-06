@@ -1,5 +1,6 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -234,27 +235,30 @@ py::object torchDispatchFromTensorImpl(
 }
 
 void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
-  // Leak the pyobj if not initialized.  This can happen if we are running
-  // exit handlers that are destructing tensors with residual (owned)
-  // PyObjects stored in them.
-  if (!Py_IsInitialized())
+  // Leak the pyobj if the GIL can't be acquired (e.g. Python isn't
+  // initialized).  This can happen if we are running exit handlers that are
+  // destructing tensors with residual (owned) PyObjects stored in them.
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
     return;
-  pybind11::gil_scoped_acquire gil;
+  }
   Py_DECREF(pyobj);
 }
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
-  if (!Py_IsInitialized())
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
     return;
-  pybind11::gil_scoped_acquire gil;
+  }
   Py_INCREF(pyobj);
 }
 
 bool ConcretePyInterpreterVTable::try_incref(
     const c10::impl::PyObjectSlot& pyobj_slot) const {
-  if (!Py_IsInitialized())
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
     return false;
-  pybind11::gil_scoped_acquire gil;
+  }
   PyObject* pyobj = pyobj_slot.load_pyobj();
   if (!pyobj) {
     return false;
@@ -263,9 +267,12 @@ bool ConcretePyInterpreterVTable::try_incref(
 }
 
 size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
-  if (!Py_IsInitialized() || pyobj == nullptr)
+  if (pyobj == nullptr)
     return 0;
-  pybind11::gil_scoped_acquire gil;
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return 0;
+  }
   return Py_REFCNT(pyobj);
 }
 

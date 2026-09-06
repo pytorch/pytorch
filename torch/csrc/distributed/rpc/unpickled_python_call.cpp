@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
 namespace torch::distributed::rpc {
@@ -13,13 +14,16 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 UnpickledPythonCall::~UnpickledPythonCall() {
+  torch::detail::SafeGilScopedAcquire acquire;
+  if (acquire) {
+    pythonUdf_.dec_ref();
+  }
   // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-  // decref on the PyObject again.
+  // decref on the PyObject again. If the GIL could not be acquired above,
+  // this deliberately leaks the reference rather than touching the
+  // refcount without the GIL held.
   // See Note [Destructing py::object] in python_ivalue.h
-  py::gil_scoped_acquire acquire;
-  pythonUdf_.dec_ref();
   pythonUdf_.ptr() = nullptr;
 }
 
