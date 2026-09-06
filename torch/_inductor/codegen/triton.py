@@ -3391,6 +3391,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+        # AMD buffer ops reject negative offsets from the kernel pointer.
+        self.negative_offset_found = False
 
     @property
     def uses_tma(self) -> bool:
@@ -4980,6 +4982,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         if isinstance(indexing, IndexingOptions):
+            coeff = sympy.expand(indexing.index).as_coeff_Add()[0]
+            if coeff.is_number and coeff < 0:
+                self.negative_offset_found = True
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
 
@@ -7632,7 +7637,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # we must not tag any args with pointer_range_32 in that case.
         # Also disable pointer_range_32 when the config flag is off.
         if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
+            self.atomic_add_found
+            or self.negative_offset_found
+            or not config.triton.emit_pointer_range_32
         ):
             triton_meta["configs"] = [
                 config_of(
