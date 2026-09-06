@@ -18,6 +18,7 @@ import torch
 from torch._inductor.codegen.common import InplacedBuffer, REMOVED
 from torch._inductor.codegen.triton import triton_store_type
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestBlockPtrStoreDtype(TestCase):
@@ -32,6 +33,8 @@ class TestBlockPtrStoreDtype(TestCase):
                 store_dtype = V.graph.get_dtype(buf.other_names[0])
         value = f"{value}.to({triton_store_type(store_dtype)})"
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _resolve_store_dtype(name, inplace_buffers, get_dtype):
