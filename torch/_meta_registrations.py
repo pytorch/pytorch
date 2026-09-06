@@ -6180,7 +6180,11 @@ def gather_shape_check(self, dim, index):
     index_dims = max(index.dim(), 1)
     torch._check(
         self_dims == index_dims,
-        lambda: "Index tensor must have the same number of dimensions as input tensor",
+        lambda: (
+            "Index tensor must have the same number of dimensions as input tensor, "
+            f"where a 0-D tensor counts as 1-D, but got index with {index.dim()} "
+            f"and input with {self.dim()} dimension(s)"
+        ),
     )
     for i in range(self_dims):
         if i != dim:
@@ -6262,7 +6266,11 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         return
     torch._check(
         ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-        lambda: "Index tensor must have the same number of dimensions as self tensor",
+        lambda: (
+            "Index tensor must have the same number of dimensions as self tensor, "
+            f"where a 0-D tensor counts as 1-D, but got index with {index.dim()} "
+            f"and self with {self.dim()} dimension(s)"
+        ),
     )
 
     self_dims = ensure_nonempty_dim(self.dim())
@@ -6284,7 +6292,11 @@ def scatter_shape_check(self, dim, index, src_opt=None):
     if src_opt is not None:
         torch._check(
             ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(src_opt.dim()),
-            lambda: "Index tensor must have the same number of dimensions as src tensor",
+            lambda: (
+                "Index tensor must have the same number of dimensions as src tensor, "
+                f"where a 0-D tensor counts as 1-D, but got index with {index.dim()} "
+                f"and src with {src.dim()} dimension(s)"
+            ),
         )
         for d in range(self_dims):
             index_d_size = ensure_nonempty_size(index, d)
