@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import gc
 import importlib
 import os
@@ -19,16 +20,15 @@ from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     TEST_WITH_TORCHDYNAMO,
 )
-from torch.testing._internal.inductor_utils import (
-    HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
-)
+from torch.utils._triton import has_triton
 
 
 def compute_loss_helper(x):
@@ -43,6 +43,8 @@ def compiled_region_with_backend_id_for_package_test():
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
@@ -85,227 +87,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
-
-    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
-    def test_nn_module(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10, device="cuda")
-
-            def forward(self, x):
-                return self.linear(x)
-
-        fn = MyModule()
-        package = CompilePackage(fn.forward)
-        compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
-        x = torch.randn(10, 10, device="cuda")
-        compiled_fn(x)
-
-    @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    def test_basic_fn(self, backend, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
-        ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x + 1
-
-        args = (
-            torch.randn(
-                3,
-                2,
-                device=device,
-            ),
-        )
-
-        # Saving
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
-        expected = compiled_fn(*args)
-        if backend == "eager":
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-
-        ctx.save_package(package, self.path())
-        # Loading
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(*args)
-
-            package, backends = ctx.load_package(fn, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(backends)
-            self.assertEqual(expected, compiled_fn(*args))
-
-    @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    def test_lazy_backward(self, backend, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
-        ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x.sin() + x.cos()
-
-        args = (
-            torch.zeros(
-                3,
-                2,
-                device=device,
-                requires_grad=True,
-            ),
-        )
-
-        # Saving
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
-        expected = compiled_fn(*args)
-        expected.sum().backward()
-
-        if backend == "eager":
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-
-        ctx.save_package(package, self.path())
-        # Loading
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(*args)
-
-            package, backends = ctx.load_package(fn, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(backends)
-            self.assertEqual(expected, compiled_fn(*args))
-
-    @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    def test_graph_break_bomb(self, backend, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
-        ctx = DiskDynamoStore()
-
-        def fn(x, l, r):
-            if l > r:
-                return x.sum()
-            mid = (l + r) // 2
-            if x.sum() == mid:
-                return x.sum()
-            elif x.sum() < mid:
-                return fn(x, l, mid)
-            else:
-                return fn(x, mid + 1, r)
-
-        def guard_filter_fn(guards):
-            return [
-                guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
-                for guard in guards
-            ]
-
-        # Saving
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(
-            backend=backend, package=package, guard_filter_fn=guard_filter_fn
-        )(fn)
-        N = 10
-        args_list = [(torch.tensor(x, device=device), 0, N - 1) for x in range(N)]
-        for args in args_list:
-            compiled_fn(*args)
-        if backend == "eager":
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
-
-        # Loading
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            for args in args_list:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-                ):
-                    compiled_fn(*args)
-            package, backends = ctx.load_package(fn, self.path())
-            compiled_fn = torch._dynamo.optimize(
-                backend="eager", package=package, guard_filter_fn=guard_filter_fn
-            )(fn)
-            package.install(backends)
-            for args in args_list:
-                self.assertEqual(compiled_fn(*args), args[0].sum())
-
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(torch.tensor(N), 0, N - 1)
-
-    @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    def test_dynamic_shape(self, backend, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
-        ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x + x.shape[0]
-
-        args = (torch.randn(3, 2, device=device),)
-        args1 = (torch.randn(5, 2, device=device),)
-        args2 = (torch.randn(7, 2, device=device),)
-        expected1 = fn(*args1)
-
-        torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
-
-        # Saving
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
-        compiled_fn(*args)
-        if backend == "eager":
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
-
-        # Loading
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(*args1)
-
-            package, backends = ctx.load_package(fn, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(fn)
-            package.install(backends)
-
-            self.assertEqual(expected1, compiled_fn(*args1))
-
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
-            ):
-                compiled_fn(*args2)
 
     def test_install_survives_stale_cleanup_hooks(self):
         # The first compile installs its generated functions -- and, on every
@@ -456,13 +237,341 @@ def add(x, y):
             )
             ctx.load_package(fn, self.path())
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    def test_dynamo_cache_manual_load(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
+    @parametrize("backend", ("eager", "inductor"))
+    def test_reset_clears_installed_package(self, backend):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
+        # package.install() must register target_code in input_codes so that
+        # torch._dynamo.reset() clears precompile entries on the installed code.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
+        compiled_fn(torch.randn(3, 2))
+        if backend == "eager":
+            for backend_id, bknd in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_import_source_unpickle_without_trace(self):
+        # Deserializing an ImportSource happens at torch.compile() time with no
+        # active TracingContext (e.g. precompile warm-load). Reconstructing the
+        # source must not install a guard (which would require a tracing
+        # context), so the round-trip must not raise.
+        import pickle
+
+        from torch._dynamo.source import ImportSource
+
+        source = ImportSource("torch")
+        reloaded = pickle.loads(pickle.dumps(source))
+        self.assertEqual(reloaded, source)
+
+
+class _tempTensorSamplerForQualName:
+    def __init__(self, val, mask, prob):
+        self.val = val
+        self.mask = mask
+        self.prob = prob
+
+    @classmethod
+    def class_method_that_is_used(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    @classmethod
+    def class_method_that_is_not_used(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    def instance_method_that_is_used(self, x):
+        return x / 2
+
+
+class _tempNetForQualName(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def instance_method_without_args(self):
+        shape = [1, 2, 3, 4]
+        x = torch.randn(shape)
+        return x
+
+    def instance_method_with_args(self, x):
+        return x + 1
+
+    def forward(self, x):
+        x *= x
+        with torch.device(x.device):
+            y = self.instance_method_without_args()
+        # test classmethod called from class
+        sampler = _tempTensorSamplerForQualName.class_method_that_is_used(x)
+        x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+        # test instance method called from instance
+        x = sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
+        another_sampler = sampler.class_method_that_is_not_used(x)
+        # test instance method called from instance
+        x = another_sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
+        x += y.sum()
+        x = self.instance_method_with_args(x)
+        return x
+
+
+class TestPackageAccelerator(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    _package_config_stack = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls._package_config_stack = contextlib.ExitStack()
+        cls._package_config_stack.enter_context(
+            functorch_config.patch("bundled_autograd_cache", True)
+        )
+        cls._package_config_stack.enter_context(
+            torch._dynamo.config.patch({"strict_precompile": True})
+        )
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            super().tearDownClass()
+        finally:
+            cls._package_config_stack.close()
+            cls._package_config_stack = None
+
+    def path(self):
+        path = os.path.join(cache_dir(), f"package_{self.id()}")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
+
+    def _save_and_reload(self, expected_backends, expected_dynamo):
+        """
+        Serializes all artifacts, clears all caches, then reloads the serialized artifact
+        Simulates a new process.
+
+        Args:
+            expected_backends: Expected number of precompile_aot_autograd_artifacts
+            expected_dynamo: Expected number of precompile_dynamo_artifacts
+        """
+        debug_info = PrecompileContext.save_to_dynamo_cache()
+        self.assertEqual(len(debug_info["dynamo"]), expected_dynamo)
+        self.assertEqual(len(debug_info["backends"]), expected_backends)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_basic_fn(self, device, backend):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        args = (
+            torch.randn(
+                3,
+                2,
+                device=device,
+            ),
+        )
+
+        # Saving
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        expected = compiled_fn(*args)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+
+        ctx.save_package(package, self.path())
+        # Loading
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(*args)
+
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(*args))
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_lazy_backward(self, device, backend):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        args = (
+            torch.zeros(
+                3,
+                2,
+                device=device,
+                requires_grad=True,
+            ),
+        )
+
+        # Saving
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        expected = compiled_fn(*args)
+        expected.sum().backward()
+
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+
+        ctx.save_package(package, self.path())
+        # Loading
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(*args)
+
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(*args))
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_graph_break_bomb(self, device, backend):
+        ctx = DiskDynamoStore()
+
+        def fn(x, l, r):
+            if l > r:
+                return x.sum()
+            mid = (l + r) // 2
+            if x.sum() == mid:
+                return x.sum()
+            elif x.sum() < mid:
+                return fn(x, l, mid)
+            else:
+                return fn(x, mid + 1, r)
+
+        def guard_filter_fn(guards):
+            return [
+                guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
+                for guard in guards
+            ]
+
+        # Saving
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend=backend, package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        N = 10
+        args_list = [(torch.tensor(x, device=device), 0, N - 1) for x in range(N)]
+        for args in args_list:
+            compiled_fn(*args)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        # Loading
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            for args in args_list:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+                ):
+                    compiled_fn(*args)
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(
+                backend="eager", package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            package.install(backends)
+            for args in args_list:
+                self.assertEqual(compiled_fn(*args), args[0].sum())
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(torch.tensor(N), 0, N - 1)
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_dynamic_shape(self, device, backend):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + x.shape[0]
+
+        args = (torch.randn(3, 2, device=device),)
+        args1 = (torch.randn(5, 2, device=device),)
+        args2 = (torch.randn(7, 2, device=device),)
+        expected1 = fn(*args1)
+
+        torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
+
+        # Saving
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
+        compiled_fn(*args)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        # Loading
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(*args1)
+
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+
+            self.assertEqual(expected1, compiled_fn(*args1))
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(*args2)
+
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_dynamo_cache_manual_load(self, device):
         def fn(x):
             return x.sin() + x.cos()
 
@@ -492,42 +601,9 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @parametrize("backend", ("eager", "inductor"))
-    def test_reset_clears_installed_package(self, backend):
-        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
-        # package.install() must register target_code in input_codes so that
-        # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
-        ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x.sin() + x.cos()
-
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
-        compiled_fn(torch.randn(3, 2))
-        if backend == "eager":
-            for backend_id, bknd in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, bknd)
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        package.install(backends)
-        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-        torch._dynamo.reset()
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -554,31 +630,13 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    def test_import_source_unpickle_without_trace(self):
-        # Deserializing an ImportSource happens at torch.compile() time with no
-        # active TracingContext (e.g. precompile warm-load). Reconstructing the
-        # source must not install a guard (which would require a tracing
-        # context), so the round-trip must not raise.
-        import pickle
-
-        from torch._dynamo.source import ImportSource
-
-        source = ImportSource("torch")
-        reloaded = pickle.loads(pickle.dumps(source))
-        self.assertEqual(reloaded, source)
-
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_import_source_guard(self, device):
         # Warm-loading a guard state whose serialized sources include an
         # ImportSource must not raise. `pytree.tree_is_leaf` routes through
         # `get_pytree_SUPPORTED_NODES_source`, which builds an
         # `ImportSource("torch")` that ends up in the serialized guard state.
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x):
             if torch.utils._pytree.tree_is_leaf(x):
                 return torch.nn.functional.relu(x) + x.sin()
@@ -598,14 +656,9 @@ def add(x, y):
             self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -635,14 +688,9 @@ def add(x, y):
         TEST_WITH_TORCHDYNAMO or IS_LINUX,
         "https://github.com/pytorch/pytorch/issues/183810",
     )
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x, l, r):
             if l > r:
                 return x.sum()
@@ -682,14 +730,9 @@ def add(x, y):
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -711,14 +754,9 @@ def add(x, y):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_graph_break_partial_backend(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def fn(x):
             y = x.sin()
             torch._dynamo.graph_break()
@@ -758,13 +796,9 @@ def add(x, y):
         # One recompile on a new frame, so total_frames should increase by 1
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
         mod = torch.nn.Linear(2, 3, device=device)
 
         def foo(x, mod):
@@ -786,14 +820,9 @@ def add(x, y):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_code_with_generator(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def foo(set_of_x):
             if not all(isinstance(s, torch.Tensor) for s in set_of_x):
                 raise TypeError(
@@ -807,14 +836,9 @@ def add(x, y):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         def guard_filter_fn(guards):
             return [
                 guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
@@ -856,77 +880,43 @@ def add(x, y):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    class _tempTensorSamplerForQualName:
-        def __init__(self, val, mask, prob):
-            self.val = val
-            self.mask = mask
-            self.prob = prob
+    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
+    @unittest.skipIf(not has_triton(), "Requires Triton")
+    def test_nn_module(self, device):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10, device=device)
 
-        @classmethod
-        def class_method_that_is_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
+            def forward(self, x):
+                return self.linear(x)
 
-        @classmethod
-        def class_method_that_is_not_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
+        fn = MyModule()
+        package = CompilePackage(fn.forward)
+        compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+        x = torch.randn(10, 10, device=device)
+        compiled_fn(x)
 
-        def instance_method_that_is_used(self, x):
-            return x / 2
-
-    class _tempNetForQualName(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def instance_method_without_args(self):
-            shape = [1, 2, 3, 4]
-            x = torch.randn(shape)
-            return x
-
-        def instance_method_with_args(self, x):
-            return x + 1
-
-        def forward(self, x):
-            x *= x
-            with torch.device(x.device):
-                y = self.instance_method_without_args()
-            # test classmethod called from class
-            sampler = (
-                TestPackage._tempTensorSamplerForQualName.class_method_that_is_used(x)
-            )
-            x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
-            # test instance method called from instance
-            x = sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            another_sampler = sampler.class_method_that_is_not_used(x)
-            # test instance method called from instance
-            x = another_sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            x += y.sum()
-            x = self.instance_method_with_args(x)
-            return x
-
-    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
         x = torch.rand(10, device=device)
-        model = TestPackage._tempNetForQualName()
+        model = _tempNetForQualName()
         model.forward(x)
         compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             model.forward,
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
         compiled_fn(x)
+
+
+instantiate_device_type_tests(
+    TestPackageAccelerator,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 
 if __name__ == "__main__":
