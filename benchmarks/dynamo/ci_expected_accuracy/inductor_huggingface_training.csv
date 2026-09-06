@@ -102,7 +102,7 @@ TrOCRForCausalLM,pass,6,61,1
 
 
 
-XGLMForCausalLM,pass,6,,
+XGLMForCausalLM,OOM,5,72,4
 
 
 
