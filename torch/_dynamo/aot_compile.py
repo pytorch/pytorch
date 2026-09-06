@@ -115,25 +115,37 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned. Its annotations are the
-            # exception: a 3.14 FORWARDREF proxy is not picklable, and it hides
-            # inside a container too (list[Bar] reads back as
-            # list[ForwardRef('Bar')]), so a shallow filter would miss it.
-            # resolve=True asks for real values and drops the whole set if a
-            # TYPE_CHECKING-only name will not resolve; the runtime assigns
-            # annotations back verbatim and never evaluates them, so dropping an
-            # unresolvable one costs nothing.
+            # pickler nothing it holds is pruned -- except its annotations. The
+            # runtime assigns those back verbatim and never evaluates them, and
+            # inspect.Signature carries its own picklable copy for tooling, so an
+            # annotation this pickler cannot serialize is dropped per value
+            # rather than left to fail the whole dump (see _pickleable_annotations).
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
-                annotations=self._read_raw_annotations(obj, resolve=True),
+                annotations=self._pickleable_annotations(obj),
                 type_params=getattr(obj, "__type_params__", None),
             )
 
         return NotImplemented
+
+    def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
+        # resolve=True first turns a 3.14 FORWARDREF proxy into a real value (or
+        # drops the whole set when a TYPE_CHECKING-only name will not resolve).
+        # Below 3.14 it hands back __annotations__ raw. Either way a value can
+        # still be unpicklable -- a <locals> class resolves fine yet pickle
+        # cannot reference it -- so probe each and keep only the ones that dump.
+        kept: dict[str, Any] = {}
+        for name, value in self._read_raw_annotations(obj, resolve=True).items():
+            try:
+                type(self)(self.external_data, io.BytesIO()).dump(value)
+            except Exception:
+                continue
+            kept[name] = value
+        return kept
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
