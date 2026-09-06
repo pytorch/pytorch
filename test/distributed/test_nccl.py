@@ -192,6 +192,48 @@ class TestNCCL(TestCase):
         ):
             nccl.reduce_scatter(t, t)
 
+    @parametrize(
+        "op_name,requires_grad_arg",
+        [
+            ("all_reduce", "input"),
+            ("all_reduce", "output"),
+            ("reduce", "input"),
+            ("reduce", "output"),
+            ("broadcast", "input"),
+            ("all_gather", "input"),
+            ("all_gather", "output"),
+            ("reduce_scatter", "input"),
+            ("reduce_scatter", "output"),
+        ],
+    )
+    def test_collectives_reject_autograd(self, device, op_name, requires_grad_arg):
+        input = torch.ones(4, device=device, requires_grad=requires_grad_arg == "input")
+        output = torch.empty(
+            4, device=device, requires_grad=requires_grad_arg == "output"
+        )
+        collectives = {
+            "all_reduce": lambda: nccl.all_reduce(
+                [input], [output] if requires_grad_arg == "output" else None
+            ),
+            "reduce": lambda: nccl.reduce(
+                [input], output=output if requires_grad_arg == "output" else None
+            ),
+            "broadcast": lambda: nccl.broadcast([input]),
+            "all_gather": lambda: nccl.all_gather([input], [output]),
+            "reduce_scatter": lambda: nccl.reduce_scatter([input], [output]),
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
+            collectives[op_name]()
+
+    def test_collectives_allow_no_grad(self, device):
+        tensor = torch.ones(4, device=device, requires_grad=True)
+
+        with torch.no_grad():
+            nccl.all_reduce([tensor])
+
+        self.assertEqual(tensor, torch.ones_like(tensor))
+
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
