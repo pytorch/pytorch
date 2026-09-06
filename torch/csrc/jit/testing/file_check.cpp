@@ -18,9 +18,13 @@
 #include <optional>
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 
 namespace torch::jit::testing {
 
@@ -87,6 +91,211 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
 }
 
 namespace {
+
+using VariableMap = std::unordered_map<std::string, std::string>;
+
+struct PatternMatch {
+  size_t start;
+  size_t end;
+  VariableMap captures;
+};
+
+bool isValidVariableName(std::string_view name) {
+  if (name.empty()) {
+    return false;
+  }
+  size_t start = name[0] == '$' ? 1 : 0;
+  if (start == name.size() ||
+      !(std::isalpha(static_cast<unsigned char>(name[start])) ||
+        name[start] == '_')) {
+    return false;
+  }
+  return std::all_of(
+      name.begin() + static_cast<std::string_view::difference_type>(start + 1),
+      name.end(),
+      [](unsigned char c) { return std::isalnum(c) || c == '_'; });
+}
+
+std::string escapeRegex(std::string_view str) {
+  std::string escaped;
+  escaped.reserve(str.size());
+  for (const char c : str) {
+    switch (c) {
+      case '\\':
+      case '^':
+      case '$':
+      case '.':
+      case '|':
+      case '?':
+      case '*':
+      case '+':
+      case '(':
+      case ')':
+      case '[':
+      case ']':
+      case '{':
+      case '}':
+        escaped.push_back('\\');
+        break;
+      default:
+        break;
+    }
+    escaped.push_back(c);
+  }
+  return escaped;
+}
+
+size_t countCapturingGroups(std::string_view regex) {
+  size_t count = 0;
+  bool escaped = false;
+  bool in_character_class = false;
+  for (size_t i = 0; i < regex.size(); ++i) {
+    const char c = regex[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '[') {
+      in_character_class = true;
+      continue;
+    }
+    if (c == ']' && in_character_class) {
+      in_character_class = false;
+      continue;
+    }
+    if (c == '(' && !in_character_class &&
+        (i + 1 == regex.size() || regex[i + 1] != '?')) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::optional<PatternMatch> findPattern(
+    const SourceRange& search_range,
+    const std::string& pattern,
+    const VariableMap& variables,
+    bool allow_definitions = true) {
+  const auto& text = search_range.source()->text_str();
+  const size_t search_end = std::min(search_range.end(), text.size());
+  if (search_range.start() > search_end) {
+    return std::nullopt;
+  }
+
+  const std::string_view pattern_view(pattern);
+  if (pattern_view.find("[[") == std::string_view::npos) {
+    const auto pos = text.find(pattern, search_range.start());
+    if (pos == std::string::npos || pos + pattern.size() > search_end) {
+      return std::nullopt;
+    }
+    return PatternMatch{pos, pos + pattern.size(), {}};
+  }
+
+  std::string regex;
+  std::unordered_map<std::string, size_t> local_definitions;
+  std::vector<std::pair<std::string, size_t>> captures;
+  size_t capturing_groups = 0;
+  size_t cursor = 0;
+  while (cursor < pattern_view.size()) {
+    const auto open = pattern_view.find("[[", cursor);
+    if (open == std::string_view::npos) {
+      regex += escapeRegex(pattern_view.substr(cursor));
+      break;
+    }
+    regex += escapeRegex(pattern_view.substr(cursor, open - cursor));
+    const auto close = pattern_view.find("]]", open + 2);
+    if (close == std::string_view::npos) {
+      throw std::runtime_error(c10::str(
+          "Unterminated FileCheck variable block in pattern: ", pattern));
+    }
+
+    const auto block = pattern_view.substr(open + 2, close - open - 2);
+    const auto colon = block.find(':');
+    const auto name_view = block.substr(0, colon);
+    if (!isValidVariableName(name_view)) {
+      throw std::runtime_error(
+          c10::str("Invalid FileCheck variable name: ", name_view));
+    }
+    const std::string name(name_view);
+
+    if (colon != std::string_view::npos) {
+      if (!allow_definitions) {
+        throw std::runtime_error(
+            "FileCheck variable definitions are not allowed in CHECK-NOT");
+      }
+      const auto definition = block.substr(colon + 1);
+      const size_t capture_group = capturing_groups + 1;
+      regex += c10::str("(", definition, ")");
+      capturing_groups += 1 + countCapturingGroups(definition);
+      local_definitions[name] = capture_group;
+      captures.emplace_back(name, capture_group);
+    } else if (const auto local = local_definitions.find(name);
+               local != local_definitions.end()) {
+      regex += c10::str("(?:\\", local->second, ")");
+    } else if (const auto variable = variables.find(name);
+               variable != variables.end()) {
+      regex += escapeRegex(variable->second);
+    } else {
+      throw std::runtime_error(
+          c10::str("Undefined FileCheck variable: ", name));
+    }
+    cursor = close + 2;
+  }
+
+  const auto target =
+      text.substr(search_range.start(), search_end - search_range.start())
+          .str();
+  std::smatch match;
+  if (!std::regex_search(target, match, std::regex(regex))) {
+    return std::nullopt;
+  }
+
+  VariableMap captured_variables;
+  for (const auto& [name, group] : captures) {
+    captured_variables[name] = match[group].str();
+  }
+  const size_t start = search_range.start() + match.position(0);
+  return PatternMatch{start, start + match.length(0), captured_variables};
+}
+
+PatternMatch assertFindPattern(
+    const SourceRange& search_range,
+    const Check& check,
+    const VariableMap& variables) {
+  auto match = findPattern(search_range, check.search_str_, variables);
+  if (!match) {
+    auto found_range = SourceRange(
+        search_range.source(), search_range.start(), search_range.end());
+    std::stringstream ss;
+    ss << "Expected to find pattern ";
+    c10::printQuotedString(ss, check.search_str_);
+    ss << " but did not find it\n";
+    ss << "Searched string:\n";
+    found_range.highlight(ss);
+    ss << "From " << check << '\n';
+    throw std::runtime_error(std::move(ss).str());
+  }
+  return std::move(*match);
+}
+
+PatternMatch assertFindPattern(
+    const std::shared_ptr<Source>& source,
+    const Check& check,
+    size_t start,
+    const VariableMap& variables) {
+  return assertFindPattern(
+      SourceRange(source, start, source->size()), check, variables);
+}
+
+void updateVariables(VariableMap& variables, const PatternMatch& match) {
+  for (const auto& [name, value] : match.captures) {
+    variables[name] = value;
+  }
+}
 
 size_t assertFind(
     const SourceRange& search_range,
@@ -177,6 +386,25 @@ void assertNotFind(
     std::stringstream ss;
     ss << "Expected to not find ";
     c10::printQuotedString(ss, sub);
+    ss << " but found it\n";
+    found_range.highlight(ss);
+    ss << "From " << check << '\n';
+    throw std::runtime_error(std::move(ss).str());
+  }
+}
+
+void assertNotFindPattern(
+    const SourceRange& search_range,
+    const Check& check,
+    const VariableMap& variables) {
+  const auto match =
+      findPattern(search_range, check.search_str_, variables, false);
+  if (match) {
+    auto found_range =
+        SourceRange(search_range.source(), match->start, match->end);
+    std::stringstream ss;
+    ss << "Expected to not find pattern ";
+    c10::printQuotedString(ss, check.search_str_);
     ss << " but found it\n";
     found_range.highlight(ss);
     ss << "From " << check << '\n';
@@ -337,7 +565,8 @@ struct FileCheckImpl {
       const std::vector<Check>& nots,
       const std::shared_ptr<Source>& source,
       const SourceRange& prev,
-      const SourceRange& next) {
+      const SourceRange& next,
+      const VariableMap& variables) {
     auto start = prev.end(); // inclusive
     auto end = next.start(); // exclusive
     if (end < start) {
@@ -345,7 +574,7 @@ struct FileCheckImpl {
     }
     for (const auto& check : nots) {
       AT_ASSERT(check.type_ == CHECK_NOT);
-      assertNotFind(SourceRange(source, start, end), check.search_str_, check);
+      assertNotFindPattern(SourceRange(source, start, end), check, variables);
     }
   }
 
@@ -428,16 +657,18 @@ struct FileCheckImpl {
   SourceRange matchDagGroup(
       const std::vector<Check>& group,
       const std::shared_ptr<Source>& source,
-      const SourceRange& prev) {
+      const SourceRange& prev,
+      VariableMap& variables) {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
 
     AT_ASSERT(!groups.empty());
     for (const auto& check : group) {
       AT_ASSERT(check.type_ == group[0].type_);
-      auto pos = assertFind(source, check.search_str_, prev.end(), check);
-      group_beg = std::min(pos, group_beg);
-      group_end = std::max(pos + check.search_str_.size(), group_end);
+      auto match = assertFindPattern(source, check, prev.end(), variables);
+      updateVariables(variables, match);
+      group_beg = std::min(match.start, group_beg);
+      group_end = std::max(match.end, group_end);
     }
 
     return SourceRange(source, group_beg, group_end);
@@ -446,12 +677,13 @@ struct FileCheckImpl {
   SourceRange matchGroup(
       const std::vector<Check>& group,
       const std::shared_ptr<Source>& source,
-      const SourceRange& prev) {
+      const SourceRange& prev,
+      VariableMap& variables) {
     AT_ASSERT(!group.empty());
     CheckType type = group[0].type_;
 
     if (type == CHECK_DAG) {
-      return matchDagGroup(group, source, prev);
+      return matchDagGroup(group, source, prev, variables);
     }
     AT_ASSERT(type != CHECK_NOT);
     AT_ASSERT(group.size() == 1);
@@ -462,30 +694,37 @@ struct FileCheckImpl {
 
     switch (check.type_) {
       case CHECK: {
-        start_range = assertFind(source, check.search_str_, start_range, check);
-        end_range = start_range + check.search_str_.size();
+        auto match = assertFindPattern(source, check, start_range, variables);
+        updateVariables(variables, match);
+        start_range = match.start;
+        end_range = match.end;
       } break;
       case CHECK_SAME: {
-        auto pos = assertFind(source, check.search_str_, start_range, check);
-        assertNotFind(SourceRange(source, prev.end(), pos), "\n", check);
-        start_range = pos;
-        end_range = pos + check.search_str_.size();
+        auto match = assertFindPattern(source, check, start_range, variables);
+        assertNotFind(
+            SourceRange(source, prev.end(), match.start), "\n", check);
+        updateVariables(variables, match);
+        start_range = match.start;
+        end_range = match.end;
       } break;
       case CHECK_NEXT: {
         auto line_end = assertFind(source, "\n", start_range, check);
-        auto pos = assertFind(source, check.search_str_, line_end + 1, check);
-        assertNotFind(SourceRange(source, line_end + 1, pos), "\n", check);
-        start_range = pos;
-        end_range = pos + check.search_str_.size();
+        auto match = assertFindPattern(source, check, line_end + 1, variables);
+        assertNotFind(
+            SourceRange(source, line_end + 1, match.start), "\n", check);
+        updateVariables(variables, match);
+        start_range = match.start;
+        end_range = match.end;
       } break;
       case CHECK_COUNT: {
         auto group_start_range = std::string::npos;
         AT_ASSERT(check.count_ && *check.count_ != 0);
         for (size_t i = 0; i < *check.count_; ++i) {
-          start_range =
-              assertFind(source, check.search_str_, start_range, check);
-          group_start_range = std::min(start_range, group_start_range);
-          end_range = start_range + check.search_str_.size();
+          auto match = assertFindPattern(source, check, start_range, variables);
+          updateVariables(variables, match);
+          start_range = match.start;
+          group_start_range = std::min(match.start, group_start_range);
+          end_range = match.end;
           start_range = end_range;
         }
         start_range = group_start_range;
@@ -509,23 +748,27 @@ struct FileCheckImpl {
 
   void doChecks(const std::shared_ptr<Source>& source) {
     SourceRange prev(source, 0, 0);
+    VariableMap variables;
     for (size_t i = 0; i < groups.size(); i++) {
       const auto& curr_group = groups[i];
       CheckType type = curr_group.at(0).type_;
       if (type != CHECK_NOT) {
-        prev = matchGroup(curr_group, source, prev);
+        prev = matchGroup(curr_group, source, prev, variables);
       } else {
         if (i + 1 < groups.size()) {
           const auto& next_group = groups[i + 1];
           AT_ASSERT(next_group.at(0).type_ != CHECK_NOT);
-          SourceRange after_not = matchGroup(next_group, source, prev);
-          doCheckNot(curr_group, source, prev, after_not);
+          auto next_variables = variables;
+          SourceRange after_not =
+              matchGroup(next_group, source, prev, next_variables);
+          doCheckNot(curr_group, source, prev, after_not, variables);
+          variables = std::move(next_variables);
           prev = after_not;
           ++i; // already checked the group after
         } else {
           SourceRange end_of_file(
               source, source->size() + 1, source->size() + 1);
-          doCheckNot(curr_group, source, prev, end_of_file);
+          doCheckNot(curr_group, source, prev, end_of_file, variables);
         }
       }
     }
