@@ -2181,7 +2181,7 @@ from user code:
         )
         artifacts = compiled._artifacts
         self.assertEqual(artifacts.device_type, "cpu")
-        stale = ("mips", "DEFAULT", 128, None, "INVALID")
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
 
         # An eager artifact holds no generated code, so there is no baked vector
         # width to protect and the comparison must not run at all -- otherwise
@@ -2239,7 +2239,7 @@ from user code:
         self.assertEqual(artifacts.device_types, frozenset(("cpu",)))
         self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
 
-        stale = ("mips", "DEFAULT", 128, None, "INVALID")
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
         artifacts.system_info = dataclasses.replace(
             artifacts.system_info, cpu_codegen_target=stale
         )
@@ -2286,7 +2286,7 @@ from user code:
         self.assertIn("cpu", artifacts.device_types)
         self.assertIsNotNone(artifacts.system_info.cpu_codegen_target)
 
-        stale = ("mips", "DEFAULT", 128, None, "INVALID")
+        stale = ("mips", "DEFAULT", 128, (), None, "INVALID")
         artifacts.system_info = dataclasses.replace(
             artifacts.system_info, cpu_codegen_target=stale
         )
