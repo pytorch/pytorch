@@ -50,6 +50,16 @@ index 8c9f655..823ba7e 100644
 @@ -70,0 +93,2 @@ __all__ = [
 +    "cache_dir_override",
 +    "get_cache_dir",
+diff --git a/quack/cache/async_compile.py b/quack/cache/async_compile.py
+index 7e2a11b..3532a6b 100644
+--- a/quack/cache/async_compile.py
++++ b/quack/cache/async_compile.py
+@@ -47 +47 @@ import pickle
+-from concurrent.futures import Future, ProcessPoolExecutor
++from concurrent.futures import Executor, Future, ProcessPoolExecutor
+@@ -381 +381 @@ class CompilePool:
+-    def __init__(self, jobs: Optional[int] = None, executor: Optional[ProcessPoolExecutor] = None):
++    def __init__(self, jobs: Optional[int] = None, executor: Optional[Executor] = None):
 diff --git a/quack/cache/jit.py b/quack/cache/jit.py
 index 7106526..6ce345f 100644
 --- a/quack/cache/jit.py
@@ -401,7 +411,7 @@ index 0000000..53e0c8b
 +    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
 +    return to_dtype(x, dtype)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f44..283c131 100644
+index 1b56f44..3c9fff6 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163 @@ from typing import NamedTuple, Optional
@@ -420,7 +430,7 @@ index 1b56f44..283c131 100644
 +    canonicalize_config_constraints
 +)
 +
-@@ -292,0 +301,55 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
+@@ -292,0 +301,65 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
 +class _FragmentEpiModMixin(_EpiModMixinBase):
 +    """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
 +
@@ -437,8 +447,13 @@ index 1b56f44..283c131 100644
 +                fragment.fill(epi_loop_tensors[name])
 +                values[name] = fragment.load()
 +                continue
++            if const_expr(kind == "apply"):
++                op = ops_by_name[name]
++                pstate = op.fn_prepare(self, epi_loop_tensors[name], False)
++                values[name] = op.fn_apply_fragment(self, pstate)
++                continue
 +            assert kind in ("c", "row", "col", "tile"), (
-+                "TensorSSA callbacks support c/row/col/tile/scalar operands"
++                "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
 +            )
 +            fragment = tRS_rC if const_expr(kind == "c") else epi_loop_tensors[name]
 +            assert fragment is not None
@@ -469,28 +484,33 @@ index 1b56f44..283c131 100644
 +        sink_tmps = []
 +        for name in self._epi_mod_sinks:
 +            value = result[name]
-+            sink_tmp = cute.make_rmem_tensor(value.shape, value.element_type)
-+            sink_tmp.store(value)
-+            sink_tmps.append(sink_tmp)
++            # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
++            planes = value if isinstance(value, tuple) else (value,)
++            fragments = []
++            for plane in planes:
++                fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
++                fragment.store(plane)
++                fragments.append(fragment)
++            sink_tmps.append(fragments[0] if len(fragments) == 1 else tuple(fragments))
 +        self._flush_sinks(ops_by_name, epi_loop_tensors, tuple(sink_tmps))
 +        return tuple(outputs)
 +
 +
-@@ -308,0 +372 @@ class EpiMod:
+@@ -308,0 +382 @@ class EpiMod:
 +        fragmentwise=False,
-@@ -348,0 +413,5 @@ class EpiMod:
+@@ -348,0 +423,5 @@ class EpiMod:
 +        self.fragmentwise = fragmentwise
 +        if fragmentwise and (self.mode != "element" or prepass is not None):
 +            raise ValueError(
 +                "TensorSSA callbacks support element mode without an accumulator prepass"
 +            )
-@@ -406 +475,4 @@ class EpiMod:
+@@ -406 +485,4 @@ class EpiMod:
 -            ("vectorize", self.vectorize),
 +            # Preserve the default disk-cache identity while distinguishing
 +            # explicit vectorizer choices and whole-fragment callbacks.
 +            *(() if self.vectorize is None else (("vectorize", self.vectorize),)),
 +            *(() if not self.fragmentwise else (("fragmentwise", True),)),
-@@ -414,0 +487,9 @@ class EpiMod:
+@@ -414,0 +497,9 @@ class EpiMod:
 +    def supports_swap_ab(self) -> bool:
 +        """Whether every orientation-sensitive op supports swap-at-trace."""
 +        return (
@@ -500,24 +520,24 @@ index 1b56f44..283c131 100644
 +            and all(op.supports_swap_ab for op in self.sinks.values())
 +        )
 +
-@@ -422,0 +504 @@ class EpiMod:
+@@ -422,0 +514 @@ class EpiMod:
 +        state["_call_cache"] = {}
-@@ -479,2 +561,4 @@ class EpiMod:
+@@ -479,2 +571,4 @@ class EpiMod:
 -            elif paired_acc and not op.gated:
 -                raise ValueError(f"output op {out_name!r} must be gated in acc_pair mode")
 +            elif paired_acc and not (
 +                op.gated or getattr(op, "paired_output_bytes", None) is not None
 +            ):
 +                raise ValueError(f"output op {out_name!r} must support acc_pair mode")
-@@ -527 +611,4 @@ class EpiMod:
+@@ -527 +621,4 @@ class EpiMod:
 -            (_EpiModMixinBase, _SM_BASE[sm]),
 +            (
 +                _FragmentEpiModMixin if self.fragmentwise else _EpiModMixinBase,
 +                _SM_BASE[sm],
 +            ),
-@@ -540,0 +628 @@ class EpiMod:
+@@ -540,0 +638 @@ class EpiMod:
 +                "_epi_mod_fragmentwise": self.fragmentwise,
-@@ -557,4 +645,4 @@ class EpiMod:
+@@ -557,4 +655,4 @@ class EpiMod:
 -    def gemm_tuned(self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False):
 -        """Autotuned gemm(): config-space sweep via quack.gemm_runtime.autotune (lazy
 -        import — this module sits below gemm_config in the import graph).
@@ -526,7 +546,7 @@ index 1b56f44..283c131 100644
 +        self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False, config_constraints=None
 +    ):
 +        """Autotune GEMM over the optionally constrained native config space."""
-@@ -563 +651,10 @@ class EpiMod:
+@@ -563 +661,10 @@ class EpiMod:
 -        return tuned_mod_gemm(self, A, B, D, C, epi_args=epi_args, b_kn=b_kn)
 +        return tuned_mod_gemm(
 +            self,
@@ -538,27 +558,27 @@ index 1b56f44..283c131 100644
 +            b_kn=b_kn,
 +            config_constraints=config_constraints,
 +        )
-@@ -660,2 +756,0 @@ class EpiMod:
+@@ -660,2 +766,0 @@ class EpiMod:
 -            import torch
 -
-@@ -687 +782,3 @@ class EpiMod:
+@@ -687 +792,3 @@ class EpiMod:
 -            # Swap-at-trace contract: dense, element-mode, sink-less, B (k, n).
 +            # Swap-at-trace requires dense element mode, B (k, n), and
 +            # orientation-aware EpiOps. GroupedLocalReduce owns the
 +            # transposed physical geometry.
-@@ -692,2 +789,2 @@ class EpiMod:
+@@ -692,2 +799,2 @@ class EpiMod:
 -            if self.mode != "element" or self.sinks:
 -                raise ValueError("swap_ab supports element-mode sink-less epilogues only")
 +            if not self.supports_swap_ab():
 +                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
-@@ -817,2 +913,0 @@ class EpiMod:
+@@ -817,2 +923,0 @@ class EpiMod:
 -            import torch
 -
-@@ -879,2 +974 @@ class EpiMod:
+@@ -879,2 +984 @@ class EpiMod:
 -            import torch
 -
 +            output_op = self.output_ops.get(out_name)
-@@ -882 +976,7 @@ class EpiMod:
+@@ -882 +986,7 @@ class EpiMod:
 -            out_n = n_gemm // 2 if paired_acc else n_gemm
 +            out_n = (
 +                output_op.output_n(n_gemm)
@@ -567,7 +587,7 @@ index 1b56f44..283c131 100644
 +                if paired_acc
 +                else n_gemm
 +            )
-@@ -887,3 +987,4 @@ class EpiMod:
+@@ -887,3 +997,4 @@ class EpiMod:
 -                # fp8/fp4 gated aux = quantized postact (SM100-only; the
 -                # TileStore op asserts the arch at trace time).
 -                if aux.element_size() != 2 and aux.dtype not in (
@@ -575,7 +595,7 @@ index 1b56f44..283c131 100644
 +                if isinstance(expected_bytes, int):
 +                    expected_bytes = (expected_bytes,)
 +                if aux.dtype in (
-@@ -894 +995,6 @@ class EpiMod:
+@@ -894 +1005,6 @@ class EpiMod:
 -                    raise TypeError("acc_pair auxiliary output must be 16-bit (or fp8/fp4)")
 +                    expected_bytes = (*expected_bytes, 1)
 +                if aux.element_size() not in expected_bytes:
@@ -583,9 +603,9 @@ index 1b56f44..283c131 100644
 +                        "acc_pair auxiliary output has the wrong storage width: "
 +                        f"expected one of {expected_bytes} bytes, got {aux.element_size()}"
 +                    )
-@@ -1183 +1288,0 @@ class EpiMod:
+@@ -1183 +1298,0 @@ class EpiMod:
 -        n_store = n // 2 if self.mode == "acc_pair" else n
-@@ -1185,0 +1291,8 @@ class EpiMod:
+@@ -1185,0 +1301,8 @@ class EpiMod:
 +                output_op = self.output_ops.get(name)
 +                n_store = (
 +                    output_op.output_n(n)
@@ -594,16 +614,22 @@ index 1b56f44..283c131 100644
 +                    if self.mode == "acc_pair"
 +                    else n
 +                )
-@@ -1299 +1412,2 @@ class EpiMod:
+@@ -1299 +1422,2 @@ class EpiMod:
 -        config=None,  # explicit GemmConfig pins; None + tuned=True autotunes
 +        config_constraints=None,  # partial GemmConfig fields, mapping or canonical tuple
 +        config=None,  # exact GemmConfig pin; None selects/defaults from constraints
-@@ -1327 +1441,3 @@ class EpiMod:
+@@ -1317,0 +1442 @@ class EpiMod:
++        compile_dispatch: bool = True,
+@@ -1327 +1452,3 @@ class EpiMod:
 -        The tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
 +        ``config_constraints`` limits native candidates for both tuning and
 +        deterministic selection; an exact ``config=`` must satisfy them. The
 +        tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
-@@ -1340,0 +1457,10 @@ class EpiMod:
+@@ -1338 +1465,2 @@ class EpiMod:
+-        inside the op body."""
++        inside the op body. Generated runtime callers set ``compile_dispatch=False``
++        because they are already below torch.compile."""
+@@ -1340,0 +1469,10 @@ class EpiMod:
 +        constraints = canonicalize_config_constraints(config_constraints)
 +        if config is not None and type(config) is not GemmConfig:
 +            raise TypeError("config must be an exact GemmConfig or None")
@@ -614,16 +640,22 @@ index 1b56f44..283c131 100644
 +                f"config {config} does not satisfy config_constraints={dict(constraints)!r}"
 +            )
 +
-@@ -1398,0 +1525 @@ class EpiMod:
+@@ -1345 +1483 @@ class EpiMod:
+-                if torch.compiler.is_compiling():
++                if compile_dispatch and torch.compiler.is_compiling():
+@@ -1384 +1522 @@ class EpiMod:
+-        if torch.compiler.is_compiling():
++        if compile_dispatch and torch.compiler.is_compiling():
+@@ -1398,0 +1537 @@ class EpiMod:
 +                config_constraints=constraints,
-@@ -1411,0 +1539 @@ class EpiMod:
+@@ -1411,0 +1551 @@ class EpiMod:
 +                concat_layout=concat_layout,
-@@ -1442,0 +1571 @@ class EpiMod:
+@@ -1442,0 +1583 @@ class EpiMod:
 +                constraints,
-@@ -1526 +1655 @@ class EpiMod:
+@@ -1526 +1667 @@ class EpiMod:
 -                shape_key = (lead[-1], n, l, str(A.device), num_seqs)
 +                shape_key = (lead[-1], n, l, str(A.device), num_seqs, constraints)
-@@ -1531 +1660,7 @@ class EpiMod:
+@@ -1531 +1672,7 @@ class EpiMod:
 -                        self, lead[-1], n, l=l, device=A.device, num_seqs=num_seqs
 +                        self,
 +                        lead[-1],
@@ -632,9 +664,9 @@ index 1b56f44..283c131 100644
 +                        device=A.device,
 +                        num_seqs=num_seqs,
 +                        config_constraints=constraints,
-@@ -1557,0 +1693 @@ class EpiMod:
+@@ -1557,0 +1705 @@ class EpiMod:
 +                config_constraints=constraints,
-@@ -1586,0 +1723,36 @@ class EpiMod:
+@@ -1586,0 +1735,36 @@ class EpiMod:
 +            elif constraints or any(
 +                hasattr(op, "supports_config")
 +                for op in (
@@ -671,7 +703,7 @@ index 1b56f44..283c131 100644
 +                    selection_args,
 +                    preferred_config=preferred_config,
 +                )
-@@ -1794,0 +1967,16 @@ def gemm_epilogue(
+@@ -1794,0 +1979,16 @@ def gemm_epilogue(
 +def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +    """Decorate a whole-fragment TensorSSA callback using the EpiMod host stack."""
 +
@@ -717,26 +749,46 @@ index 631ff1c..9096a86 100644
 +    corrupt the max (see VecReduce.combine note)."""
 +    return {"D": acc, "amax": epi_math.abs(acc, fast=True)}
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index b7e4ae2..4874d18 100644
+index b7e4ae2..dbb9344 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
 @@ -320,0 +321 @@ class EpiOp:
 +    supports_swap_ab = False
-@@ -520,0 +522 @@ class Scalar(EpiOp):
+@@ -329,0 +331,19 @@ class EpiOp:
++    def fn_apply_fragment(self, gemm, pstate):
++        """Return the TensorSSA callable for a whole-fragment (fragmentwise) fn.
++
++        The default applies ``fn_apply`` to every element of the fragment, so an
++        apply-port op written for the per-element loop also composes with
++        TensorSSA callbacks; ops with a native fragment formulation override it.
++        """
++
++        @cute.jit
++        def apply(value):
++            source = cute.make_rmem_tensor(value.shape, value.element_type)
++            source.store(value)
++            result = cute.make_rmem_tensor(value.shape, value.element_type)
++            for i in cutlass.range(cute.size(source), unroll_full=True):
++                result[i] = self.fn_apply(gemm, pstate, i, source[i])
++            return result.load()
++
++        return apply
++
+@@ -520,0 +541 @@ class Scalar(EpiOp):
 +    supports_swap_ab = True
-@@ -599 +601,4 @@ class Scalar(EpiOp):
+@@ -599 +620,4 @@ class Scalar(EpiOp):
 -            return utils.load_scalar_or_pointer(param, dtype=self.dtype)
 +            value = utils.load_scalar_or_pointer(param, dtype=self.dtype)
 +            if const_expr(self.dtype in (cutlass.Float16, cutlass.BFloat16)):
 +                return Float32(value)
 +            return value
-@@ -602,0 +608,5 @@ class Scalar(EpiOp):
+@@ -602,0 +627,5 @@ class Scalar(EpiOp):
 +def is_floating_dtype(dtype):
 +    """Return whether a static CuTeDSL numeric type is floating-point."""
 +    return hasattr(dtype, "__tvm_ffi_float__")
 +
 +
-@@ -611,0 +622,7 @@ class VecLoad(EpiOp):
+@@ -611,0 +641,7 @@ class VecLoad(EpiOp):
 +    def __init__(self, name, dtype=None):
 +        super().__init__(name)
 +        self.dtype = dtype
@@ -744,30 +796,30 @@ index b7e4ae2..4874d18 100644
 +    def config_key(self):
 +        return (self.dtype,)
 +
-@@ -636,0 +654,5 @@ class VecLoad(EpiOp):
+@@ -636,0 +673,5 @@ class VecLoad(EpiOp):
 +    @cute.jit
 +    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
 +        """Return the in-bounds vector extent for the current tile."""
 +        return min(cute.size(vector, mode=[0]) - coord_idx * tile_dim, tile_dim)
 +
-@@ -682 +704 @@ class VecLoad(EpiOp):
+@@ -682 +723 @@ class VecLoad(EpiOp):
 -        limit = min(cute.size(mVec, mode=[0]) - coord_idx * tile_dim, tile_dim)
 +        limit = self._valid_extent(mVec, coord_idx, tile_dim, ctx)
-@@ -696 +718 @@ class VecLoad(EpiOp):
+@@ -696 +737 @@ class VecLoad(EpiOp):
 -        # Pre-allocate register tensor reused across begin_loop calls
 +        # Pre-allocate register tensor reused across begin_loop calls.
-@@ -698 +720,2 @@ class VecLoad(EpiOp):
+@@ -698 +739,2 @@ class VecLoad(EpiOp):
 -        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, gemm.acc_dtype)
 +        register_dtype = gemm.acc_dtype if is_floating_dtype(dtype) else dtype
 +        tDrV_cvt = cute.make_rmem_tensor(tDsV_sub.layout, register_dtype)
-@@ -715 +738 @@ class VecLoad(EpiOp):
+@@ -715 +757 @@ class VecLoad(EpiOp):
 -            tDrV_cvt.store(tDrV.load().to(gemm.acc_dtype))
 +            tDrV_cvt.store(tDrV.load().to(tDrV_cvt.element_type))
-@@ -723,0 +747 @@ class RowVecLoad(VecLoad):
+@@ -723,0 +766 @@ class RowVecLoad(VecLoad):
 +    supports_swap_ab = True
-@@ -735,0 +760 @@ class ColVecLoad(VecLoad):
+@@ -735,0 +779 @@ class ColVecLoad(VecLoad):
 +    supports_swap_ab = True
-@@ -751,15 +776,3 @@ class ColVecLoad(VecLoad):
+@@ -751,15 +795,3 @@ class ColVecLoad(VecLoad):
 -    def begin(self, gemm, param, smem_tensor, ctx):
 -        dtype = param.element_type
 -        num_copy_elems = const_expr(max(32, dtype.width)) // dtype.width
@@ -786,7 +838,7 @@ index b7e4ae2..4874d18 100644
 +    def _valid_extent(self, vector, coord_idx, tile_dim, ctx):
 +        """Use the active varlen-M extent for column-vector tail predicates."""
 +        return min(
-@@ -769,17 +782,7 @@ class ColVecLoad(VecLoad):
+@@ -769,17 +801,7 @@ class ColVecLoad(VecLoad):
 -        for m in cutlass.range(cute.size(tVsV.shape[1]), unroll_full=True):
 -            if tVcV[0, m] < tile_dim:  # Guard to avoid writing beyond the smem we've allocated
 -                pred = cute.make_rmem_tensor(1, Boolean)
@@ -811,7 +863,7 @@ index b7e4ae2..4874d18 100644
 +    if isinstance(epi_tile[1], cute.Layout):
 +        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
 +    return (epi_tile[0], epi_tile[1] // group)
-@@ -790,3 +793,11 @@ def _gated_epi_tile_fn(gemm, epi_tile):
+@@ -790,3 +812,11 @@ def _gated_epi_tile_fn(gemm, epi_tile):
 -    if isinstance(epi_tile[1], cute.Layout):
 -        return (epi_tile[0], cute.recast_layout(2, 1, epi_tile[1]))
 -    return (epi_tile[0], epi_tile[1] // 2)
@@ -826,10 +878,10 @@ index b7e4ae2..4874d18 100644
 +def _grouped_main_epi_tile_4(gemm, epi_tile):
 +    """Contract a grouped-main output tile by four adjacent N lanes."""
 +    return _contract_epi_tile_n(epi_tile, 4)
-@@ -824,0 +836,2 @@ class TileStore(EpiOp):
+@@ -824,0 +855,2 @@ class TileStore(EpiOp):
 +    supports_swap_ab = True
 +
-@@ -883,6 +896,3 @@ class TileStore(EpiOp):
+@@ -883,6 +915,3 @@ class TileStore(EpiOp):
 -        # A halved/reshaped tile (epi_tile_fn, e.g. gated postact) has an N
 -        # extent unrelated to the GEMM's n: use a fresh sym. Such tiles are
 -        # n-major by construction (asserted in to_params). Sub-byte (fp4)
@@ -839,25 +891,25 @@ index b7e4ae2..4874d18 100644
 +        # A halved/reshaped tile has an N extent unrelated to the GEMM's n,
 +        # while only sub-byte storage requires static packing divisibility.
 +        if dtype.width < 8:
-@@ -889,0 +900,2 @@ class TileStore(EpiOp):
+@@ -889,0 +919,2 @@ class TileStore(EpiOp):
 +        elif self.epi_tile_fn is not None:
 +            n = cute.sym_int()
-@@ -1041,0 +1054,6 @@ class TileStore(EpiOp):
+@@ -1041,0 +1073,6 @@ class TileStore(EpiOp):
 +    def store_tile_shape_mn(self, gemm):
 +        """Return the logical CTA tile shape written by this store."""
 +        if self.gated:
 +            return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
 +        return gemm.cta_tile_shape_mnk[:2]
 +
-@@ -1060,4 +1077,0 @@ class TileStore(EpiOp):
+@@ -1060,4 +1096,0 @@ class TileStore(EpiOp):
 -        if self.gated:
 -            tile_shape_mn = (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // 2)
 -        else:
 -            tile_shape_mn = gemm.cta_tile_shape_mnk[:2]
-@@ -1067 +1081 @@ class TileStore(EpiOp):
+@@ -1067 +1100 @@ class TileStore(EpiOp):
 -            tile_shape_mn,
 +            self.store_tile_shape_mn(gemm),
-@@ -1159,0 +1174,85 @@ class DStore(EpiOp):
+@@ -1159,0 +1193,85 @@ class DStore(EpiOp):
 +class GroupedMainStore(TileStore):
 +    """Store one value per adjacent-N group from a direct TensorSSA callback.
 +
@@ -943,14 +995,14 @@ index b7e4ae2..4874d18 100644
 +        return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // self.group)
 +
 +
-@@ -1185,0 +1285 @@ class TileLoad(EpiOp):
+@@ -1185,0 +1304 @@ class TileLoad(EpiOp):
 +    supports_swap_ab = True
-@@ -1187 +1287 @@ class TileLoad(EpiOp):
+@@ -1187 +1306 @@ class TileLoad(EpiOp):
 -    def __init__(self, name, epi_tile_fn=None):
 +    def __init__(self, name, epi_tile_fn=None, dtype=None):
-@@ -1189,0 +1290 @@ class TileLoad(EpiOp):
+@@ -1189,0 +1309 @@ class TileLoad(EpiOp):
 +        self.dtype = dtype
-@@ -1192 +1293 @@ class TileLoad(EpiOp):
+@@ -1192 +1312 @@ class TileLoad(EpiOp):
 -        return (_callable_config_key(self.epi_tile_fn),)
 +        return (_callable_config_key(self.epi_tile_fn), self.dtype)
 diff --git a/quack/gemm_config.py b/quack/gemm_config.py
@@ -1005,7 +1057,7 @@ index 3156c2b..bef7138 100644
 +
 +
 diff --git a/quack/gemm_runtime/autotune.py b/quack/gemm_runtime/autotune.py
-index 2440581..acb2197 100644
+index 2440581..2f8732a 100644
 --- a/quack/gemm_runtime/autotune.py
 +++ b/quack/gemm_runtime/autotune.py
 @@ -55,0 +56 @@ from quack.gemm_config import (
@@ -1129,7 +1181,7 @@ index 2440581..acb2197 100644
 +                    _prune_for_mod, mod, transform_a, config_constraints=constraints
 +                )
 +            },
-@@ -381,0 +452,40 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
+@@ -381,0 +452,55 @@ def _get_tuner(mod, epi_names, has_c, device, transform_a=None, ta_names=()):
 +def mod_selection_args(
 +    operands,
 +    outputs,
@@ -1156,25 +1208,40 @@ index 2440581..acb2197 100644
 +    }
 +
 +
-+def _select_mod_config(
++def _legal_mod_configs(
 +    mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
 +):
-+    """Return the preferred native config when legal, or the first supported one."""
++    """Return every supported native config, with the preferred one first when legal."""
 +    constraints = canonicalize_config_constraints(config_constraints)
 +    configs = _config_space(mod, device, constraints)
 +    if preferred_config in configs:
 +        configs = [preferred_config, *(config for config in configs if config != preferred_config)]
 +    candidates = [AutotuneConfig(config=config) for config in configs]
-+    return _prune_for_mod(mod, transform_a, candidates, named_args, config_constraints=constraints)[
-+        0
-+    ].kwargs["config"]
++    survivors = _prune_for_mod(
++        mod, transform_a, candidates, named_args, config_constraints=constraints
++    )
++    return [candidate.kwargs["config"] for candidate in survivors]
 +
 +
-@@ -405,0 +516 @@ def tuned_mod_gemm(
++def _select_mod_config(
++    mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
++):
++    """Return the preferred native config when legal, or the first supported one."""
++    return _legal_mod_configs(
++        mod,
++        device,
++        config_constraints,
++        named_args,
++        preferred_config=preferred_config,
++        transform_a=transform_a,
++    )[0]
++
++
+@@ -405,0 +531 @@ def tuned_mod_gemm(
 +    config_constraints=None,
-@@ -415,0 +527 @@ def tuned_mod_gemm(
+@@ -415,0 +542 @@ def tuned_mod_gemm(
 +    constraints = canonicalize_config_constraints(config_constraints)
-@@ -419 +531,21 @@ def tuned_mod_gemm(
+@@ -419 +546,21 @@ def tuned_mod_gemm(
 -    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names)
 +    tuner = _get_tuner(mod, epi_names, C is not None, A.device, transform_a, ta_names, constraints)
 +    call_kwargs = dict(
@@ -1197,7 +1264,7 @@ index 2440581..acb2197 100644
 +            config_constraints=constraints,
 +            **call_kwargs,
 +        )
-@@ -425,0 +558 @@ def tuned_mod_gemm(
+@@ -425,0 +573 @@ def tuned_mod_gemm(
 +        config_constraints=constraints,
 diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
 index 14bb369..e9b8038 100644
