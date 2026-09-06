@@ -361,7 +361,7 @@ class StructuredTraceTest(TestCase):
 {{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_autograd_runtime_wrappers", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
@@ -396,7 +396,7 @@ class StructuredTraceTest(TestCase):
 {{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_autograd_runtime_wrappers", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
 {{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
@@ -438,7 +438,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "recompile_reasons", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
@@ -461,7 +461,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 """,
@@ -524,7 +524,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,
@@ -585,12 +585,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "backward_prologue", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "backward_epilogue", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "compiled_function_forward", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "compiled_function_backward", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "compiled_fn_wrapper", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_50_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 2, "frame_compile_id": 0, "attempt": 1}
@@ -998,7 +993,7 @@ def forward(self, x, y):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -1014,7 +1009,7 @@ def forward(self, x, y):
 {"artifact": {"name": "inductor_provenance_tracking_node_mappings", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "inductor_provenance_tracking_kernel_stack_traces", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "fx_graph_cache_hit", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "runtime_wrapper_orchestration", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "aotautograd_cache_hit", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}

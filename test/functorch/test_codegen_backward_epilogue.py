@@ -9,13 +9,10 @@ codegen_backward_subclass_wrap() generates straight-line wrapping code
 with all subclass types and attr names baked in, replacing the generic
 wrap_tensor_subclasses() loop.
 
-Tests verify that a "backward_subclass_wrapper" artifact is emitted via
-trace_structured, analogous to the "subclass_wrapper" artifact emitted
-by the forward path.
+Tests inspect the generated "backward_subclass_wrapper" source section.
 """
 
-import logging
-from contextlib import contextmanager
+from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
@@ -23,36 +20,9 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-trace_log = logging.getLogger("torch.__trace")
-
-
 class TestCodegenBackwardEpilogue(TestCase):
-    @contextmanager
     def _capture_codegen_source(self, artifact_name):
-        """Capture codegen artifacts from the structured trace log."""
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == artifact_name
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
+        return capture_codegen_source(artifact_name)
 
     def test_simple_backward_wraps_grad_inputs(self):
         """
