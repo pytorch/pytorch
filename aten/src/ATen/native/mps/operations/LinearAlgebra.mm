@@ -2140,7 +2140,6 @@ static void svd_kernel_mps(const Tensor& A,
     }
   });
 
-
   if (!S_direct) {
     const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
   }
