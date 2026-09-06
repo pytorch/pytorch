@@ -1,10 +1,12 @@
 # Owner(s): ["module: fx"]
 import torch
 from torch.fx import symbolic_trace
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestFXNodeHook(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hooks_for_node_update(self):
         global create_node_hook1_called
         global create_node_hook2_called
