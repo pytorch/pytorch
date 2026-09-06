@@ -3879,30 +3879,31 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         lst.call_method(tx, "extend", [args[0]], {})
         return lst
 
-    def call_method(
+    def builtin_list_new(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__new__":
-            if args and not kwargs:
-                # list.__new__ (PyType_GenericNew) ignores extra args -- only
-                # the first arg (the type) matters. Pass init_args=[] so
-                # reconstruction emits base_cls.__new__(cls) without extras.
-                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
-                list_vt = ListVariable([], mutation_type=ValueMutationNew())
-                if isinstance(args[0], ListBuiltinVariable):
-                    return list_vt
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
-                )
+    ) -> VariableTracker | None:
+        if args and not kwargs:
+            # list.__new__ (PyType_GenericNew) ignores extra args -- only
+            # the first arg (the type) matters. Pass init_args=[] so
+            # reconstruction emits base_cls.__new__(cls) without extras.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
+            list_vt = ListVariable([], mutation_type=ValueMutationNew())
+            if isinstance(args[0], ListBuiltinVariable):
+                return list_vt
+            return tx.output.side_effects.track_new_user_defined_object(
+                self,
+                args[0],
+                [],
+                tx=tx,
+            )
+        return None
 
-        return super().call_method(tx, name, args, kwargs)
+    tp_methods = {
+        "__new__": Method(builtin_list_new),
+    }
 
 
 # pyrefly: ignore [deprecated]
