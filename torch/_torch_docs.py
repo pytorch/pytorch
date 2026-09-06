@@ -13545,7 +13545,7 @@ Examples::
     >>> # Computes the trapezoidal rule in 1D, spacing is implicitly 1
     >>> y = torch.tensor([1, 5, 10])
     >>> torch.trapezoid(y)
-    tensor(10.5)
+    tensor(10.5000)
 
     >>> # Computes the same trapezoidal rule directly to verify
     >>> (1 + 10 + 10) / 2
@@ -13554,12 +13554,12 @@ Examples::
     >>> # Computes the trapezoidal rule in 1D with constant spacing of 2
     >>> # NOTE: the result is the same as before, but multiplied by 2
     >>> torch.trapezoid(y, dx=2)
-    21.0
+    tensor(21.)
 
     >>> # Computes the trapezoidal rule in 1D with arbitrary spacing
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.trapezoid(y, x)
-    28.5
+    tensor(28.5000)
 
     >>> # Computes the same trapezoidal rule directly to verify
     >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
@@ -13567,29 +13567,30 @@ Examples::
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 matrix
     >>> y = torch.arange(9).reshape(3, 3)
+    >>> y
     tensor([[0, 1, 2],
             [3, 4, 5],
             [6, 7, 8]])
     >>> torch.trapezoid(y)
-    tensor([ 2., 8., 14.])
+    tensor([ 2.,  8., 14.])
 
     >>> # Computes the trapezoidal rule for each column of the matrix
     >>> torch.trapezoid(y, dim=0)
-    tensor([ 6., 8., 10.])
+    tensor([ 6.,  8., 10.])
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with the same arbitrary spacing
     >>> y = torch.ones(3, 3)
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.trapezoid(y, x)
-    array([5., 5., 5.])
+    tensor([5., 5., 5.])
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with different arbitrary spacing per row
     >>> y = torch.ones(3, 3)
     >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
     >>> torch.trapezoid(y, x)
-    array([2., 4., 6.])
+    tensor([2., 4., 6.])
 """,
 )
 
@@ -13632,7 +13633,7 @@ Examples::
     >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
     >>> y = torch.tensor([1, 5, 10])
     >>> torch.cumulative_trapezoid(y)
-    tensor([3., 10.5])
+    tensor([ 3.0000, 10.5000])
 
     >>> # Computes the same trapezoidal rule directly up to each element to verify
     >>> (1 + 5) / 2
@@ -13643,12 +13644,12 @@ Examples::
     >>> # Cumulatively computes the trapezoidal rule in 1D with constant spacing of 2
     >>> # NOTE: the result is the same as before, but multiplied by 2
     >>> torch.cumulative_trapezoid(y, dx=2)
-    tensor([6., 21.])
+    tensor([ 6., 21.])
 
     >>> # Cumulatively computes the trapezoidal rule in 1D with arbitrary spacing
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.cumulative_trapezoid(y, x)
-    tensor([6., 28.5])
+    tensor([ 6.0000, 28.5000])
 
     >>> # Computes the same trapezoidal rule directly up to each element to verify
     >>> ((3 - 1) * (1 + 5)) / 2
@@ -13658,18 +13659,19 @@ Examples::
 
     >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 matrix
     >>> y = torch.arange(9).reshape(3, 3)
+    >>> y
     tensor([[0, 1, 2],
             [3, 4, 5],
             [6, 7, 8]])
     >>> torch.cumulative_trapezoid(y)
-    tensor([[ 0.5,  2.],
-            [ 3.5,  8.],
-            [ 6.5, 14.]])
+    tensor([[ 0.5000,  2.0000],
+            [ 3.5000,  8.0000],
+            [ 6.5000, 14.0000]])
 
     >>> # Cumulatively computes the trapezoidal rule for each column of the matrix
     >>> torch.cumulative_trapezoid(y, dim=0)
-    tensor([[ 1.5,  2.5,  3.5],
-            [ 6.0,  8.0, 10.0]])
+    tensor([[ 1.5000,  2.5000,  3.5000],
+            [ 6.0000,  8.0000, 10.0000]])
 
     >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with the same arbitrary spacing
