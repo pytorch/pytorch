@@ -28,10 +28,24 @@ Example usage:
     ctx = code_context.pop_context(code_obj)
 """
 
-import types
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, TypedDict
 
 from .utils import ExactWeakKeyDictionary
+
+
+if TYPE_CHECKING:
+    import types
+    import weakref
+
+    from torch.fx import GraphModule
+
+
+class CodeContext(TypedDict, total=False):
+    bytecode_hook_side_effects: tuple[str, ...]
+    dynamism: dict[str, dict[str, tuple[bool, ...]]]
+    orig_graphmodule: weakref.ReferenceType[GraphModule]
 
 
 class CodeContextDict:
@@ -41,15 +55,14 @@ class CodeContextDict:
     def has_context(self, code: types.CodeType) -> bool:
         return code in self.code_context
 
-    def get_context(self, code: types.CodeType) -> dict[str, Any]:
-        ctx = self.code_context.get(code)
+    def get_context(self, code: types.CodeType) -> CodeContext:
+        ctx: CodeContext | None = self.code_context.get(code)
         if ctx is None:
-            # pyrefly: ignore [implicit-any]
             ctx = {}
             self.code_context[code] = ctx
         return ctx
 
-    def pop_context(self, code: types.CodeType) -> dict[str, Any]:
+    def pop_context(self, code: types.CodeType) -> CodeContext:
         ctx = self.get_context(code)
         self.code_context._remove_id(id(code))
         return ctx

@@ -26,9 +26,11 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
-    _nvgemm_bias_add_epilogue,
+    _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
+    _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
+    CuTeDSLEpilogueArguments,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import (
@@ -39,7 +41,7 @@ from torch._inductor.ir import (
     PermuteView,
     TensorBox,
 )
-from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
@@ -269,18 +271,23 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         precompile (which writes the same key) hands off to the benchmark
         instead of recompiling serially.
         """
-        from cutlass.operators.arguments import EpilogueArguments
         from cutlass.operators.artifact import CompiledArtifact
 
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
         *gemm_tensors, bias = input_tensors
         gemm_tensors = tuple(gemm_tensors)
-        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+        epilogue_args = CuTeDSLEpilogueArguments(
+            _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE, bias=bias, D=out
+        )
 
         kernel_name = self.kernel.metadata.operator_name
         cache_key = _create_gemm_cache_key(
-            gemm_tensors, out, has_epilogue=True, aux_tensors=(bias,)
+            gemm_tensors,
+            out,
+            has_epilogue=True,
+            aux_tensors=(bias,),
+            epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
         )
         dev_idx = gemm_tensors[0].device.index or 0
         disk_config_key = _make_disk_config_key(
@@ -291,6 +298,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.scale_type_b,
             self.swizzle_type_a,
             self.swizzle_type_b,
+            _NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
         )
 
         def disk_fallback(kernel):
@@ -314,7 +322,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.accumulator_type,
             kernel_name=kernel_name,
             epilogue_args=epilogue_args,
-            epilogue_source="nvgemm_addmm_bias_v1",
+            epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
         )
@@ -539,11 +547,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         def make_kernel_render(
             out_node,
             hint_override=None,
-            epilogue_fn_code=None,
-            epilogue_is_cutedsl=False,
-            epilogue_reads=None,
-            epilogue_writes=None,
-            epilogue_var_renames=None,
+            epilogue: GemmEpiloguePlan | None = None,
             local_reduce=None,
         ):
             from torch._inductor.ir import StorageBox, TensorBox
@@ -578,11 +582,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 scale_type_b=scale_type_b,
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
-                epilogue_fn_code=epilogue_fn_code,
-                epilogue_is_cutedsl=epilogue_is_cutedsl,
-                epilogue_reads=epilogue_reads,
-                epilogue_writes=epilogue_writes,
-                epilogue_var_renames=epilogue_var_renames,
+                epilogue=epilogue,
                 local_reduce=local_reduce,
                 swap_ab=swap_ab,
                 # pyrefly: ignore [bad-argument-type]
@@ -879,6 +879,11 @@ def _add_nv_gemm_choices_impl(
     log.debug("Added %d %s choices", num_added, variant.op_name)
 
 
+def _transposed_kernel_layout(layout: Layout) -> FixedLayout:
+    m, n = layout.size[0], layout.size[1]
+    return FixedLayout(layout.device, layout.dtype, [n, m], [1, n])
+
+
 def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
@@ -914,8 +919,7 @@ def add_nv_universal_gemm_choices(
     # would be wrong, so skip it there.
     if not config.nvgemm_swap_ab or len(layout.size) != 2:
         return
-    m, n = layout.size[0], layout.size[1]
-    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    swap_kernel_layout = _transposed_kernel_layout(layout)
     # Rank swap configs with the heuristic on the SWAPPED (N, M, K) problem:
     # new mat1 = mat_b.t() (N, K) row, new mat2 = mat_a.t() (K, M) col. Without
     # this, the swap variant would fall back to an unranked prefix and miss the
@@ -1116,8 +1120,7 @@ def add_nv_universal_scaled_gemm_choices(
         return
 
     # Kernel output shape is (N, M) — the transpose of the original (M, N)
-    m, n = layout.size[0], layout.size[1]
-    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    swap_kernel_layout = _transposed_kernel_layout(layout)
 
     # Skip heuristic filtering for swap_ab: mm_inputs has original (M, N, K) but
     # the swapped kernel sees (N, M, K). Let the benchmark pick the best kernel.
