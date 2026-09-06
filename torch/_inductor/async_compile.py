@@ -521,7 +521,12 @@ class AsyncCompile:
                 else:
                     size_hints_str = str(None)
 
-                triton_src = source_code.split("@triton.jit\n")[1]
+                # Generated modules may contain JIT helpers before the function
+                # being compiled, so anchor the lookup hash to its definition.
+                kernel_start = source_code.find(f"def {kernel_name}(")
+                triton_src = (
+                    source_code[kernel_start:] if kernel_start >= 0 else source_code
+                )
                 from torch._inductor.runtime.triton_heuristics import (
                     generate_lookup_hash_from_source_code,
                 )

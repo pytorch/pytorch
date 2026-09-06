@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -14,6 +15,7 @@ import re
 import secrets
 import sys
 import tempfile
+import textwrap
 from collections.abc import Callable
 from enum import Enum
 from itertools import chain, count
@@ -370,6 +372,83 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def _is_triton_jit_decorator(
+    decorator: ast.expr,
+    global_symbols: dict[str, Any],
+    triton_jit: Any,
+) -> bool:
+    if isinstance(decorator, ast.Call):
+        decorator = decorator.func
+    if isinstance(decorator, ast.Name):
+        return global_symbols.get(decorator.id) is triton_jit
+    if isinstance(decorator, ast.Attribute):
+        base = decorator.value
+        return (
+            decorator.attr == "jit"
+            and isinstance(base, ast.Name)
+            and getattr(global_symbols.get(base.id), "jit", None) is triton_jit
+        )
+    # Nested attribute paths cannot be resolved from function globals, so their
+    # options are not preserved by the bare @triton.jit fallback.
+    return False
+
+
+def _check_triton_jit_decorator_literals(
+    decorator: ast.Call,
+    symbol: Any,
+) -> None:
+    nonliteral_options = []
+    for index, arg in enumerate(decorator.args):
+        try:
+            ast.literal_eval(arg)
+        except (TypeError, ValueError):
+            nonliteral_options.append(f"positional option {index}")
+    for keyword in decorator.keywords:
+        if keyword.arg is None:
+            nonliteral_options.append("**options")
+            continue
+        try:
+            ast.literal_eval(keyword.value)
+        except (TypeError, ValueError):
+            nonliteral_options.append(f"{keyword.arg}=")
+    if nonliteral_options:
+        # Dropping these options would silently change kernel semantics,
+        # including when this source is collected for a cache key.
+        options = ", ".join(nonliteral_options)
+        raise RuntimeError(
+            f"{getattr(symbol, '__name__', symbol)}: @triton.jit decorator options "
+            "must be Python literals for Inductor codegen; "
+            f"non-literal options are not supported: {options}"
+        )
+
+
+@functools.cache
+def _triton_jit_decorator_from_source(symbol) -> str:
+    raw_src = getattr(symbol, "raw_src", None)
+    if raw_src:
+        # Triton .src strips decorators; raw_src preserves them in current Triton.
+        # Joining handles both string raw_src and list-of-lines raw_src variants.
+        try:
+            import triton
+
+            src = textwrap.dedent("".join(raw_src))
+            fn_def = ast.parse(src).body[0]
+            if isinstance(fn_def, ast.FunctionDef):
+                global_symbols = getattr(getattr(symbol, "fn", None), "__globals__", {})
+                for decorator in fn_def.decorator_list:
+                    if _is_triton_jit_decorator(decorator, global_symbols, triton.jit):
+                        if isinstance(decorator, ast.Call):
+                            _check_triton_jit_decorator_literals(decorator, symbol)
+                            decorator_src = ast.get_source_segment(src, decorator)
+                            func_src = ast.get_source_segment(src, decorator.func)
+                            if decorator_src and func_src:
+                                return f"@triton.jit{decorator_src[len(func_src) :]}"
+                        return "@triton.jit"
+        except (ImportError, IndexError, SyntaxError, TypeError, ValueError):
+            pass
+    return "@triton.jit"
+
+
 def user_defined_triton_kernel_transitive_closure_source_code(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
 ) -> str:
@@ -383,6 +462,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     kernel_src = kernel.src
     if epilogue_fusion:
         kernel_src = epilogue_fusion[1]
+    # Inductor supplies entry-point specialization and compiler options directly,
+    # so the root JITFunction's decorator options are not consumed on this path.
+    compile_wrapper.writeline("@triton.jit")
     compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
@@ -412,7 +494,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                 symbol = cur_kernel.fn.__globals__[symbol_name]
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
-                    compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(
+                        _triton_jit_decorator_from_source(symbol), strip=True
+                    )
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -484,6 +568,24 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
     traverse(kernel)
     return compile_wrapper.getvalue()
+
+
+def user_defined_triton_kernel_specialization(
+    kernel,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return root specialization controls that affect Inductor codegen.
+
+    The generated closure source omits the root decorator, so cache-key callers
+    must record this metadata separately.
+    """
+    do_not_specialize = tuple(p.num for p in kernel.params if p.do_not_specialize)
+    # Older Triton KernelParam instances predate do_not_specialize_on_alignment.
+    do_not_specialize_on_alignment = tuple(
+        p.num
+        for p in kernel.params
+        if getattr(p, "do_not_specialize_on_alignment", False)
+    )
+    return do_not_specialize, do_not_specialize_on_alignment
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -3740,7 +3842,6 @@ class PythonWrapperCodegen(CodeGen):
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         arg_indices: list[int] = []
-        equal_to_1_args: list[str] = []
 
         def add_to_signature(idx, arg):
             signature.append(arg)
@@ -3785,6 +3886,11 @@ class PythonWrapperCodegen(CodeGen):
 
         arg_names = [p.name for p in kernel.params]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
+        # Root decorator text is omitted from generated source, but the original
+        # JITFunction parameters still carry Triton's specialization controls.
+        do_not_specialize, do_not_specialize_on_alignment = (
+            user_defined_triton_kernel_specialization(kernel)
+        )
         for idx, key in enumerate(arg_names):
             if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
@@ -3836,11 +3942,13 @@ class PythonWrapperCodegen(CodeGen):
                         ),
                     )
                 else:
-                    equals_1 = isinstance(
-                        arg, (int, sympy.Integer)
-                    ) and V.graph.sizevars.statically_known_equals(
-                        arg,
-                        1,  # type: ignore[arg-type]
+                    equals_1 = (
+                        isinstance(arg, (int, sympy.Integer))
+                        and idx not in do_not_specialize
+                        and V.graph.sizevars.statically_known_equals(
+                            arg,
+                            1,  # type: ignore[arg-type]
+                        )
                     )
                     add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
 
@@ -3850,6 +3958,7 @@ class PythonWrapperCodegen(CodeGen):
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
             use_fp64_for_python_float=False,
+            equal_to_1_exclusions=do_not_specialize,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)
@@ -3863,15 +3972,14 @@ class PythonWrapperCodegen(CodeGen):
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
             # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-            "constants": {
-                **constants,
-                **dict.fromkeys(equal_to_1_args, 1),
-            },
+            "constants": constants,
             "configs": [
                 config_of(
                     signature,
                     indices=arg_indices,
                     pointer_range_override=(),
+                    divisible_by_16_exclusions=do_not_specialize_on_alignment,
+                    equal_to_1_exclusions=do_not_specialize,
                 )
             ],
         }
@@ -4024,7 +4132,6 @@ class PythonWrapperCodegen(CodeGen):
                 filename=__file__,
                 custom_kernel=True,
             )
-            @triton.jit
             """
         )
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(

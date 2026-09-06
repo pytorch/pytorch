@@ -552,7 +552,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
     def get_triton_source_codes_from_gm(
         self,
         gm: torch.fx.GraphModule,
-    ) -> list[str]:
+    ) -> list[tuple[str, tuple[int, ...], tuple[int, ...]]]:
         if not has_triton_package():
             raise AssertionError("Triton is not available")
 
@@ -563,6 +563,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
         triton_kernel_source_codes = []
         from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_specialization,
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
@@ -572,10 +573,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             if isinstance(kernel, Autotuner):
                 # Grab the Inner JITFunction
                 kernel = kernel.fn
-            source_codes = user_defined_triton_kernel_transitive_closure_source_code(
+            source_code = user_defined_triton_kernel_transitive_closure_source_code(
                 kernel
             )
-            triton_kernel_source_codes.append(source_codes)
+            do_not_specialize, do_not_specialize_on_alignment = (
+                user_defined_triton_kernel_specialization(kernel)
+            )
+            triton_kernel_source_codes.append(
+                (source_code, do_not_specialize, do_not_specialize_on_alignment)
+            )
 
         return triton_kernel_source_codes
 
