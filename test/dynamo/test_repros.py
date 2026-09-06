@@ -13,7 +13,6 @@ import gc
 import importlib
 import inspect
 import itertools
-import logging
 import os
 import random
 import sys
@@ -64,19 +63,15 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
-)
 from torch.testing._internal.common_device_type import (
+    Capability,
     E4M3_MAX_POS,
     e4m3_type,
     instantiate_device_type_tests,
-    onlyAccelerator,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
@@ -87,7 +82,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.logging_utils import LoggingTestCase
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -98,9 +94,6 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
-
-
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
@@ -981,12 +974,10 @@ class IncByTwo:
 
 
 class LRUCacheWarningTests(LoggingTestCase):
-    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
-    @make_logging_test(dynamo=logging.DEBUG)
-    def test_lru_cache_warning_issued_during_tracing(self, records):
-        prev_default = torch._C._get_default_device()
-        try:
-            torch.set_default_device(torch.accelerator.current_accelerator())
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_lru_cache_warning_issued_during_tracing(self, device):
+        with self.assertNoLogs(level="WARNING"):
 
             @torch.compile(backend="eager")
             def f(x):
@@ -994,20 +985,13 @@ class LRUCacheWarningTests(LoggingTestCase):
                 x = x.cos().sin()
                 return x
 
-            result = f(torch.randn(1024))
+            result = f(torch.randn(1024, device=device))
             self.assertIsInstance(result, torch.Tensor)
-        finally:
-            if prev_default == "cpu":
-                torch.set_default_device(None)
-            else:
-                torch.set_default_device(prev_default)
-
-        for record in records:
-            if "call to a lru_cache wrapped function at:" in record.getMessage():
-                self.fail("lru_cache warning was incorrectly logged")
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         try:
@@ -4797,49 +4781,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
-    @requires_cuda
-    def test_tensor_set_data_cross_device(self):
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x_eager = torch.randn(4, device="cpu")
-        x_compiled = x_eager.clone()
-
-        out_eager = func(x_eager)
-        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(x_eager.device, x_compiled.device)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self):
-        def func(x):
-            x.data = torch.randn(8, device="cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(func, backend="eager", fullgraph=True)(x)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_placeholder_metadata(self):
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        torch.compile(func, backend=backend, fullgraph=True)(x)
-
-        gm = backend.graphs[0]
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.Tensor):
-                    self.assertEqual(ev.device.type, "cpu")
-
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -6383,10 +6324,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -8879,561 +8817,6 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
-
-class ReproTestsDevice(torch._dynamo.test_case.TestCase):
-    @serialTest()
-    @onlyAccelerator
-    def test_mem_leak_guards(self, device):
-        def gn(x0, x):
-            return x0 * x
-
-        class MyMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            @torch._dynamo.disable(recursive=False)
-            def forward(self, running_x):
-                running_x = torch.sin(running_x)
-                x = running_x
-                x = gn(running_x, running_x)
-                x = gn(running_x, x)
-                return x
-
-        mod = MyMod().to(device)
-
-        fn = torch.compile(mod, backend="eager")
-        x = torch.randn(10, 10, device=device)
-        torch.get_device_module(device).reset_peak_memory_stats()
-
-        fn(x)
-        peak_mem1 = torch.get_device_module(device).max_memory_allocated()
-
-        for _ in range(1000):
-            fn(x)
-        peak_mem2 = torch.get_device_module(device).max_memory_allocated()
-        self.assertTrue(peak_mem1 == peak_mem2)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
-    # test involves custom ops that return unbacked symints
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    # test requires the activation memory budget code to think
-    # that j() is banned from recompute
-    @torch._functorch.config.patch(activation_memory_budget=0.5)
-    def test_partitioner_activation_memory_budget_with_unbacked_symints(self, device):
-        @torch.library.custom_op("test_partitioner::f", mutates_args=[])
-        def f(x: torch.Tensor) -> torch.Tensor:
-            return x.new_zeros(512, 1)
-
-        @f.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            ctx = torch.library.get_ctx()
-            s = ctx.new_dynamic_size()
-            return torch.empty(s, 1, device=x.device, dtype=x.dtype)
-
-        @torch.library.custom_op("test_partitioner::g", mutates_args=[])
-        def g(x: torch.Tensor) -> torch.Tensor:
-            return torch.cat([x, x[0].unsqueeze(-1)])
-
-        @g.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            return torch.cat([x, x[0].unsqueeze(-1)])
-
-        @torch.library.custom_op("test_partitioner::i", mutates_args=[])
-        def i(x: torch.Tensor, sz: int) -> torch.Tensor:
-            return torch.ones(sz, 1, dtype=x.dtype, device=x.device)
-
-        @i.register_fake
-        def _(x: torch.Tensor, sz: int) -> torch.Tensor:
-            return torch.empty(sz, 1, dtype=x.dtype, device=x.device)
-
-        @torch.library.custom_op("test_partitioner::j", mutates_args=[])
-        def j(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + 1
-
-        @j.register_fake
-        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            sz1 = x.shape[0] - 1
-            sz2 = y.numel()
-            torch._check(sz1 == sz2)
-            # make this a reduction so partitioner bans recompute of it
-            return x.sum()
-
-        def f(x, param):
-            y = torch.ops.test_partitioner.f(x)
-            z = torch.ops.test_partitioner.g(y)
-            z2 = torch.ops.test_partitioner.i(x, z.shape[0] - 1)
-            z2 = torch.ops.test_partitioner.j(z, z2)
-            return torch.matmul(x, param).sin() * z2.sum()
-
-        x = torch.randn(512, 512, device=device)
-        param = torch.randn(512, 512, device=device, requires_grad=True)
-        out_ref = f(x, param)
-        out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
-        self.assertEqual(out_ref, out_test)
-
-    # This test will fail as flip in combination with particular input lengths
-    # produces weird results.
-    # This is under investigations in
-    # https://github.com/pytorch/pytorch/issues/131805
-    @unittest.skip("Skip this flip test for the moment. It is under investigation")
-    def test_flip_bad_accuracy(self, device):
-        import torch
-        import torch._dynamo.config
-        import torch._functorch.config
-        import torch._inductor.config
-        import torch._inductor.inductor_prims
-        import torch.fx.experimental._config
-
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, arg0_1):
-                rev = torch.ops.prims.rev.default(arg0_1, [0])
-                arg0_1 = None
-                slice_1 = torch.ops.aten.slice.Tensor(rev, 0, 0, -1, 2)
-                slice_2 = torch.ops.aten.slice.Tensor(rev, 0, 1, 9223372036854775807, 2)
-                add_1 = torch.ops.aten.add.Tensor(slice_1, slice_2)
-                slice_1 = slice_2 = None
-                slice_3 = torch.ops.aten.slice.Tensor(add_1, 0, 0, -1, 2)
-                slice_4 = torch.ops.aten.slice.Tensor(
-                    add_1, 0, 1, 9223372036854775807, 2
-                )
-                add_2 = torch.ops.aten.add.Tensor(slice_3, slice_4)
-                slice_3 = slice_4 = None
-                slice_5 = torch.ops.aten.slice.Tensor(add_2, 0, 0, -1, 2)
-                slice_6 = torch.ops.aten.slice.Tensor(
-                    add_2, 0, 1, 9223372036854775807, 2
-                )
-                add_3 = torch.ops.aten.add.Tensor(slice_5, slice_6)
-                slice_5 = slice_6 = None
-                slice_9 = torch.ops.aten.slice.Tensor(add_2, 0, 0, 1)
-                add_2 = None
-                unsqueeze = torch.ops.aten.unsqueeze.default(slice_9, 1)
-                slice_9 = None
-                unsqueeze_1 = torch.ops.aten.unsqueeze.default(add_3, 1)
-                add_3 = None
-                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
-                unsqueeze = unsqueeze_1 = None
-                view = torch.ops.aten.view.default(cat, [2])
-                cat = None
-                slice_10 = torch.ops.aten.slice.Tensor(view, 0, 0, -1)
-                slice_11 = torch.ops.aten.slice.Tensor(
-                    add_1, 0, 2, 9223372036854775807, 2
-                )
-                add_5 = torch.ops.aten.add.Tensor(slice_10, slice_11)
-                slice_10 = slice_11 = None
-                slice_12 = torch.ops.aten.slice.Tensor(add_1, 0, 0, 1)
-                add_1 = None
-                cat_1 = torch.ops.aten.cat.default([slice_12, add_5])
-                slice_12 = add_5 = None
-                unsqueeze_2 = torch.ops.aten.unsqueeze.default(cat_1, 1)
-                cat_1 = None
-                unsqueeze_3 = torch.ops.aten.unsqueeze.default(view, 1)
-                view = None
-                cat_2 = torch.ops.aten.cat.default([unsqueeze_2, unsqueeze_3], 1)
-                unsqueeze_2 = unsqueeze_3 = None
-                view_1 = torch.ops.aten.view.default(cat_2, [4])
-                cat_2 = None
-                slice_13 = torch.ops.aten.slice.Tensor(
-                    rev, 0, 2, 9223372036854775807, 2
-                )
-                add_6 = torch.ops.aten.add.Tensor(view_1, slice_13)
-                slice_13 = None
-                slice_14 = torch.ops.aten.slice.Tensor(rev, 0, 0, 1)
-                rev = None
-                cat_3 = torch.ops.aten.cat.default([slice_14, add_6])
-                slice_14 = add_6 = None
-                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
-                    view_1, [0, 1], 0.0
-                )
-                view_1 = None
-                unsqueeze_4 = torch.ops.aten.unsqueeze.default(cat_3, 1)
-                cat_3 = None
-                unsqueeze_5 = torch.ops.aten.unsqueeze.default(constant_pad_nd, 1)
-                constant_pad_nd = None
-                cat_4 = torch.ops.aten.cat.default([unsqueeze_4, unsqueeze_5], 1)
-                unsqueeze_4 = unsqueeze_5 = None
-                view_2 = torch.ops.aten.view.default(cat_4, [10])
-                cat_4 = None
-                slice_15 = torch.ops.aten.slice.Tensor(view_2, 0, 0, 9)
-                view_2 = None
-                rev_1 = torch.ops.prims.rev.default(slice_15, [0])
-                slice_15 = None
-                return (rev_1,)
-
-        mod = Repro()
-        x = torch.arange(9, device=torch.device(device))
-
-        @torch.compile  # noqa: UNSPECIFIED_BACKEND
-        def f(x):
-            return mod(x)
-
-        out = f(x)
-        self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
-
-    # https://github.com/pytorch/pytorch/issues/156580
-    @serialTest()
-    @onlyAccelerator
-    def test_dont_dce_rand(self, device):
-        # https://github.com/pytorch/pytorch/issues/143431
-        def f(image_latent):
-            B = 2
-            num_ref = 3
-            num_tar = 3
-            x = torch.rand(B, 12)
-            indices = torch.argsort(torch.rand(*x.shape), dim=-1)[
-                :, : num_ref + num_tar
-            ]
-            return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
-
-        # Generate input once to ensure consistency across runs
-        torch.manual_seed(54321)
-        torch.get_device_module(device).manual_seed_all(54321)
-        image_latent = torch.randn((2, 12, 16, 32, 32))
-
-        torch.manual_seed(54321)
-        torch.get_device_module(device).manual_seed_all(54321)
-        expected = f(image_latent).sum()
-
-        # https://github.com/pytorch/pytorch/issues/147171
-        with torch._inductor.config.patch(fallback_random=True):
-            for backend in ["eager", "aot_eager"]:
-                torch.manual_seed(54321)
-                torch.get_device_module(device).manual_seed_all(54321)
-                actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                    image_latent
-                ).sum()
-                self.assertEqual(actual, expected)
-
-    # https://github.com/pytorch/pytorch/issues/151670
-    @onlyAccelerator
-    def test_diagonal_scatter_single_elem_cpu_with_gpu_tensor(self, device):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                y = torch.ones(x.size(0))
-                x = torch.diagonal_scatter(x, y)
-                return x
-
-        model = Model()
-
-        x = torch.rand(1, 2)
-        inputs = [x]
-
-        model = model.to(device)
-        inputs = [x.to(device) for x in inputs]
-
-        compiled_model = torch.compile(model, backend="eager")
-
-        self.assertEqual(model(*inputs), compiled_model(*inputs))
-
-    def test_norm_dtype(self, device):
-        def foo(_stack0):
-            getitem = _stack0[(slice(None, None, None), -1)]
-            _stack0 = None
-            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
-            getitem = None
-            return (normalize,)
-
-        args = [((2, 50, 256), (1, 256, 1), torch.float16, device, False)]
-        args = [
-            rand_strided(sh, st, dt, dev).requires_grad_(rg)
-            for (sh, st, dt, dev, rg) in args
-        ]
-
-        torch.compile(foo, backend="aot_eager_decomp_partition")
-        with torch.amp.autocast(device_type=device, enabled=True):
-            ref = foo(*args)[0]
-            res = foo(*args)[0]
-            self.assertEqual(ref.dtype, res.dtype)
-
-            self.assertTrue(same(res, ref))
-
-    def test_guard_default_device(self, device):
-        try:
-            torch.set_default_device(device)
-
-            counter = torch._dynamo.testing.CompileCounter()
-
-            @torch._dynamo.optimize(counter)
-            def f():
-                x = torch.randn(3)
-                return x * 2
-
-            self.assertEqual(f().device.type + ":0", device)
-            self.assertEqual(counter.frame_count, 1)
-
-            torch.set_default_device("cpu")
-
-            self.assertEqual(f().device.type, "cpu")
-            self.assertEqual(counter.frame_count, 2)
-
-        finally:
-            torch.set_default_device(None)
-
-    @skipIfHpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
-    def test_flash_attn_backward_mixed_strides(self, device):
-        # in this repro, "grad_out" and "value" are transposed tensors,
-        # but "key" and "value" are contiguous
-        def gen_inputs(device):
-            return (
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(
-                    2, 513, 16, 64, dtype=torch.float16, device=device
-                ).transpose(1, 2),
-                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
-                torch.randn(2, 16, 513, device=device),
-                None,
-                None,
-                513,
-                513,
-                0.0,
-                False,
-                torch.tensor(1, dtype=torch.int64),
-                torch.tensor(1, dtype=torch.int64),
-            )
-
-        inps_device = gen_inputs(device)
-        inps_meta = gen_inputs("meta")
-        (
-            out1_ref,
-            out2_ref,
-            out3_ref,
-        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
-            *inps_device, scale=0.125
-        )
-        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
-
-        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
-            *inps_meta, scale=0.125
-        )
-
-        self.assertEqual(out1_ref.shape, out1_test.shape)
-        self.assertEqual(out1_ref.stride(), out1_test.stride())
-        self.assertEqual(out2_ref.shape, out2_test.shape)
-        self.assertEqual(out2_ref.stride(), out2_test.stride())
-        self.assertEqual(out3_ref.shape, out3_test.shape)
-        self.assertEqual(out3_ref.stride(), out3_test.stride())
-
-    @onlyAccelerator
-    def test_memleak_when_graph_input_has_tensor_attr(self, device):
-        @torch.compile(backend="eager")
-        def f(x):
-            x.add_(1)
-
-        mem_before = torch.accelerator.memory_allocated()
-
-        x = torch.ones(2, device=device)
-        x.foo = torch.zeros(2, device=device)
-        f(x)
-        del x.foo
-        del x
-        mem_after = torch.accelerator.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
-        # check when non-tensor data structure attribute contains a tensor
-        @torch.compile(backend="eager")
-        def f(x):
-            x.add_(1)
-
-        mem_before = torch.accelerator.memory_allocated()
-        x = torch.ones(2, device=device)
-        x.foo = [torch.zeros(2, device=device) for _ in range(5)]
-        f(x)
-        del x.foo
-        del x
-        mem_after = torch.accelerator.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
-        # check with tensor refcycle
-        @torch.compile(backend="eager")
-        def g(x, y):
-            return x + y
-
-        mem_before = torch.accelerator.memory_allocated()
-        x = torch.ones(2, device=device)
-        y = torch.zeros(2, device=device)
-        x.foo = [y]
-        y.foo = [x]
-        g(x, y)
-        del x.foo
-        del y.foo
-        del x
-        del y
-        mem_after = torch.accelerator.memory_allocated()
-        self.assertEqual(mem_before, mem_after)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
-    def test_sdpa_dynamic_shapes(self, device):
-        def f(x, s0, s1, s2):
-            q = x.view(2, s0, s2, s0)
-            return torch._C._nn.scaled_dot_product_attention(
-                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
-            )
-
-        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device=device)
-        x_ref = x.clone().detach().requires_grad_()
-        s0 = 32
-        s1 = 64
-        s2 = 128
-
-        f_compiled = torch.compile(f, dynamic=True, backend="eager")
-
-        with torch._dynamo.config.patch(assume_static_by_default=False):
-            out_ref = f(x_ref, s0, s1, s2)
-            out = f_compiled(x, s0, s1, s2)
-            self.assertEqual(out_ref, out)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
-    def test_partitioner_saves_weights_for_bw(self, device):
-        def mul_tiled(a, *bs):
-            for b in bs:
-                a = a.unflatten(0, (b.shape[0], -1)).unflatten(-1, (b.shape[-1], -1))
-                a = a * b[:, None, :, None]
-                a = a.flatten(end_dim=1).flatten(start_dim=-2)
-            return a
-
-        def scale(t, amax_t):
-            max_v = E4M3_MAX_POS
-            scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
-            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(e4m3_type)
-            return t_fp8, scale_t
-
-        def matmul(first, amax_first, second_t, amax_second_t, bias):
-            first_fp8, scale_first = scale(first, amax_first)
-            second_t_fp8, scale_second_t = scale(second_t, amax_second_t)
-            post_scales = []
-            post_bias = None
-            post_scales = [scale_first, scale_second_t.t()]
-            scale_first = scale_first.new_ones((1, 1))
-            scale_second_t = scale_second_t.t().new_ones((1, 1))
-            post_bias, bias = bias, None
-            res = torch._scaled_mm(
-                first_fp8,
-                second_t_fp8.t(),
-                scale_a=scale_first,
-                scale_b=scale_second_t.t(),
-                bias=bias,
-                out_dtype=torch.bfloat16,
-                use_fast_accum=False,
-            )
-            res = mul_tiled(res, *post_scales).to(torch.bfloat16)
-            if post_bias is not None:
-                res += post_bias
-            return res
-
-        @torch.compiler.allow_in_graph
-        class Fp8LinearFn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b_t, bias):
-                amax_a = a.abs().unflatten(-1, (1, -1)).amax(dim=-1)
-                amax_b_t = b_t.abs().unflatten(-1, (1, -1)).amax(dim=-1)
-                out = matmul(a, amax_a, b_t, amax_b_t, bias)
-                ctx.a_requires_grad = a.requires_grad
-                ctx.b_requires_grad = b_t.requires_grad
-                ctx.bias_requires_grad = (
-                    bias.requires_grad if bias is not None else False
-                )
-                ctx.save_for_backward(a, b_t, amax_b_t)
-                return out
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                a, b_t, amax_b_t = ctx.saved_tensors
-                # Workaround for https://github.com/pytorch/pytorch/issues/141881.
-                # The partitioner would pre-compute the transposed scaling of the weight
-                # in the forward (as it's most efficient, but it actually uses too much
-                # memory). We prevent that by making the scaling depend on the gradient
-                # in a way that has no effect and will be optimized away later.
-                # Care is needed to support tensor parallelism and circumvent bugs.
-                #        b_t = b_t + grad_out[:1, :, None].squeeze(0) * 0
-                if ctx.a_requires_grad:
-                    b = b_t.t().contiguous()
-                    amax_grad_out = grad_out.abs().unflatten(-1, (1, -1)).amax(dim=-1)
-                    amax_b = amax_b_t.t().unflatten(-1, (1, -1)).amax(dim=-1)
-                    amax_b = amax_b.repeat_interleave(
-                        b.shape[0] // amax_b.shape[0], dim=0, output_size=b.shape[0]
-                    )
-                    grad_a = matmul(grad_out, amax_grad_out, b, amax_b, None)
-                else:
-                    grad_a = None
-                if ctx.b_requires_grad:
-                    grad_b = grad_out.t() @ a
-                else:
-                    grad_b = None
-                if ctx.bias_requires_grad:
-                    grad_bias = grad_out.sum(dim=0)
-                else:
-                    grad_bias = None
-                return grad_a, grad_b, grad_bias
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.nn.Parameter(
-                    torch.randn(
-                        64, 64, dtype=torch.bfloat16, device=device, requires_grad=True
-                    )
-                )
-                self.b = torch.nn.Parameter(
-                    torch.randn(
-                        64, 64, dtype=torch.bfloat16, device=device, requires_grad=True
-                    )
-                )
-                self.bias = torch.nn.Parameter(
-                    torch.randn(
-                        64, dtype=torch.bfloat16, device=device, requires_grad=True
-                    )
-                )
-
-        class CustomLinear(torch.nn.Linear):
-            def forward(self, input: torch.Tensor) -> torch.Tensor:
-                out = Fp8LinearFn.apply(
-                    input.flatten(end_dim=-2), self.weight, self.bias
-                )
-                out = out.unflatten(0, input.shape[:-1])
-                return out
-
-        m = CustomLinear(64, 64, dtype=torch.bfloat16, device=device)
-        m = torch.compile(m, backend="aot_eager")
-
-        # simple mode to track how many collective ops we saw in the backward
-        class TrackingMode(TorchDispatchMode):
-            def __init__(self):
-                super().__init__()
-                self.ops_counter = defaultdict(int)
-
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                rs = func(*args, **kwargs)
-                self.ops_counter[func] += 1
-                return rs
-
-        a = torch.randn(64, 64, dtype=torch.bfloat16, device=device, requires_grad=True)
-        out = m(a)
-        with TrackingMode() as mode:
-            out.sum().backward()
-        # If you print out the AOT fw and bw graphs,
-        # the main thing to look for is that both weights (primals_1/primals_2)
-        # *are* saved for backward, and become back inputs.
-        # The easier-to-test thing I'm checking for here is that the recompute
-        # on primals_2 happens in the backward. With the recompute,
-        # there are 5 _to_copy ops in the backward. Without it, there are 4
-        # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
-        self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
-
     def test_getattr_return(self):
         _WrapperDescriptor = type(type.__call__)
         _MethodWrapper = type(all.__call__)
@@ -9548,31 +8931,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out1 = model(input.clone())
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
-
-    @onlyAccelerator
-    def test_zero_dim_param_mixed_device_grad(self, device):
-        # cpu 0-dim params with cuda grads
-        # https://github.com/pytorch/pytorch/issues/160084
-        class RegressionModel(torch.nn.Module):
-            def __init__(self, a=0, b=0):
-                super().__init__()
-                self.a = torch.nn.Parameter(torch.tensor(a).float())
-                self.b = torch.nn.Parameter(torch.tensor(b).float())
-
-            def forward(self, x):
-                return x * self.a + self.b
-
-        model = RegressionModel()
-        model.forward = torch.compile(
-            model.forward, backend="aot_eager", fullgraph=True
-        )
-        inputs = torch.randn(4, 10).to(device)
-        out = model(inputs)
-        out.sum().backward()
-        self.assertIsNotNone(model.a.grad)
-        self.assertIsNotNone(model.b.grad)
-        self.assertEqual(model.a.grad.device, torch.device("cpu"))
-        self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -10000,6 +9358,620 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(result2, torch.tensor([40.0]))
         self.assertEqual(cnt.frame_count, 2)
 
+
+class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_tensor_set_data_cross_device(self, device):
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x_eager = torch.randn(4, device="cpu")
+        x_compiled = x_eager.clone()
+
+        out_eager = func(x_eager)
+        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(x_eager.device, x_compiled.device)
+
+    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self, device):
+        def func(x):
+            x.data = torch.randn(8, device=device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(func, backend="eager", fullgraph=True)(x)
+
+    def test_tensor_set_data_cross_device_placeholder_metadata(self, device):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        torch.compile(func, backend=backend, fullgraph=True)(x)
+
+        gm = backend.graphs[0]
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                ev = node.meta.get("example_value")
+                if isinstance(ev, torch.Tensor):
+                    self.assertEqual(ev.device.type, "cpu")
+
+    @serialTest()
+    def test_mem_leak_guards(self, device):
+        def gn(x0, x):
+            return x0 * x
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, running_x):
+                running_x = torch.sin(running_x)
+                x = running_x
+                x = gn(running_x, running_x)
+                x = gn(running_x, x)
+                return x
+
+        mod = MyMod().to(device)
+
+        fn = torch.compile(mod, backend="eager")
+        x = torch.randn(10, 10, device=device)
+        torch.get_device_module(device).reset_peak_memory_stats()
+
+        fn(x)
+        peak_mem1 = torch.get_device_module(device).max_memory_allocated()
+
+        for _ in range(1000):
+            fn(x)
+        peak_mem2 = torch.get_device_module(device).max_memory_allocated()
+        self.assertTrue(peak_mem1 == peak_mem2)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3860")
+    # test involves custom ops that return unbacked symints
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # test requires the activation memory budget code to think
+    # that j() is banned from recompute
+    @torch._functorch.config.patch(activation_memory_budget=0.5)
+    def test_partitioner_activation_memory_budget_with_unbacked_symints(self, device):
+        @torch.library.custom_op("test_partitioner::f", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.new_zeros(512, 1)
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            s = ctx.new_dynamic_size()
+            return torch.empty(s, 1, device=x.device, dtype=x.dtype)
+
+        @torch.library.custom_op("test_partitioner::g", mutates_args=[])
+        def g(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @g.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @torch.library.custom_op("test_partitioner::i", mutates_args=[])
+        def i(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.ones(sz, 1, dtype=x.dtype, device=x.device)
+
+        @i.register_fake
+        def _(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.empty(sz, 1, dtype=x.dtype, device=x.device)
+
+        @torch.library.custom_op("test_partitioner::j", mutates_args=[])
+        def j(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @j.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            sz1 = x.shape[0] - 1
+            sz2 = y.numel()
+            torch._check(sz1 == sz2)
+            # make this a reduction so partitioner bans recompute of it
+            return x.sum()
+
+        def f(x, param):
+            y = torch.ops.test_partitioner.f(x)
+            z = torch.ops.test_partitioner.g(y)
+            z2 = torch.ops.test_partitioner.i(x, z.shape[0] - 1)
+            z2 = torch.ops.test_partitioner.j(z, z2)
+            return torch.matmul(x, param).sin() * z2.sum()
+
+        x = torch.randn(512, 512, device=device)
+        param = torch.randn(512, 512, device=device, requires_grad=True)
+        out_ref = f(x, param)
+        out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
+        self.assertEqual(out_ref, out_test)
+
+    # This test will fail as flip in combination with particular input lengths
+    # produces weird results.
+    # This is under investigations in
+    # https://github.com/pytorch/pytorch/issues/131805
+    @unittest.skip("Skip this flip test for the moment. It is under investigation")
+    def test_flip_bad_accuracy(self, device):
+        import torch
+        import torch._dynamo.config
+        import torch._functorch.config
+        import torch._inductor.config
+        import torch._inductor.inductor_prims
+        import torch.fx.experimental._config
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg0_1):
+                rev = torch.ops.prims.rev.default(arg0_1, [0])
+                arg0_1 = None
+                slice_1 = torch.ops.aten.slice.Tensor(rev, 0, 0, -1, 2)
+                slice_2 = torch.ops.aten.slice.Tensor(rev, 0, 1, 9223372036854775807, 2)
+                add_1 = torch.ops.aten.add.Tensor(slice_1, slice_2)
+                slice_1 = slice_2 = None
+                slice_3 = torch.ops.aten.slice.Tensor(add_1, 0, 0, -1, 2)
+                slice_4 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 1, 9223372036854775807, 2
+                )
+                add_2 = torch.ops.aten.add.Tensor(slice_3, slice_4)
+                slice_3 = slice_4 = None
+                slice_5 = torch.ops.aten.slice.Tensor(add_2, 0, 0, -1, 2)
+                slice_6 = torch.ops.aten.slice.Tensor(
+                    add_2, 0, 1, 9223372036854775807, 2
+                )
+                add_3 = torch.ops.aten.add.Tensor(slice_5, slice_6)
+                slice_5 = slice_6 = None
+                slice_9 = torch.ops.aten.slice.Tensor(add_2, 0, 0, 1)
+                add_2 = None
+                unsqueeze = torch.ops.aten.unsqueeze.default(slice_9, 1)
+                slice_9 = None
+                unsqueeze_1 = torch.ops.aten.unsqueeze.default(add_3, 1)
+                add_3 = None
+                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
+                unsqueeze = unsqueeze_1 = None
+                view = torch.ops.aten.view.default(cat, [2])
+                cat = None
+                slice_10 = torch.ops.aten.slice.Tensor(view, 0, 0, -1)
+                slice_11 = torch.ops.aten.slice.Tensor(
+                    add_1, 0, 2, 9223372036854775807, 2
+                )
+                add_5 = torch.ops.aten.add.Tensor(slice_10, slice_11)
+                slice_10 = slice_11 = None
+                slice_12 = torch.ops.aten.slice.Tensor(add_1, 0, 0, 1)
+                add_1 = None
+                cat_1 = torch.ops.aten.cat.default([slice_12, add_5])
+                slice_12 = add_5 = None
+                unsqueeze_2 = torch.ops.aten.unsqueeze.default(cat_1, 1)
+                cat_1 = None
+                unsqueeze_3 = torch.ops.aten.unsqueeze.default(view, 1)
+                view = None
+                cat_2 = torch.ops.aten.cat.default([unsqueeze_2, unsqueeze_3], 1)
+                unsqueeze_2 = unsqueeze_3 = None
+                view_1 = torch.ops.aten.view.default(cat_2, [4])
+                cat_2 = None
+                slice_13 = torch.ops.aten.slice.Tensor(
+                    rev, 0, 2, 9223372036854775807, 2
+                )
+                add_6 = torch.ops.aten.add.Tensor(view_1, slice_13)
+                slice_13 = None
+                slice_14 = torch.ops.aten.slice.Tensor(rev, 0, 0, 1)
+                rev = None
+                cat_3 = torch.ops.aten.cat.default([slice_14, add_6])
+                slice_14 = add_6 = None
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    view_1, [0, 1], 0.0
+                )
+                view_1 = None
+                unsqueeze_4 = torch.ops.aten.unsqueeze.default(cat_3, 1)
+                cat_3 = None
+                unsqueeze_5 = torch.ops.aten.unsqueeze.default(constant_pad_nd, 1)
+                constant_pad_nd = None
+                cat_4 = torch.ops.aten.cat.default([unsqueeze_4, unsqueeze_5], 1)
+                unsqueeze_4 = unsqueeze_5 = None
+                view_2 = torch.ops.aten.view.default(cat_4, [10])
+                cat_4 = None
+                slice_15 = torch.ops.aten.slice.Tensor(view_2, 0, 0, 9)
+                view_2 = None
+                rev_1 = torch.ops.prims.rev.default(slice_15, [0])
+                slice_15 = None
+                return (rev_1,)
+
+        mod = Repro()
+        x = torch.arange(9, device=torch.device(device))
+
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
+        def f(x):
+            return mod(x)
+
+        out = f(x)
+        self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
+
+    # https://github.com/pytorch/pytorch/issues/156580
+    @serialTest()
+    def test_dont_dce_rand(self, device):
+        # https://github.com/pytorch/pytorch/issues/143431
+        def f(image_latent):
+            B = 2
+            num_ref = 3
+            num_tar = 3
+            x = torch.rand(B, 12)
+            indices = torch.argsort(torch.rand(*x.shape), dim=-1)[
+                :, : num_ref + num_tar
+            ]
+            return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
+
+        # Generate input once to ensure consistency across runs
+        torch.manual_seed(54321)
+        torch.get_device_module(device).manual_seed_all(54321)
+        image_latent = torch.randn((2, 12, 16, 32, 32))
+
+        torch.manual_seed(54321)
+        torch.get_device_module(device).manual_seed_all(54321)
+        expected = f(image_latent).sum()
+
+        # https://github.com/pytorch/pytorch/issues/147171
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.get_device_module(device).manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    image_latent
+                ).sum()
+                self.assertEqual(actual, expected)
+
+    # https://github.com/pytorch/pytorch/issues/151670
+    def test_diagonal_scatter_single_elem_cpu_with_gpu_tensor(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.ones(x.size(0))
+                x = torch.diagonal_scatter(x, y)
+                return x
+
+        model = Model()
+
+        x = torch.rand(1, 2)
+        inputs = [x]
+
+        model = model.to(device)
+        inputs = [x.to(device) for x in inputs]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    def test_norm_dtype(self, device):
+        def foo(_stack0):
+            getitem = _stack0[(slice(None, None, None), -1)]
+            _stack0 = None
+            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
+            getitem = None
+            return (normalize,)
+
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, device, False)]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        torch.compile(foo, backend="aot_eager_decomp_partition")
+        with torch.amp.autocast(device_type=device, enabled=True):
+            ref = foo(*args)[0]
+            res = foo(*args)[0]
+            self.assertEqual(ref.dtype, res.dtype)
+
+            self.assertTrue(same(res, ref))
+
+    def test_guard_default_device(self, device):
+        try:
+            torch.set_default_device(device)
+
+            counter = torch._dynamo.testing.CompileCounter()
+
+            @torch._dynamo.optimize(counter)
+            def f():
+                x = torch.randn(3)
+                return x * 2
+
+            self.assertEqual(f().device.type + ":0", device)
+            self.assertEqual(counter.frame_count, 1)
+
+            torch.set_default_device("cpu")
+
+            self.assertEqual(f().device.type, "cpu")
+            self.assertEqual(counter.frame_count, 2)
+
+        finally:
+            torch.set_default_device(None)
+
+    @skipIfHpu
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_flash_attn_backward_mixed_strides(self, device):
+        # in this repro, "grad_out" and "value" are transposed tensors,
+        # but "key" and "value" are contiguous
+        def gen_inputs(device):
+            return (
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, device=device),
+                None,
+                None,
+                513,
+                513,
+                0.0,
+                False,
+                torch.tensor(1, dtype=torch.int64),
+                torch.tensor(1, dtype=torch.int64),
+            )
+
+        inps_device = gen_inputs(device)
+        inps_meta = gen_inputs("meta")
+        (
+            out1_ref,
+            out2_ref,
+            out3_ref,
+        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
+            *inps_device, scale=0.125
+        )
+        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
+
+        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
+            *inps_meta, scale=0.125
+        )
+
+        self.assertEqual(out1_ref.shape, out1_test.shape)
+        self.assertEqual(out1_ref.stride(), out1_test.stride())
+        self.assertEqual(out2_ref.shape, out2_test.shape)
+        self.assertEqual(out2_ref.stride(), out2_test.stride())
+        self.assertEqual(out3_ref.shape, out3_test.shape)
+        self.assertEqual(out3_ref.stride(), out3_test.stride())
+
+    def test_memleak_when_graph_input_has_tensor_attr(self, device):
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.accelerator.memory_allocated()
+
+        x = torch.ones(2, device=device)
+        x.foo = torch.zeros(2, device=device)
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.accelerator.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check when non-tensor data structure attribute contains a tensor
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.accelerator.memory_allocated()
+        x = torch.ones(2, device=device)
+        x.foo = [torch.zeros(2, device=device) for _ in range(5)]
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.accelerator.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check with tensor refcycle
+        @torch.compile(backend="eager")
+        def g(x, y):
+            return x + y
+
+        mem_before = torch.accelerator.memory_allocated()
+        x = torch.ones(2, device=device)
+        y = torch.zeros(2, device=device)
+        x.foo = [y]
+        y.foo = [x]
+        g(x, y)
+        del x.foo
+        del y.foo
+        del x
+        del y
+        mem_after = torch.accelerator.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
+    def test_sdpa_dynamic_shapes(self, device):
+        def f(x, s0, s1, s2):
+            q = x.view(2, s0, s2, s0)
+            return torch._C._nn.scaled_dot_product_attention(
+                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
+
+        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device=device)
+        x_ref = x.clone().detach().requires_grad_()
+        s0 = 32
+        s1 = 64
+        s2 = 128
+
+        f_compiled = torch.compile(f, dynamic=True, backend="eager")
+
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            out_ref = f(x_ref, s0, s1, s2)
+            out = f_compiled(x, s0, s1, s2)
+            self.assertEqual(out_ref, out)
+
+    @requires_capabilities(Capability.dtype.fp8)
+    def test_partitioner_saves_weights_for_bw(self, device):
+        def mul_tiled(a, *bs):
+            for b in bs:
+                a = a.unflatten(0, (b.shape[0], -1)).unflatten(-1, (b.shape[-1], -1))
+                a = a * b[:, None, :, None]
+                a = a.flatten(end_dim=1).flatten(start_dim=-2)
+            return a
+
+        def scale(t, amax_t):
+            max_v = E4M3_MAX_POS
+            scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
+            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(e4m3_type)
+            return t_fp8, scale_t
+
+        def matmul(first, amax_first, second_t, amax_second_t, bias):
+            first_fp8, scale_first = scale(first, amax_first)
+            second_t_fp8, scale_second_t = scale(second_t, amax_second_t)
+            post_scales = []
+            post_bias = None
+            post_scales = [scale_first, scale_second_t.t()]
+            scale_first = scale_first.new_ones((1, 1))
+            scale_second_t = scale_second_t.t().new_ones((1, 1))
+            post_bias, bias = bias, None
+            res = torch._scaled_mm(
+                first_fp8,
+                second_t_fp8.t(),
+                scale_a=scale_first,
+                scale_b=scale_second_t.t(),
+                bias=bias,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+            res = mul_tiled(res, *post_scales).to(torch.bfloat16)
+            if post_bias is not None:
+                res += post_bias
+            return res
+
+        @torch.compiler.allow_in_graph
+        class Fp8LinearFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b_t, bias):
+                amax_a = a.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                amax_b_t = b_t.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                out = matmul(a, amax_a, b_t, amax_b_t, bias)
+                ctx.a_requires_grad = a.requires_grad
+                ctx.b_requires_grad = b_t.requires_grad
+                ctx.bias_requires_grad = (
+                    bias.requires_grad if bias is not None else False
+                )
+                ctx.save_for_backward(a, b_t, amax_b_t)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                a, b_t, amax_b_t = ctx.saved_tensors
+                # Workaround for https://github.com/pytorch/pytorch/issues/141881.
+                # The partitioner would pre-compute the transposed scaling of the weight
+                # in the forward (as it's most efficient, but it actually uses too much
+                # memory). We prevent that by making the scaling depend on the gradient
+                # in a way that has no effect and will be optimized away later.
+                # Care is needed to support tensor parallelism and circumvent bugs.
+                #        b_t = b_t + grad_out[:1, :, None].squeeze(0) * 0
+                if ctx.a_requires_grad:
+                    b = b_t.t().contiguous()
+                    amax_grad_out = grad_out.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                    amax_b = amax_b_t.t().unflatten(-1, (1, -1)).amax(dim=-1)
+                    amax_b = amax_b.repeat_interleave(
+                        b.shape[0] // amax_b.shape[0], dim=0, output_size=b.shape[0]
+                    )
+                    grad_a = matmul(grad_out, amax_grad_out, b, amax_b, None)
+                else:
+                    grad_a = None
+                if ctx.b_requires_grad:
+                    grad_b = grad_out.t() @ a
+                else:
+                    grad_b = None
+                if ctx.bias_requires_grad:
+                    grad_bias = grad_out.sum(dim=0)
+                else:
+                    grad_bias = None
+                return grad_a, grad_b, grad_bias
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(
+                    torch.randn(
+                        64, 64, dtype=torch.bfloat16, device=device, requires_grad=True
+                    )
+                )
+                self.b = torch.nn.Parameter(
+                    torch.randn(
+                        64, 64, dtype=torch.bfloat16, device=device, requires_grad=True
+                    )
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(
+                        64, dtype=torch.bfloat16, device=device, requires_grad=True
+                    )
+                )
+
+        class CustomLinear(torch.nn.Linear):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                out = Fp8LinearFn.apply(
+                    input.flatten(end_dim=-2), self.weight, self.bias
+                )
+                out = out.unflatten(0, input.shape[:-1])
+                return out
+
+        m = CustomLinear(64, 64, dtype=torch.bfloat16, device=device)
+        m = torch.compile(m, backend="aot_eager")
+
+        # simple mode to track how many collective ops we saw in the backward
+        class TrackingMode(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops_counter = defaultdict(int)
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                rs = func(*args, **kwargs)
+                self.ops_counter[func] += 1
+                return rs
+
+        a = torch.randn(64, 64, dtype=torch.bfloat16, device=device, requires_grad=True)
+        out = m(a)
+        with TrackingMode() as mode:
+            out.sum().backward()
+        # If you print out the AOT fw and bw graphs,
+        # the main thing to look for is that both weights (primals_1/primals_2)
+        # *are* saved for backward, and become back inputs.
+        # The easier-to-test thing I'm checking for here is that the recompute
+        # on primals_2 happens in the backward. With the recompute,
+        # there are 5 _to_copy ops in the backward. Without it, there are 4
+        # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
+        self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
+
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with accelerator grads
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        model = RegressionModel()
+        model.forward = torch.compile(
+            model.forward, backend="aot_eager", fullgraph=True
+        )
+        inputs = torch.randn(4, 10).to(device)
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
     @skipIfHpu
     def test_deterministic_pad_replicate_compile(self, device):
         from torch.testing._internal.common_utils import DeterministicGuard
@@ -10015,10 +9987,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_flex_attention_guard_on_constant_func_defaults(self, device):
         """
         Dynamo must guard on mask_mod.__defaults__ so that when a
@@ -10026,10 +9997,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mask_mod has the same __code__ but different __defaults__,
         Dynamo recompiles instead of reusing the stale first graph.
         """
-        from torch.utils._triton import has_triton
-
-        if not has_triton():
-            self.skipTest("requires triton")
 
         @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def flex_chunk(q, k, v, block_mask, scale):
@@ -10172,11 +10139,8 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
-
-class CUDAReproTests(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @torch._dynamo.config.patch(capture_scalar_outputs=False)
-    def test_aot_backward_context_reentry_after_graph_break(self):
+    def test_aot_backward_context_reentry_after_graph_break(self, device):
         def fn(x, y, scalar):
             cpu = x.cpu()
             other_cpu = x.cpu()
@@ -10185,48 +10149,74 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             after_break = y.cos()
             return before_break, after_break
 
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        y = torch.randn(8, device="cuda", requires_grad=True)
-        scalar = torch.randn((), device="cuda")
+        x = torch.randn(8, device=device, requires_grad=True)
+        y = torch.randn(8, device=device, requires_grad=True)
+        scalar = torch.randn((), device=device)
 
         before_break, after_break = torch.compile(fn, backend="aot_eager")(x, y, scalar)
-        loss = before_break.sum().to("cuda") + after_break.sum()
+        loss = before_break.sum().to(device) + after_break.sum()
         loss.backward()
 
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, -y.detach().sin())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_sync(self):
+    def test_accelerator_sync(self, device):
         def fn(x):
             y = x + 1
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
             return y * 2
 
-        x = torch.ones(2, device="cuda")
+        x = torch.ones(2, device=device)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_torch_cuda_is_initialized(self):
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self, device):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(backend="inductor", dynamic=False)
+        def fn(q, k):
+            with torch.device(device):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device=device, dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device=device, dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.accelerator.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
+
+
+class CUDAReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_torch_cuda_is_initialized(self, device):
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
             if torch.cuda.is_initialized():
                 return x + 1
             return x + 2
 
-        inp = torch.randn(3)
+        inp = torch.randn(3, device=device)
         self.assertEqual(f(inp), inp + 1)
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self, device):
         def f():
-            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            x = torch.tensor(5, dtype=torch.float32, device=device)
             copy.deepcopy(x)
 
         def clear_cuda_memory(*, reset_dynamo):
@@ -10249,13 +10239,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         # retained the real CUDA scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires CUDA bf16 support")
-    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self):
+    @requires_capabilities(Capability.dtype.bf16)
+    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         x = torch.tensor(
             [[1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0]],
-            device="cuda",
+            device=device,
             dtype=torch.bfloat16,
         )
 
@@ -10302,39 +10291,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             "expected scalar type BFloat16 but found Long",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
-        torch._dynamo.utils.counters.clear()
-
-        @torch.compile(backend="inductor", dynamic=False)
-        def fn(q, k):
-            with torch.device("cuda"):
-                a = torch.reshape(q, [-1, 8, 1, 32])
-                return torch.matmul(a, k)
-
-        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
-        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
-
-        out = fn(q, k)
-        torch.cuda.synchronize()
-        self.assertEqual(out.shape, (64, 8, 1, 128))
-
-        graph_break_reasons = "\n".join(
-            torch._dynamo.utils.counters["graph_break"].keys()
-        )
-        # The native router should not run trace-unsafe eager predicates here.
-        # If it does, the COW probe on the reshaped operand graph-breaks before
-        # it can fold or install a guard.
-        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
-        self.assertNotIn("call_boxed", graph_break_reasons)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
-    # TODO: Remoe this skip once nccl issue if fixed
+    # TODO: Remove this skip once nccl issue if fixed
     @unittest.skip(
         "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
     )
-    def test_ddp_checkpoint(self):
+    def test_ddp_checkpoint(self, device):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
         SEQ_LEN = 32
@@ -10385,12 +10347,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             os.environ["MASTER_ADDR"] = "localhost"
             os.environ["MASTER_PORT"] = "12355"
             dist.init_process_group(backend="nccl", world_size=1, rank=0)
-            model = model.to("cuda")
+            model = model.to(device)
             model = nn.parallel.DistributedDataParallel(model)
 
             for batch in dataloader:
                 x, y = batch
-                x = x.to("cuda")
+                x = x.to(device)
                 output = model(x)
                 loss = output.sum()
                 loss.backward()
@@ -10408,11 +10370,18 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(ReproTests)
-
-devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
-    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+    LRUCacheWarningTests, globals(), except_for="cpu", allow_xpu=True, allow_mps=True
 )
+instantiate_device_type_tests(
+    ReproTestsDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+instantiate_device_type_tests(CUDAReproTests, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
