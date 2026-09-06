@@ -12,7 +12,7 @@ from base64 import b64encode
 from collections.abc import Callable
 from datetime import timedelta
 from typing import cast, ClassVar
-from unittest import mock, TestCase
+from unittest import mock
 
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
@@ -27,9 +27,16 @@ from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     create_backend,
 )
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
+    hw_classification = HardwareClassification.GENERIC
+
     _store: ClassVar[TCPStore]
 
     @classmethod
@@ -48,6 +55,8 @@ class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
 
 class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
+    hw_classification = HardwareClassification.GENERIC
+
     _store: ClassVar[FileStore]
 
     def setUp(self) -> None:
@@ -69,6 +78,8 @@ class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
 
 class CreateBackendTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         # For testing, the default parameters used are for tcp. If a test
@@ -288,3 +299,7 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+
+if __name__ == "__main__":
+    run_tests()
