@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import serialTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, serialTest
+from torch.testing._internal.inductor_utils import HAS_MPS, HAS_TRITON
 
 
 class _TestEinsumtoPointwise(torch.nn.Module):
@@ -28,7 +31,9 @@ class _TestEinsumtoPointwise(torch.nn.Module):
         return add1 + add2
 
 
-class TestKernelOptimization(TestCase):
+class TestKernelOptimizationAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
@@ -53,11 +58,9 @@ class TestKernelOptimization(TestCase):
     def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
-        self.assertTrue(
-            self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
-        )
+        self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad, rtol, atol=atol))
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "einsum_to_pointwise_pass": {},
@@ -65,16 +68,16 @@ class TestKernelOptimization(TestCase):
         post_grad_fusion_options={},
     )
     @serialTest()  # Needs slightly more memory on GPUs
-    def test_einsum_to_pointwise(self):
+    def test_einsum_to_pointwise(self, device):
         counters.clear()
-        module = _TestEinsumtoPointwise().to(GPU_TYPE)
+        module = _TestEinsumtoPointwise().to(device)
         input = [
-            torch.randn(4096, 9, 512, device=GPU_TYPE, requires_grad=True),
-            torch.randn(9, 512, 96, device=GPU_TYPE, requires_grad=True),
-            torch.randn(9, 96, device=GPU_TYPE, requires_grad=True),
-            torch.randn(4096, 9, 160, device=GPU_TYPE, requires_grad=True),
-            torch.randn(4096, 9, 160, 96, device=GPU_TYPE, requires_grad=True),
-            torch.randn(4096, 9, 96, device=GPU_TYPE, requires_grad=True),
+            torch.randn(4096, 9, 512, device=device, requires_grad=True),
+            torch.randn(9, 512, 96, device=device, requires_grad=True),
+            torch.randn(9, 96, device=device, requires_grad=True),
+            torch.randn(4096, 9, 160, device=device, requires_grad=True),
+            torch.randn(4096, 9, 160, 96, device=device, requires_grad=True),
+            torch.randn(4096, 9, 96, device=device, requires_grad=True),
         ]
         traced = torch.compile(module)
         ref = module(*input)
@@ -89,6 +92,15 @@ class TestKernelOptimization(TestCase):
             1,
         )
         counters.clear()
+
+
+instantiate_device_type_tests(
+    TestKernelOptimizationAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
