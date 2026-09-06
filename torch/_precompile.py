@@ -3675,3 +3675,11 @@ def load(
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
     return _runnable_from_pair(python_code, cache, fn=fn)
+
+
+# The capture/load surface is a module (torch.compiler.precompile); these functions
+# are defined here but reported and re-exported under that path, so introspection
+# (test_public_bindings, Sphinx, help()) resolves them there.
+for _f in (capture, load):
+    _f.__module__ = "torch.compiler.precompile"
+del _f
