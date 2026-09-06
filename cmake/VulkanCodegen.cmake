@@ -16,25 +16,17 @@ else()
 endif()
 
 # Precompiling shaders
-if(ANDROID)
-  if(NOT ANDROID_NDK)
-    message(FATAL_ERROR "ANDROID_NDK not set")
-  endif()
+find_program(
+  GLSLC_PATH glslc
+  PATHS
+  ENV VULKAN_SDK
+  PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin"
+  PATHS "$ENV{VULKAN_SDK}/bin"
+)
 
-  set(GLSLC_PATH "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
-else()
-  find_program(
-    GLSLC_PATH glslc
-    PATHS
-    ENV VULKAN_SDK
-    PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin"
-    PATHS "$ENV{VULKAN_SDK}/bin"
-  )
-
-  if(NOT GLSLC_PATH)
-    message(FATAL_ERROR "USE_VULKAN glslc not found")
-  endif(NOT GLSLC_PATH)
-endif()
+if(NOT GLSLC_PATH)
+  message(FATAL_ERROR "USE_VULKAN glslc not found")
+endif(NOT GLSLC_PATH)
 
 set(PYTHONPATH "$ENV{PYTHONPATH}")
 set(NEW_PYTHONPATH ${PYTHONPATH})
