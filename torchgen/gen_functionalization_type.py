@@ -1179,6 +1179,9 @@ def gen_functionalization_registration(
         # See Note [Functionalization <> torch.Tensor constructor]
         if str(g.view.func.name) == "lift_fresh":
             return []
+        # _unpack_dual has mixed view/non-view outputs and a hand-written kernel.
+        if str(g.view.func.name) == "_unpack_dual":
+            return []
         view_str = []
         view_str.append(emit_registration_helper(g.view))
         if g.view_inplace is not None:

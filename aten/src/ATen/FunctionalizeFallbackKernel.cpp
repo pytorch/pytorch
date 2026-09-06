@@ -16,6 +16,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_copy.h>
+#include <ATen/ops/_unpack_dual.h>
 #include <ATen/ops/lift.h>
 #include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
@@ -309,6 +310,27 @@ static at::Tensor _to_copy_functionalize(
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
+static std::tuple<at::Tensor, at::Tensor> _unpack_dual_functionalize(
+    const at::Tensor& dual,
+    int64_t level) {
+  if (!at::functionalization::impl::isFunctionalTensor(dual)) {
+    at::AutoDispatchSkipFunctionalize guard;
+    return at::_unpack_dual(dual, level);
+  }
+
+  at::functionalization::impl::sync(dual);
+  auto dual_ = at::functionalization::impl::from_functional_tensor(dual);
+  auto primal = dual._fw_primal(level);
+  auto tangent = dual_._fw_grad(level);
+  if (tangent.defined()) {
+    // The tangent is wrapped as a fresh non-view functional tensor: mutations
+    // to it are not written back through the dual, consistent with
+    // functionalization's value semantics. Eager returns the tangent itself.
+    tangent = at::functionalization::impl::to_functional_tensor(tangent);
+  }
+  return {primal, tangent};
+}
+
 
 // Why is _unsafe_view special-cased here?
 // Basically just to satisfy autograd's debug asserts.
@@ -418,6 +440,7 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("lift_fresh", TORCH_FN(lift_fresh_functionalize));
   m.impl("lift_fresh_copy", TORCH_FN(lift_fresh_functionalize_copy));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
+  m.impl("_unpack_dual", TORCH_FN(_unpack_dual_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
   // The overloads of set_() that take in a storage should never
   // appear with torch.compile, because dynamo graph breaks
