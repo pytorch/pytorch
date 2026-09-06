@@ -6,19 +6,23 @@ from contextlib import nullcontext
 
 import torch
 from torch import distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -30,6 +34,44 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class ExecOrderTestBase(FSDPTestContinuous):
+    """Device-agnostic base.
+
+    FSDPTestContinuous inherits the module-level ``DEVICE_TYPE`` /
+    ``DEVICE_COUNT`` / ``DISTRIBUTED_BACKEND`` globals from ``common_fsdp``,
+    which only recognize cuda/hpu/xpu. Override the device-resolution hooks so
+    the test runs on any accelerator (incl. out-of-tree PrivateUse1 backends)
+    once instantiated via ``instantiate_device_type_tests``. Mirrors the
+    ``FineTuneTestBase`` pattern: the intermediate base holds ``backend_str``
+    so the device-specific generated class inherits it rather than ports it
+    (a ported classmethod cannot see the variant's device_type).
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
+
+    @property
+    def world_size(self) -> int:
+        return _get_device_module(self.device_type).device_count()
 
 
 class Model(torch.nn.Module):
@@ -100,8 +142,12 @@ class Model(torch.nn.Module):
         return fsdp_model.to(device)
 
 
-class TestFSDPExecOrder(FSDPTestContinuous):
-    @skip_if_lt_x_gpu(2)
+class TestFSDPExecOrder(ExecOrderTestBase):
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
@@ -113,6 +159,7 @@ class TestFSDPExecOrder(FSDPTestContinuous):
     ):
         """Tests that FSDP errors if the all-gather order differs across ranks
         in the first iteration."""
+        device_type = torch.device(self._resolved_device_type())
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         dist.set_debug_level(dist.DebugLevel.DETAIL)
@@ -125,7 +172,11 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model(*inp)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
@@ -139,6 +190,7 @@ class TestFSDPExecOrder(FSDPTestContinuous):
     ):
         """Tests that FSDP warns the user if the all-gather order changes after
         the first iteration."""
+        device_type = torch.device(self._resolved_device_type())
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
@@ -176,12 +228,17 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         loss = fsdp_model.module.get_loss(inp, output).to(device_type)
         fsdp_model.module.run_backward(loss)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     def test_train_eval(self, device, sharding_strategy: ShardingStrategy):
+        device_type = torch.device(self._resolved_device_type())
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         fsdp_model = Model.wrap(sharding_strategy, device_type)
         NUM_ITERS = 3
@@ -211,9 +268,8 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         # an `AssertionError` will be raised above for both sharding strategies
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestFSDPExecOrder, globals(), only_for=devices, allow_xpu=True
+    TestFSDPExecOrder, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
