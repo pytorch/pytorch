@@ -8,6 +8,8 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
+#include <compare>
+#include <iterator>
 #include <optional>
 #include <vector>
 
@@ -47,10 +49,15 @@ template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) noexcept;
 
 template<class T, class Iterator>
-bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
+T iter_move(const ListIterator<T, Iterator>& it);
 
 template<class T, class Iterator>
-bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+void iter_swap(
+    const ListIterator<T, Iterator>& lhs,
+    const ListIterator<T, Iterator>& rhs) noexcept;
+
+template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 
 template<class T>
 struct ListElementConstReferenceTraits {
@@ -73,12 +80,15 @@ public:
       const T&,
       T>() const;
 
-  ListElementReference& operator=(T&& new_value) &&;
+  // Const-qualified: std::indirectly_writable requires it.
+  // NOLINTBEGIN(misc-unconventional-assign-operator,cppcoreguidelines-c-copy-assignment-signature)
+  const ListElementReference& operator=(T&& new_value) const&&;
 
-  ListElementReference& operator=(const T& new_value) &&;
+  const ListElementReference& operator=(const T& new_value) const&&;
 
   // assigning another ref to this assigns the underlying value
-  ListElementReference& operator=(ListElementReference&& rhs) && noexcept;
+  const ListElementReference& operator=(ListElementReference&& rhs) const&& noexcept;
+  // NOLINTEND(misc-unconventional-assign-operator,cppcoreguidelines-c-copy-assignment-signature)
 
   const IValue& get() const& {
     return *iterator_;
@@ -87,7 +97,8 @@ public:
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs) noexcept;
 
   ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
+  // Lvalue-only, so it does not compete with the const&& assignments above.
+  ListElementReference& operator=(const ListElementReference&) & = delete;
   ~ListElementReference() = default;
 
 private:
@@ -112,11 +123,14 @@ private:
 template <class T, class Iterator>
 class ListIterator final {
  public:
-   // C++17 friendly std::iterator implementation
-  using iterator_category = std::random_access_iterator_tag;
+  // C++17 forbids a proxy iterator from being forward or better, so the legacy
+  // tag says input and the real category goes in iterator_concept. Spelled out
+  // explicitly rather than left to iterator_traits synthesis: GCC 11 (an actual
+  // CI toolchain) synthesizes something std::reverse's dispatch can't match.
+  using iterator_concept = std::random_access_iterator_tag;
+  using iterator_category = std::input_iterator_tag;
   using value_type = T;
   using difference_type = std::ptrdiff_t;
-  using pointer = T*;
   using reference = ListElementReference<T, Iterator>;
 
   explicit ListIterator() = default;
@@ -149,22 +163,26 @@ class ListIterator final {
       return copy;
   }
 
-  ListIterator& operator+=(typename List<T>::size_type offset) {
+  ListIterator& operator+=(difference_type offset) {
       iterator_ += offset;
       return *this;
   }
 
-  ListIterator& operator-=(typename List<T>::size_type offset) {
+  ListIterator& operator-=(difference_type offset) {
       iterator_ -= offset;
       return *this;
   }
 
-  ListIterator operator+(typename List<T>::size_type offset) const {
+  ListIterator operator+(difference_type offset) const {
     return ListIterator{iterator_ + offset};
   }
 
-  ListIterator operator-(typename List<T>::size_type offset) const {
+  ListIterator operator-(difference_type offset) const {
     return ListIterator{iterator_ - offset};
+  }
+
+  friend ListIterator operator+(difference_type offset, const ListIterator& rhs) {
+    return rhs + offset;
   }
 
   friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
@@ -175,37 +193,36 @@ class ListIterator final {
     return {iterator_};
   }
 
-  ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
+  ListElementReference<T, Iterator> operator[](difference_type offset) const {
     return {iterator_ + offset};
   }
+
+  // ranges finds these by ADL; defined in List_inl.h (need a complete IValue).
+  friend T iter_move<T, Iterator>(const ListIterator& it);
+
+  friend void iter_swap<T, Iterator>(
+      const ListIterator& lhs,
+      const ListIterator& rhs) noexcept;
 
 private:
   explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
 
   Iterator iterator_;
 
-  friend bool operator==(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ == rhs.iterator_;
-  }
+  // Not defaulted: libc++'s __wrap_iter has no <=> of its own, which would
+  // make a defaulted <=> here implicitly deleted.
+  friend bool operator==(const ListIterator&, const ListIterator&) = default;
 
-  friend bool operator!=(const ListIterator& lhs, const ListIterator& rhs) {
-    return !(lhs == rhs);
-  }
-
-  friend bool operator<(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ < rhs.iterator_;
-  }
-
-  friend bool operator<=(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ <= rhs.iterator_;
-  }
-
-  friend bool operator>(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ > rhs.iterator_;
-  }
-
-  friend bool operator>=(const ListIterator& lhs, const ListIterator& rhs) {
-    return lhs.iterator_ >= rhs.iterator_;
+  friend std::strong_ordering operator<=>(
+      const ListIterator& lhs,
+      const ListIterator& rhs) {
+    if (lhs.iterator_ < rhs.iterator_) {
+      return std::strong_ordering::less;
+    }
+    if (rhs.iterator_ < lhs.iterator_) {
+      return std::strong_ordering::greater;
+    }
+    return std::strong_ordering::equal;
   }
 
   friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
@@ -442,9 +459,6 @@ public:
   template <class T_>
   friend bool operator==(const List<T_>& lhs, const List<T_>& rhs);
 
-  template <class T_>
-  friend bool operator!=(const List<T_>& lhs, const List<T_>& rhs);
-
   /**
    * Identity comparison. Returns true if and only if `rhs` represents the same
    * List object as `this`.
@@ -457,7 +471,6 @@ public:
    * Returns the number of Lists currently pointing to this same list.
    * If this is the only instance pointing to this list, returns 1.
    */
-  // TODO Test use_count
   size_t use_count() const;
 
   TypePtr elementType() const;

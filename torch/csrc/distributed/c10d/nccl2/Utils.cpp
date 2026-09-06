@@ -2,10 +2,10 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <algorithm>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -72,11 +72,8 @@ bool string_to_bool(std::string_view str) {
       (lowercase_str == "0" || lowercase_str == "false" ||
        lowercase_str == "no" || lowercase_str == "n");
 
-  if (!is_true && !is_false) {
-    throw std::runtime_error("Invalid value for string " + std::string(str));
-  } else {
-    return is_true;
-  }
+  TORCH_CHECK(is_true || is_false, "Invalid value for string ", str);
+  return is_true;
 }
 
 template <typename T>
@@ -105,15 +102,16 @@ T env_to_value(std::string_view env_key, const T& default_value) {
       std::istringstream ss(value);
       ss >> result;
 
-      if (ss.fail() || !ss.eof()) {
-        throw std::runtime_error("Conversion failed");
-      }
+      TORCH_CHECK(!ss.fail() && ss.eof(), "Conversion failed");
 
       return result;
     } catch (const std::exception&) {
-      throw std::runtime_error(
-          "Invalid value for environment variable " + std::string(env_key) +
-          ": " + value);
+      TORCH_CHECK(
+          false,
+          "Invalid value for environment variable ",
+          env_key,
+          ": ",
+          value);
     }
   }
 }
@@ -208,7 +206,8 @@ std::pair<int, int> query_ranksize() {
   };
 
   if (!tryQueryRankSize()) {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "Unable to determine rank and size from environment variables. "
         "Please set TORCHCOMM_RANK and TORCHCOMM_SIZE, or ensure you are "
         "running in a supported environment (Torchrun, MPI, or PALS).");
