@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from torch.onnx._internal.exporter import _exportable_module
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class SimpleExportableModel(_exportable_module.ExportableModule):
@@ -95,6 +96,7 @@ class ExportableModelMultipleOutputs(_exportable_module.ExportableModule):
 
 class TestExportableModule(common_utils.TestCase):
     """Tests for ExportableModule abstract class and its implementations."""
+    hw_classification = HardwareClassification.GENERIC
 
     def test_abstract_class_cannot_be_instantiated(self):
         """Test that ExportableModule cannot be instantiated directly."""
