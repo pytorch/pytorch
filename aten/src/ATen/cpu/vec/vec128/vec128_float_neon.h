@@ -492,14 +492,45 @@ class Vectorized<float> {
       nextafter,
       Sleef_nextafterf4)
   Vectorized<float> frac() const;
+#if defined(CPU_CAPABILITY_SVE128)
+  Vectorized<float> sin() const {
+    svfloat32_t sve_input = neon_to_sve(values);
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, sve_input, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_sinf4_u10(values)), map(std::sin));
+    }
+    svfloat32_t sve_result = sinf_fast_path(sve_input);
+
+    return Vectorized<float>(sve_to_neon(sve_result));
+  }
+#else
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
+#endif
+
+#if defined(CPU_CAPABILITY_SVE128)
+  Vectorized<float> cos() const {
+    svfloat32_t sve_input = neon_to_sve(values);
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, sve_input, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_cosf4_u10(values)), map(std::cos));
+    }
+    svfloat32_t sve_result = cosf_fast_path(sve_input);
+
+    return Vectorized<float>(sve_to_neon(sve_result));
+  }
+#else
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
+#endif
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
   // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
     return map(std::sinh);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
   Vectorized<float> cosh() const {
     return map(std::cosh);
   }
