@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <utility>
 
@@ -49,6 +50,333 @@ Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
     return unreduced.sum();
   }
   return unreduced;
+}
+
+namespace {
+
+// Avoid undefined gradients when every input is -inf.
+Tensor safe_logsumexp(TensorList values) {
+  auto stacked = at::stack(values);
+  auto maximum = at::amax(stacked, {0});
+  auto finite = at::isfinite(maximum);
+  auto safe_maximum = at::where(finite, maximum, at::zeros_like(maximum));
+  auto exp_sum = at::sum(at::exp(stacked - safe_maximum), {0});
+  auto safe_exp_sum = at::where(exp_sum.eq(0), at::ones_like(exp_sum), exp_sum);
+  auto result = at::log(safe_exp_sum) + safe_maximum;
+  return at::where(
+      finite,
+      result,
+      at::full_like(result, -std::numeric_limits<double>::infinity()));
+}
+
+Tensor safe_logsumexp_jvp(TensorList values, TensorList tangents) {
+  auto stacked = at::stack(values);
+  auto stacked_tangents = at::stack(tangents);
+  auto maximum = at::amax(stacked, {0});
+  auto finite = at::isfinite(maximum);
+  auto safe_maximum = at::where(finite, maximum, at::zeros_like(maximum));
+  auto weights = at::exp(stacked - safe_maximum);
+  auto denominator = at::sum(weights, {0});
+  auto safe_denominator =
+      at::where(denominator.eq(0), at::ones_like(denominator), denominator);
+  auto result = at::sum(weights * stacked_tangents, {0}) / safe_denominator;
+  return at::where(finite, result, at::zeros_like(result));
+}
+
+// The CTC gradient is exp(log_probs) minus the label posteriors. Propagate
+// grad_grad through the forward-backward recurrences to compute its JVP, which
+// equals the VJP needed here because the Hessian is symmetric.
+std::tuple<Tensor, Tensor> ctc_loss_double_backward_sample(
+    const Tensor& grad_grad,
+    const Tensor& grad_out,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    int64_t input_length,
+    int64_t blank,
+    bool zero_infinity) {
+  const auto max_input_length = log_probs.size(0);
+  const auto num_labels = log_probs.size(1);
+  const auto target_length = targets.numel();
+  if (input_length == 0) {
+    return {at::zeros_like(grad_out), at::zeros_like(log_probs)};
+  }
+
+  Tensor state_labels;
+  if (target_length == 0) {
+    state_labels = at::full({1}, blank, log_probs.options().dtype(at::kLong));
+  } else {
+    state_labels =
+        at::stack({at::full_like(targets, blank), targets}, 1).flatten();
+    state_labels = at::cat(
+        {state_labels,
+         at::full({1}, blank, log_probs.options().dtype(at::kLong))});
+  }
+
+  const auto num_states = state_labels.numel();
+  auto emissions =
+      log_probs.narrow(0, 0, input_length).index_select(1, state_labels);
+  auto emission_tangents =
+      grad_grad.narrow(0, 0, input_length).index_select(1, state_labels);
+  auto neginf = at::full(
+      {}, -std::numeric_limits<double>::infinity(), log_probs.options());
+  auto zero = at::zeros({}, log_probs.options());
+  auto state_indices =
+      at::arange(num_states, log_probs.options().dtype(at::kLong));
+
+  std::vector<Tensor> alpha;
+  std::vector<Tensor> alpha_tangents;
+  alpha.reserve(input_length);
+  alpha_tangents.reserve(input_length);
+  auto initial_mask = state_indices < std::min<int64_t>(2, num_states);
+  alpha.push_back(at::where(initial_mask, emissions.select(0, 0), neginf));
+  alpha_tangents.push_back(
+      at::where(initial_mask, emission_tangents.select(0, 0), zero));
+  Tensor skip_mask;
+  if (num_states > 2) {
+    skip_mask = at::cat(
+        {at::zeros({2}, log_probs.options().dtype(at::kBool)),
+         state_labels.slice(0, 2) != state_labels.slice(0, 0, num_states - 2)});
+  } else {
+    skip_mask = at::zeros({num_states}, log_probs.options().dtype(at::kBool));
+  }
+  for (const auto t : c10::irange<int64_t>(1, input_length)) {
+    const auto& previous = alpha.back();
+    const auto& previous_tangent = alpha_tangents.back();
+    auto step =
+        at::cat({neginf.expand({1}), previous.narrow(0, 0, num_states - 1)});
+    auto step_tangent = at::cat(
+        {zero.expand({1}), previous_tangent.narrow(0, 0, num_states - 1)});
+    auto skip = num_states > 2
+        ? at::cat({neginf.expand({2}), previous.narrow(0, 0, num_states - 2)})
+        : neginf.expand({num_states});
+    auto skip_tangent = num_states > 2
+        ? at::cat(
+              {zero.expand({2}), previous_tangent.narrow(0, 0, num_states - 2)})
+        : zero.expand({num_states});
+    skip = at::where(skip_mask, skip, neginf);
+    skip_tangent = at::where(skip_mask, skip_tangent, zero);
+    alpha.push_back(
+        emissions.select(0, t) + safe_logsumexp({previous, step, skip}));
+    alpha_tangents.push_back(
+        emission_tangents.select(0, t) +
+        safe_logsumexp_jvp(
+            {previous, step, skip},
+            {previous_tangent, step_tangent, skip_tangent}));
+  }
+
+  Tensor neg_log_likelihood;
+  Tensor neg_log_likelihood_tangent;
+  if (target_length == 0) {
+    neg_log_likelihood = -alpha.back().select(0, 0);
+    neg_log_likelihood_tangent = -alpha_tangents.back().select(0, 0);
+  } else {
+    neg_log_likelihood = -safe_logsumexp(
+        {alpha.back().select(0, num_states - 1),
+         alpha.back().select(0, num_states - 2)});
+    neg_log_likelihood_tangent = -safe_logsumexp_jvp(
+        {alpha.back().select(0, num_states - 1),
+         alpha.back().select(0, num_states - 2)},
+        {alpha_tangents.back().select(0, num_states - 1),
+         alpha_tangents.back().select(0, num_states - 2)});
+  }
+
+  std::vector<Tensor> beta(input_length);
+  std::vector<Tensor> beta_tangents(input_length);
+  auto final_mask = state_indices >= std::max<int64_t>(num_states - 2, 0);
+  beta.back() =
+      at::where(final_mask, emissions.select(0, input_length - 1), neginf);
+  beta_tangents.back() = at::where(
+      final_mask, emission_tangents.select(0, input_length - 1), zero);
+  if (num_states > 2) {
+    skip_mask = at::cat(
+        {state_labels.slice(0, 0, num_states - 2) != state_labels.slice(0, 2),
+         at::zeros({2}, log_probs.options().dtype(at::kBool))});
+  }
+  for (int64_t t = input_length - 2; t >= 0; --t) {
+    const auto& following = beta[t + 1];
+    const auto& following_tangent = beta_tangents[t + 1];
+    auto step =
+        at::cat({following.narrow(0, 1, num_states - 1), neginf.expand({1})});
+    auto step_tangent = at::cat(
+        {following_tangent.narrow(0, 1, num_states - 1), zero.expand({1})});
+    auto skip = num_states > 2
+        ? at::cat({following.narrow(0, 2, num_states - 2), neginf.expand({2})})
+        : neginf.expand({num_states});
+    auto skip_tangent = num_states > 2
+        ? at::cat(
+              {following_tangent.narrow(0, 2, num_states - 2),
+               zero.expand({2})})
+        : zero.expand({num_states});
+    skip = at::where(skip_mask, skip, neginf);
+    skip_tangent = at::where(skip_mask, skip_tangent, zero);
+    beta[t] = emissions.select(0, t) + safe_logsumexp({following, step, skip});
+    beta_tangents[t] = emission_tangents.select(0, t) +
+        safe_logsumexp_jvp({following, step, skip},
+                           {following_tangent, step_tangent, skip_tangent});
+  }
+
+  auto infinite = at::isinf(neg_log_likelihood);
+  auto safe_neg_log_likelihood = zero_infinity
+      ? at::where(
+            infinite, at::zeros_like(neg_log_likelihood), neg_log_likelihood)
+      : neg_log_likelihood;
+  auto safe_neg_log_likelihood_tangent = zero_infinity
+      ? at::where(
+            infinite,
+            at::zeros_like(neg_log_likelihood_tangent),
+            neg_log_likelihood_tangent)
+      : neg_log_likelihood_tangent;
+  auto state_posteriors = at::exp(
+      at::stack(alpha) + at::stack(beta) + safe_neg_log_likelihood - emissions);
+  auto state_posterior_tangents = state_posteriors *
+      (at::stack(alpha_tangents) + at::stack(beta_tangents) +
+       safe_neg_log_likelihood_tangent - emission_tangents);
+  auto state_to_label =
+      at::one_hot(state_labels, num_labels).to(log_probs.scalar_type());
+  auto posteriors = at::matmul(state_posteriors, state_to_label);
+  auto posterior_tangents =
+      at::matmul(state_posterior_tangents, state_to_label);
+  auto base_gradient =
+      at::exp(log_probs.narrow(0, 0, input_length)) - posteriors;
+  auto gradient_tangent = at::exp(log_probs.narrow(0, 0, input_length)) *
+          grad_grad.narrow(0, 0, input_length) -
+      posterior_tangents;
+  if (zero_infinity) {
+    base_gradient =
+        at::where(infinite, at::zeros_like(base_gradient), base_gradient);
+    gradient_tangent =
+        at::where(infinite, at::zeros_like(gradient_tangent), gradient_tangent);
+  }
+  if (input_length < max_input_length) {
+    base_gradient = at::cat(
+        {base_gradient, at::zeros_like(log_probs.slice(0, input_length))});
+    gradient_tangent = at::cat(
+        {gradient_tangent, at::zeros_like(log_probs.slice(0, input_length))});
+  }
+  return {at::sum(grad_grad * base_gradient), gradient_tangent * grad_out};
+}
+
+} // namespace
+
+std::tuple<Tensor, Tensor> ctc_loss_double_backward(
+    const Tensor& grad_grad,
+    const Tensor& grad_out,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
+    int64_t blank,
+    bool zero_infinity) {
+  std::vector<Tensor> grad_grad_outs;
+  std::vector<Tensor> grad_log_probs;
+  grad_grad_outs.reserve(log_probs.size(1));
+  grad_log_probs.reserve(log_probs.size(1));
+  auto targets_device = targets.to(log_probs.device(), at::kLong);
+  int64_t target_offset = 0;
+  for (const auto b : c10::irange(log_probs.size(1))) {
+    const auto target_length = target_lengths[b];
+    Tensor sample_targets;
+    if (targets.dim() == 1) {
+      sample_targets =
+          targets_device.slice(0, target_offset, target_offset + target_length);
+      target_offset += target_length;
+    } else {
+      sample_targets = targets_device.select(0, b).slice(0, 0, target_length);
+    }
+    auto [grad_grad_out, grad_log_prob] = ctc_loss_double_backward_sample(
+        grad_grad.select(1, b),
+        grad_out.select(0, b),
+        log_probs.select(1, b),
+        sample_targets,
+        input_lengths[b],
+        blank,
+        zero_infinity);
+    grad_grad_outs.push_back(std::move(grad_grad_out));
+    grad_log_probs.push_back(std::move(grad_log_prob));
+  }
+  return {at::stack(grad_grad_outs), at::stack(grad_log_probs, 1)};
+}
+
+std::tuple<Tensor, Tensor> ctc_loss_double_backward(
+    const Tensor& grad_grad,
+    const Tensor& grad_out,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t blank,
+    bool zero_infinity) {
+  auto input_lengths_cpu = input_lengths.to(at::kCPU, at::kLong).contiguous();
+  auto target_lengths_cpu = target_lengths.to(at::kCPU, at::kLong).contiguous();
+  return ctc_loss_double_backward(
+      grad_grad,
+      grad_out,
+      log_probs,
+      targets,
+      IntArrayRef(
+          input_lengths_cpu.const_data_ptr<int64_t>(),
+          input_lengths_cpu.numel()),
+      IntArrayRef(
+          target_lengths_cpu.const_data_ptr<int64_t>(),
+          target_lengths_cpu.numel()),
+      blank,
+      zero_infinity);
+}
+
+Tensor ctc_loss_fused_backward(
+    const variable_list& grads,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    int64_t blank,
+    bool zero_infinity) {
+  auto grad_log_probs = grads[0].defined()
+      ? _cudnn_ctc_loss_backward(grads[0], loss, raw_grad, zero_infinity)
+      : at::zeros_like(log_probs);
+  if (grads[1].defined()) {
+    grad_log_probs = grad_log_probs +
+        std::get<1>(ctc_loss_double_backward(
+            grads[1],
+            at::ones_like(loss),
+            log_probs,
+            targets,
+            input_lengths,
+            target_lengths,
+            blank,
+            zero_infinity));
+  }
+  return grad_log_probs;
+}
+
+Tensor ctc_loss_fused_backward(
+    const variable_list& grads,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    int64_t blank,
+    bool zero_infinity) {
+  auto input_lengths_cpu = input_lengths.to(at::kCPU, at::kLong).contiguous();
+  auto target_lengths_cpu = target_lengths.to(at::kCPU, at::kLong).contiguous();
+  return ctc_loss_fused_backward(
+      grads,
+      log_probs,
+      targets,
+      IntArrayRef(
+          input_lengths_cpu.const_data_ptr<int64_t>(),
+          input_lengths_cpu.numel()),
+      IntArrayRef(
+          target_lengths_cpu.const_data_ptr<int64_t>(),
+          target_lengths_cpu.numel()),
+      loss,
+      raw_grad,
+      blank,
+      zero_infinity);
 }
 
 static bool isDefined(const std::optional<Tensor>& t) {

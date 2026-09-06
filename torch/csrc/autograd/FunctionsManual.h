@@ -42,6 +42,44 @@ inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
 
 TORCH_API Tensor
 apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
+TORCH_API std::tuple<Tensor, Tensor> ctc_loss_double_backward(
+    const Tensor& grad_grad,
+    const Tensor& grad_out,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
+    int64_t blank,
+    bool zero_infinity);
+TORCH_API std::tuple<Tensor, Tensor> ctc_loss_double_backward(
+    const Tensor& grad_grad,
+    const Tensor& grad_out,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t blank,
+    bool zero_infinity);
+TORCH_API Tensor ctc_loss_fused_backward(
+    const variable_list& grads,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    int64_t blank,
+    bool zero_infinity);
+TORCH_API Tensor ctc_loss_fused_backward(
+    const variable_list& grads,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    int64_t blank,
+    bool zero_infinity);
 TORCH_API bool any_variable_defined(const variable_list& variables);
 TORCH_API void update_wrapped_number(Tensor& input, Tensor& output);
 TORCH_API void copy_range(

@@ -2028,7 +2028,7 @@
   autogen: _ctc_loss.Tensor_out
   tags: dynamic_output_shape  # the shape of second output is data dependent
 
-- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+- func: _ctc_loss_backward(Tensor grad_out, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
@@ -2036,7 +2036,7 @@
     MPS: ctc_loss_backward_mps
   autogen: _ctc_loss_backward.out
 
-- func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+- func: _ctc_loss_backward.Tensor(Tensor grad_out, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
     CPU, CUDA, XPU, MPS: ctc_loss_backward_tensor
 
