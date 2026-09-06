@@ -14,12 +14,15 @@ from torch.distributed.fsdp._runtime_utils import (
     _get_training_state,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
-
-device_type = torch.device(get_devtype())
 
 NUM_ITERS = 2
 DECODER_PARAM_FQNS = [
@@ -75,20 +78,23 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestBackwardPrefetch(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
-    def _dist_train(self, backward_prefetch=BackwardPrefetch.BACKWARD_PRE):
+    def _dist_train(self, backward_prefetch=BackwardPrefetch.BACKWARD_PRE, device=None):
         rank = self.rank
         orig_get_handle_to_prefetch = _get_handle_to_prefetch
         torch.manual_seed(0)
         policy = ModuleWrapPolicy(
             {nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
         )
+        device_type = torch.device(device).type
         model = FSDP(
             nn.Transformer(d_model=1024, nhead=8, device=device_type),
-            device_id=device_type.type,
+            device_id=device_type,
             auto_wrap_policy=policy,
             use_orig_params=True,
             backward_prefetch=backward_prefetch,
@@ -199,7 +205,7 @@ class TestBackwardPrefetch(FSDPTestContinuous):
                 all_handle_fqns = []
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_prefetch(self):
+    def test_backward_prefetch(self, device):
         # subtest reuse process group to shorten test time
         self.run_subtests(
             {
@@ -210,11 +216,15 @@ class TestBackwardPrefetch(FSDPTestContinuous):
                 ],
             },
             self._test_backward_prefetch,
+            device=device,
         )
 
-    def _test_backward_prefetch(self, backward_prefetch: BackwardPrefetch):
-        self._dist_train(backward_prefetch)
+    def _test_backward_prefetch(self, backward_prefetch: BackwardPrefetch, device):
+        self._dist_train(backward_prefetch, device=device)
 
 
+instantiate_device_type_tests(
+    TestBackwardPrefetch, globals(), except_for=("cpu",), allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
