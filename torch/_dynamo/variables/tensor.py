@@ -2782,6 +2782,18 @@ class TensorVariable(VariableTracker):
         )
 
 
+def _symnode_proxy(name: str) -> Method:
+    def handler(
+        self: "SymNodeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._proxy_method(tx, name, args, kwargs)
+
+    return Method(handler)
+
+
 class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
@@ -2898,7 +2910,7 @@ class SymNodeVariable(VariableTracker):
                 case_name="constrain_as_size_example",
             )
 
-    def call_method(
+    def _proxy_method(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
@@ -2915,6 +2927,26 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def int_(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.nb_int_impl(tx)
+
+    # Named instance methods on SymInt / SymFloat. Arithmetic dunders are
+    # number slots. Named int_ so this does not shadow Python's __int__.
+    tp_methods = {
+        "as_integer_ratio": _symnode_proxy("as_integer_ratio"),
+        "bit_length": _symnode_proxy("bit_length"),
+        "conjugate": _symnode_proxy("conjugate"),
+        "has_hint": _symnode_proxy("has_hint"),
+        "hex": _symnode_proxy("hex"),
+        "is_integer": _symnode_proxy("is_integer"),
+        "__int__": Method(int_),
+    }
 
     def nb_index_impl(
         self,
@@ -2948,11 +2980,6 @@ class SymNodeVariable(VariableTracker):
                 {},
             ),
         )
-
-    def method___int__(
-        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
-    ) -> VariableTracker:
-        return self.nb_int_impl(tx)
 
     def nb_add_impl(
         self,
