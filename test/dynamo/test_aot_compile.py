@@ -2668,6 +2668,29 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__annotations__, {"x": list[int], "return": int})
         self.assertEqual(out([1, 2, 3]), 3)
 
+    def test_pickler_drops_an_unpicklable_annotation_and_keeps_the_rest(self):
+        # A <locals> class resolves fine on every version but pickle cannot
+        # reference it, so annotating with one used to fail the whole dump. It
+        # is now dropped per value, and a serializable sibling annotation on the
+        # same function survives, so the function still reloads and runs.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            class Cfg:
+                pass
+
+            def inner(x: Cfg, y: int) -> int:
+                return y
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out.__annotations__, {"y": int, "return": int})
+        self.assertEqual(out(object(), 5), 5)
+
     @unittest.skipIf(
         sys.version_info < (3, 14), "PEP 649 FORWARDREF annotations are 3.14+"
     )
