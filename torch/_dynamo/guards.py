@@ -4451,12 +4451,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         }
         # An annotation or type param nothing guards can be an unpicklable local
         # class; prune it rather than let it fail the whole dump.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            raw_annotations = annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        else:
+            raw_annotations = obj.__annotations__
         annotations = {
             name: self._prune(value, "unguarded function annotation")
-            for name, value in obj.__annotations__.items()
+            for name, value in raw_annotations.items()
         }
         type_params = getattr(obj, "__type_params__", None)
-        if type_params:
+        if type_params is not None:
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
