@@ -10,7 +10,11 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, munge_exc
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    munge_exc,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -34,6 +38,8 @@ class BadCmp:
 
 
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -73,6 +79,8 @@ class CustomSetTests(_BaseSetTests):
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_isdisjoint_with_generator(self):
         n = 0
 
@@ -203,6 +211,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
 
 class TestSetGuards(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
