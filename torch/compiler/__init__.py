@@ -210,9 +210,10 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         - Both inputs and outputs must use pytree-compatible types. User-defined classes
           must be registered via :func:`torch.utils._pytree.register_pytree_node`,
           :func:`torch.utils._pytree.register_dataclass`, or
-          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
-          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default.
+          :func:`torch.utils._pytree.register_constant`. Tensors, ``None``,
+          Python primitives (int, float, bool, str), symbolic types (SymInt,
+          SymFloat, SymBool), and built-in containers (list, tuple, dict) are
+          already handled by default.
         - Primitive values and container structure are specialized per call site:
           each call site expects the same primitives and structure on every execution.
 
@@ -281,21 +282,21 @@ def substitute_in_graph(
     Example::
 
         >>> import binascii
-        >>> binascii.b2a_base64(b"abc")
-        b'YWJj\n'
+        >>> binascii.crc32(b"abc")
+        891568578
         >>> torch.compile(
-        ...     binascii.b2a_base64, fullgraph=True
+        ...     binascii.crc32, fullgraph=True
         ... )(b"abc")  # xdoctest: +SKIP("Long tracebacks")
         ...
         Traceback (most recent call last):
         ...
         torch._dynamo.exc.Unsupported: ...
-        >>> @torch.compiler.substitute_in_graph(binascii.b2a_base64)
-        ... def b2a_base64(data, /, *, newline=True):
-        ...     return b"YWJj\n"
+        >>> @torch.compiler.substitute_in_graph(binascii.crc32)
+        ... def crc32(data, crc=0, /):
+        ...     return 891568578
         ...
-        >>> torch.compile(binascii.b2a_base64, fullgraph=True)(b"abc")
-        b'YWJj\n'
+        >>> torch.compile(binascii.crc32, fullgraph=True)(b"abc")
+        891568578
 
     """
     import torch._dynamo

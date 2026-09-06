@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -442,7 +443,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -476,6 +494,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -525,6 +544,7 @@ def addmm(
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,

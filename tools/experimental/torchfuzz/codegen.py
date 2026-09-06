@@ -1,13 +1,14 @@
-# mypy: ignore-errors
 import hashlib
 import importlib
 import os
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast, Protocol, TypeAlias
 
 import torch
 
+from torchfuzz.checks import Check
 from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_descriptor import format_tensor_descriptor
@@ -15,6 +16,14 @@ from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
 _DEFAULT_DEVICE_MODULE = "torchfuzz.cuda"
+
+# Operations handed to the args/constants codegen hooks: (varname, spec) and
+# (varname, literal, spec) respectively. These are spelled as aliases because
+# list and dict are invariant, so FuzzTemplate and every override must use the
+# identical type or the override is rejected.
+ArgOperations: TypeAlias = list[tuple[str, Spec]]
+ConstantOperations: TypeAlias = list[tuple[str, str, Spec]]
+SpecDistribution: TypeAlias = dict[str, float | bool]
 
 
 @dataclass
@@ -46,11 +55,14 @@ class DeviceInfo:
 
 
 class FuzzTemplate:
-    def __init__(self, supported_ops, check):
+    supported_ops: list[str]
+    check: Check
+
+    def __init__(self, supported_ops: list[str], check: Check) -> None:
         self.supported_ops = supported_ops
         self.check = check
 
-    def supported_dtypes(self):
+    def supported_dtypes(self) -> list[torch.dtype]:
         """Return list of supported dtypes for this template."""
         return [
             torch.float32,
@@ -64,7 +76,7 @@ class FuzzTemplate:
             torch.bool,
         ]
 
-    def spec_distribution(self):
+    def spec_distribution(self) -> SpecDistribution:
         """
         Define the distribution for generating random Specs.
 
@@ -82,7 +94,7 @@ class FuzzTemplate:
             "allow_scalars": True,
         }
 
-    def fuzz_spec_custom(self):
+    def fuzz_spec_custom(self) -> Spec:
         """
         Generate a random Spec based on this template's distribution preferences.
 
@@ -117,7 +129,7 @@ class FuzzTemplate:
             else:
                 return self._generate_scalar_spec(dtype)
 
-    def _generate_tensor_spec(self, dtype):
+    def _generate_tensor_spec(self, dtype: torch.dtype) -> TensorSpec:
         """Generate a TensorSpec with the given dtype."""
         from torchfuzz.tensor_fuzzer import (
             fuzz_tensor_size,
@@ -129,25 +141,25 @@ class FuzzTemplate:
         stride = fuzz_valid_stride(size)
         return TensorSpec(size=size, stride=stride, dtype=dtype)
 
-    def _generate_scalar_spec(self, dtype):
+    def _generate_scalar_spec(self, dtype: torch.dtype) -> ScalarSpec:
         """Generate a ScalarSpec with the given dtype."""
         from torchfuzz.tensor_fuzzer import ScalarSpec
 
         return ScalarSpec(dtype=dtype)
 
-    def imports_codegen(self):
+    def imports_codegen(self) -> list[str]:
         """Return import lines emitted at the top of the generated file."""
         return []
 
-    def flags_codegen(self):
+    def flags_codegen(self) -> list[str]:
         """Return flag/setup lines emitted at the top of the generated file."""
         return []
 
-    def setseed_codegen(self, seed: int):
+    def setseed_codegen(self, seed: int) -> list[str]:
         """Return lines emitted to set the random seed."""
         return [f"torch.manual_seed({seed})", ""]
 
-    def epilogue_codegen(self):
+    def epilogue_codegen(self) -> list[str]:
         """Return lines emitted at the very end of the generated file."""
         return []
 
@@ -195,7 +207,11 @@ class FuzzTemplate:
         """
         return f"{output_name} = {tensor_creation_expr}"
 
-    def args_codegen(self, arg_operations, constant_operations=None):
+    def args_codegen(
+        self,
+        arg_operations: ArgOperations,
+        constant_operations: ConstantOperations | None = None,
+    ) -> list[str]:
         """Generate argument creation code for default template.
 
         ``constant_operations`` is only consulted by templates that opt in via
@@ -296,7 +312,17 @@ class FuzzTemplate:
 # ---------------------------------------------------------------------------
 
 
-_TEMPLATE_REGISTRY: dict[str, type[FuzzTemplate]] | None = None
+# Registered templates are FuzzTemplate subclasses whose __init__ takes no
+# arguments (they pass supported_ops/check to super()), so the registry values
+# are zero-argument factories rather than plain ``type[FuzzTemplate]``.
+class DevicePlugin(Protocol):
+    """The contract a ``TORCHFUZZ_DEVICE_MODULE`` plugin module must satisfy."""
+
+    def register_codegen(self) -> dict[str, Callable[[], FuzzTemplate]]: ...
+    def get_device_info(self) -> DeviceInfo: ...
+
+
+_TEMPLATE_REGISTRY: dict[str, Callable[[], FuzzTemplate]] | None = None
 _DEVICE_INFO: DeviceInfo | None = None
 
 
@@ -314,32 +340,44 @@ def initialize_codegen() -> None:
     if _TEMPLATE_REGISTRY is not None:
         return
     module_name = os.environ.get("TORCHFUZZ_DEVICE_MODULE", _DEFAULT_DEVICE_MODULE)
-    plugin = importlib.import_module(module_name)
+    # import_module returns a bare ModuleType, so every attribute on it is
+    # unchecked; assert the plugin contract instead.
+    plugin = cast("DevicePlugin", importlib.import_module(module_name))
     _TEMPLATE_REGISTRY = plugin.register_codegen()
     _DEVICE_INFO = plugin.get_device_info()
 
 
+def _template_registry() -> dict[str, Callable[[], FuzzTemplate]]:
+    """Return the registry, loading the device plugin on first use."""
+    initialize_codegen()
+    registry = _TEMPLATE_REGISTRY
+    if registry is None:
+        raise RuntimeError("device plugin did not populate the template registry")
+    return registry
+
+
 def get_template_names() -> list[str]:
     """Return the list of template names registered by the active plugin."""
-    initialize_codegen()
-    return list(_TEMPLATE_REGISTRY.keys())
+    return list(_template_registry().keys())
 
 
 def make_template(name: str) -> FuzzTemplate:
     """Instantiate the FuzzTemplate registered under ``name``."""
-    initialize_codegen()
-    if name not in _TEMPLATE_REGISTRY:
+    registry = _template_registry()
+    if name not in registry:
         raise KeyError(
-            f"Unknown template '{name}'; available templates: "
-            f"{sorted(_TEMPLATE_REGISTRY.keys())}"
+            f"Unknown template '{name}'; available templates: {sorted(registry.keys())}"
         )
-    return _TEMPLATE_REGISTRY[name]()
+    return registry[name]()
 
 
 def get_device_info() -> DeviceInfo:
     """Return the active plugin's :class:`DeviceInfo`."""
     initialize_codegen()
-    return _DEVICE_INFO
+    device_info = _DEVICE_INFO
+    if device_info is None:
+        raise RuntimeError("device plugin did not provide DeviceInfo")
+    return device_info
 
 
 def convert_graph_to_python_code(
@@ -450,7 +488,7 @@ def convert_graph_to_python_code(
     final_var_name, _ = node_variables[root_node_id]
 
     # Generate function signature based on discovered arg and constant operations
-    param_names = []
+    param_names: list[str] = []
     if arg_operations:
         param_names.extend([f"arg_{i}" for i in range(len(arg_operations))])
     if constant_as_global and constant_operations:
@@ -487,7 +525,7 @@ def convert_graph_to_python_code(
     code_lines.extend(arg_code_lines)
 
     # Generate the final execution with both normal and compiled versions
-    param_values = []
+    param_values: list[str] = []
     if arg_operations:
         param_values.extend([f"arg_{i}" for i in range(len(arg_operations))])
     if constant_as_global and constant_operations:
@@ -516,10 +554,10 @@ def convert_graph_to_python_code(
 
 def generate_simple_operation_code(
     output_var: str,
-    input_vars: list,
+    input_vars: list[str],
     op_name: str,
-    output_spec,
-) -> list:
+    output_spec: Spec,
+) -> list[str]:
     """
     Generate code lines for executing a single operation using class-based operators.
 
