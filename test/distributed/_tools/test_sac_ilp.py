@@ -16,7 +16,7 @@ from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -47,7 +47,7 @@ except ImportError:
 class TestSACILP(TestCase):
     def setUp(self):
         super().setUp()
-        self.device = torch.cuda.current_device()
+        self.device = torch.accelerator.current_device_index()
         self.estimate_mode = "operator-level-cost-model"
         # Pin the roofline device spec so runtime estimates are deterministic
         # across the physical GPU the test happens to run on.
@@ -151,7 +151,7 @@ class TestSACILP(TestCase):
             )
         return mod_info
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_sac_ilp_case1(self):
         """
@@ -195,7 +195,7 @@ class TestSACILP(TestCase):
                 ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
             )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_sac_ilp_case2(self):
         """
@@ -211,7 +211,7 @@ class TestSACILP(TestCase):
         self.assertEqual(recomputation_time, 0)
         self.assertGreater(peak_mem, 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_sac_ilp_case3(self):
         """
@@ -254,7 +254,7 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
