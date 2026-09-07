@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 
-from . import _is_tensorpipe_available, constants as rpc_contants
+from . import _is_tensorpipe_available, constants as rpc_constants
 
 
 DeviceType = int | str | torch.device
@@ -84,9 +84,9 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def __init__(
         self,
         *,
-        num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
-        rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
-        init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
+        num_worker_threads: int = rpc_constants.DEFAULT_NUM_WORKER_THREADS,
+        rpc_timeout: float = rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
+        init_method: str = rpc_constants.DEFAULT_INIT_METHOD,
         device_maps: dict[str, dict[DeviceType, DeviceType]] | None = None,
         devices: list[DeviceType] | None = None,
         _transports: list | None = None,
