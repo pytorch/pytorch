@@ -378,6 +378,17 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
+# fbcode-only: whole-graph batching of independent same-(M, K, N) aten.addmm
+# ops into a single bmm. Unlike batch_linear_post_grad's depth-bounded BFS
+# candidate search, this groups matching addmm ops across the entire graph --
+# needed for the per-feature embedding-projection pattern in ads ranking
+# models, where same-shape projections are separated by other matmuls the BFS
+# stops at. Empty dict disables the pass. Recognized options:
+#   "selective" (bool, default True): skip addmm ops whose downstream consumer
+#       Inductor would epilogue-fuse into a template kernel.
+#   "min_group_size" (int, default 4): minimum same-shape group size to batch.
+batch_addmm_fusion_options: dict[str, Any] = {}
+
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
 
