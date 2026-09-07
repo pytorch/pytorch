@@ -761,6 +761,8 @@ def _call_while_loop(
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
+    from ..source import RandomValueSource
+
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
 
@@ -854,6 +856,7 @@ def _call_while_loop(
             for carry in operands_seq
         ]
 
+    random_calls_before_cond = len(tx.output.random_calls)
     # create cond subgrpahs
     (
         (cond_r, _cond_treespec),
@@ -927,6 +930,55 @@ def _call_while_loop(
                 ],
             )
         else:
+            # Replay can take a different path on the original operands. Drop
+            # speculative RNG inputs as well as calls so their types cannot be reused.
+            for index in reversed(
+                range(random_calls_before_cond, len(tx.output.random_calls))
+            ):
+                source = RandomValueSource(index)
+                random_var = tx.output.unspec_variable_map.pop(source.name)
+                random_proxy = random_var.as_proxy()
+                for tracer in reversed(tx.output.tracers):
+                    proxy = (
+                        random_proxy
+                        if tracer is tx.output.root_tracer
+                        else tracer.lifted_freevars.pop(random_proxy, None)
+                    )
+                    if proxy is None:
+                        continue
+                    tensor_inputs = [
+                        node
+                        for node in tracer.graph.find_nodes(op="placeholder")
+                        if isinstance(node.meta["example_value"], torch.Tensor)
+                    ]
+                    del tracer._input_versions_at_beginning[
+                        tensor_inputs.index(proxy.node)
+                    ]
+                    tracer.remove_node(proxy.node)
+                tx.output.input_source_to_sizes_strides.pop(source, None)
+            del tx.output.random_calls[random_calls_before_cond:]
+
+            input_versions = []
+            if not self.supports_input_mutation:
+                for arg in operands_seq + additional_inputs_seq:
+                    if arg.is_tensor():
+                        example = arg.as_proxy().node.meta["example_value"]
+                        input_versions.append((example, example._version))
+            cond_fn.call_function(tx, operands_seq + additional_inputs_seq, {})
+            if any(t._version != version for t, version in input_versions):
+                context = (
+                    f"Input mutation detected while replaying {hop_name}'s cond_fn"
+                )
+                name = hop_name
+                unimplemented(
+                    gb_type="Encountered input mutation during higher order op tracing",
+                    context=context,
+                    explanation=f"Higher order ops do not support input mutation. Found in {name}",
+                    hints=[
+                        "Consider using the debug context to change user code to avoid mutation.",
+                        "Please open an issue.",
+                    ],
+                )
             return operands
 
     # create body subgraph
