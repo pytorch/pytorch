@@ -1015,16 +1015,20 @@ class SystemInfo:
                     f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
+            # Exempt off the artifact (self), not the host: an artifact built
+            # without Triton (self == (0, 0)) bakes in no Triton-specific code,
+            # but one built with Triton must match, even on a Triton-less host
+            # (which would otherwise fail later at kernel load).
             if (
-                other.triton_version != (0, 0)
+                self.triton_version != (0, 0)
                 and self.triton_version != other.triton_version
             ):
                 raise RuntimeError(
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            # Check GPU name if the artifact recorded one (self, not the host).
+            if self.gpu_name is not None and self.gpu_name != other.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
                     f"cached={self.gpu_name}, current={other.gpu_name}"
