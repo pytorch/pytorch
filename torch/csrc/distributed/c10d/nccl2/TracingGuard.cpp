@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -69,14 +70,9 @@ void TracingGuard::initializeTracingCommon(
     uint64_t sequence_number,
     const std::vector<at::Tensor>& input_tensor_list,
     const std::vector<at::Tensor>& output_tensor_list) {
-  std::vector<int64_t> in_split_sizes;
-  for (const auto& input_tensor_list_elem : input_tensor_list) {
-    in_split_sizes.push_back(input_tensor_list_elem.numel());
-  }
-  std::vector<int64_t> out_split_sizes;
-  for (const auto& output_tensor_list_elem : output_tensor_list) {
-    out_split_sizes.push_back(output_tensor_list_elem.numel());
-  }
+  auto numel = [](const at::Tensor& t) { return t.numel(); };
+  std::vector<int64_t> in_split_sizes = c10::fmap(input_tensor_list, numel);
+  std::vector<int64_t> out_split_sizes = c10::fmap(output_tensor_list, numel);
 
   auto debug_info = getDebugInfo(
       comm_name,

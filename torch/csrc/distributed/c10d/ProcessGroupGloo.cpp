@@ -4,6 +4,7 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -1586,14 +1587,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     }
     buffers.push_back(inputTensors[i].clone());
   }
-  std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto& buffer : buffers) {
-    std::vector<at::Tensor> inp = {buffer};
-    AllreduceOptions arOpts;
-    arOpts.reduceOp = opts.reduceOp;
-    arOpts.timeout = opts.timeout;
-    works.push_back(allreduce(inp, arOpts));
-  }
+  AllreduceOptions arOpts;
+  arOpts.reduceOp = opts.reduceOp;
+  arOpts.timeout = opts.timeout;
+  std::vector<c10::intrusive_ptr<Work>> works =
+      c10::fmap(buffers, [this, &arOpts](const at::Tensor& buffer) {
+        std::vector<at::Tensor> inp = {buffer};
+        return allreduce(inp, arOpts);
+      });
   return c10::make_intrusive<LambdaWork>(
       [rank, worldSize, buffers, outputTensors, works = std::move(works)]() {
         for (const auto i : c10::irange(outputTensors.size())) {
@@ -2269,14 +2270,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
       buffers.push_back(inputs[0][i].clone());
     }
   }
-  std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto& buffer : buffers) {
-    std::vector<at::Tensor> inp = {buffer};
-    AllreduceOptions arOpts;
-    arOpts.reduceOp = opts.reduceOp;
-    arOpts.timeout = opts.timeout;
-    works.push_back(allreduce(inp, arOpts));
-  }
+  AllreduceOptions arOpts;
+  arOpts.reduceOp = opts.reduceOp;
+  arOpts.timeout = opts.timeout;
+  std::vector<c10::intrusive_ptr<Work>> works =
+      c10::fmap(buffers, [this, &arOpts](const at::Tensor& buffer) {
+        std::vector<at::Tensor> inp = {buffer};
+        return allreduce(inp, arOpts);
+      });
   return c10::make_intrusive<LambdaWork>(
       [worldSize, works = std::move(works)]() {
         for (const auto i : c10::irange(worldSize)) {
