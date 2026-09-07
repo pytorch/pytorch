@@ -521,7 +521,7 @@ auto Function<T>::apply(Args&&... args)
   };
 
   auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
-    return x.view_as(x);
+    return x.alias();
   };
 
   c10::intrusive_ptr<Node> attached_node;
