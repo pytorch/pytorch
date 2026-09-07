@@ -33,11 +33,6 @@ FROM base as patchelf
 ADD ./common/install_patchelf.sh install_patchelf.sh
 RUN bash ./install_patchelf.sh && rm install_patchelf.sh && cp $(which patchelf) /patchelf
 
-FROM base as conda
-# Install Anaconda
-ADD ./common/install_conda_docker.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
-
 # Install CUDA
 FROM base as cuda
 ARG CUDA_VERSION=12.6
@@ -113,18 +108,13 @@ COPY --from=cuda13.4  /usr/local/cuda-13.4 /usr/local/cuda-13.4
 FROM ${BASE_TARGET} as final
 ARG DEVTOOLSET_VERSION=13
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
-COPY --from=conda              /opt/conda             /opt/conda
 
 # Add jni.h for java host build.
 COPY ./common/install_jni.sh install_jni.sh
 COPY ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-ENV PATH /opt/conda/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
 RUN rm -rf /usr/local/cuda
 RUN chmod o+rw /usr/local
-RUN touch /.condarc && \
-    chmod o+rw /.condarc && \
-    chmod -R o+rw /opt/conda
