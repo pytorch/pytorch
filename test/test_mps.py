@@ -19,6 +19,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
+
+# DO NOT MERGE: intentional early failure to reproduce venv cleanup EACCES on
+# the m1-14 runner (Post Setup Python step). See pytorch/test-infra cleanup.js.
+raise RuntimeError("Intentional failure to reproduce venv cleanup issue")
 import re
 from collections import defaultdict
 from torch import inf
