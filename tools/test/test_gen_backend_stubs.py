@@ -459,6 +459,33 @@ supported:
     # Deriving the functional from a multi-output op's '.out' would type every output as the input
     # dtype, but multi-output ops mix dtypes (a Long index). Reject it for both a structured op
     # (sort) and a non-structured one (_ctc_loss); a single-output op like div still derives.
+    # A structured kernel is defined as Class::structured_<kernel>::impl(...); the
+    # missing-kernel scan must attribute that to <kernel> rather than report it missing.
+    def test_missing_kernels_counts_structured_impl(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+supported:
+- maximum.out:
+    structured: true"""
+        impl = (
+            "void PrivateUse1NativeFunctions::structured_maximum_out::impl("
+            "const at::Tensor& a, const at::Tensor& b, const at::Tensor& out) {}"
+        )
+        with (
+            tempfile.NamedTemporaryFile(mode="w") as fp,
+            tempfile.NamedTemporaryFile(mode="w") as kernel_file,
+        ):
+            fp.write(yaml_str)
+            fp.flush()
+            kernel_file.write(impl)
+            kernel_file.flush()
+            run(fp.name, "", True, impl_path=kernel_file.name)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str, kernels_str="")
+        self.assertIn("missing a kernel definition for maximum_out", output_error)
+
     # A factory op resolves dtype/layout/device inside its functional body (arange from the
     # scalar values, zeros_like from self) and its .out schema has no options argument, so
     # the functional is refused even though it is single-output.
