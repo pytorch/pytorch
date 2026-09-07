@@ -3,10 +3,23 @@ from contextlib import contextmanager
 
 import torch
 import torch._prims_common as utils
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 aten = torch.ops.aten
+
+# Device is passed via environment variable from the parent test process
+# (consistent with bisector CLI pattern: TORCH_COMPILE_BACKEND, TORCH_BISECT_BACKEND).
+# When run standalone, resolve the current accelerator dynamically; if no
+# accelerator is available, fail loudly instead of guessing a device.
+_DEVICE = os.environ.get("TORCH_BISECT_TEST_DEVICE")
+if _DEVICE is None:
+    _accel = torch.accelerator.current_accelerator(check_available=True)
+    if _accel is None:
+        raise RuntimeError(
+            "No accelerator available. Set TORCH_BISECT_TEST_DEVICE to the "
+            "device under test when running this helper standalone."
+        )
+    _DEVICE = _accel.type
 
 
 def bad_exp_decomp(self, rate=1.0, generator=None):
@@ -49,7 +62,7 @@ def vq(x):
 def test_fn():
     with patch_exp_decomp():
         vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-        x = torch.randn(4, 400, 256, device=GPU_TYPE)
+        x = torch.randn(4, 400, 256, device=_DEVICE)
         out_compiled = vq_compiled(x)
 
     return 1 if out_compiled.isnan().any() else 0
