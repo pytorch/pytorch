@@ -431,6 +431,7 @@ def patch_inductor_backend(
     Patch the inductor backend for a specific device.
     """
     from torch._inductor.codegen.common import (
+        device_codegens,
         get_custom_backend_config_for_device,
         get_custom_backend_pass_for_device,
         get_scheduling_for_device,
@@ -449,6 +450,8 @@ def patch_inductor_backend(
     original_fx_wrapper = get_wrapper_codegen_for_device(device, fx_wrapper=True)
     original_custom_pass = get_custom_backend_pass_for_device(device)
     original_custom_backend_config = get_custom_backend_config_for_device(device)
+    original_codegen = device_codegens.get(device)
+    original_compile_options = original_codegen.compile_options if original_codegen else {}
 
     try:
         # Register modified backend for the device
@@ -468,6 +471,7 @@ def patch_inductor_backend(
                 if custom_backend_config is not None
                 else original_custom_backend_config
             ),
+            device_compile_options=original_compile_options,
         )
         yield
     finally:
@@ -480,6 +484,7 @@ def patch_inductor_backend(
             original_fx_wrapper,
             original_custom_pass,
             original_custom_backend_config,
+            device_compile_options=original_compile_options,
         )
 
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
