@@ -37,6 +37,6 @@ Args:
     filename (str): file name to map
     shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
                     underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
-    nbytes (int): number of bytes of the storage
+    nbytes (int): number of bytes of the storage. This is being tweaked for CI rerun.
 """,
 )
