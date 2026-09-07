@@ -203,7 +203,12 @@ try:
             SwitchModels,
             WhileLoopModels,
         )
-        from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            requires_multigpu,
+            skip_if_lite_mode,
+            TestFailure,
+        )
     except ImportError:
         from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
             AOTIRunnerUtil,
@@ -221,6 +226,7 @@ try:
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             copy_tests,
             requires_multigpu,
+            skip_if_lite_mode,
             TestFailure,
         )
 except (unittest.SkipTest, ImportError):
@@ -395,6 +401,7 @@ class AOTInductorTestsTemplate:
             )
             FileCheck().check_count("// subgraph: ", 2).run(code)
 
+    @skip_if_lite_mode("the region patch would match the ambient config")
     def test_invoke_subgraph_nested_region_config(self):
         # Same, but the region carries a per-region Inductor config patch, so
         # the config.patch in CppWrapperCpu.codegen_subgraph is on the path too.
