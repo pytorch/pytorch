@@ -5928,7 +5928,8 @@ class TestLinalg(TestCase):
             A[0, :, 150:] = 0
             A[2, :, :150] = 0
             A[4, :, 17] = 0
-            _, _, info = torch.linalg.lu_factor_ex(A)
+            LU, _, info = torch.linalg.lu_factor_ex(A)
+            self.assertTrue(torch.isfinite(LU).all())
             self.assertEqual(info[0], 151)
             self.assertEqual(info[2], 1)
             self.assertEqual(info[4], 18)
