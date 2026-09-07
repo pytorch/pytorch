@@ -230,6 +230,8 @@ class TestCheckpointReaderDevice(_CheckpointReaderTestBase):
 instantiate_device_type_tests(
     TestCheckpointReaderDevice,
     globals(),
+    allow_mps=True,
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
