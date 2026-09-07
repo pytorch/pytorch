@@ -64,6 +64,7 @@ ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
+ENV PIP_NO_CACHE_DIR=1
 RUN yum -y install epel-release
 RUN yum -y update
 RUN yum install -y \
@@ -178,5 +179,6 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
 ENV XPU_VERSION 2026.1
+ENV OMIX_VERSION 0.3.0
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd
