@@ -524,6 +524,198 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
+    def test_generalized_scatter_through_index_put_copy_back(self):
+        # Data-dependent indexed values from the updated field (#195285).
+        def composed(field, delta, indices, gain):
+            field[1:-1].add_(delta)
+            values = torch.index_select(field, 0, indices) * gain
+            field.index_put_((indices,), values)
+
+        field = torch.randn(512, device=device)
+        delta = torch.randn(510, device=device)
+        indices = torch.arange(0, 64, 2, device=device, dtype=torch.int64)
+        gain = torch.randn(indices.shape[0], device=device)
+
+        expected = field.clone()
+        composed(expected, delta, indices, gain)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with ctx():
+            actual = field.clone()
+            compiled(actual, delta, indices, gain)
+        post_grad_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
+        self.assertNotIn("aten.slice_scatter.default", post_grad_graphs)
+
+    @parametrize(
+        "put_op",
+        [
+            subtest(aten.index_put.default, name="index_put"),
+            subtest(aten._unsafe_index_put.default, name="unsafe_index_put"),
+        ],
+    )
+    def test_should_reinplace_scatter_indexed_update_chain(self, put_op):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.reinplace import (
+            ViewOp,
+            _generalized_scatter,
+            should_reinplace_scatter,
+        )
+
+        def build_graph(
+            *,
+            values_from_scatter: bool,
+            copy_dst_is_inp: bool,
+            num_updates: int = 1,
+            post_copy_use: str | None = None,
+        ):
+            g = torch.fx.Graph()
+            inp = g.placeholder("inp")
+            other = g.placeholder("other")
+            src = g.placeholder("src")
+            indices = g.placeholder("indices")
+            values = g.placeholder("values")
+            subgraph = g.placeholder("subgraph")
+            view_ops = [ViewOp(target=aten.slice.Tensor, args=(0, 1, -1), kwargs={})]
+            scatter = g.call_function(_generalized_scatter, (inp, src, view_ops))
+            live_result = None
+            if post_copy_use == "view_output":
+                live_result = g.call_function(aten.slice.Tensor, (scatter, 0, 0, None))
+            if values_from_scatter:
+                values = g.call_function(aten.index.Tensor, (scatter, [indices]))
+            updates = [scatter]
+            for _ in range(num_updates):
+                updates.append(
+                    g.call_function(put_op, (updates[-1], [indices], values, False))
+                )
+            put = updates[-1]
+            if post_copy_use == "indexed_output":
+                live_result = put
+            elif post_copy_use == "intermediate_view_output":
+                live_result = g.call_function(
+                    aten.slice.Tensor, (updates[-2], 0, 0, None)
+                )
+            elif post_copy_use == "sibling_output":
+                live_result = g.call_function(
+                    put_op, (scatter, [indices], values, False)
+                )
+            elif post_copy_use == "indexed_split_output":
+                split = g.call_function(aten.split.Tensor, (put, 1))
+                live_result = g.call_function(operator.getitem, (split, 0))
+            copy_dst = inp if copy_dst_is_inp else other
+            g.call_function(aten.copy_.default, (copy_dst, put))
+            if post_copy_use == "metadata":
+                g.call_function(aten.sym_size.int, (scatter, 0))
+            elif post_copy_use == "ordering":
+                g.call_function(control_deps, ((scatter,), subgraph, other))
+            elif post_copy_use not in (
+                None,
+                "view_output",
+                "indexed_output",
+                "intermediate_view_output",
+                "sibling_output",
+                "indexed_split_output",
+            ):
+                raise AssertionError(f"unexpected post_copy_use: {post_copy_use}")
+            g.output(live_result if live_result is not None else copy_dst)
+            return scatter
+
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=True)
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=True, copy_dst_is_inp=True)
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    num_updates=2,
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=False)
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="view_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="sibling_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="indexed_split_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="indexed_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    num_updates=2,
+                    post_copy_use="intermediate_view_output",
+                )
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="metadata",
+                )
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="ordering",
+                )
+            )
+        )
+
     @parametrize(
         "factory_op",
         [
