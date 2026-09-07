@@ -130,33 +130,31 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
     yield from sample_inputs_elementwise_unary(
         op_info, device, dtype, requires_grad, **kwargs
     )
-    if torch.device(device).type != 'mps' or not dtype.is_floating_point:
-        return
-    # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
-    # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
-    # (y < exp(-32)) and the +-inf / nan returns are never reached by them.
-    # Only generated without requires_grad: the derivative is inf at 0 and 1 and
-    # nan outside [0, 1], so gradcheck cannot use them (test_fn_grad fails with
-    # "max per-element difference (slow mode) is: nan").
-    extremes = [
-        0.0,
-        1.0,
-        -0.5,
-        1.5,
-        float("nan"),
-        1e-30,
-        1e-20,
-        1e-15,
-        1e-8,
-        0.134,
-        0.136,
-        0.5,
-        0.864,
-        0.866,
-    ]
-    yield SampleInput(
-        torch.tensor(extremes, dtype=dtype, device=device, requires_grad=requires_grad)
-    )
+    if torch.device(device).type == "mps" and dtype.is_floating_point:
+        # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
+        # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
+        # (y < exp(-32)) and the +-inf / nan returns are never reached by them.
+        extremes = [
+            0.0,
+            1.0,
+            -0.5,
+            1.5,
+            float("nan"),
+            1e-30,
+            1e-20,
+            1e-15,
+            1e-8,
+            0.134,
+            0.136,
+            0.5,
+            0.864,
+            0.866,
+        ]
+        yield SampleInput(
+            torch.tensor(
+                extremes, dtype=dtype, device=device, requires_grad=requires_grad
+            )
+        )
 
 
 op_db: list[OpInfo] = [
