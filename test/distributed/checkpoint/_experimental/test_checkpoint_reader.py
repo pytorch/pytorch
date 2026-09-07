@@ -65,19 +65,6 @@ class _CheckpointReaderTestBase(TestCase):
         # Clean up the temporary directory
         shutil.rmtree(self.temp_dir)
 
-    def move_tensors_to_device(self, state_dict: Any, device: str) -> Any:
-        if isinstance(state_dict, dict):
-            return {
-                key: self.move_tensors_to_device(value, device)
-                for key, value in state_dict.items()
-            }
-        elif isinstance(state_dict, list):
-            return [self.move_tensors_to_device(item, device) for item in state_dict]
-        elif isinstance(state_dict, torch.Tensor):
-            return state_dict.to(device)
-        else:
-            return state_dict
-
 
 class TestCheckpointReader(_CheckpointReaderTestBase):
     hw_classification = HardwareClassification.GENERIC
@@ -233,7 +220,6 @@ class TestCheckpointReaderDevice(_CheckpointReaderTestBase):
         read_state_dict, _ = self.reader.read(
             self.checkpoint_path, map_location=map_location
         )
-        read_state_dict = self.move_tensors_to_device(read_state_dict, map_location)
         self.assertIn("model", read_state_dict)
         self.assertIn("optimizer", read_state_dict)
         self.assertEqual(read_state_dict["epoch"], 5)
