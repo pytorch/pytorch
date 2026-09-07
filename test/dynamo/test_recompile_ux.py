@@ -751,9 +751,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         try:
             self.assertEqual(prior, -1)
             self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
-            thread = threading.Thread(target=worker)
+            thread = threading.Thread(target=worker, daemon=True)
             thread.start()
-            thread.join()
+            thread.join(timeout=120)
+            self.assertFalse(thread.is_alive())
             self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
         finally:
             set_eval_frame_isolate_recompiles_id(prior)
@@ -846,6 +847,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         errors = queue.SimpleQueue()
 
+        def _reraise_worker_errors():
+            raised = []
+            while not errors.empty():
+                raised.append(errors.get_nowait())
+            _reraise_worker_error(raised)
+
         def caller():
             try:
                 opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
@@ -855,13 +862,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         thread = threading.Thread(target=caller, daemon=True)
         thread.start()
+        inv_thread = None
         try:
             # If the caller raised before reaching __eq__, in_eq never fires;
             # surface that exception instead of waiting out the full timeout.
             deadline = time.monotonic() + 120
             while not in_eq.wait(timeout=1):
-                if not errors.empty():
-                    raise errors.get_nowait()
+                _reraise_worker_errors()
                 self.assertTrue(thread.is_alive(), "caller exited before __eq__")
                 now = time.monotonic()
                 self.assertLess(now, deadline, "caller never reached __eq__")
@@ -882,16 +889,22 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
             inv_thread = threading.Thread(target=invalidator, daemon=True)
             inv_thread.start()
-            self.assertTrue(invalidator_done.wait(timeout=60))
+            # A raise inside invalidator() queues onto errors without setting
+            # the event, so poll both: surface the worker traceback rather than
+            # waiting out the timeout and asserting a contentless False.
+            deadline = time.monotonic() + 60
+            while not invalidator_done.wait(timeout=1):
+                _reraise_worker_errors()
+                self.assertLess(time.monotonic(), deadline, "invalidator never drained")
         finally:
             # Join inside finally: an assertion above must not leave the caller
-            # running a compile into the next test, holding compile_lock.
+            # (or the invalidator, whose blocking is what this test asserts on)
+            # running into the next test holding a Dynamo-internal lock.
             release_eq.set()
             thread.join(timeout=120)
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        _reraise_worker_error(raised)
+            if inv_thread is not None:
+                inv_thread.join(timeout=120)
+        _reraise_worker_errors()
         self.assertFalse(thread.is_alive())
         # A later lock holder drains the parked request: the entry reports
         # itself invalidated and a fresh compile serves the next call.
@@ -2544,20 +2557,22 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt = ctx(f)
         opt(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
-        set_code_exec_strategy(
-            f.__code__, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
-        )
-        # A miss without the marker runs eager: no new compile.
-        opt(torch.randn(4, 4))
-        self.assertEqual(cnt.frame_count, 1)
-        ctx.callback._torchdynamo_force_callback_on_cache_miss = True
         try:
+            set_code_exec_strategy(
+                f.__code__,
+                FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY),
+            )
+            # A miss without the marker runs eager: no new compile.
+            opt(torch.randn(4, 4))
+            self.assertEqual(cnt.frame_count, 1)
+            ctx.callback._torchdynamo_force_callback_on_cache_miss = True
             opt(torch.randn(5, 5))
             self.assertEqual(cnt.frame_count, 2)
         finally:
-            del ctx.callback._torchdynamo_force_callback_on_cache_miss
-            # reset_code drops the RUN_ONLY strategy this test set on f.__code__
-            # so it does not leak into the next test.
+            # Set inside the try: a failed assertion above must not leak the
+            # RUN_ONLY strategy or the marker onto f.__code__ into the next test.
+            if hasattr(ctx.callback, "_torchdynamo_force_callback_on_cache_miss"):
+                del ctx.callback._torchdynamo_force_callback_on_cache_miss
             reset_code(f.__code__)
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
