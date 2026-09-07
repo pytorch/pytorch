@@ -2588,6 +2588,16 @@ def solve_min_cut(
             return None
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
+        if isinstance(node.meta.get("val"), torch.device):
+            # A device-valued node (e.g. the coor::current_device() node
+            # compile_on_one_rank substitutes for a baked device) has no tensor to
+            # save, so get_node_weight would give it infinite weight as a non-tensor
+            # output and the allowlist check below would ban it as unrecomputable --
+            # leaving min-cut unable to place it at all once a backward op needs it.
+            # Recomputing is both free and correct: the op only reads the current
+            # accelerator, and doing so on the backward side is what makes the graph
+            # follow each rank's own device.
+            return None
 
         if min_cut_options.ban_if_not_in_allowlist:
             if not op_types.is_recomputable(node):
