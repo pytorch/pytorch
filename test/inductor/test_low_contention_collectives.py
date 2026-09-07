@@ -8,7 +8,11 @@ from torch._inductor import config
 from torch._inductor.fx_passes.low_contention_collectives import (
     replace_collectives_with_low_contention,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 if dist.is_available():
@@ -17,6 +21,8 @@ if dist.is_available():
 
 @unittest.skipIf(not dist.is_available(), "requires distributed")
 class TestLowContentionCollectives(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _build_ag_graph(self):
         """Build an FX graph: input -> all_gather -> wait_tensor -> output (no compute)."""
         c10d_fn = torch.ops._c10d_functional
