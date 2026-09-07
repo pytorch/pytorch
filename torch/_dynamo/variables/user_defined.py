@@ -1098,6 +1098,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif (
             args
+            # Only for plain classes (metaclass `type`): a custom metaclass
+            # (e.g. EnumMeta) may define `name` itself, which must be looked
+            # up via the metaclass MRO below, not misread here as an unbound
+            # call to a descriptor inherited into self.value's own MRO (e.g.
+            # `x in SomeStrEnum` hitting `str.__contains__` via the StrEnum
+            # mixin instead of EnumMeta.__contains__).
+            and type(self.value) is type
             and isinstance(
                 inspect.getattr_static(self.value, name, None),
                 (types.WrapperDescriptorType, types.MethodDescriptorType),
