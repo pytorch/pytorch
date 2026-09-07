@@ -498,10 +498,19 @@ def _reraise_worker_error(raised):
         return
     first = raised[0]
     extra = raised[1:]
-    if extra and hasattr(first, "add_note"):
-        first.add_note(
-            f"+{len(extra)} more worker error(s): " + "; ".join(repr(e) for e in extra)
+    if extra:
+        note = f"+{len(extra)} more worker error(s): " + "; ".join(
+            repr(e) for e in extra
         )
+        if hasattr(first, "add_note"):
+            first.add_note(note)
+        else:
+            # add_note is 3.11+; on 3.10 fold the extras into the message so
+            # the second-failure diagnostic is not silently dropped.
+            if first.args:
+                first.args = (f"{first.args[0]}\n{note}",) + first.args[1:]
+            else:
+                first.args = (note,)
     raise first
 
 
@@ -871,12 +880,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 errors.put(e)
 
         thread = threading.Thread(target=caller, daemon=True)
+        # One shared wall-clock budget for the whole race: the polls below and
+        # the joins in finally all draw from this single deadline, so a wedge
+        # fails at ~120s rather than summing each wait's independent timeout.
+        deadline = time.monotonic() + 120
         thread.start()
         inv_thread = None
         try:
             # If the caller raised before reaching __eq__, in_eq never fires;
             # surface that exception instead of waiting out the full timeout.
-            deadline = time.monotonic() + 120
             while not in_eq.wait(timeout=1):
                 _reraise_worker_errors()
                 self.assertTrue(thread.is_alive(), "caller exited before __eq__")
@@ -904,18 +916,30 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # A raise inside invalidator() queues onto errors without setting
             # the event, so poll both: surface the worker traceback rather than
             # waiting out the timeout and asserting a contentless False.
-            deadline = time.monotonic() + 60
             while not invalidator_done.wait(timeout=1):
                 _reraise_worker_errors()
                 self.assertLess(time.monotonic(), deadline, "invalidator never drained")
+            # invalidate() returned while the caller is still parked in __eq__
+            # (release_eq is unset until finally) and cache_python_depth is
+            # still raised, so the read below does not drain the park either
+            # (drain_pending_invalidations / apply_pending_evictions both no-op
+            # at depth != 0): the request must be parked, not applied. Nothing
+            # is marked Invalidated until a later depth-zero holder drains it,
+            # which is what separates parking from an immediate apply.
+            self.assertTrue(
+                all(
+                    e.trace_annotation != "Invalidated"
+                    for e in _get_cache_entries_for_region(code, -1)
+                )
+            )
         finally:
             # Join inside finally: an assertion above must not leave the caller
             # (or the invalidator, whose blocking is what this test asserts on)
             # running into the next test holding a Dynamo-internal lock.
             release_eq.set()
-            thread.join(timeout=120)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
             if inv_thread is not None:
-                inv_thread.join(timeout=120)
+                inv_thread.join(timeout=max(0.0, deadline - time.monotonic()))
         _reraise_worker_errors()
         self.assertFalse(thread.is_alive())
         # A later lock holder drains the parked request: the entry reports
@@ -2164,8 +2188,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
 
             class Backend:
-                # The shape _PrecompileBackend has, minus the __init__ that
-                # would flip the gate before the OFF half is measured.
+                # The shape _PrecompileBackend (added in #195917) has, minus the
+                # __init__ that would flip the gate before the OFF half is
+                # measured.
                 def __init__(self, inner):
                     self._torchdynamo_orig_backend = inner
                     self._torchdynamo_cache_key = object()
@@ -2403,6 +2428,17 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(region9.recursive_action, FrameAction.SKIP)
             region7 = get_code_region_exec_strategy(code, 7)
             self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+            # A mixed global (only recursive_action is SKIP) inherits per field:
+            # SKIP flows to recursive_action, RUN_ONLY does not flow to
+            # cur_action. The SKIP/SKIP and RUN_ONLY/RUN_ONLY cases above are
+            # symmetric, so this asymmetric case is what pins the two fields to
+            # distinct values -- a transposed cur/recursive mapping fails here.
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.SKIP)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(region9.recursive_action, FrameAction.SKIP)
         finally:
             reset_code(code)
 
@@ -2430,12 +2466,40 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "default cache region"):
             _clear_cache_entries_for_region(code, -1)
 
+        from torch._C._dynamo.eval_frame import (
+            get_code_region_exec_strategy,
+            set_code_region_exec_strategy,
+        )
+
+        # The clear also wipes the region's strategy_map and frame_state_map
+        # entries, not just its cache entries. Seed a region strategy so a
+        # dropped region_strategy_map.erase (extra_state.cpp) is caught.
+        set_code_region_exec_strategy(
+            code,
+            region_a,
+            FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY),
+        )
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_a).cur_action,
+            FrameAction.RUN_ONLY,
+        )
         total_before = _get_total_cache_entry_count(code)
         _clear_cache_entries_for_region(code, region_a)
         # The whole region is gone and the total drops by exactly its size: a
         # dropped C++ count decrement or a partial clear fails here.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 0)
         self.assertEqual(_get_total_cache_entry_count(code), total_before - 2)
+        # The region strategy is erased too: it reads back the inherited DEFAULT
+        # it had before any strategy was recorded, and the untouched neighbour
+        # stays DEFAULT as well.
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_a).cur_action,
+            FrameAction.DEFAULT,
+        )
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_b).cur_action,
+            FrameAction.DEFAULT,
+        )
         # The neighbour region is untouched and still serves its entry.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
         opt_b(torch.randn(3))
