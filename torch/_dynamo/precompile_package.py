@@ -31,8 +31,9 @@ dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
 The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
 real, returns its result, and records every frame, break continuation and
-guarded variant it exercises. ``precompile.accumulate`` is the same model, rewriting the artifact on every
-call instead of once at block exit.
+guarded variant it exercises. ``cap.save()`` writes the artifact from
+everything captured so far -- call it repeatedly to checkpoint a long capture,
+or once at the end; exiting the block writes a final time.
 
 Calls run with the grad mode the caller sets -- capture does not force
 ``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
@@ -108,8 +109,7 @@ capture used as a context manager: the caller's own calls inside the block drive
 the capture, and the ``(python_code, cache)`` artifact is written to the given files
 when the block exits (its default ``tracer=DynamoTracer()`` records many calls;
 ``tracer=MakeFxTracer()`` produces a self-contained Python source artifact from one
-call); ``torch.compiler.precompile.accumulate(...)``, the counterpart that rewrites
-the files after every call; and ``torch.compiler.precompile.load``.
+call); and ``torch.compiler.precompile.load``.
 The helpers in this module, including the capture session, implement that surface
 and remain internal. All of it is distinct from ``torch._dynamo.config.caching_precompile``,
 which caches ``torch.compile`` artifacts transparently without an explicit
@@ -1550,10 +1550,10 @@ def _summarize(
 class PrecompileSession:
     """
     A caller-driven capture in progress. Enter as a context manager to get the
-    callable to exercise, invoke it with real inputs inside the block, then
-    ``save()``. A one-shot session captures within a single ``with`` block; a
-    resumable session (``resumable=True``) keeps its compiled region across
-    blocks so a later call reuses an earlier one's variants.
+    callable to exercise, invoke it with real inputs inside the block, and
+    ``save()`` to write the artifact -- repeatedly to checkpoint mid-block, and
+    once more on exit. The compiled region stays alive for the whole block, so
+    every call reuses the variants the earlier ones produced.
     """
 
     def __init__(
@@ -1569,7 +1569,6 @@ class PrecompileSession:
         keep_graphs: bool = False,
         invariants: str | None = None,
         prune_invariant_guards: bool = False,
-        resumable: bool = False,
     ) -> None:
         self._fn = fn
         self._backend = backend
@@ -1582,8 +1581,8 @@ class PrecompileSession:
         self._cycle_guard_leaves: dict[bytes, set[tuple[str, str]]] = {}
         self._drifted_guards: set[tuple[str, str]] = set()
         # Whether the artifact's guards were already rebuilt -- drift-probed and
-        # unrebuildables dropped. _apply_guard_policy does it on the precompile()
-        # path, the gate does it otherwise; the flag keeps it to once.
+        # unrebuildables dropped. The first render does it via the gate; the
+        # flag keeps it to once, so a later save() in the same block reuses it.
         self._rebuild_checked = False
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
@@ -1597,16 +1596,13 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = prune_invariant_guards
-        # An accumulating capture re-enters this session once per caller-driven
-        # call, so __exit__ must not tear the region down: the compiled variants
-        # are filed under isolate_recompiles_id, and lookup matches that id with
-        # no fallback, so a fresh region would make every prior variant
-        # invisible and recompile the world. Nothing can hand an existing id to
-        # torch._dynamo.optimize either -- it mints its own from a private
-        # counter -- so the only way to keep them is to keep the region.
-        self._resumable = resumable
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
+        # Whether _policy_filtered_codes has run and populated the drop
+        # accounting. A render (save/artifact/snapshot) sets it, so __exit__
+        # only computes the policy itself for a bare session that never
+        # rendered -- and never a second time on the render path.
+        self._policy_applied = False
         # slot -> the check it rendered as, for every slot dropped by any
         # route. See PrecompileSummary.dropped_guard_code for why the slot
         # tuple alone cannot be audited.
@@ -1616,8 +1612,8 @@ class PrecompileSession:
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._warned_unrebuildable: set[tuple[str, str]] = set()
         self._capture_errors: list[str] = []
-        # How many capture errors predate the current cycle. Always 0 for a
-        # one-shot capture, which has exactly one cycle.
+        # How many capture errors predate the capture block. Set at __enter__;
+        # a render counts only the errors raised since.
         self._gate_error_mark = 0
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
@@ -1695,33 +1691,6 @@ class PrecompileSession:
                 self._package.cached_backends.clear()
             self._pgo_state.clear()
 
-    def retire(self) -> None:
-        """Final teardown for a RESUMABLE session: drain, then give back the
-        compiled region.
-
-        The accumulating capture's close() ends the session between calls, but
-        "between calls" is a per-thread notion: another thread can still be
-        inside a capture call, compiling against the region this tears down.
-        Same drain handshake as __exit__, owned here so no caller has to reach
-        into _closing/_active_calls by hand.
-        """
-        with self._state:
-            self._resumable = False
-            self._closing = True
-            try:
-                while self._active_calls:
-                    self._state.wait()
-            except BaseException:
-                self._closing = False
-                self._state.notify_all()
-                raise
-        try:
-            self._clear_runtime_cache()
-        finally:
-            self._finished = True
-            with self._state:
-                self._state.notify_all()
-
     def _call(self, *args: object, **kwargs: object) -> object:
         with self._state:
             if self._compiled is None or self._closing:
@@ -1734,15 +1703,22 @@ class PrecompileSession:
                 _use_code_state(self._pgo_state),
                 record_live_guard_leaves(self._cycle_guard_leaves),
             ):
-                return compiled(*args, **kwargs)
+                result = compiled(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
             raise
         finally:
             with self._state:
                 self._active_calls -= 1
+                # Merge as each call completes, not only at block end: a
+                # mid-block save() and the render-before-close both check guard
+                # drift against _live_guard_leaves, so this cycle's leaves must
+                # be visible before either renders. update(), so a frame not
+                # recompiled this call keeps its leaves under its earlier key.
+                self._live_guard_leaves.update(self._cycle_guard_leaves)
                 if self._active_calls == 0:
                     self._state.notify_all()
+        return result
 
     def __enter__(self) -> Callable[..., object]:
         if self._finished:
@@ -1752,18 +1728,17 @@ class PrecompileSession:
                 "PrecompileSession is already active: a session runs one capture "
                 "block at a time, so serialize concurrent entries."
             )
-        # Set by every exit and, on the one-shot path, never read again. A
-        # resumable session does re-enter, and _call refuses to run while it is
-        # set, so clearing it here is what makes the second cycle work at all.
-        self._closing = False
         self._gate_error_mark = len(self._capture_errors)
         stack = contextlib.ExitStack()
-        stack.enter_context(_capture_config(self._training))
-        # Merged into _live_guard_leaves when the cycle ends, rather than
-        # replacing it: every cycle starts a fresh dict, and a frame the cycle
-        # did not recompile keeps its live leaves under the key from the cycle
-        # that built it. Installed per call by _call, not here: the recording
-        # is thread-scoped, and a call may run on a thread other than this one.
+        # The grad-mode/config patch is per call, in _call, not block-level:
+        # user code between calls (optimizer.step, data loading, save()) must
+        # run in the ambient mode, not the capture's.
+        #
+        # Merged into _live_guard_leaves when the block ends, rather than
+        # replacing it: a frame not recompiled during the block keeps its live
+        # leaves under the key from when it was built. Installed per call by
+        # _call, not here: the recording is thread-scoped, and a call may run on
+        # a thread other than this one.
         self._cycle_guard_leaves = {}
         self._stack = stack
         try:
@@ -1785,17 +1760,16 @@ class PrecompileSession:
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
-            # the config patch above stays on for the life of the process and
             # the session is wedged: save() reports the block as still open.
             self._stack = None
             self._compiled = None
             # Drain in-flight calls FIRST, before any teardown, exactly as
-            # __exit__ does: a concurrent resumable-session call can still be
-            # compiling against a borrowed cache entry, and both stack.close()
-            # and the region clear below mutate state it reads. The cleanup
-            # chain sits in the drain's finally so an interrupt raised out of
-            # wait() (e.g. KeyboardInterrupt) still tears the region down
-            # rather than leaking it until process exit.
+            # __exit__ does: a concurrent call can still be compiling against a
+            # borrowed cache entry, and both stack.close() and the region clear
+            # below mutate state it reads. The cleanup chain sits in the drain's
+            # finally so an interrupt raised out of wait() (e.g.
+            # KeyboardInterrupt) still tears the region down rather than leaking
+            # it until process exit.
             try:
                 with self._state:
                     self._closing = True
@@ -1843,17 +1817,32 @@ class PrecompileSession:
                 try:
                     self._take_backend_artifacts()
                 finally:
-                    if not self._resumable:
-                        self._clear_runtime_cache()
-                        self._finished = True
+                    self._clear_runtime_cache()
+                    self._finished = True
                     with self._state:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
-        # Before the report, so that it describes the artifact actually written.
-        # The rebuildability check for the other path is in artifact()/save(),
-        # where a caller can catch it like every other artifact-quality gate.
-        if exc[0] is None and self._prune_invariant_guards and not self._resumable:
-            self._apply_guard_policy()
+        # Before the report, so it describes the artifact actually written: the
+        # final save() populated policy_dropped_guards, and re-marking those
+        # slots is what makes the report show them as dropped preconditions. A
+        # bare session that never rendered (summary() without save/artifact)
+        # still needs the accounting, so compute it here when no render did.
+        if exc[0] is None and self._prune_invariant_guards:
+            if not self._policy_applied:
+                # No render happened (a bare session read through summary() or
+                # the package itself), so apply the policy IN PLACE now the
+                # capture is over: this prunes the package's own guard state,
+                # one-shot. A mid-block save() ran _policy_filtered_codes on
+                # copies to keep this state pristine for later calls; at exit
+                # there are none, so the originals are the thing to prune. The
+                # rebuild here also sets _rebuild_checked so a later gate does
+                # not re-read the now-pruned pickle and lose its drift check.
+                self._policy_dropped_guards |= self._run_guard_policy(
+                    list(self._package.code_entries())
+                )
+                self._rebuild_checked = True
+                self._policy_applied = True
+            self._remark_policy_dropped(self._policy_dropped_guards)
         if self._invariants_path is None:
             return
         if exc[0] is None:
@@ -2101,27 +2090,15 @@ class PrecompileSession:
             )
         return state
 
-    def _apply_guard_policy(self) -> None:
-        """Apply the policy IN PLACE and fold its drops into the session.
+    def _remark_policy_dropped(self, dropped: set[tuple[str, str]]) -> None:
+        """Flip the report's ``enforced`` flag on the slots the policy dropped.
 
-        The one-shot path, the only one wired up here: the capture is over, so
-        consuming the accumulated facts to produce the artifact costs nothing.
-        The accumulating capture a later change in this stack adds must use
-        :meth:`_policy_filtered_codes` instead -- see the warning there for what
-        re-running this in place would destroy.
+        Cosmetic, for :meth:`write_invariants` only: the artifact and summary
+        already subtract ``policy_dropped_guards`` without this. Run once, at
+        exit, over the FINAL drop set -- a mid-block ``save()`` must not, since
+        the policy's verdict on a slot can flip as later variants make it
+        discriminate, and this flag does not flip back.
         """
-        dropped = self._run_guard_policy(list(self._package.code_entries()))
-        # _run_guard_policy rebuilt every frame, so the gate must not do it
-        # again: a second rebuild reads the already-pruned pickle under a key
-        # the live build never recorded, losing the drift comparison.
-        self._rebuild_checked = True
-        # Not "risky": the policy is the caller stating that the environment is
-        # fixed and every variation is in the inputs, so a slot that never
-        # varied is out of the artifact's declared domain rather than an
-        # unchecked hazard. summary() subtracts these from the kept set, so the
-        # kept set itself stays as the filters recorded it.
-        self._policy_dropped_guards |= dropped
-
         # Re-mark exactly the slots the policy ACTUALLY dropped, not every slot
         # a coarse invariance test would. policy() drops an environment-rooted
         # slot only, so a droppable-typed slot reached through an input survives
@@ -2146,24 +2123,23 @@ class PrecompileSession:
     def _policy_filtered_codes(self) -> list[Any]:
         """Policy-filtered COPIES of the code entries, session left pristine.
 
-        Unused until a later change in this stack wires up the accumulating
-        capture. That path renders an artifact after every call, and the
-        policy is not safe to apply to the same state twice. It rewrites each
-        variant's serialized guards and then prunes the facts it derived them
-        from, so a second pass reads bytes the first already filtered against
-        facts the first already edited, and filtering can only ever remove.
+        ``save()`` renders an artifact whenever it is called, and the policy is
+        not safe to apply to the same state twice. It rewrites each variant's
+        serialized guards and then prunes the facts it derived them from, so a
+        second pass reads bytes the first already filtered against facts the
+        first already edited, and filtering can only ever remove.
 
         That is not a theoretical loss. varying_guard_slots over a SINGLE
         variant is empty by construction -- one variant cannot disagree with
-        itself -- so the pass after the first call drops every slot of every
+        itself -- so the pass after the first save drops every slot of every
         frame that is not unconditionally kept. When a later call adds the
         variant that makes one of those slots discriminate, the earlier variant
         cannot get it back, and it goes on matching calls that belong to the
         new graph.
 
-        So the accumulating path filters a copy and keeps its own state
-        pristine. deepcopy treats bytes as atomic, so this duplicates the record
-        structure and not the serialized guard payloads.
+        So the render filters a copy and keeps the session's own state pristine.
+        deepcopy treats bytes as atomic, so this duplicates the record structure
+        and not the serialized guard payloads.
         """
         codes = copy.deepcopy(list(self._package.code_entries()))
         # REPLACED, not unioned. keep_only grows as calls add variants, so a
@@ -2171,6 +2147,7 @@ class PrecompileSession:
         # cumulative set would keep reporting it as dropped from an artifact
         # that carries it. This is the drops in the file being written now.
         self._policy_dropped_guards = self._run_guard_policy(codes)
+        self._policy_applied = True
         return codes
 
     def _run_guard_policy(self, code_entries: list[Any]) -> set[tuple[str, str]]:
@@ -2547,21 +2524,23 @@ class PrecompileSession:
         require_complete: bool,
         require_no_risky_drops: bool,
         require_no_dropped_guards: bool,
-        caller: str,
     ) -> PrecompileSummary:
-        """Run the coverage and guard gates, or raise saying which one failed."""
-        if self._stack is not None:
-            raise RuntimeError(f"{caller} must be called after the capture block exits")
+        """Run the coverage and guard gates, or raise saying which one failed.
+
+        Callable mid-block: ``save()`` renders while the region is still live.
+        The rebuildability rebuild below re-lowers retained graphs directly, not
+        through the frame evaluator, so it does not recurse into the capture.
+        """
         # Here rather than in __exit__ so a caller can catch it like every other
-        # gate below. On the precompile() path _apply_guard_policy already
-        # rebuilt every frame and set the flag, so this is a no-op there.
+        # gate below. The first render rebuilds every frame and sets the flag,
+        # so a later save() in the same block is a no-op here.
         if not self._rebuild_checked:
             self._drop_unrebuildable_guards()
         summary = self.summary()
-        # On a resumable session, only the errors THIS cycle raised. A call that
-        # failed already raised to the caller, who saw it and carried on; making
-        # every later render refuse over it would freeze the artifact at the
-        # last good call for the rest of the loop.
+        # Only the errors raised since the block was entered. A call that failed
+        # already raised to the caller, who saw it and carried on; counting a
+        # pre-block error here would refuse a render over something the caller
+        # already handled.
         fresh_errors = list(summary.capture_errors)[self._gate_error_mark :]
         if require_complete and fresh_errors:
             raise PackageError(
@@ -2691,7 +2670,6 @@ class PrecompileSession:
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
             require_no_dropped_guards=require_no_dropped_guards,
-            caller="save()",
         )
         self._take_backend_artifacts()
         store = _SingleFileStore(self._backend_artifacts)
@@ -2785,33 +2763,39 @@ class PrecompileSession:
     ) -> tuple[str, bytes]:
         """Render everything captured SO FAR, leaving this session able to capture more.
 
-        Same gates and the same rendering as :meth:`artifact`, but derived from
+        Same gates and the same rendering as :meth:`artifact`. With
+        ``prune_invariant_guards`` set, the render is derived from
         policy-filtered COPIES of the code entries, so the accumulated guard
         state and the facts it was derived from survive intact for the next
-        call. See :meth:`_policy_filtered_codes` for why applying the policy to
-        the session itself would quietly destroy the artifact.
+        render (see :meth:`_policy_filtered_codes` for why applying the policy
+        to the session itself would quietly destroy the artifact). Rendering
+        from copies is what lets ``save()`` be called repeatedly within one
+        capture block.
         """
         # A serialization boundary like artifact()/save(): a CPU codegen
-        # target that drifted between accumulate() calls makes the inductor
-        # bundle mix native code for two ISA targets, which can crash (illegal
+        # target that drifted between save() calls makes the inductor bundle
+        # mix native code for two ISA targets, which can crash (illegal
         # instruction) on the loading machine -- refuse at write time instead.
         self._package.refuse_unserializable()
         # The policy FIRST: it is what populates policy_dropped_guards, and the
         # gates below read them. Gating first leaves require_no_risky_drops
         # judging the previous render's numbers -- inert on the first call, and
         # a capture that renders once therefore reports POLICY_DROPPED_GUARDS =
-        # [] while that same pass dropped every invariant slot.
-        codes = self._policy_filtered_codes()
+        # [] while that same pass dropped every invariant slot. Off unless the
+        # caller opted into pruning: without it the render keeps every guard,
+        # so there is nothing to filter and the session codes serialize as-is.
+        codes = self._policy_filtered_codes() if self._prune_invariant_guards else None
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
             require_no_dropped_guards=require_no_dropped_guards,
-            caller="snapshot_artifact()",
         )
         from torch._precompile import _build_multigraph_artifact
 
         backends = self._collect_backends()
-        entry = dataclasses.replace(self._package.cache_entry(), codes=codes)
+        entry = self._package.cache_entry()
+        if codes is not None:
+            entry = dataclasses.replace(entry, codes=codes)
         rendered, refused = self.rendered_backends(list(backends))
         return _build_multigraph_artifact(
             entry,
@@ -2874,7 +2858,6 @@ class PrecompileSession:
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
             require_no_dropped_guards=require_no_dropped_guards,
-            caller="artifact()",
         )
         from torch._precompile import _build_multigraph_artifact
 
@@ -3124,18 +3107,18 @@ def precompile_capture(
 
     The capture is caller-driven: enter the session to get a callable, invoke it
     exactly as you would ``fn`` inside the ``with`` body, and the calls fold into
-    the artifact in the ambient grad mode. ``invariants`` names a file written
-    when the block exits without an exception. A one-shot session captures within
-    a single ``with`` block; :func:`precompile_accumulate` keeps its region alive
-    across blocks so a later call reuses an earlier one's variants.
+    the artifact in the ambient grad mode. The compiled region stays alive for
+    the whole block, so every call reuses the variants the earlier ones
+    produced. ``invariants`` names a file written when the block exits without
+    an exception.
 
     Runtime guards remain intact during capture. ``guard_filter_fn`` applies
     only to the serialized guard state, so every call observes the same
     recompilation behavior as ordinary ``torch.compile``. ``save()`` refuses
     the risky subset by default rather than every drop, and a drop a custom
     filter adds beyond the default's counts as risky. ``prune_invariant_guards``
-    additionally drops, on exit, the droppable guard slots that held identically
-    in every captured variant (see ``PrecompileSession._apply_guard_policy``).
+    additionally drops the droppable guard slots that held identically in every
+    captured variant (see ``PrecompileSession._policy_filtered_codes``).
     """
     return PrecompileSession(
         fn,
