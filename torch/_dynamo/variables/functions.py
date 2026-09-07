@@ -46,6 +46,7 @@ from weakref import WeakKeyDictionary
 
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
+from torch._dynamo.utils import namedtuple_fields
 from torch._guards import Source
 from torch.utils._pytree import is_namedtuple_class
 
@@ -112,6 +113,7 @@ from .constant import ConstantVariable
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
+    NamedTupleVariable,
     UserDefinedObjectVariable,
 )
 
@@ -135,7 +137,7 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
-    from .lists import BaseListVariable, ListVariable
+    from .lists import BaseListVariable, ListVariable, TupleVariable
     from .tensor import TensorVariable
 
 
@@ -3795,8 +3797,13 @@ class SysFunctionVariable(VariableTracker):
 from torch._higher_order_ops.triton_kernel_wrap import (
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
+    AggregateSpec,
+    AggregateTypeMetadata,
+    LeafSpec,
+    NamedTupleSpec,
     TMADescriptorMetadata,
     TritonHOPifier,
+    TupleSpec,
 )
 
 
@@ -3916,6 +3923,63 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel_source=variable.kernel_source,
         )
 
+    def _get_aggregate_type_metadata(
+        self,
+        param_name: str,
+        param_value: "NamedTupleVariable | TupleVariable",
+        combined_args: dict[str, Any],
+        tma_descriptor_metadata: TMADescriptorMetadata,
+    ) -> TupleSpec | NamedTupleSpec:
+        from .lists import TupleVariable
+
+        flat_vars_counter = 0
+
+        def get_next_flat_key() -> str:
+            nonlocal flat_vars_counter
+            # `flat_key` really shouldn't be in `combined_args`, but guard against that
+            # anyway
+            while True:
+                flat_key = f"__triton_{param_name}_{flat_vars_counter}"
+                flat_vars_counter += 1
+                if flat_key not in combined_args:
+                    return flat_key
+
+        def dfs(var: VariableTracker) -> AggregateSpec:
+            if isinstance(var, NamedTupleVariable):
+                children = tuple(dfs(child) for child in var.items)
+                return NamedTupleSpec(
+                    type_name=var.tuple_cls.__name__,
+                    field_names=tuple(namedtuple_fields(var.tuple_cls)),
+                    children=children,
+                )
+            if type(var) is TupleVariable:
+                return TupleSpec(children=tuple(dfs(child) for child in var.items))
+
+            flat_key = get_next_flat_key()
+            if isinstance(
+                var,
+                (TMADescriptorExperimentalVariable, TMADescriptorStableVariable),
+            ):
+                tma_descriptor_metadata[flat_key] = var.to_metadata()
+                combined_args[flat_key] = var.get_tensor()
+            # TODO(mwizak): add support for more python constants
+            # for symnodes.. need to think about how this is correct
+            elif var.is_python_constant() or var.is_tensor() or var.is_symnode_like():
+                combined_args[flat_key] = var
+            else:
+                self.raise_unsupported(
+                    "Unsupported leaf in Triton tuple or NamedTuple argument "
+                    f"{param_name!r}: {var!r}."
+                )
+            return LeafSpec(flat_key=flat_key)
+
+        metadata = dfs(param_value)
+        if not isinstance(metadata, (TupleSpec, NamedTupleSpec)):
+            raise AssertionError(
+                f"Expected aggregate metadata for {param_name!r}, got {metadata!r}"
+            )
+        return metadata
+
     def call_HOP(
         self,
         variable: "TritonKernelVariable",
@@ -3926,6 +3990,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         tx: "InstructionTranslatorBase",
     ) -> ConstantVariable | None:
         from .dicts import ConstDictVariable
+        from .lists import TupleVariable
 
         # as we can only pass tensors as non-const args in fx graph,
         # here we replace TMA descriptors
@@ -3934,13 +3999,21 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args.keys()):
+        aggregate_type_metadata: AggregateTypeMetadata = {}
+
+        for k in list(combined_args.keys() & set(kernel_arg_names)):
             v = combined_args[k]
             if isinstance(
                 v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
             ):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args[k] = v.get_tensor()
+            elif isinstance(v, NamedTupleVariable) or type(v) is TupleVariable:
+                aggregate_type_metadata[k] = self._get_aggregate_type_metadata(
+                    k, v, combined_args, tma_descriptor_metadata
+                )
+                # Remove the aggregate arg as it has been flattened
+                combined_args.pop(k)
 
         combined_args_vt = {
             VariableTracker.build(tx, k): v for k, v in combined_args.items()
@@ -3992,18 +4065,20 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args)
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": variable.kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grids,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": meta.as_proxy(),
+            "aggregate_type_metadata": aggregate_type_metadata,
+            "launch_kwargs": launch_kwargs,
+        }
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
-            {
-                "kernel_idx": variable.kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grids,
-                "tma_descriptor_metadata": tma_descriptor_metadata,
-                "kwargs": meta.as_proxy(),
-                "launch_kwargs": launch_kwargs,
-            },
+            hop_kwargs,
         )
 
         return VariableTracker.build(

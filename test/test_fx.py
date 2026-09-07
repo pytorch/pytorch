@@ -4925,6 +4925,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
                 ),
                 grid=[(x.numel(),)],
                 tma_descriptor_metadata={},
+                aggregate_type_metadata={},
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,

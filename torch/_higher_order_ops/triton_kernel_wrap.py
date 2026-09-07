@@ -172,7 +172,7 @@ def maybe_unpack_host_tma_descriptor(
     return base, create_tma_stable_metadata(list(arg.block_shape))
 
 
-# TMADescriptorMetadata maps kernel parameter names to the metadata that allows
+# TMADescriptorMetadata maps flat argument keys to the metadata that allows
 # reconstructing TMA descriptors from the underlying tensors (passed as kernel
 # arguments in the fx graph, instead of the TMA descriptors).
 #
@@ -186,6 +186,30 @@ TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     TMAExperimentalMetadata | TMAStableMetadata,
 ]
+
+
+# TODO(mwizak): Better class names
+@dataclasses.dataclass(frozen=True)
+class LeafSpec:
+    flat_key: str
+
+
+@dataclasses.dataclass(frozen=True)
+class TupleSpec:
+    children: tuple["AggregateSpec", ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class NamedTupleSpec:
+    type_name: str
+    field_names: tuple[str, ...]
+    children: tuple["AggregateSpec", ...]
+
+
+AggregateSpec = LeafSpec | TupleSpec | NamedTupleSpec
+# Only top-level aggregate parameters have entries. Ordinary scalar/tensor/TMA
+# parameters are represented solely by the existing argument maps.
+AggregateTypeMetadata = dict[str, TupleSpec | NamedTupleSpec]
 
 
 ###############################################################################
@@ -292,6 +316,7 @@ def generate_ttir(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    aggregate_type_metadata: AggregateTypeMetadata,
 ) -> tuple["TritonIRModule", list[str]]:
     """
     Uses Triton's internal code generation to create TTIR
@@ -337,20 +362,12 @@ def generate_ttir(
         if name not in kernel.arg_names and name in options.__dict__:
             kwargs.pop(name)
 
-    if len(kwargs) != len(kernel.arg_names):
-        raise ValueError(
-            "Incorrect number of arguments passed to kernel: "
-            f"passed {list(kwargs.keys())}, expected {kernel.arg_names}."
-        )
-
     # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all FakeTensor/TensorBox with real tensors
+    # Replace all flat FakeTensor/TensorBox leaves with representative real values.
     # These replacements are needed for triton's type, key and config functions
-    ordered_args: dict[str, Any] = {}
-    for name in kernel.arg_names:
-        a = kwargs[name]
+    def convert_type_for_ttir_generation(name: str, a: Any) -> Any:
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
-            ordered_args[name] = 2
+            return 2
         elif (
             stable_meta := maybe_unpack_tma_stable_metadata(
                 # pyrefly: ignore [bad-argument-type]
@@ -367,12 +384,34 @@ def generate_ttir(
                     [elements_per_dim] * len(block_shape), dtype=a.dtype
                 )
 
-            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
+            return TensorDescriptor.from_tensor(base_tensor, block_shape)
         elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
-                ordered_args[name] = torch.empty(2, dtype=a.dtype)
+                return torch.empty(2, dtype=a.dtype)
         else:
-            ordered_args[name] = a
+            return a
+
+    # TMA metadata and aggregate specs are keyed by flat argument names. Convert
+    # while those names are still available. Unlike the runtime path, TTIR
+    # generation must not construct a descriptor backed by a fake tensor.
+    kwargs = {
+        name: convert_type_for_ttir_generation(name, arg)
+        for name, arg in kwargs.items()
+    }
+    kwargs, _constant_args = _reconstruct_triton_kernel_aggregates(
+        graph_kwargs=kwargs,
+        aggregate_type_metadata=aggregate_type_metadata,
+    )
+
+    if len(kwargs) != len(kernel.arg_names):
+        raise ValueError(
+            "Incorrect number of arguments passed to kernel: "
+            f"passed {list(kwargs.keys())}, expected {kernel.arg_names}."
+        )
+
+    ordered_args: dict[str, Any] = {}
+    for name in kernel.arg_names:
+        ordered_args[name] = kwargs[name]
 
     def is_stable_tensor_descriptor_arg(arg: object) -> bool:
         if has_triton_tensor_descriptor_host_tma():
@@ -399,10 +438,9 @@ def generate_ttir(
     # whereas `constexpr` are inlined, and None are excluded. We both preserve
     # scalars and tensors as this matters for "odd" ordering,
     # eg. [tensor, scalar, tensor].
-    def get_arg_names(name: str, arg: object) -> list[str]:
-        if _is_constexpr_or_none(name, arg):
+    def get_leaf_arg_names(name: str, arg: Any) -> list[str]:
+        if arg is None:
             return []
-
         if is_stable_tensor_descriptor_arg(arg):
             stable_meta = maybe_unpack_tma_stable_metadata(
                 tma_descriptor_metadata[name]
@@ -417,6 +455,28 @@ def generate_ttir(
             return names
 
         return [name]
+
+    def get_aggregate_arg_names(spec: AggregateSpec, arg: Any) -> list[str]:
+        if isinstance(spec, LeafSpec):
+            return get_leaf_arg_names(spec.flat_key, arg)
+        if len(spec.children) != len(arg):
+            raise AssertionError(
+                "Aggregate argument does not match its spec: "
+                f"expected {len(spec.children)} children, got {len(arg)}"
+            )
+        return list(
+            itertools.chain.from_iterable(
+                get_aggregate_arg_names(child_spec, child_arg)
+                for child_spec, child_arg in zip(spec.children, arg)
+            )
+        )
+
+    def get_arg_names(name: str, arg: Any) -> list[str]:
+        if _is_constexpr_or_none(name, arg):
+            return []
+        if (spec := aggregate_type_metadata.get(name)) is not None:
+            return get_aggregate_arg_names(spec, arg)
+        return get_leaf_arg_names(name, arg)
 
     ordered_arg_names = list(
         itertools.chain.from_iterable(
@@ -1301,6 +1361,7 @@ def identify_accessed_tensors(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    aggregate_type_metadata: AggregateTypeMetadata,
 ) -> TensorAccesses:
     """
     Given a triton kernel and the arguments for this kernel, this function
@@ -1316,7 +1377,7 @@ def identify_accessed_tensors(
     functions = None
     try:
         ttir_module, ordered_arg_names = generate_ttir(
-            kernel, kwargs, tma_descriptor_metadata
+            kernel, kwargs, tma_descriptor_metadata, aggregate_type_metadata
         )
 
         # extract functions from TTIR using MLIR bindings exposed by Triton code
@@ -1480,6 +1541,7 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
         grid: list["TritonGridType"],
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
+        aggregate_type_metadata: AggregateTypeMetadata,
         launch_kwargs: tuple[str, ...] | None = None,
     ) -> Any:
         hop_kwargs: dict[str, Any] = {
@@ -1488,6 +1550,7 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
             "grid": grid,
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
+            "aggregate_type_metadata": aggregate_type_metadata,
         }
         if launch_kwargs:
             hop_kwargs["launch_kwargs"] = launch_kwargs
@@ -1512,6 +1575,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
+        aggregate_type_metadata: AggregateTypeMetadata,
         launch_kwargs: tuple[str, ...] | None = None,
         tensor_bases: dict[str, Tensor] | None = None,
     ) -> dict[str, Any]:
@@ -1522,6 +1586,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
             "tensors_to_clone": tensors_to_clone,
+            "aggregate_type_metadata": aggregate_type_metadata,
         }
         if tensor_bases:
             hop_kwargs["tensor_bases"] = tensor_bases
@@ -1539,6 +1604,161 @@ def get_kernel(kernel_idx: int) -> "TritonKernelType":
     return kernel_side_table.get_kernel(kernel_idx)
 
 
+def reconstruct_tensor_descriptor_from_metadata(
+    tensor: Tensor,
+    metadata: TMAExperimentalMetadata | TMAStableMetadata,
+) -> Any:
+    if (exp_meta := maybe_unpack_tma_experimental_metadata(metadata)) is not None:
+        from triton.tools.experimental_descriptor import (
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+        )
+
+        dims, block_dims, element_size = exp_meta
+        create_tma_descriptor = (
+            create_1d_tma_descriptor if len(dims) == 1 else create_2d_tma_descriptor
+        )
+        return create_tma_descriptor(
+            tensor.data_ptr(),
+            *dims,
+            *block_dims,
+            element_size,
+        )
+    stable_meta = maybe_unpack_tma_stable_metadata(metadata)
+    if stable_meta is None:
+        raise AssertionError("Failed to unpack TMA descriptor metadata")
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    block_shape = stable_meta[0]
+    return TensorDescriptor.from_tensor(tensor, block_shape)
+
+
+@functools.cache
+def _namedtuple_type_from_spec(
+    type_name: str, field_names: tuple[str, ...]
+) -> type[tuple]:
+    return collections.namedtuple(type_name, field_names)
+
+
+def _aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
+    if isinstance(spec, LeafSpec):
+        return (spec.flat_key,)
+    return tuple(
+        itertools.chain.from_iterable(
+            _aggregate_leaf_keys(child) for child in spec.children
+        )
+    )
+
+
+def _reconstruct_aggregate(
+    spec: AggregateSpec,
+    graph_kwargs: dict[str, Any],
+    constant_args: dict[str, Any],
+) -> Any:
+    if isinstance(spec, LeafSpec):
+        if spec.flat_key in graph_kwargs:
+            return graph_kwargs[spec.flat_key]
+        if spec.flat_key in constant_args:
+            return constant_args[spec.flat_key]
+        raise ValueError(
+            f"Aggregate leaf {spec.flat_key!r} was not found in the arguments"
+        )
+
+    children = tuple(
+        _reconstruct_aggregate(child, graph_kwargs, constant_args)
+        for child in spec.children
+    )
+    if isinstance(spec, TupleSpec):
+        return children
+
+    if len(spec.field_names) != len(children):
+        raise ValueError(
+            f"NamedTuple {spec.type_name!r} has {len(spec.field_names)} fields but "
+            f"its aggregate spec has {len(children)} children"
+        )
+    namedtuple_type = _namedtuple_type_from_spec(spec.type_name, spec.field_names)
+    return namedtuple_type(*children)
+
+
+def _reconstruct_triton_kernel_aggregates(
+    graph_kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
+    *,
+    constant_args: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reconstruct top-level aggregates from already-materialized flat leaves."""
+    if constant_args is None:
+        constant_args = {}
+    else:
+        duplicate_keys = constant_args.keys() & graph_kwargs.keys()
+        if duplicate_keys:
+            raise AssertionError(
+                "Triton constant and graph arguments have duplicate keys: "
+                f"{sorted(duplicate_keys)!r}"
+            )
+        constant_args = constant_args.copy()
+    graph_kwargs = graph_kwargs.copy()
+
+    aggregate_leaf_keys: set[str] = set()
+    for name, spec in aggregate_type_metadata.items():
+        leaf_keys = _aggregate_leaf_keys(spec)
+        for key in leaf_keys:
+            if key in aggregate_leaf_keys:
+                raise AssertionError(
+                    f"Aggregate leaf {key!r} is referenced more than once"
+                )
+            aggregate_leaf_keys.add(key)
+
+        if name in graph_kwargs or name in constant_args:
+            raise AssertionError(
+                f"Aggregate argument {name!r} also appears in the arguments"
+            )
+        aggregate = _reconstruct_aggregate(spec, graph_kwargs, constant_args)
+
+        # An aggregate with any graph-owned leaf must remain in graph kwargs.
+        # A wholly constant (including empty) aggregate stays in constant_args.
+        destination = (
+            graph_kwargs
+            if any(key in graph_kwargs for key in leaf_keys)
+            else constant_args
+        )
+        destination[name] = aggregate
+
+        for key in leaf_keys:
+            graph_kwargs.pop(key, None)
+            constant_args.pop(key, None)
+
+    return graph_kwargs, constant_args
+
+
+def reconstruct_triton_kernel_args(
+    graph_kwargs: dict[str, Any],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    aggregate_type_metadata: AggregateTypeMetadata,
+    *,
+    constant_args: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Materialize runtime TMA leaves, then reconstruct top-level aggregates."""
+    graph_kwargs = graph_kwargs.copy()
+
+    # TMA is a leaf-level storage transform. Resolve every descriptor once before
+    # interpreting aggregate structure, regardless of whether the leaf is nested.
+    for key, metadata in tma_descriptor_metadata.items():
+        if key not in graph_kwargs:
+            raise AssertionError(
+                f"TMA descriptor argument {key!r} was not found in graph kwargs"
+            )
+        graph_kwargs[key] = reconstruct_tensor_descriptor_from_metadata(
+            graph_kwargs[key], metadata
+        )
+
+    return _reconstruct_triton_kernel_aggregates(
+        graph_kwargs,
+        aggregate_type_metadata,
+        constant_args=constant_args,
+    )
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
     *,
@@ -1547,6 +1767,7 @@ def triton_kernel_wrapper_mutation_dense(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
@@ -1568,43 +1789,12 @@ def triton_kernel_wrapper_mutation_dense(
         exec(code, namespace)
         grid_fn = namespace[fn_name]
 
-    if tma_descriptor_metadata:
-        # as we need to launch the kernel here, we "unwrap" the
-        # tma_descriptor_metadata, create the TMA descriptors
-        # from it, and replace the tensors in the kwargs by the
-        # corresponding TMA descriptors before launching
-        kwargs = kwargs.copy()
-        for k, v in tma_descriptor_metadata.items():
-            tensor = kwargs[k]
-            if (exp_meta := maybe_unpack_tma_experimental_metadata(v)) is not None:
-                from triton.tools.experimental_descriptor import (
-                    create_1d_tma_descriptor,
-                    create_2d_tma_descriptor,
-                )
-
-                dims, block_dims, element_size = exp_meta
-                create_tma_descriptor = (
-                    create_1d_tma_descriptor
-                    if len(dims) == 1
-                    else create_2d_tma_descriptor
-                )
-                kwargs[k] = create_tma_descriptor(
-                    tensor.data_ptr(),
-                    *dims,
-                    *block_dims,
-                    element_size,
-                )
-            else:
-                stable_meta = maybe_unpack_tma_stable_metadata(v)
-                if stable_meta is None:
-                    raise AssertionError(
-                        f"Failed to unpack stable TMA metadata for key {k}"
-                    )
-                from triton.tools.tensor_descriptor import TensorDescriptor
-
-                block_shape = stable_meta[0]
-
-                kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
+    kwargs, constant_args = reconstruct_triton_kernel_args(
+        kwargs,
+        tma_descriptor_metadata,
+        aggregate_type_metadata,
+        constant_args=constant_args,
+    )
 
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:
@@ -1651,6 +1841,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     return None
@@ -1664,6 +1855,7 @@ def _(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     return None
@@ -1702,6 +1894,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     node_args: dict[str, Any] = {
@@ -1710,6 +1903,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
         "grid": grid,
         "tma_descriptor_metadata": tma_descriptor_metadata,
         "kwargs": kwargs,
+        "aggregate_type_metadata": aggregate_type_metadata,
     }
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
@@ -1728,11 +1922,21 @@ def get_mutated_tensors(
     constant_args_idx: int,
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    aggregate_type_metadata: AggregateTypeMetadata,
 ) -> list[str]:
+    # if aggregate_type_metadata:
+    #     # generate_ttir does not yet map a nested Triton signature back to flat
+    #     # leaf keys. Conservatively cloning every tensor leaf preserves
+    #     # functionalization correctness until that precise analysis is added.
+    #     return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
+
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     tensor_accesses = identify_accessed_tensors(
-        kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
+        kernel,
+        {**kwargs, **constant_args},
+        tma_descriptor_metadata,
+        aggregate_type_metadata,
     )
     # Filter to only tensor kwargs: with Triton 3.7+, ordered_arg_names
     # includes scalars, so writes may reference non-tensor args like SymInts.
@@ -1751,6 +1955,7 @@ def triton_kernel_wrapper_mutation_functionalize(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
@@ -1759,7 +1964,11 @@ def triton_kernel_wrapper_mutation_functionalize(
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
     tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+        kernel_idx,
+        constant_args_idx,
+        unwrapped_kwargs,
+        tma_descriptor_metadata,
+        aggregate_type_metadata,
     )
     # A mutated arg that is a view has to be cloned through its base, and the base is
     # only a tracked value out here -- reading _base inside the functional impl yields
@@ -1779,6 +1988,7 @@ def triton_kernel_wrapper_mutation_functionalize(
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": unwrapped_kwargs,
             "tensors_to_clone": tensors_to_clone,
+            "aggregate_type_metadata": aggregate_type_metadata,
         }
         if tensor_bases:
             functional_kwargs["tensor_bases"] = tensor_bases
@@ -1841,6 +2051,7 @@ def triton_kernel_wrapper_functional_dense(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1862,6 +2073,7 @@ def triton_kernel_wrapper_functional_dense(
         "grid": grid,
         "tma_descriptor_metadata": tma_descriptor_metadata,
         "kwargs": kwargs,
+        "aggregate_type_metadata": aggregate_type_metadata,
     }
     if launch_kwargs:
         mutation_kwargs["launch_kwargs"] = launch_kwargs
@@ -1878,6 +2090,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1902,6 +2115,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1912,6 +2126,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
         "tma_descriptor_metadata": tma_descriptor_metadata,
         "kwargs": kwargs,
         "tensors_to_clone": tensors_to_clone,
+        "aggregate_type_metadata": aggregate_type_metadata,
     }
     if tensor_bases:
         node_args["tensor_bases"] = tensor_bases
@@ -1937,6 +2152,7 @@ def triton_kernel_wrapper_functional_functionalize(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    aggregate_type_metadata: AggregateTypeMetadata,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1950,6 +2166,7 @@ def triton_kernel_wrapper_functional_functionalize(
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": unwrapped_kwargs,
             "tensors_to_clone": tensors_to_clone,
+            "aggregate_type_metadata": aggregate_type_metadata,
         }
         if unwrapped_tensor_bases:
             functional_kwargs["tensor_bases"] = unwrapped_tensor_bases
@@ -2610,6 +2827,8 @@ class TritonHOPifier:
             arg_names = [p.name for p in variable.kernel.fn.params]
 
         for idx, arg_name in enumerate(arg_names):
+            # TODO(mwizak): handle constexpr NamedTuple, triton must have a key that can be used
+            # for aggregate types that we can use as the guard
             if idx in constexprs:
                 if arg_name in combined_args_raw:
                     # [Note: Specialize tl.constexpr args in user-defined triton kernels]
@@ -2808,6 +3027,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             grid=grids,  # type: ignore[arg-type]
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=graphable_args,
+            aggregate_type_metadata={},
             launch_kwargs=launch_kwargs,
         )
 

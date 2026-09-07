@@ -151,6 +151,7 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     SPLIT_SCAN = auto()
     TEMPLATE = auto()
+
     USER_AUTOTUNE = auto()
     FIXED = auto()
 
