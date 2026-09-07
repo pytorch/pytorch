@@ -9,6 +9,9 @@ from contextlib import nullcontext
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
+    IS_X86,
     NoTest,
     run_tests,
     TEST_ACCELERATOR,
@@ -17,6 +20,8 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.viz import _cycles
+from torch.utils.viz._cycles import observe_tensor_cycles
 
 
 # Pinned memory doesn't make sense on UMA systems (MPS) (see https://github.com/pytorch/pytorch/issues/193845 )
@@ -30,6 +35,20 @@ if not TEST_ACCELERATOR:
     TestCase = NoTest
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
+
+
+# cudaMallocAsync does not support setContextRecorder, so allocations carry no frames.
+TEST_MALLOC_ASYNC = (
+    torch.accelerator.current_accelerator().type == "cuda"
+    and torch.cuda.get_allocator_backend() == "cudaMallocAsync"
+)
+requiresAllocationStacks = unittest.skipUnless(
+    (IS_X86 or IS_ARM64)
+    and IS_LINUX
+    and not TEST_MALLOC_ASYNC
+    and _cycles._memory_history_module() is not None,
+    "allocation stacks need cpp contexts (linux x86/aarch64) and allocation history",
+)
 
 
 class TestAccelerator(TestCase):
@@ -326,6 +345,42 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+    @requiresAllocationStacks
+    def test_tensor_cycles(self):
+        reported = []
+        disarm = observe_tensor_cycles(reported.append)
+
+        def noop():
+            pass
+
+        try:
+
+            def create():
+                x = torch.empty(3, 4, device=torch.accelerator.current_accelerator())
+
+                def foo(p):
+                    if p:
+                        return foo(not p)
+                    else:
+                        return x
+
+                return foo
+
+            create()
+            gc.collect()
+            # the callback has to run outside of the collect
+            # call so it doesn't actual fire until the next
+            # method call after a gc.collect
+            noop()
+        finally:
+            disarm()
+
+        self.assertEqual(len(reported), 1)
+        html = reported[0]
+        self.assertIn("torch.Tensor", html)
+        self.assertIn("test_accelerator", html)
+        self.assertIn("cell_contents", html)
 
 
 instantiate_device_type_tests(
