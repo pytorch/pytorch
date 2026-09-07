@@ -1911,8 +1911,9 @@ class TestTorchFunctionMode(TestCase):
     def test_device_context_semantics(self):
         from torch._C import _len_torch_function_stack
         from torch.utils._device import DeviceContext
+        device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
         try:
-            torch.set_default_device("cuda")
+            torch.set_default_device(device_type)
 
             def get_stack():
                 return [torch._C._get_function_stack_at(i) for i in range(_len_torch_function_stack())]
