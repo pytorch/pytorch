@@ -15,16 +15,19 @@ from torch._inductor.ir import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
 class TestDependencies(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_buffer(self, name, shape, dtype=torch.float32):
         return Buffer(
             name=name,
-            layout=FixedLayout(torch.device(GPU_TYPE), dtype=dtype, size=shape),
+            layout=FixedLayout(torch.device("meta"), dtype=dtype, size=shape),
         )
 
     def setUp(self):
@@ -63,7 +66,7 @@ class TestDependencies(InductorTestCase):
             )
 
         pointwise = Pointwise.create(
-            device=torch.device(GPU_TYPE),
+            device=torch.device("meta"),
             dtype=torch.int32,
             inner_fn=inner_fn,
             ranges=[1024 * 4],
@@ -96,7 +99,7 @@ class TestDependencies(InductorTestCase):
             )
 
         pointwise = Pointwise.create(
-            device=torch.device(GPU_TYPE),
+            device=torch.device("meta"),
             dtype=torch.int32,
             inner_fn=inner_fn,
             ranges=[1024 * 4],
@@ -243,5 +246,5 @@ class TestDependencies(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU and HAS_GPU:
+    if HAS_CPU:
         run_tests("sympy")
