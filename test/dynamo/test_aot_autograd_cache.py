@@ -1513,7 +1513,9 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertIn(
             "factory_kernel",
             kernel_names,
-            lambda msg: f"{msg}\nfactory_kernel should be detected, got: {kernel_names}",
+            lambda msg: (
+                f"{msg}\nfactory_kernel should be detected, got: {kernel_names}"
+            ),
         )
 
         a = torch.randn(5, device=GPU_TYPE)
@@ -4421,6 +4423,27 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(data_a, data_b)
         # Different value -> different hash
         self.assertNotEqual(data_a, data_c)
+
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
 
 
 def _subprocess_gen_dtensor_cache_key(queue):

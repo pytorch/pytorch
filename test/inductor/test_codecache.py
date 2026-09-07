@@ -2382,6 +2382,38 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    def test_linalg_ops_fxgraph_cache_hit(self):
+        """
+        Test that graphs containing linalg ops with effectful error checks hit the fxgraph cache.
+        """
+
+        def fn(a):
+            return torch.linalg.cholesky(a)
+
+        # Generate a symmetric positive-definite matrix
+        x = torch.randn(4, 4, dtype=torch.float64)
+        a = x @ x.T + torch.eye(4, dtype=torch.float64)
+
+        compiled_fn = torch.compile(fn)
+
+        # Verify the "miss" case
+        res1 = compiled_fn(a)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(res1, torch.linalg.cholesky(a))
+
+        # Verify the "hit" case
+        self.reset()
+        res2 = compiled_fn(a)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(res2, torch.linalg.cholesky(a))
+
+        # Verify runtime error check still raises on invalid (non-PD) inputs even with cached graph
+        bad_matrix = torch.zeros(4, 4, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "not positive-definite"):
+            compiled_fn(bad_matrix)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     def test_cache_clear(self):
         """
         Test clearing the cache.
@@ -3815,6 +3847,47 @@ class TestFxGraphCacheHashing(TestCase):
             ),
             require_shape_env=False,
         ).validate()
+
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+            ),
+            {"is_matrix": False},
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        validator.validate_graph(include_constants=False)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache HigherOrderOperator: with_effects"
+        ):
+            validator.validate_graph(include_constants=False)
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -5429,7 +5502,9 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(calls, [60])
         self.assertTrue(
             any("hung after 60s" in str(w.message) for w in caught),
-            msg=lambda msg: f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}",
+            msg=lambda msg: (
+                f"{msg}\nexpected timeout warning, got: {[str(w.message) for w in caught]}"
+            ),
         )
 
     def test_probe_load_returns_false_on_called_process_error(self):
@@ -5461,7 +5536,9 @@ class TestVecISACheckBuild(TestCase):
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=lambda msg: f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=lambda msg: (
+                f"{msg}\nLD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}"
+            ),
         )
 
     @unittest.skipUnless(sys.platform == "linux", "Linux loader semantics")

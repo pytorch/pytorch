@@ -888,7 +888,7 @@ def compile_to_python(
         )
 
     # Effectful ops thread effect tokens through a calling convention the standalone
-    # composition does not reproduce (and their with_effects HOP is non-cacheable);
+    # composition does not reproduce;
     # reject them up front with a concrete reason. Not supported yet. (Detected here
     # too, not only in torch.compiler.precompile's capture-time guard, so direct callers of
     # this lowering get the same clear failure rather than a silently-wrong artifact.)
