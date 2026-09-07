@@ -6483,11 +6483,11 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             (torch.randn(3),),
             (torch.randn(3, requires_grad=True),),
         ]
-        if torch.cuda.is_available():
+        if TEST_ACCELERATOR:
             sample_inputs.extend(
                 [
-                    (torch.randn(3, device="cuda"),),
-                    (torch.randn(3, device="cuda", requires_grad=True),),
+                    (torch.randn(3, device=device_type),),
+                    (torch.randn(3, device=device_type, requires_grad=True),),
                 ]
             )
         for args in sample_inputs:
