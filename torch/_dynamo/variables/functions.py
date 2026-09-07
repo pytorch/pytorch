@@ -4856,6 +4856,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
+        # Prefer the VT's declarative table when it models this attribute, so a
+        # VT with no concrete Python object behind it still resolves.
+        entry = obj.lookup_tp_getset_member(attr_name)
+        if entry is not None and entry.getter is not None:
+            result = entry.getter(obj, tx)
+            if result is not None:
+                return result
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             raise _UnhandledDescriptorError(
@@ -4998,6 +5005,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        # Prefer the VT's declarative table when it models this attribute
+        entry = obj.lookup_tp_getset_member(attr_name)
+        if entry is not None and entry.getter is not None:
+            result = entry.getter(obj, tx)
+            if result is not None:
+                return result
+        # Otherwise call the C getter on the concrete Python object
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             from .object_protocol import _UnhandledDescriptorError
