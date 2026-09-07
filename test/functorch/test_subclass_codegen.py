@@ -12,7 +12,11 @@ from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._functorch._aot_autograd.subclass_codegen import (
     _codegen_subclass_wrapper_source,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -35,6 +39,8 @@ class _TestSubclassMeta:
 
 
 class TestSubclassCodegen(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _two_tensor_meta(self) -> _TestSubclassMeta:
         return _TestSubclassMeta(
             flat_tensor_start_idx=0,
