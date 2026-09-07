@@ -235,7 +235,10 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__annotations__ = annotations
         if type_params is not None:
             fn.__type_params__ = type_params
-        fn.__dict__.update(attributes)
+        # Assign the dict wholesale rather than copy entries in: a helper that
+        # stashed `self.d is self.__dict__` round-trips as the same object only
+        # if the reconstructed __dict__ keeps the pickled dict's identity.
+        fn.__dict__ = attributes
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
 
