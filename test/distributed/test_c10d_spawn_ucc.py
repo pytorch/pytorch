@@ -37,7 +37,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             y = torch.distributed.nn.broadcast(x, 1)
@@ -54,7 +54,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp.SUM)
@@ -72,7 +72,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp.SUM)
@@ -89,7 +89,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             tensors = torch.distributed.nn.all_gather(x)
@@ -107,7 +107,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             x0 = torch.ones(5, 5, device=device) + 2 * self.rank
             x1 = torch.ones(5, 5, device=device) + 2 * self.rank
             x0.requires_grad = True
@@ -129,7 +129,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=backend
             )
-            device = torch.device(f"{device}:{self.rank}")
+            device = torch.device(torch.device(device).type, self.rank)
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
             x = torch.ones(int(row), 5, device=device) * (self.rank + 1)
             x.requires_grad = True
