@@ -301,13 +301,15 @@ class FunctionPicklerBase(pickle.Pickler):
         closure: tuple[types.CellType, ...] | None,
         attributes: dict[str, Any],
         annotations: dict[str, Any],
+        doc: Any,
         type_params: tuple[Any, ...] | None,
         globals_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
-        # annotations/type_params are passed in rather than read off fn: the
+        # annotations/type_params/doc are passed in rather than read off fn: the
         # guard pickler prunes what no guard reads, so an unpicklable local class
-        # in an annotation cannot fail the whole dump (a failure there silently
-        # bypasses the package).
+        # in an annotation -- or a __doc__ reassigned to an unpicklable object --
+        # cannot fail the whole dump (a failure there silently bypasses the
+        # package). The AOT pickler passes them through verbatim.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
@@ -318,7 +320,7 @@ class FunctionPicklerBase(pickle.Pickler):
             kwdefaults,
             attributes,
             globals_snapshot,
-            fn.__doc__,
+            doc,
             annotations,
             type_params,
         )
