@@ -13,16 +13,18 @@ from torch.distributed.checkpoint.format_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModelUneven(nn.Module):
@@ -42,11 +44,15 @@ class SimpleModelUneven(nn.Module):
         x = self.net4(x)
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=device_type)
 
+class TestFormatUtilsNoDist(TestCase):
+    # These two tests drive the dcp <-> torch.save conversion on the no-dist
+    # path: no process group, and no device is referenced anywhere, so they
+    # are GENERIC and stay un-instantiated. Keeping them in the ACCELERATOR
+    # class below would stop them from being generated (and run) on CPU-only
+    # hosts once ``except_for="cpu"`` filters that class out.
+    hw_classification = HardwareClassification.GENERIC
 
-class TestFormatUtils(DTensorTestBase):
     @with_temp_dir
     def test_dcp_to_torch_save(self) -> None:
         model = SimpleModelUneven()
@@ -72,10 +78,14 @@ class TestFormatUtils(DTensorTestBase):
 
         self.assertEqual({"model": model.state_dict()}, sd)
 
+
+class TestFormatUtils(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_online_torch_save_to_dcp(self) -> None:
+    def test_online_torch_save_to_dcp(self, device) -> None:
         """Tests loading a model saved by torch.save directly into a sharded model
         using dcp.load
         """
@@ -106,5 +116,8 @@ class TestFormatUtils(DTensorTestBase):
         self.assertEqual(sd["model"], model.state_dict())
 
 
+instantiate_device_type_tests(
+    TestFormatUtils, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
