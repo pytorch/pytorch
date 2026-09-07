@@ -3,7 +3,6 @@ import itertools
 import random
 import subprocess
 import sys
-import unittest
 from itertools import product
 
 import torch
@@ -13,10 +12,10 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    expectedFailureXLA,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyNativeDeviceTypes,
-    onlyOn,
+    onlyAccelerator,
     skipCUDAIf,
     skipMeta,
     skipXPUIf,
@@ -27,6 +26,7 @@ from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
     DeterministicGuard,
     dtype2prec_DONTUSE,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_JETSON,
     parametrize as parametrize_test,
@@ -34,35 +34,13 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipIfTorchDynamo,
     slowTest,
-    TEST_CUDA,
-    TEST_XPU,
-)
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
 class TestEmbeddingNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU unavailable")
-    def test_embedding_max_norm_unsorted_repeating_indices(self):
-        def create_embedding(device):
-            # Seed RNG so we get the same Embedding each time
-            torch.manual_seed(0)
-            return torch.nn.Embedding(
-                num_embeddings=20, embedding_dim=64, max_norm=1.0
-            ).to(device)
-
-        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
-        out_cpu = create_embedding("cpu")(ix)
-
-        ix = ix.to(device_type)
-        out = create_embedding(device_type)(ix)
-        self.assertEqual(out.cpu(), out_cpu)
 
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
@@ -83,21 +61,6 @@ class TestEmbeddingNN(NNTestCase):
         embedding(input).sum().backward()
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
-
-    def test_move_sparse_half_embedding(self):
-        embedding = nn.Embedding(10, 3, sparse=True)
-        self.assertEqual(embedding.weight.device.type, "cpu")
-        self.assertEqual(embedding.weight.dtype, torch.get_default_dtype())
-        embedding.to(torch.float16)
-        self.assertEqual(embedding.weight.dtype, torch.float16)
-        self.assertEqual(embedding.embedding_dim, 3)
-        self.assertEqual(embedding.num_embeddings, 10)
-
-        if torch.accelerator.is_available():
-            embedding.to(device_type)
-            self.assertEqual(embedding.weight.device.type, device_type)
-            embedding.to("cpu")
-            self.assertEqual(embedding.weight.device.type, "cpu")
 
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
@@ -192,16 +155,6 @@ class TestEmbeddingNN(NNTestCase):
         res_F = F.embedding(a, embeddings, padding_idx=2)
 
         self.assertEqual(res_old, res_F)
-
-    # https://github.com/pytorch/pytorch/issues/130806
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    @largeTensorTest("40GB", device=device_type)
-    def test_large_tensors(self):
-        input = torch.randint(low=0, high=16032, size=[131072], device=device_type)
-        w = torch.randn([16032, 16384], device=device_type)
-        out = torch.nn.functional.embedding(input, w)
-        self.assertEqual(out.dim(), 2)
-        self.assertEqual(out.numel(), 2147483648)
 
     def test_embedding_bag_functional(self):
         a = torch.tensor([[1, 3, 2], [0, 2, 1]], dtype=torch.long)
@@ -299,6 +252,49 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_move_sparse_half_embedding(self, device):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        self.assertEqual(embedding.weight.device.type, "cpu")
+        self.assertEqual(embedding.weight.dtype, torch.get_default_dtype())
+        embedding.to(torch.float16)
+        self.assertEqual(embedding.weight.dtype, torch.float16)
+        self.assertEqual(embedding.embedding_dim, 3)
+        self.assertEqual(embedding.num_embeddings, 10)
+
+        if torch.accelerator.is_available():
+            embedding.to(device)
+            self.assertEqual(embedding.weight.device.type, torch.device(device).type)
+            embedding.to("cpu")
+            self.assertEqual(embedding.weight.device.type, "cpu")
+
+    @onlyAccelerator
+    def test_embedding_max_norm_unsorted_repeating_indices(self, device):
+        def create_embedding(device):
+            # Seed RNG so we get the same Embedding each time
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20, embedding_dim=64, max_norm=1.0
+            ).to(device)
+
+        ix = torch.arange(2, device="cpu", dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding("cpu")(ix)
+
+        ix = ix.to(device)
+        out = create_embedding(device)(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
+    # https://github.com/pytorch/pytorch/issues/130806
+    @onlyAccelerator
+    @largeTensorTest("40GB")
+    def test_large_tensors(self, device):
+        input = torch.randint(low=0, high=16032, size=[131072], device=device)
+        w = torch.randn([16032, 16384], device=device)
+        out = torch.nn.functional.embedding(input, w)
+        self.assertEqual(out.dim(), 2)
+        self.assertEqual(out.numel(), 2147483648)
+
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)
@@ -541,7 +537,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # padding indices to fill in the gaps indicated by the offset array
 
     @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
@@ -691,7 +686,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -783,7 +778,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
             )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -833,7 +828,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     lambda msg: f"{msg}\nExpected non-zero gradient for index {idx}",
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -884,12 +879,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertEqual(weight.grad, reference_grad, atol=0, rtol=0)
                 weight.grad = None
 
-    @onlyOn(["cuda", "xpu"])
-    @dtypes(
-        torch.bfloat16,
-    )
-    @largeTensorTest("80GB", device="cuda")
-    @largeTensorTest("80GB", device="xpu")
+    @onlyAccelerator
+    @dtypes(torch.bfloat16)
+    @largeTensorTest("80GB")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
         Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
@@ -967,9 +959,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
     # https://github.com/pytorch/pytorch/issues/188467
-    @onlyOn(["cuda"])
+    @onlyAccelerator
     @dtypes(torch.int32, torch.int64)
-    @largeTensorTest("20GB", device="cuda")
+    @largeTensorTest("20GB")
     def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
         # chosen to guarantee an int32 overflow
         dim = 2**16
@@ -990,7 +982,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         torch.testing.assert_close(torch.ones(dim, device=device), grad_at_r(dtype))
 
     # https://github.com/pytorch/pytorch/issues/190063
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     def test_embedding_bag_scale_grad_by_freq_mixed_counts(self, device, dtype):
         # scale_grad_by_freq must divide each index's gradient by that index's
@@ -1015,7 +1006,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
     # against torch.nn.functional.embedding followed by a reduction.
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
@@ -1130,7 +1120,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -1197,156 +1187,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     padding_idx=padding_idx,
                     mode=mode,
                 )
-
-    # https://github.com/pytorch/pytorch/issues/192445
-    @onlyOn(["cuda"])
-    @slowTest
-    @dtypes(torch.int32, torch.int64)
-    @parametrize_test("target", ("indices", "offset2bag"))
-    @parametrize_test("bound", ("negative", "upper"))
-    def test_embedding_bag_per_sample_weights_rejects_invalid_saved_indices(
-        self, device, dtype, target, bound
-    ):
-        script = f"""
-import torch
-
-weight = torch.ones((5, 2), device={device!r})
-indices = torch.zeros(1024, dtype={dtype}, device={device!r})
-indices_alias = torch.from_dlpack(indices)
-offsets = torch.tensor([0], dtype={dtype}, device={device!r})
-per_sample_weights = torch.ones(1024, device={device!r}, requires_grad=True)
-
-output, offset2bag, _, _ = torch._embedding_bag(
-    weight,
-    indices,
-    offsets,
-    False,
-    0,
-    False,
-    per_sample_weights,
-)
-if {target!r} == "indices":
-    invalid_value = -1 if {bound!r} == "negative" else weight.size(0)
-    indices_alias.fill_(invalid_value)
-else:
-    invalid_value = -1 if {bound!r} == "negative" else output.size(0)
-    torch.from_dlpack(offset2bag).fill_(invalid_value)
-
-output.sum().backward()
-torch.cuda.synchronize()
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            errors="replace",
-        )
-        output = proc.stdout + "\n" + proc.stderr
-        expected_assert = (
-            "embedding_idx >= 0 && embedding_idx < num_embeddings"
-            if target == "indices"
-            else "bag_idx >= 0 && bag_idx < num_bags"
-        )
-        has_cuda_assert = (
-            "device-side assert triggered" in output
-            and "EmbeddingBag.cu" in output
-            and expected_assert in output
-        )
-        has_hip_assert = (
-            "hipErrorLaunchFailure" in output
-            or "unspecified launch failure" in output
-            or "HSA_STATUS_ERROR_EXCEPTION" in output
-        )
-        self.assertTrue(
-            has_cuda_assert or has_hip_assert,
-            lambda msg: f"{msg}\nExpected device assert error in output, got: {output}",
-        )
-
-    # https://github.com/pytorch/pytorch/issues/192445
-    @onlyOn(["cuda"])
-    @largeTensorTest("5GB", device="cuda")
-    def test_embedding_bag_per_sample_weights_large_index(self, device):
-        large_index = 2**31
-        weight = torch.empty((large_index + 1, 1), device=device, dtype=torch.float16)
-        weight[large_index] = 3.0
-        indices = torch.tensor([large_index], device=device, dtype=torch.int64)
-        offsets = torch.tensor([0], device=device, dtype=torch.int64)
-        per_sample_weights = torch.ones(
-            1, device=device, dtype=torch.float16, requires_grad=True
-        )
-
-        torch.nn.functional.embedding_bag(
-            indices,
-            weight,
-            offsets,
-            mode="sum",
-            per_sample_weights=per_sample_weights,
-        ).sum().backward()
-
-        self.assertEqual(
-            per_sample_weights.grad,
-            torch.tensor([3.0], device=device, dtype=torch.float16),
-        )
-
-    def test_embedding_bag_dimension_errors(self, device):
-        funcs = (
-            lambda x, y, z: torch.nn.functional.embedding_bag(y, x, z),
-            torch.embedding_bag,
-            torch._embedding_bag,
-            torch._embedding_bag_forward_only,
-        )
-        for i, f in enumerate(funcs):
-            err_type = (ValueError, RuntimeError) if i == 0 else RuntimeError
-
-            weight = torch.full(
-                (
-                    2,
-                    6,
-                ),
-                0,
-                dtype=torch.float64,
-                device=device,
-            )
-            indices = torch.full(
-                (
-                    2,
-                    0,
-                    0,
-                    6,
-                    6,
-                ),
-                2,
-                dtype=torch.int64,
-                device=device,
-            )
-            offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
-
-            if i == 0:
-                error_msg = "input has to be 1D or 2D Tensor"
-            else:
-                error_msg = "input has to be a 1D or 2D Tensor"
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type, error_msg, lambda: f(weight, indices, offsets)
-            )
-
-            weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
-            indices = torch.full((2,), 1, dtype=torch.int64, device=device)
-
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type,
-                "offsets has to be a 1D Tensor",
-                lambda: f(weight, indices, offsets),
-            )
-
-            weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
-            indices = torch.full((2,), 2, dtype=torch.int64, device=device)
-            offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
-
-            torch._dynamo.disable(self.assertRaisesRegex)(
-                err_type,
-                "weight has to be a 2D Tensor",
-                lambda: f(weight, indices, offsets),
-            )
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
@@ -2117,7 +1957,7 @@ torch.cuda.synchronize()
             )
         self.assertEqual(output_non_contig, output_contig)
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    @expectedFailureXLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):
@@ -2140,7 +1980,7 @@ torch.cuda.synchronize()
                 test_backward=True,
             )
 
-    @onlyNativeDeviceTypes  # currently fails on XLA
+    @expectedFailureXLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_half(self, device, dtypes):
         self._test_EmbeddingBag(
@@ -2167,7 +2007,160 @@ torch.cuda.synchronize()
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
+class TestEmbeddingNNCudaOnly(NNTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    # https://github.com/pytorch/pytorch/issues/192445
+    @slowTest
+    @dtypes(torch.int32, torch.int64)
+    @parametrize_test("target", ("indices", "offset2bag"))
+    @parametrize_test("bound", ("negative", "upper"))
+    def test_embedding_bag_per_sample_weights_rejects_invalid_saved_indices(
+        self, device, dtype, target, bound
+    ):
+        script = f"""
+import torch
+
+weight = torch.ones((5, 2), device={device!r})
+indices = torch.zeros(1024, dtype={dtype}, device={device!r})
+indices_alias = torch.from_dlpack(indices)
+offsets = torch.tensor([0], dtype={dtype}, device={device!r})
+per_sample_weights = torch.ones(1024, device={device!r}, requires_grad=True)
+
+output, offset2bag, _, _ = torch._embedding_bag(
+    weight,
+    indices,
+    offsets,
+    False,
+    0,
+    False,
+    per_sample_weights,
+)
+if {target!r} == "indices":
+    invalid_value = -1 if {bound!r} == "negative" else weight.size(0)
+    indices_alias.fill_(invalid_value)
+else:
+    invalid_value = -1 if {bound!r} == "negative" else output.size(0)
+    torch.from_dlpack(offset2bag).fill_(invalid_value)
+
+output.sum().backward()
+torch.cuda.synchronize()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        output = proc.stdout + "\n" + proc.stderr
+        expected_assert = (
+            "embedding_idx >= 0 && embedding_idx < num_embeddings"
+            if target == "indices"
+            else "bag_idx >= 0 && bag_idx < num_bags"
+        )
+        has_cuda_assert = (
+            "device-side assert triggered" in output
+            and "EmbeddingBag.cu" in output
+            and expected_assert in output
+        )
+        has_hip_assert = (
+            "hipErrorLaunchFailure" in output
+            or "unspecified launch failure" in output
+            or "HSA_STATUS_ERROR_EXCEPTION" in output
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in output, got: {output}",
+        )
+
+    # https://github.com/pytorch/pytorch/issues/192445
+    @largeTensorTest("5GB", device="cuda")
+    def test_embedding_bag_per_sample_weights_large_index(self, device):
+        large_index = 2**31
+        weight = torch.empty((large_index + 1, 1), device=device, dtype=torch.float16)
+        weight[large_index] = 3.0
+        indices = torch.tensor([large_index], device=device, dtype=torch.int64)
+        offsets = torch.tensor([0], device=device, dtype=torch.int64)
+        per_sample_weights = torch.ones(
+            1, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        torch.nn.functional.embedding_bag(
+            indices,
+            weight,
+            offsets,
+            mode="sum",
+            per_sample_weights=per_sample_weights,
+        ).sum().backward()
+
+        self.assertEqual(
+            per_sample_weights.grad,
+            torch.tensor([3.0], device=device, dtype=torch.float16),
+        )
+
+    def test_embedding_bag_dimension_errors(self, device):
+        funcs = (
+            lambda x, y, z: torch.nn.functional.embedding_bag(y, x, z),
+            torch.embedding_bag,
+            torch._embedding_bag,
+            torch._embedding_bag_forward_only,
+        )
+        for i, f in enumerate(funcs):
+            err_type = (ValueError, RuntimeError) if i == 0 else RuntimeError
+
+            weight = torch.full(
+                (
+                    2,
+                    6,
+                ),
+                0,
+                dtype=torch.float64,
+                device=device,
+            )
+            indices = torch.full(
+                (
+                    2,
+                    0,
+                    0,
+                    6,
+                    6,
+                ),
+                2,
+                dtype=torch.int64,
+                device=device,
+            )
+            offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
+
+            if i == 0:
+                error_msg = "input has to be 1D or 2D Tensor"
+            else:
+                error_msg = "input has to be a 1D or 2D Tensor"
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type, error_msg, lambda: f(weight, indices, offsets)
+            )
+
+            weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
+            indices = torch.full((2,), 1, dtype=torch.int64, device=device)
+
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type,
+                "offsets has to be a 1D Tensor",
+                lambda: f(weight, indices, offsets),
+            )
+
+            weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
+            indices = torch.full((2,), 2, dtype=torch.int64, device=device)
+            offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
+
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type,
+                "weight has to be a 2D Tensor",
+                lambda: f(weight, indices, offsets),
+            )
+
+
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestEmbeddingNNCudaOnly, globals(), only_for="cuda")
 instantiate_parametrized_tests(TestEmbeddingNN)
 
 if __name__ == "__main__":
