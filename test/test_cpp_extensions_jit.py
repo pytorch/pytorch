@@ -14,12 +14,15 @@ import unittest
 import warnings
 
 import torch
-import torch.backends.cudnn
 import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
-from torch.testing._internal.common_utils import gradcheck, TEST_XPU
+from torch.testing._internal.common_utils import (
+    gradcheck,
+    HardwareClassification,
+    TEST_XPU,
+)
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
     _TORCH_PATH,
@@ -40,6 +43,8 @@ IS_LINUX = sys.platform.startswith("linux")
 
 
 class TestCppExtensionImport(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cython_not_loaded_with_import_cpp_extension(self):
         script = """
 import importlib.util
@@ -83,12 +88,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-# There's only one test that runs gradcheck, run slow mode manually
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionJIT(common.TestCase):
-    """Tests just-in-time cpp extensions.
-    Don't confuse this with the PyTorch JIT (aka TorchScript).
-    """
+class _CppExtensionJITMixin(common.TestCase):
+    """Shared set up and tear down functions for device-specific test classes."""
+
+    old_working_dir: str
 
     def setUp(self):
         super().setUp()
@@ -109,6 +112,14 @@ class TestCppExtensionJIT(common.TestCase):
     @classmethod
     def tearDownClass(cls):
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+
+# There's only one test that runs gradcheck, run slow mode manually
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionJIT(_CppExtensionJITMixin):
+    """Tests just-in-time cpp extensions.
+    Don't confuse this with the PyTorch JIT (aka TorchScript).
+    """
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -1225,7 +1236,16 @@ except RuntimeError as e:
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+
+@unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionJITCUDA(_CppExtensionJITMixin):
+    """Tests just-in-time cpp extensions.
+    Don't confuse this with the PyTorch JIT (aka TorchScript).
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
         module = torch.utils.cpp_extension.load(
@@ -1429,7 +1449,6 @@ except RuntimeError as e:
             module.cudnn_relu(x, y_incorrect)
 
     @unittest.skip("Temporarily disabled")
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -1472,7 +1491,6 @@ except RuntimeError as e:
         self.assertEqual(z, x.cos() + y.cos())
 
     @unittest.skip("Temporarily disabled")
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_custom_op_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -1520,7 +1538,6 @@ except RuntimeError as e:
         self.assertEqual(z, x.cos() + y.cos())
 
     @unittest.skip("Temporarily disabled")
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """
         Checks for an issue with operator< ambiguity for half when certain
@@ -1560,7 +1577,6 @@ except RuntimeError as e:
         result = module.half_test(x)
         self.assertEqual(result[0], 123)
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -1597,7 +1613,6 @@ except RuntimeError as e:
         for p in net.parameters():
             self.assertTrue(p.device.type == "cuda")
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cuda_pluggable_allocator_include(self):
         """
         This method creates a minimal example to replicate the apex setup.py to build nccl_allocator extension
