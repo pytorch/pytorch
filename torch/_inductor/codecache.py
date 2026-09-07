@@ -1888,19 +1888,36 @@ class GuardedCache(Generic[T]):
     ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
-            if os.path.exists(subdir):
-                for path in sorted(os.listdir(subdir)):
-                    if path.startswith("."):
-                        continue  # Skip temp files from concurrent write_atomic() calls
-                    try:
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            content = f.read()
-                            yield pickle.loads(content), content, True
-                    except Exception:
-                        log.warning(
-                            "fx graph cache unable to load compiled graph",
-                            exc_info=True,
-                        )
+            try:
+                names = sorted(os.listdir(subdir))
+            except FileNotFoundError:
+                # Nothing was ever written for this key, or another process cleared
+                # the cache out from under us. The local cache root is shared across
+                # processes, so checking os.path.exists() first would only narrow the
+                # race, not close it. Either way there are no candidates: a miss.
+                names = []
+            except OSError:
+                # Anything else (a bad mode on the cache dir, a dead mount) is not a
+                # race and is worth surfacing, but it still leaves no candidates.
+                log.warning(
+                    "%s unable to list cache entries", cls.__name__, exc_info=True
+                )
+                names = []
+            for path in names:
+                if path.startswith("."):
+                    continue  # Skip temp files from concurrent write_atomic() calls
+                try:
+                    with open(os.path.join(subdir, path), "rb") as f:
+                        content = f.read()
+                        yield pickle.loads(content), content, True
+                except FileNotFoundError:
+                    continue  # Raced with a concurrent cache clear
+                except Exception:
+                    log.warning(
+                        "%s unable to load compiled graph",
+                        cls.__name__,
+                        exc_info=True,
+                    )
 
         if remote_cache:
             try:
