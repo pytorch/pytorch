@@ -17,6 +17,8 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    INDEXED_OUTPUT_INDICES_ARG_NAME,
+    INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
@@ -312,6 +314,7 @@ def flex_gemm_epimod(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
+    indexed_dtypes: tuple[torch.dtype, torch.dtype] | None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
 ):
@@ -322,6 +325,7 @@ def flex_gemm_epimod(
         epilogue_arg_kinds,
         epilogue_arg_dtypes,
         aux_output_count,
+        indexed_dtypes,
         None if local_reduce is None else local_reduce.cache_key,
         main_transform,
     )
@@ -362,6 +366,19 @@ def flex_gemm_epimod(
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
+    extra_ops = ()
+    if indexed_dtypes is not None:
+        out_dtype, index_dtype = indexed_dtypes
+        index_op = epi_ops.ColVecLoad(
+            INDEXED_OUTPUT_INDICES_ARG_NAME,
+            dtype=cute_dsl_utils.torch2cute_dtype_map[index_dtype],
+        )
+        sinks[INDEXED_OUTPUT_STORE_ARG_NAME] = epi_ops.ColVecSelect(
+            INDEXED_OUTPUT_STORE_ARG_NAME,
+            idx_op=index_op,
+            output_dtype=cute_dsl_utils.torch2cute_dtype_map[out_dtype],
+        )
+        extra_ops = (index_op,)
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
@@ -443,6 +460,7 @@ def flex_gemm_epimod(
         outputs=outputs,
         ops=ops,
         outs=sinks,
+        extra_ops=extra_ops,
         prepass=prepass,
         prepass_outs=prepass_outs,
     )(epilogue_fn)
@@ -465,6 +483,8 @@ def gemm_epimod(
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
+    indexed_out: torch.Tensor | None = None,
+    indexed_indices: torch.Tensor | None = None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     config: tuple[tuple[str, Any], ...] | None = None,
@@ -485,6 +505,15 @@ def gemm_epimod(
         SFB = quack_blockscaled_scale_view(
             SFB, b.shape[1], b.shape[0], blockscaled_format
         )
+    if (indexed_out is None) != (indexed_indices is None):
+        raise RuntimeError(
+            "FlexGEMM indexed outputs require both indexed_out and indexed_indices"
+        )
+    if indexed_out is not None and indexed_indices is not None:
+        indexed_out = quack_epilogue_arg(indexed_out)
+        indexed_dtypes = (indexed_out.dtype, indexed_indices.dtype)
+    else:
+        indexed_dtypes = None
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
@@ -495,6 +524,7 @@ def gemm_epimod(
         quack_epilogue_args,
         epilogue_arg_kinds,
         len(aux_outs),
+        indexed_dtypes,
         local_reduce,
         main_transform,
     )
@@ -510,6 +540,9 @@ def gemm_epimod(
         operands[f"operand{index}"] = (
             arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
         )
+    if indexed_out is not None:
+        operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_indices
+        operands[INDEXED_OUTPUT_STORE_ARG_NAME] = indexed_out
     initialize_local_reduce_out = None
     if local_reduce is not None:
         from torch._vendor.quack import grouped_reduce
