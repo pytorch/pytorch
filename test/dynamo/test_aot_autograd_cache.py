@@ -3637,6 +3637,22 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
 
+    def test_region_activation_memory_budget_cache_key(self):
+        def make_fn(budget):
+            def fn(x):
+                size = x.shape[0]
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return x.sin() + size
+
+            return fn
+
+        config = self.default_config()
+        low = self.gen_cache_key(make_fn(0.2), config)
+        high = self.gen_cache_key(make_fn(0.7), config)
+        low_again = self.gen_cache_key(make_fn(0.2), config)
+        self.assertNotEqual(low, high)
+        self.assertEqual(low, low_again)
+
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
             return x.sin().cos()
