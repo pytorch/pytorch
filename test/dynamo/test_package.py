@@ -118,7 +118,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
         node.meta["val"] = torch.empty(2)
-        graph.call_function(torch.ops.aten.add.Tensor, (node, torch.device("cuda")))
+        graph.call_function(
+            torch.ops.aten.ones.default, ((2,),), {"device": torch.device("cuda")}
+        )
         package.update_device_type(graph)
         self.assertEqual(package._device_types, {"cpu", "cuda"})
 
