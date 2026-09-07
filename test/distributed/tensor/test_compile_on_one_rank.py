@@ -506,6 +506,67 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         FileCheck().check("torch.cuda.current_device()").run(code)
         self._assert_no_baked_device(code)
 
+    @staticmethod
+    def _coor_template_fn(a, b):
+        return (a @ b).relu()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @torch._inductor.config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON"
+    )
+    def test_inductor_template_no_baked_device(self):
+        # A Triton template must not bake the rank-specific device index either.
+        #
+        # The device-index drop is applied where TritonKernel builds triton_meta
+        # (codegen/triton.py), but a template's triton_meta is built separately in
+        # select_algorithm.py and calls DeviceProperties.create() on the concrete
+        # device, so it still emits DeviceProperties(..., index=N). The same gap
+        # exists in triton_combo_kernel.py.
+        #
+        # test_inductor_compiles_under_coor does not catch this: _coor_inductor_fn
+        # is a factory plus a reduction, which only produces inductor-generated
+        # kernels and never reaches the template path.
+        from torch._inductor.utils import run_and_get_code
+
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            self._coor_template_fn, backend="inductor", fullgraph=True
+        )
+        a = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+        _, codes = run_and_get_code(compiled, a, b)
+        self._assert_no_baked_device("\n".join(codes))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_user_defined_triton_kernel_no_baked_device(self):
+        # A user-defined @triton.jit kernel gets its triton_meta from a third site,
+        # define_user_defined_triton_kernel in codegen/wrapper.py, which is neither
+        # the TritonKernel path nor the template path.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.utils import run_and_get_code
+
+        @triton.jit
+        def add_one_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(in_ptr + offs, mask=mask) + 1, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            add_one_kernel[(1,)](x, out, x.numel(), BLOCK=128)
+            return out
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(128, device="cuda")
+        out, codes = run_and_get_code(compiled, x)
+        self.assertEqual(out, x + 1)
+        self._assert_no_baked_device("\n".join(codes))
+
     def _assert_no_baked_device(self, code):
         # A baked index reaches generated code in more forms than "cuda:N": repr() of a
         # torch.device gives device(type='cuda', index=0), and triton_meta renders
