@@ -81,8 +81,6 @@ from .base import (
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
-    Setter,
-    unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
