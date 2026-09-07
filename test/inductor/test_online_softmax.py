@@ -10,12 +10,13 @@ from torch._dynamo.utils import rmse, same
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -28,8 +29,25 @@ def _prepare_softmax(x, dim):
     return xmax, xsum
 
 
+def get_softmax_wrapper(device, V=50304, use_log_softmax=False):
+    N = 32 * 1024
+
+    @torch.compile
+    def f(x):
+        if use_log_softmax:
+            return torch.log_softmax(x, dim=-1)
+        else:
+            return torch.softmax(x, dim=-1)
+
+    x = torch.randn(N, V, dtype=torch.bfloat16, device=device)
+    out, source_codes = run_and_get_code(f, x)
+    return source_codes[0]
+
+
 class TestOnlineSoftmax(TestCase):
-    def do_test_acc_and_perf(self, op):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def do_test_acc_and_perf(self, device, op):
         if DO_PERF_TEST:
             N = 32 * 1024
             V = 50304  # padded version for gpt2
@@ -39,7 +57,7 @@ class TestOnlineSoftmax(TestCase):
         def f(x):
             return op(x, dim=-1)
 
-        x = torch.randn(N, V, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(N, V, dtype=torch.bfloat16, device=device)
         opt_f = torch.compile(f)
         expected = f(x)
         actual = opt_f(x)
@@ -54,46 +72,36 @@ class TestOnlineSoftmax(TestCase):
             print(f"{eager_ms=}")
             print(f"{opt_ms=}")
 
-    def test_softmax(self):
-        self.do_test_acc_and_perf(torch.softmax)
+    def test_softmax(self, device):
+        self.do_test_acc_and_perf(device, torch.softmax)
 
-    def test_log_softmax(self):
-        self.do_test_acc_and_perf(torch.log_softmax)
+    def test_log_softmax(self, device):
+        self.do_test_acc_and_perf(device, torch.log_softmax)
 
     @inductor_config.patch(use_fast_math=True)
-    def test_prepare_softmax_perf(self):
-        self.do_test_acc_and_perf(_prepare_softmax)
+    def test_prepare_softmax_perf(self, device):
+        self.do_test_acc_and_perf(device, _prepare_softmax)
 
-    def get_softmax_wrapper(self, V=50304, use_log_softmax=False, device=GPU_TYPE):
-        N = 32 * 1024
-
-        @torch.compile
-        def f(x):
-            if use_log_softmax:
-                return torch.log_softmax(x, dim=-1)
-            else:
-                return torch.softmax(x, dim=-1)
-
-        x = torch.randn(N, V, dtype=torch.bfloat16, device=device)
-        out, source_codes = run_and_get_code(f, x)
-        return source_codes[0]
-
-    def test_codegen_3pass_softmax_due_to_disable(self):
+    def test_codegen_3pass_softmax_due_to_disable(self, device):
         with inductor_config.patch(online_softmax=False):
-            wrapper_code = self.get_softmax_wrapper()
+            wrapper_code = get_softmax_wrapper(device=device)
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 3)
 
     @parametrize("V", [2048, 50304])
     @parametrize("use_log_softmax", [False, True])
-    def test_codegen_online_softmax(self, use_log_softmax, V):
-        wrapper_code = self.get_softmax_wrapper(use_log_softmax=use_log_softmax, V=V)
+    def test_codegen_online_softmax(self, device, use_log_softmax, V):
+        wrapper_code = get_softmax_wrapper(
+            device=device, use_log_softmax=use_log_softmax, V=V
+        )
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize("use_log_softmax", [False, True])
-    def test_codegen_online_softmax_unbacked_non_reduction_dim(self, use_log_softmax):
+    def test_codegen_online_softmax_unbacked_non_reduction_dim(
+        self, device, use_log_softmax
+    ):
         def f(x, n):
             x = x[: n.item(), :]
             if use_log_softmax:
@@ -101,7 +109,7 @@ class TestOnlineSoftmax(TestCase):
             else:
                 return torch.softmax(x, dim=-1)
 
-        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=device)
         n = torch.tensor(1024)
         _, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x, n)
         wrapper_code = "\n".join(source_codes)
@@ -109,28 +117,21 @@ class TestOnlineSoftmax(TestCase):
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
         self.assertTrue("online_softmax_reduce" in wrapper_code)
 
-    def test_no_online_softmax_for_cpu(self):
-        code = self.get_softmax_wrapper(V=2048, device="cpu")
-
-        # CPU need an explicit loop across different rows.
-        # For GPU, this is parallelized by the hardware.
-        self.assertEqual(code.count("for(int64_t"), 4)
-
-    def test_codegen_softmax_persistent_reduction(self):
+    def test_codegen_softmax_persistent_reduction(self, device):
         """
         Persistent reduction has no for loops.
         """
-        wrapper_code = self.get_softmax_wrapper(1024)
+        wrapper_code = get_softmax_wrapper(device=device, V=1024)
         self.assertEqual(wrapper_code.count("for r0_offset in"), 0)
 
     @inductor_config.patch("triton.persistent_reductions", False)
-    def test_sdpa(self):
+    def test_sdpa(self, device):
         """
         Make sure online softmax here does not conflict with the sdpa
         patterns.
         """
         q, k, v = (
-            torch.randn((4, 2, 16, 32), device=GPU_TYPE, dtype=torch.bfloat16)
+            torch.randn((4, 2, 16, 32), device=device, dtype=torch.bfloat16)
             for _ in range(3)
         )
 
@@ -150,8 +151,8 @@ class TestOnlineSoftmax(TestCase):
 
     @parametrize("nrow", [2, 2048])
     @parametrize("dim", [-1, 0, 1])
-    def test_prepare_softmax(self, dim, nrow):
-        x = torch.randn(nrow, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+    def test_prepare_softmax(self, device, dim, nrow):
+        x = torch.randn(nrow, 2048, dtype=torch.bfloat16, device=device)
         act, (code,) = run_and_get_code(torch.compile(_prepare_softmax), x, dim)
         ref = _prepare_softmax(x, dim)
         self.assertTrue(same(ref, act, tol=1e-2))
@@ -163,7 +164,7 @@ class TestOnlineSoftmax(TestCase):
             #   numel_hint >= num_sm * 2 * 32
             # When dim=0, numel_hint (output size) = ncol (2048)
             # split is expected only when num_sm > 32
-            props = DeviceProperties.create(torch.device(GPU_TYPE))
+            props = DeviceProperties.create(torch.device(device))
             num_sm = props.multi_processor_count
             split_not_expected = 2048 >= num_sm * 2 * 32
             if split_not_expected:
@@ -180,11 +181,11 @@ class TestOnlineSoftmax(TestCase):
             self.assertEqual(code.count("for r0_offset in"), expected_num_loop)
 
     @inductor_config.patch(strict_signed_zero=True)
-    def test_prepare_softmax_signed_zero(self):
+    def test_prepare_softmax_signed_zero(self, device):
         def reduce_max(x):
             return x.amax(dim=-1, keepdim=True)
 
-        x = torch.zeros(2, 2048, device=GPU_TYPE)
+        x = torch.zeros(2, 2048, device=device)
         x[0, 1::2] = -0.0
         x[1, ::2] = -0.0
 
@@ -196,7 +197,7 @@ class TestOnlineSoftmax(TestCase):
         self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
         self.assertEqual(ref[1], act[1])
 
-    def test_prepare_softmax_after_partitioning(self):
+    def test_prepare_softmax_after_partitioning(self, device):
         from torch._dynamo.backends.common import aot_autograd
         from torch._functorch.aot_autograd import make_boxed_func
         from torch._functorch.partitioners import min_cut_rematerialization_partition
@@ -275,13 +276,13 @@ class TestOnlineSoftmax(TestCase):
             B, S, D = 2, 128, 16
             args = (
                 torch.randn(
-                    B, S, D, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                    B, S, D, device=device, dtype=torch.float16, requires_grad=True
                 ),
                 torch.randn(
-                    B, S, D, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                    B, S, D, device=device, dtype=torch.float16, requires_grad=True
                 ),
                 torch.randn(
-                    B, S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+                    B, S, S, device=device, dtype=torch.float16, requires_grad=True
                 ),
             )
 
@@ -302,13 +303,13 @@ class TestOnlineSoftmax(TestCase):
         )
 
     @parametrize("strict_signed_zero", [False, True])
-    def test_split_reduction(self, strict_signed_zero):
+    def test_split_reduction(self, device, strict_signed_zero):
         """
         Split online_softmax_reduce into partial max/sum tuples and combine
         the partials with another online_softmax_reduce.
         """
         # tensor shape to trigger split reduction
-        x = torch.randn(1, 2**20 + 13, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(1, 2**20 + 13, dtype=torch.bfloat16, device=device)
         ref = torch.softmax(x, dim=-1)
         with inductor_config.patch(strict_signed_zero=strict_signed_zero):
             act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
@@ -317,9 +318,9 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue("online_softmax_reduce" in code)
         self.assertTrue("online_softmax_combine_with_sum" in code)
 
-    def test_kl_div_log_softmax_backward_split_reduction(self):
+    def test_kl_div_log_softmax_backward_split_reduction(self, device):
         logits = torch.randn(
-            1, 2**20, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            1, 2**20, dtype=torch.float32, device=device, requires_grad=True
         )
         targets = F.softmax(torch.randn_like(logits), dim=-1)
         ref_logits = logits.detach().clone().requires_grad_()
@@ -344,13 +345,13 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue("online_softmax_combine_with_sum" in code)
 
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
-    def test_prepare_softmax_acc_with_fp64(self, dtype):
+    def test_prepare_softmax_acc_with_fp64(self, device, dtype):
         if USE_LARGE_INPUT:
             M, N = 32768, 50257
         else:
             M, N = 1024, 2048
 
-        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+        x = torch.randn(M, N, device=device, dtype=dtype)
 
         ref_fp64 = _prepare_softmax(x.to(dtype=torch.float64), dim=-1)
         ref = _prepare_softmax(x, dim=-1)
@@ -379,13 +380,13 @@ class TestOnlineSoftmax(TestCase):
 
     @parametrize("fn", [torch.log_softmax, torch.softmax])
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
-    def test_softmax_acc_with_fp64(self, dtype, fn):
+    def test_softmax_acc_with_fp64(self, device, dtype, fn):
         if USE_LARGE_INPUT:
             M, N = 32768, 50257
         else:
             M, N = 1024, 2048
 
-        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+        x = torch.randn(M, N, device=device, dtype=dtype)
 
         ref_fp64 = fn(x.to(dtype=torch.float64), dim=-1)
         ref = fn(x, dim=-1)
@@ -412,7 +413,7 @@ class TestOnlineSoftmax(TestCase):
             res_error < ref_error + 0.1
         )  # Is this good enough to make CI stable
 
-    def test_softmin(self):
+    def test_softmin(self, device):
         """
         The rnumel==1 kind of reduction should be unrolled.
         """
@@ -420,18 +421,18 @@ class TestOnlineSoftmax(TestCase):
         def f(x):
             return F.softmin(x, dim=0)
 
-        x = torch.randn(1, device=GPU_TYPE)
+        x = torch.randn(1, device=device)
         ref = f(x)
         act, (code,) = run_and_get_code(torch.compile(f), x)
         self.assertTrue(torch.allclose(ref, act))
         self.assertTrue("online_softmax_reduce" not in code)
 
-    def test_causal_mask(self):
+    def test_causal_mask(self, device):
         def f(x):
             return x.softmax(dim=-1)
 
-        x = torch.randn(2048, 2048, device=GPU_TYPE)
-        mask = torch.tril(torch.ones(2048, 2048, device=GPU_TYPE))
+        x = torch.randn(2048, 2048, device=device)
+        mask = torch.tril(torch.ones(2048, 2048, device=device))
         x.masked_fill_(mask == 0, float("-inf"))
 
         ref = f(x)
@@ -440,7 +441,7 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(not act.isnan().any())
         self.assertTrue(torch.allclose(ref, act))
 
-    def test_tb_speech_transformer_attn(self):
+    def test_tb_speech_transformer_attn(self, device):
         """
         This is an example extracted from speech_transformer.
         Since online softmax use the max from partial elements of an entire
@@ -459,8 +460,8 @@ class TestOnlineSoftmax(TestCase):
             xsum = (x - xmax).exp().sum(dim=-1, keepdim=True)
             return xsum
 
-        x = torch.randn(8, 10, 22, 204, device=GPU_TYPE)
-        mask = torch.randint(0, 2, (10, 204), device=GPU_TYPE) == 0
+        x = torch.randn(8, 10, 22, 204, device=device)
+        mask = torch.randint(0, 2, (10, 204), device=device) == 0
         mask = mask.view(1, 10, 1, 204)
 
         ref = f(x, mask)
@@ -470,20 +471,20 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(torch.allclose(ref, act))
 
     @inductor_config.patch(split_reductions=False)
-    def test_3d_tiled_online_softmax(self):
+    def test_3d_tiled_online_softmax(self, device):
         def f(x, y):
             return (x * y).softmax(dim=-1)
 
         M, N, K = 32, 8, 1024
 
-        x = torch.randn(K, N, M, device=GPU_TYPE).permute(2, 1, 0)
-        y = torch.randn(K, M, N, device=GPU_TYPE).permute(1, 2, 0)
+        x = torch.randn(K, N, M, device=device).permute(2, 1, 0)
+        y = torch.randn(K, M, N, device=device).permute(1, 2, 0)
 
         opt_f = torch.compile(f)
         torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
 
     @parametrize("dtype", [torch.bfloat16, torch.float32])
-    def test_nan_propagation(self, dtype):
+    def test_nan_propagation(self, device, dtype):
         """
         The softmax-internal max uses fmax (non-NaN-propagating) for
         performance, but NaN must still propagate to the final output
@@ -497,7 +498,7 @@ class TestOnlineSoftmax(TestCase):
             self.skipTest("requires triton")
 
         M, N = 4, 1024
-        x = torch.randn(M, N, device=GPU_TYPE, dtype=dtype)
+        x = torch.randn(M, N, device=device, dtype=dtype)
 
         x[0, 0] = float("nan")
         x[1, N // 2] = float("nan")
@@ -525,8 +526,23 @@ class TestOnlineSoftmax(TestCase):
         torch.testing.assert_close(ref[3], act[3])
 
 
-instantiate_parametrized_tests(TestOnlineSoftmax)
+class TestOnlineSoftmaxOnlyCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_no_online_softmax_for_cpu(self, device):
+        code = get_softmax_wrapper(device=device, V=2048)
+
+        # CPU need an explicit loop across different rows.
+        # For GPU, this is parallelized by the hardware.
+        self.assertEqual(code.count("for(int64_t"), 4)
+
+
+instantiate_device_type_tests(
+    TestOnlineSoftmax, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestOnlineSoftmaxOnlyCPU, globals(), only_for="cpu")
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU and HAS_TRITON:
+    if IS_LINUX and HAS_TRITON:
         run_tests()
