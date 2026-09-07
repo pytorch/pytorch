@@ -1193,6 +1193,8 @@ class SequentialLR(LRScheduler):
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
             scheduler._update_lr(0)
         else:
+            # Every composite scheduler needs to pass `metrics` to all
+            # schedulers that may read it.
             if isinstance(
                 scheduler, (ReduceLROnPlateau, SequentialLR, ChainedScheduler)
             ):
@@ -1561,6 +1563,8 @@ class ChainedScheduler(LRScheduler):
                 currently active scheduler. :class:`ReduceLROnPlateau` makes use of it.
         """
         for scheduler in self._schedulers:
+            # Every composite scheduler needs to pass `metrics` to all
+            # schedulers that may read it.
             if isinstance(
                 scheduler, (ReduceLROnPlateau, SequentialLR, ChainedScheduler)
             ):
