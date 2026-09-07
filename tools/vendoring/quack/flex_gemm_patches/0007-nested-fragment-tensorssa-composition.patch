@@ -1,0 +1,242 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 116a03d..2186e44 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -383,0 +384 @@ class EpiMod:
++        prepass_mode=None,
+@@ -443 +444,5 @@ class EpiMod:
+-        if prepass is not None:
++        if prepass is None:
++            if prepass_mode is not None:
++                raise ValueError("prepass_mode= requires prepass=")
++            self.prepass_operand_names = ()
++        else:
+@@ -448,2 +453,6 @@ class EpiMod:
+-        else:
+-            self.prepass_operand_names = ()
++            # The prepass loop is always element-domain, even when the main
++            # callback consumes accumulator pairs. Require that choice explicitly.
++            if self.mode == "acc_pair" and prepass_mode != "element":
++                raise ValueError("prepass + acc_pair requires explicit prepass_mode='element'")
++            if prepass_mode not in (None, "element"):
++                raise ValueError("prepass_mode only supports 'element'")
+@@ -1953,0 +1963 @@ def gemm_epilogue(
++    prepass_mode=None,
+@@ -1995,0 +2006 @@ def gemm_epilogue(
++            prepass_mode=prepass_mode,
+diff --git a/quack/epilogue/library.py b/quack/epilogue/library.py
+index 9096a86..ba3b897 100644
+--- a/quack/epilogue/library.py
++++ b/quack/epilogue/library.py
+@@ -375,0 +376 @@ def qknorm_epi(acc, qk, w):
++    prepass_mode="element",
+@@ -395,0 +397 @@ def qk_rope_epi(acc, cs, qk, w):
++    prepass_mode="element",
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index 83aeb4c..dc899e1 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -976,0 +977,4 @@ class TileStore(EpiOp):
++    def min_epi_tile_n(self, arg_tensor):
++        """Return a physical-N lower bound imposed by this store, if any."""
++        return None
++
+@@ -1204 +1208 @@ class GroupedMainStore(TileStore):
+-    def __init__(self, name, group, paired=False):
++    def __init__(self, name, group, paired=False, min_fragment_n=None):
+@@ -1208,0 +1213,2 @@ class GroupedMainStore(TileStore):
++        if min_fragment_n is not None and (min_fragment_n <= 0 or min_fragment_n % group):
++            raise ValueError("min_fragment_n must be a positive multiple of group")
+@@ -1212,0 +1219 @@ class GroupedMainStore(TileStore):
++        self.min_fragment_n = min_fragment_n
+@@ -1216 +1223 @@ class GroupedMainStore(TileStore):
+-        return (self.group, self.paired, *super().config_key())
++        return (self.group, self.paired, self.min_fragment_n, *super().config_key())
+@@ -1273,0 +1281,9 @@ class GroupedMainStore(TileStore):
++    def min_epi_tile_n(self, arg_tensor):
++        """Keep stores vectorizable and fragment reductions complete."""
++        store_width = 0
++        if arg_tensor is not None:
++            width = arg_tensor.element_type.width
++            store_width = self.group * ((128 + width - 1) // width)
++        required_n = max(store_width, self.min_fragment_n or 0)
++        return required_n or None
++
+diff --git a/quack/gemm_sm100.py b/quack/gemm_sm100.py
+index 5dd8bf1..0aace89 100644
+--- a/quack/gemm_sm100.py
++++ b/quack/gemm_sm100.py
+@@ -518,6 +518,3 @@ class GemmSm100(GemmTmaBase):
+-        # Quantized-output SF vectors must be produced within one epi subtile.
+-        # Widen the epi tile N when an active BlockScaleFactorStore needs a
+-        # larger run (e.g. fp4 D with a small tile may default to epi N below
+-        # the SF vector); column-direction vectors run along M and put no
+-        # requirement on the epi tile N. The stage computation below
+-        # re-budgets smem. Shared scan with GemmSm120._setup_attributes.
++        # Quantized-output SF vectors and contracted narrow stores may require
++        # a wider N run than the default epi subtile. The stage computation
++        # below re-budgets smem after any widening.
+@@ -525,2 +522,10 @@ class GemmSm100(GemmTmaBase):
+-        if sfd_min_n:
+-            epi_tile_n = self.epi_tile[1]
++        store_min_n = 0
++        for op in getattr(self, "_epi_ops", ()):
++            if not op.is_tile_store():
++                continue
++            required_n = op.min_epi_tile_n(getattr(epilogue_args, op.name, None))
++            if required_n is not None:
++                store_min_n = max(store_min_n, required_n)
++        min_epi_n = max(sfd_min_n or 0, store_min_n)
++        epi_tile_n = self.epi_tile[1]
++        if cute.size(epi_tile_n) < min_epi_n:
+@@ -532,6 +537,6 @@ class GemmSm100(GemmTmaBase):
+-            if (
+-                contiguous
+-                and cute.size(epi_tile_n) < sfd_min_n
+-                and self.cta_tile_shape_mnk[1] % sfd_min_n == 0
+-            ):
+-                self.epi_tile = (self.epi_tile[0], cute.make_layout(sfd_min_n))
++            if contiguous and self.cta_tile_shape_mnk[1] % min_epi_n == 0:
++                self.epi_tile = (self.epi_tile[0], cute.make_layout(min_epi_n))
++            elif cute.size(epi_tile_n) < store_min_n:
++                if not contiguous or self.cta_tile_shape_mnk[1] % store_min_n:
++                    raise ValueError(f"epilogue N tile cannot satisfy required width {store_min_n}")
++                self.epi_tile = (self.epi_tile[0], cute.make_layout(store_min_n))
+diff --git a/tests/test_epilogue_iface.py b/tests/test_epilogue_iface.py
+index 463b6ae..0bd956c 100644
+--- a/tests/test_epilogue_iface.py
++++ b/tests/test_epilogue_iface.py
+@@ -133,0 +134,16 @@ def test_multi_plane_sink_rejects_prepass_output():
++def test_acc_pair_prepass_requires_explicit_domain():
++    def prepass(acc):
++        return {"sq": acc}
++
++    with pytest.raises(ValueError, match="prepass \\+ acc_pair requires explicit"):
++
++        @gemm_epilogue(
++            mode="acc_pair",
++            reduces={"sq": ColVecReduce("sq")},
++            prepass=prepass,
++            prepass_outs=("sq",),
++        )
++        def invalid(acc):
++            return {"D": acc}
++
++
+diff --git a/tests/test_grouped_main.py b/tests/test_grouped_main.py
+index 3b9f04d..ca8fb2a 100644
+--- a/tests/test_grouped_main.py
++++ b/tests/test_grouped_main.py
+@@ -42,0 +43 @@ def test_grouped_main_store_shape_identity_and_config_legality():
++    fragment_group2 = GroupedMainStore("main", 2, min_fragment_n=64)
+@@ -44,0 +46,5 @@ def test_grouped_main_store_shape_identity_and_config_legality():
++    assert group2.cache_key() != fragment_group2.cache_key()
++    uint8_arg = SimpleNamespace(element_type=cutlass.Uint8)
++    assert group2.min_epi_tile_n(uint8_arg) == 32
++    assert group4.min_epi_tile_n(uint8_arg) == 64
++    assert fragment_group2.min_epi_tile_n(None) == 64
+@@ -46,0 +53,2 @@ def test_grouped_main_store_shape_identity_and_config_legality():
++    with pytest.raises(ValueError, match="positive multiple"):
++        GroupedMainStore("main", 2, min_fragment_n=63)
+@@ -126,0 +135,36 @@ def test_grouped_main_n64_vendor_configs(m, tile_m, cluster_m, persistent):
++def test_fragment_group4_stores_uint8():
++    """A widened epilogue tile keeps contracted byte stores TMA-legal."""
++
++    @cute.jit
++    def sum4_uint8(acc):
++        group = 4
++        fragment_group = cutlass.const_expr(min(group, cute.size(acc.shape, mode=[0])))
++        repeats = cutlass.const_expr(cute.size(acc.shape, mode=[0]) // fragment_group)
++        grouped = acc.reshape(((1, fragment_group, repeats), 1, 1))
++        value = (
++            grouped[((0, 0, None), None, None)]
++            + grouped[((0, 1, None), None, None)]
++            + grouped[((0, 2, None), None, None)]
++            + grouped[((0, 3, None), None, None)]
++        )
++        return {"main": value.to(cutlass.Uint8)}
++
++    m, n, k = 128, 256, 128
++    A = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
++    B = (torch.arange(n, device="cuda") % 16).expand(k, n).to(torch.bfloat16)
++    out = torch.empty((m, n // 4), device="cuda", dtype=torch.uint8)
++    mod = fragment_epilogue(outputs=(GroupedMainStore("main", 4),))(sum4_uint8)
++
++    result = mod(
++        A,
++        B,
++        out={"main": out},
++        store_d=False,
++        tuned=False,
++        config_constraints={"tile_n": 256, "swap_ab": False, "cluster_n": 1},
++    )["main"]
++    reference = (A.float() @ B.float()).reshape(m, n // 4, 4).sum(-1).to(torch.uint8)
++    assert result is out
++    assert torch.equal(result, reference)
++
++
+diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
+index 04bfa59..b74d5d1 100644
+--- a/tests/test_grouped_reduce.py
++++ b/tests/test_grouped_reduce.py
+@@ -29 +29 @@ from quack import epi_math
+-from quack.epilogue.frontend import gemm_epilogue, fragment_epilogue
++from quack.epilogue.frontend import fragment_epilogue, gemm_epilogue
+@@ -30,0 +31 @@ from quack.epilogue.mixin import ComposableEpiMixin
++from quack.epilogue.ops import GroupedMainStore
+@@ -973,0 +975,55 @@ def _fragment_prepass_mod(group, combine, finalize=None):
++def test_fragment_pair_domain_reduce_feeds_main():
++    """One complete logical group reduces and feeds main in one fragment."""
++    group = 32
++
++    @cute.jit
++    def pair_reduce(acc):
++        pair_width = cutlass.const_expr(min(2, cute.size(acc.shape, mode=[0])))
++        pair_repeats = cutlass.const_expr(cute.size(acc.shape, mode=[0]) // pair_width)
++        paired = acc.reshape(((1, pair_width, pair_repeats), 1, 1))
++        value = paired[((0, 0, None), None, None)] * paired[((0, 1, None), None, None)]
++        group_width = cutlass.const_expr(min(group, cute.size(value.shape, mode=[0])))
++        repeats = cutlass.const_expr(cute.size(value.shape, mode=[0]) // group_width)
++        grouped = value.reshape(((1, group_width, repeats), 1, 1))
++        reduced = grouped.reduce(
++            cute.ReductionOp.MAX,
++            init_val=float("-inf"),
++            reduction_profile=((None, 1, None), 1, 1),
++        )
++        broadcast = reduced.reshape(((1, 1, repeats), 1, 1)).broadcast_to(grouped.shape)
++        physical = reduced.reshape(((1, 1, repeats), 1, 1)).broadcast_to(
++            ((1, 2 * group_width, repeats), 1, 1)
++        )
++        return {"main": grouped / (broadcast + cute.full_like(broadcast, 1)), "g": physical}
++
++    reduce_op = GroupedLocalReduce(
++        "g", axis=1, group=2 * group, combine="max", fragment_reduced=True
++    )
++    mod = fragment_epilogue(
++        outputs=(GroupedMainStore("main", 2, min_fragment_n=2 * group),),
++        outs={"g": reduce_op},
++    )(pair_reduce)
++
++    m, n, k = 128, 256, 128
++    torch.manual_seed(43)
++    A = torch.rand((m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.rand((k, n), device="cuda", dtype=torch.bfloat16)
++    main = torch.empty((m, n // 2), device="cuda", dtype=torch.float32)
++    grouped_out = torch.empty((m, n // (2 * group)), device="cuda", dtype=torch.float32)
++    result = mod(
++        A,
++        B,
++        out={"main": main},
++        store_d=False,
++        tuned=False,
++        g=grouped_out,
++        config_constraints={"tile_n": 256, "swap_ab": False, "cluster_n": 1},
++    )
++
++    value = (A.float() @ B.float()).reshape(m, n // 2, 2).prod(-1)
++    grouped = value.reshape(m, -1, group)
++    reduced = grouped.amax(-1)
++    torch.testing.assert_close(result["main"], (grouped / (reduced[..., None] + 1)).flatten(1))
++    torch.testing.assert_close(grouped_out, reduced)
++
++
