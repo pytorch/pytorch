@@ -12,7 +12,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -24,10 +25,12 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 # TODO: modularize this test and add test for checkpoint conversion in both direction.
 class TestFsdpTpCheckpointConversion(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_fsdp_to_tp(self):
+    def test_fsdp_to_tp(self, device):
         CHECKPOINT_DIR = self.temp_dir
 
         model = MLPModule(self.device_type).to(self.rank)
@@ -100,6 +103,10 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
                 ).to_local()
                 self.assertEqual(fsdp_redistributed, tp_redistributed)
 
+
+instantiate_device_type_tests(
+    TestFsdpTpCheckpointConversion, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
