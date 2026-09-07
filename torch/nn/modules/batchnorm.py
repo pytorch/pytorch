@@ -187,6 +187,20 @@ class _BatchNorm(_NormBase):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:  # type: ignore[has-type]
+                if not torch.jit.is_scripting():
+                    if (
+                        self.momentum is None
+                        and torch.compiler.is_dynamo_compiling()
+                        and not torch.compiler.is_exporting()
+                    ):
+                        raise RuntimeError(
+                            "BatchNorm(momentum=None) uses a cumulative moving average "
+                            "that reads num_batches_tracked as a Python scalar, "
+                            "which torch.compile cannot capture into a graph "
+                            "(see https://github.com/pytorch/pytorch/issues/194504). "
+                            "Either pass an explicit momentum, or compile with "
+                            "fullgraph=False."
+                        )
                 self.num_batches_tracked.add_(1)  # type: ignore[has-type]
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
@@ -805,6 +819,20 @@ class SyncBatchNorm(_BatchNorm):
         if self.training and self.track_running_stats:
             if self.num_batches_tracked is None:
                 raise AssertionError("num_batches_tracked must not be None")
+            if not torch.jit.is_scripting():
+                if (
+                    self.momentum is None
+                    and torch.compiler.is_dynamo_compiling()
+                    and not torch.compiler.is_exporting()
+                ):
+                    raise RuntimeError(
+                        "SyncBatchNorm(momentum=None) uses a cumulative moving average "
+                        "that reads num_batches_tracked as a Python scalar, "
+                        "which torch.compile cannot capture into a graph "
+                        "(see https://github.com/pytorch/pytorch/issues/194504). "
+                        "Either pass an explicit momentum, or compile with "
+                        "fullgraph=False."
+                    )
             self.num_batches_tracked.add_(1)
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
