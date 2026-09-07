@@ -8056,6 +8056,193 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    @skipMPS  # InstanceNorm3d is not supported on MPS
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    def test_instancenorm_channels_last(self, device, dtype):
+        # channels_last inputs must not be converted to contiguous, see
+        # https://github.com/pytorch/pytorch/issues/59168
+        tol = {torch.float: 1e-5, torch.half: 1e-2}[dtype]
+        # group_norm_memory_format (aten/src/ATen/native/group_norm.cpp) keeps
+        # the layout on every backend except those without channels_last group
+        # norm kernels, so exclude only those rather than allow-listing, letting
+        # a new backend fail loudly here instead of silently skipping the check.
+        preserves_format = self.device_type not in ('mps', 'xpu')
+
+        def helper(cls, shape, memory_format, affine, track_running_stats):
+            mod = cls(shape[1], affine=affine, track_running_stats=track_running_stats).to(device)
+            ref_mod = deepcopy(mod)
+
+            input = torch.randn(shape, device=device, dtype=dtype)
+            input = input.contiguous(memory_format=memory_format).requires_grad_()
+            ref_input = input.detach().clone().contiguous().requires_grad_()
+            grad = torch.randn(shape, device=device, dtype=dtype).contiguous(memory_format=memory_format)
+
+            out = mod(input)
+            out.backward(grad)
+            ref_out = ref_mod(ref_input)
+            ref_out.backward(grad.contiguous())
+
+            if preserves_format and not track_running_stats:
+                self.assertTrue(out.is_contiguous(memory_format=memory_format))
+                self.assertTrue(input.grad.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out, ref_out, atol=tol, rtol=tol)
+            self.assertEqual(input.grad, ref_input.grad, atol=tol, rtol=tol)
+            if affine:
+                self.assertEqual(mod.weight.grad, ref_mod.weight.grad, atol=tol, rtol=tol)
+                self.assertEqual(mod.bias.grad, ref_mod.bias.grad, atol=tol, rtol=tol)
+            if track_running_stats:
+                self.assertEqual(mod.running_mean, ref_mod.running_mean, atol=tol, rtol=tol)
+                self.assertEqual(mod.running_var, ref_mod.running_var, atol=tol, rtol=tol)
+
+        cases = [
+            (nn.InstanceNorm2d, (4, 8, 6, 7), torch.channels_last),
+            (nn.InstanceNorm2d, (4, 1, 6, 7), torch.channels_last),
+            (nn.InstanceNorm3d, (4, 8, 3, 6, 7), torch.channels_last_3d),
+            (nn.InstanceNorm3d, (4, 1, 3, 6, 7), torch.channels_last_3d),
+        ]
+        for (cls, shape, memory_format), affine, track_running_stats in product(cases, [True, False], [True, False]):
+            helper(cls, shape, memory_format, affine, track_running_stats)
+
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_instancenorm_channels_last_mixed_dtype(self, device, dtype):
+        # Under autocast the nn.InstanceNorm*d affine params stay fp32 while the
+        # input is reduced precision. The channels_last fast path routes through
+        # native_group_norm, whose CUDA kernels must keep the fp32 params and the
+        # fp32 saved mean/rstd and affine grads rather than downcasting them to
+        # the input dtype (https://github.com/pytorch/pytorch/pull/194616).
+        # Assert the stat/param dtypes directly: a differentiable downcast would
+        # still surface an fp32 leaf .grad and hide the regression.
+        N, C, D, H, W = 2, 8, 3, 6, 7
+        x = torch.randn(N, C, D, H, W, device=device, dtype=dtype)
+        x = x.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+        weight = torch.randn(C, device=device, dtype=torch.float, requires_grad=True)
+        bias = torch.randn(C, device=device, dtype=torch.float, requires_grad=True)
+
+        # native_group_norm with one group per channel is the kernel the fast
+        # path dispatches to; check it keeps fp32 stats over the fp16/bf16 input.
+        out, mean, rstd = torch.native_group_norm(x, weight, bias, N, C, D * H * W, C, 1e-5)
+        self.assertEqual(out.dtype, dtype)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(mean.dtype, torch.float)
+        self.assertEqual(rstd.dtype, torch.float)
+        out.sum().backward()
+        self.assertEqual(weight.grad.dtype, torch.float)
+        self.assertEqual(bias.grad.dtype, torch.float)
+
+        # instance_norm must pass the fp32 params through unchanged (no downcast)
+        # and match the group_norm reference.
+        io = F.instance_norm(x.detach(), None, None, weight.detach(), bias.detach(), True, 0.0, 1e-5)
+        self.assertEqual(io.dtype, dtype)
+        self.assertTrue(io.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(io, out, atol=1e-2, rtol=1e-2)
+
+    @dtypes(torch.float)
+    def test_group_norm_channels_last_staged_reduction(self, device, dtype):
+        # Same backend caveat as test_instancenorm_channels_last above.
+        preserves_format = self.device_type not in ('mps', 'xpu')
+        # The channels_last group norm kernels split the spatial reduction over
+        # several blocks and combine the partial results through a staging
+        # buffer, a path only taken once HxW is large. Every other norm test
+        # here uses a small spatial extent and so only covers the single block
+        # case, including the instance norm shapes above.
+        for C, G in ((32, 32), (64, 8)):
+            shape = (2, C, 8, 16, 16)
+            mod = nn.GroupNorm(G, C).to(device=device, dtype=dtype)
+            ref_mod = deepcopy(mod)
+            input = torch.randn(shape, device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+            ref_input = input.detach().clone().contiguous().requires_grad_()
+            grad = torch.randn(shape, device=device, dtype=dtype)
+
+            out = mod(input)
+            out.backward(grad.contiguous(memory_format=torch.channels_last_3d))
+            ref_out = ref_mod(ref_input)
+            ref_out.backward(grad.contiguous())
+
+            # The two layouts accumulate the reduction in a different order, so
+            # compare against the float32 error of a few thousand element sum
+            # rather than the default tolerance.
+            tol = {"atol": 1e-4, "rtol": 1e-4}
+            if preserves_format:
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertEqual(out, ref_out, **tol)
+            self.assertEqual(input.grad, ref_input.grad, **tol)
+            self.assertEqual(mod.weight.grad, ref_mod.weight.grad, **tol)
+            self.assertEqual(mod.bias.grad, ref_mod.bias.grad, **tol)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_group_norm_channels_last_large_batch(self, device, dtype):
+        # The channels_last kernels walk the batch along gridDim.z, which CUDA
+        # caps at 65535, so a larger batch must still launch.
+        tol = {"atol": 1e-4, "rtol": 1e-4}
+        # These cover the batch walk itself. Reaching it together with a split
+        # HxW reduction would take more than 4e9 elements, so the n factors in
+        # the staging and semaphore indices are only checked by inspection.
+        for C, H, W in ((4, 4, 4), (8, 4, 8)):
+            N = 70000
+            mod = nn.GroupNorm(C, C).to(device=device, dtype=dtype)
+            ref_mod = deepcopy(mod)
+            input = torch.randn(N, C, H, W, device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            ref_input = input.detach().clone().contiguous().requires_grad_()
+
+            out = mod(input)
+            out.sum().backward()
+            ref_out = ref_mod(ref_input)
+            ref_out.sum().backward()
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(out, ref_out, **tol)
+            self.assertEqual(input.grad, ref_input.grad, **tol)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_group_norm_channels_last_many_channels(self, device, dtype):
+        # The channels_last kernels size their grid from the channel count, so a
+        # channel count past the point where that sizing saturates must still be
+        # covered rather than silently left unwritten.
+        C = 262145
+        x = torch.randn(1, C, 2, 2, device=device, dtype=dtype)
+        x = x.contiguous(memory_format=torch.channels_last)
+        w = torch.ones(C, device=device, dtype=dtype)
+        b = torch.zeros(C, device=device, dtype=dtype)
+
+        # One group per channel exercises the forward reduction. Backward is not
+        # run here: it launches a grid of G blocks in its y extent, which is a
+        # separate pre-existing limit above 65535 groups.
+        with torch.no_grad():
+            out, mean, rstd = torch.native_group_norm(x, w, b, 1, C, 4, C, 1e-5)
+            ref = torch.native_group_norm(x.contiguous(), w, b, 1, C, 4, C, 1e-5)
+        self.assertEqual(mean, ref[1])
+        self.assertEqual(rstd, ref[2])
+        self.assertEqual(out, ref[0])
+
+        # Several channels per group exercises the backward reduction, which
+        # uses the same grid sizing for every group count.
+        G = 5
+        xg = x.detach().clone().requires_grad_()
+        xc = x.detach().clone().contiguous().requires_grad_()
+        F.group_norm(xg, G).sum().backward()
+        F.group_norm(xc, G).sum().backward()
+        self.assertEqual(xg.grad, xc.grad)
+
+    @dtypes(torch.half, torch.bfloat16)
+    def test_group_norm_mixed_dtype_bias_only(self, device, dtype):
+        # dgamma/dbeta take the param dtype the kernels read the stats with, so a
+        # fp32 bias with no weight must not fall back to the input's dtype.
+        C = 8
+        for memory_format in (torch.channels_last, torch.contiguous_format):
+            x = torch.randn(2, C, 6, 7, device=device, dtype=dtype)
+            x = x.contiguous(memory_format=memory_format).requires_grad_()
+            bias = torch.randn(C, device=device, dtype=torch.float, requires_grad=True)
+            out = F.group_norm(x, C, None, bias)
+            out.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(bias.grad.dtype, torch.float)
+
     @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
     @parametrize_test("no_batch_dim", [True, False])
     @parametrize_test("affine", [True, False])

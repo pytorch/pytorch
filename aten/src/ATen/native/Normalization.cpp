@@ -13,6 +13,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/native/group_norm.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
@@ -50,6 +51,7 @@
 #include <ATen/ops/native_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/_native_batch_norm_legit.h>
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
@@ -738,9 +740,47 @@ Tensor instance_norm(
 
  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
-  std::vector<SymInt> shape = input.sym_sizes().vec();
   SymInt b = input.sym_size(0);
   SymInt c = input.sym_size(1);
+
+  // Instance norm is group norm with one group per channel. The batch_norm path
+  // below folds N into C, which is not expressible as a view of a channels_last
+  // tensor, so it copies the input to contiguous and returns a contiguous
+  // output, forcing a layout conversion around every InstanceNorm of a
+  // channels_last model. native_group_norm has channels_last kernels, so prefer
+  // it when there are no running stats to update. Undefined running stats
+  // already imply use_input_stats via the TORCH_CHECK above, so it is not
+  // retested here.
+  const auto memory_format = group_norm_memory_format(input);
+  // native_group_norm takes the group count as a plain int, so a symbolic
+  // channel count (e.g. under torch.compile with dynamic shapes) deliberately
+  // opts out of this fast path and falls back to the batch_norm path below.
+  // A dynamic channel count therefore returns a contiguous output where eager
+  // returns a channels_last one, so the layout is not stable across the two.
+  // Specializing on the channel count would trade that for a guard on a
+  // dimension that is almost always static; the fallback is kept because it is
+  // what this op did before and is still correct.
+  const auto num_groups = c.maybe_as_int();
+  if ((memory_format == MemoryFormat::ChannelsLast ||
+       memory_format == MemoryFormat::ChannelsLast3d) &&
+      !running_mean.defined() && !running_var.defined() &&
+      num_groups.has_value()) {
+    // native_group_norm keeps the affine params and the saved mean/rstd in
+    // their own dtype (fp32) over a reduced-precision input, e.g. the fp32
+    // weight/bias of an nn.InstanceNorm*d module under autocast, so pass
+    // weight/bias through unchanged rather than downcasting to the input dtype.
+    return std::get<0>(at::native_group_norm_symint(
+        input,
+        weight,
+        bias,
+        b,
+        c,
+        c10::multiply_integers(input.sym_sizes().slice(2)),
+        *num_groups,
+        eps));
+  }
+
+  std::vector<SymInt> shape = input.sym_sizes().vec();
   shape[1] = b * c;
   shape[0] = SymInt(1);
 

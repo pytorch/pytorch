@@ -26,7 +26,7 @@
 
 namespace at::native {
 
-static MemoryFormat group_norm_memory_format(const Tensor& input) {
+MemoryFormat group_norm_memory_format(const Tensor& input) {
   return (input.device().is_cpu() || input.device().is_cuda() ||
           input.device().is_privateuseone())
       ? input.suggest_memory_format()
@@ -156,7 +156,12 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   }
 
   auto memory_format = group_norm_memory_format(X);
+  // dgamma/dbeta are written with the same param type the kernels read the
+  // stats with, so derive their dtype from the stats rather than from gamma
+  // alone: with gamma undefined and a fp32 beta over a reduced-precision input,
+  // gamma.options() would fall back to X's dtype and disagree.
   auto dparam_options{(gamma.defined() ? gamma.options() : X.options())
+                          .dtype(param_scalar_type(X, mixed_type))
                           .memory_format(MemoryFormat::Contiguous)};
 
   if (!N) {
