@@ -174,7 +174,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # pick_vec_isa never raises for a missing compiler; it returns
         # invalid_vec_isa, which must read as "no target", not as a target
         # named INVALID_VEC_ISA that only an equally broken host would match.
-        with patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=[]):
+        # Patch pick_vec_isa directly, not valid_vec_isa_list: in fbcode on x86
+        # pick_vec_isa returns VecAVX2 before ever consulting the list, so
+        # emptying the list would leave this assertion inert there.
+        with patch.object(
+            cpu_vec_isa, "pick_vec_isa", return_value=cpu_vec_isa.invalid_vec_isa
+        ):
             self.assertIsNone(_current_cpu_codegen_target())
 
     def test_sve_widths_do_not_collide_in_the_codegen_fingerprint(self):
@@ -259,6 +264,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    def test_bypassed_entry_refuses_new_registrations(self):
+        def fn(x):
+            return x + 1
+
+        (backend_id,) = (
+            compiled_region_with_backend_id_for_package_test.__code__.co_names
+        )
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_entry()
+            package.add_guarded_code(
+                b"", compiled_region_with_backend_id_for_package_test.__code__
+            )
+            package.add_backend_id(backend_id)
+            package.add_import_source("alias", "os")
+
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [])
+        self.assertEqual(entry.guarded_codes, [])
+        self.assertEqual(entry.import_sources, {})
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -556,8 +583,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # Observe the names install() actually placed in the live module dict,
         # not its own bookkeeping: the stale hooks below run against the
         # module, so the module is what must survive them.
-        installed = {name for name in scope if name.startswith(prefixes)}
-        installed -= preexisting
+        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
         self.assertTrue(installed)
 
         del pinned
@@ -963,8 +989,12 @@ def add(x, y):
         self.assertTrue(resume_b)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 2 * count)
 
-        # Either package serves the frame while the other is live: both loads'
-        # entries and resume functions coexist on the one code object.
+        # Both loads' entries and resume functions coexist on the one code
+        # object. In the shared default region, insertion-order lookup matches
+        # pkg_a's structurally identical entry first, so both of these serve
+        # through pkg_a; region-exact serving of pkg_b's own entries and
+        # renamed resume globals is covered by
+        # test_two_packages_region_scoped_serves_its_own_entries.
         compiled_fn = torch._dynamo.optimize(package=pkg_a)(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), expected)
@@ -987,6 +1017,68 @@ def add(x, y):
         with torch.compiler.set_stance("fail_on_recompile"):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled_fn(x)
+
+    def test_two_packages_region_scoped_serves_its_own_entries(self):
+        # The coexistence test above serves through pkg_a either way: both
+        # loads land in the default region and insertion-order lookup matches
+        # pkg_a's structurally identical entry first. Put pkg_b in its own
+        # isolate_recompiles region and serve from a context in that region,
+        # so lookup is region-exact and pkg_b's own entry -- and the resume
+        # functions renamed under pkg_b's per-install token -- are what run.
+        from torch._dynamo.eval_frame import _get_cache_entries_for_region
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        self._save_eager_package(fn, ctx, (x,), guard_filter_fn)
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+
+        pkg_a, backends_a = ctx.load_package(fn, self.path())
+        pkg_a.install(backends_a)
+        count = len(_debug_get_precompile_entries(fn.__code__))
+        self.assertGreater(count, 0)
+        resume_a = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+
+        # pkg_b lands in a region minted for compiled_b; install() must use the
+        # very id that context looks up in, so serving compiled_b is region-exact.
+        pkg_b, backends_b = ctx.load_package(fn, self.path())
+        compiled_b = torch._dynamo.optimize(package=pkg_b, isolate_recompiles=True)(fn)
+        pkg_b.install(
+            backends_b, isolate_recompiles_id=compiled_b._isolate_recompiles_id
+        )
+        resume_b = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+        resume_b -= resume_a
+        self.assertTrue(resume_b)
+        # pkg_a's entries stay in the default bucket; pkg_b's own bucket holds
+        # its own, told apart by region id.
+        region = compiled_b._isolate_recompiles_id
+        self.assertEqual(len(_get_cache_entries_for_region(fn.__code__, -1)), count)
+        self.assertEqual(len(_get_cache_entries_for_region(fn.__code__, region)), count)
+
+        # Poison pkg_a's resume globals: fn graph-breaks, so the served entry
+        # LOAD_GLOBALs a renamed resume function. If pkg_a's default-region
+        # entry were served, it would hit the poison and raise instead of
+        # silently returning the same number pkg_b would.
+        def _poison(*args, **kwargs):
+            raise AssertionError("pkg_a resume served in pkg_b's region")
+
+        for name in resume_a:
+            self.addCleanup(module_dict.__setitem__, name, module_dict[name])
+            module_dict[name] = _poison
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_b(x), expected)
 
     def test_uninstall_leaves_a_users_rebinding_alone(self):
         # uninstall() pops a global only while it still holds the value this

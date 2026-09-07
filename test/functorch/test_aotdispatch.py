@@ -5419,6 +5419,8 @@ def forward(self, tangents_1):
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # Disabling the marking dedup puts a None back in the kept
         # intermediate-base slot (tangent 1; tangent 0 is x * 3).
+        # _dealias_marked_returns runs at backward time, so the backward below
+        # must stay inside the patch for the None to reach the kept-slot check.
         import torch._functorch._aot_autograd.runtime_wrappers as rw
 
         def f(x):
@@ -5441,6 +5443,7 @@ def forward(self, tangents_1):
         # subclass output forbids output aliasing, so the None comes from the
         # sibling-output dedup case instead: inductor returns one object for
         # h * 1.0 and h.detach(), so marking the detach slot marks the kept one.
+        # As in the plain test, the backward must run inside the patch.
         import torch._functorch._aot_autograd.runtime_wrappers as rw
 
         def f(x, z):
@@ -5482,14 +5485,62 @@ def forward(self, tangents_1):
             (outs[0].sum() + outs[1].sum() + outs[6].sum()).backward()
             return x.grad
 
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        orig = rw.AOTDispatchAutograd.process_runtime_tangent
+        kept_tangent_idxs = []
+
+        def spy(
+            x,
+            meta,
+            tangent_idx=None,
+            tangent_desc=None,
+            compile_id_str=None,
+            tangent_stack_trace=None,
+        ):
+            if tangent_idx is not None:
+                kept_tangent_idxs.append(tangent_idx)
+            return orig(
+                x, meta, tangent_idx, tangent_desc, compile_id_str, tangent_stack_trace
+            )
+
         torch._dynamo.reset()
         lengths = torch.arange(4)
         x_ref = torch.randn(8, requires_grad=True)
         grad_ref = run(f, x_ref, lengths)
 
         x = x_ref.detach().clone().requires_grad_(True)
-        grad = run(torch.compile(f, backend="inductor"), x, lengths)
+        with patch.object(rw.AOTDispatchAutograd, "process_runtime_tangent", spy):
+            grad = run(torch.compile(f, backend="inductor"), x, lengths)
         self.assertEqual(grad, grad_ref)
+        # Structural: the prologue keeps far fewer tangent slots than the seven
+        # returns (num_flat_bw_args_with_grads < expected_grad_outs), so the
+        # dropped None slots never reach the kept-slot check; the surviving
+        # indices process_runtime_tangent sees are never None.
+        self.assertTrue(kept_tangent_idxs)
+        self.assertLess(len(set(kept_tangent_idxs)), 7)
+
+    def test_none_tangent_names_a_mutated_input(self):
+        # Exercise the input-mutation arm of the kept-slot None check: the
+        # message must name the mutated input via its descriptor, not fall back
+        # to the opaque tangent_desc.expr(). An end-to-end None in a kept
+        # input-mutation slot is hard to force, so drive the renderer directly.
+        from torch._functorch._aot_autograd.descriptors import (
+            InputMutationAOTOutput,
+            PlainAOTInput,
+            TangentAOTInput,
+        )
+        from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
+
+        desc = TangentAOTInput(
+            output=InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=2))
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"handed None instead of a Tensor for tangent 0, "
+            r"the gradient of the mutation of forward input 2",
+        ):
+            AOTDispatchAutograd.process_runtime_tangent(None, None, 0, desc)
 
 
 def extract_graph(fx_g, _, graph_cell):

@@ -1008,11 +1008,14 @@ def load_compiled_function(
                    dict: the ``__import_*`` module aliases and the
                    ``__builtins_dict___N`` key recorded at capture are inserted
                    (plus ``__builtins__`` when the dict lacks it), never
-                   overwriting an existing key. The compiled
-                   bytecode reads a copy of ``f_globals`` taken at load time, so
-                   a rebind after load changes which graph the guards select but
-                   not what a selected graph computes. (An ``nn.Module`` artifact
-                   differs: its bytecode reads the globals serialized at capture.)
+                   overwriting an existing key. There is a single compiled
+                   graph: a rebound global that fails its guard raises
+                   ``RuntimeError: GuardManager check failed`` on the next call
+                   rather than selecting a different graph. The bytecode runs
+                   against a snapshot built at load time in which ``f_globals``
+                   entries override the globals captured with the artifact. (An
+                   ``nn.Module`` artifact differs: its bytecode reads only the
+                   globals serialized at capture.)
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
