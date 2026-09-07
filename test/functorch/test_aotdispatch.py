@@ -86,7 +86,9 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     ops,
+    skipCUDAIf,
     skipOps,
     tol,
     toleranceOverride,
@@ -482,7 +484,6 @@ def skipIfDynamoInput(reason):
 
 
 class _TestAOTAutogradBase(AOTTestCase):
-
     def run_autograd(
         self,
         f: Callable,
@@ -4903,6 +4904,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
             m.impl("foo", autocast, "AutocastCPU")
             m.impl("foo", autocast, "AutocastCUDA")
+            m.impl("foo", autocast, "AutocastXPU")
 
             foo = torch.ops.mylib.foo.default
 
@@ -4935,40 +4937,29 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             return out, grad
 
     @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
-    def test_backward_pass_autocast_on(self):
-        devices = ["cpu"]
-        if torch.cuda.is_available():
-            devices.append("cuda")
-        for device in devices:
-            out, grad = self._compile_autocast(device, forward_autocast=True)
+    def test_backward_pass_autocast_on(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_off(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_custom(self, device):
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.ones_like(grad))
 
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_off(self):
-        devices = ["cpu"]
-        if torch.cuda.is_available():
-            devices.append("cuda")
-        for device in devices:
-            out, grad = self._compile_autocast(device, forward_autocast=True)
-            self.assertEqual(out, torch.zeros_like(out))
-            self.assertEqual(grad, torch.zeros_like(grad))
-
-    @torch._functorch.config.patch(backward_pass_autocast="off")
-    def test_backward_pass_autocast_custom(self):
-        devices = ["cpu"]
-        if torch.cuda.is_available():
-            devices.append("cuda")
-        for device in devices:
-            with torch._functorch.config.patch(
-                backward_pass_autocast=[{"device_type": device}]
-            ):
-                out, grad = self._compile_autocast(device, forward_autocast=False)
-                self.assertEqual(out, torch.zeros_like(out))
-                self.assertEqual(grad, torch.ones_like(grad))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_mem_leak_from_save_for_bw(self):
+    @onlyAccelerator
+    def test_mem_leak_from_save_for_bw(self, device):
         # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
         # Note [Detaching saved tensors in AOTAutograd]
         # This program creates a ref-cycle. Long term, we should fix this ref cycle
@@ -4987,23 +4978,23 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         f_compiled = aot_function(f, nop)
         inps = [
-            torch.ones(8, 8, device="cuda", requires_grad=True),
-            torch.ones(1, 4, 1, device="cuda", requires_grad=True),
+            torch.ones(8, 8, device=device, requires_grad=True),
+            torch.ones(1, 4, 1, device=device, requires_grad=True),
         ]
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = torch.accelerator.memory_allocated()
         f_compiled(*inps)
-        mem_after = torch.cuda.memory_allocated()
+        mem_after = torch.accelerator.memory_allocated()
         self.assertTrue(mem_after == mem_before)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_save_input_view_for_bw_does_not_leak_memory(self):
+    @onlyAccelerator
+    def test_save_input_view_for_bw_does_not_leak_memory(self, device):
         def f(x):
             return (x * x).sum()
 
         f_compiled = aot_function(f, nop)
 
         def run_once(check_saved_view):
-            base = torch.randn(1024, 1024, device="cuda", requires_grad=True)
+            base = torch.randn(1024, 1024, device=device, requires_grad=True)
             non_leaf_base = base * 2
             input_view = non_leaf_base[:512]
             input_view_ref = weakref.ref(input_view)
@@ -5037,8 +5028,8 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         warmup = run_once(check_saved_view=False)
         del warmup
         gc.collect()
-        torch.cuda.synchronize()
-        mem_before = torch.cuda.memory_allocated()
+        torch.accelerator.synchronize()
+        mem_before = torch.accelerator.memory_allocated()
 
         (
             out,
@@ -5051,7 +5042,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             saved_base_refs,
         ) = run_once(check_saved_view=True)
         out_ref = weakref.ref(out)
-        self.assertGreater(torch.cuda.memory_allocated(), mem_before)
+        self.assertGreater(torch.accelerator.memory_allocated(), mem_before)
 
         self.assertEqual(len(saved_view_refs), 1)
         saved_view = saved_view_refs[0]()
@@ -5070,21 +5061,21 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         del out
         gc.collect()
-        torch.cuda.synchronize()
-        mem_after = torch.cuda.memory_allocated()
+        torch.accelerator.synchronize()
+        mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_after, mem_before)
         self.assertIsNone(out_ref())
         self.assertIsNone(input_view_ref())
         self.assertIsNone(non_leaf_base_ref())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_synthetic_base_base_attribute_is_none(self):
+    @onlyAccelerator
+    def test_synthetic_base_base_attribute_is_none(self, device):
         def f(a, b):
             a.add_(1)
             return a + b
 
         def inp_callable():
-            base = torch.ones(4, 4, device="cuda")
+            base = torch.ones(4, 4, device=device)
             # detach() so that none of the inputs have a ._base attribute.
             a = base[0].detach()
             b = base[1].detach()
@@ -5093,35 +5084,35 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_autocast_disable_guard(self):
+    @onlyAccelerator
+    def test_autocast_disable_guard(self, device):
         with torch._C._DisableAutocast():
-            x = torch.rand([4, 4]).cuda()
+            x = torch.rand([4, 4]).to(device=device)
             y = x @ x
             self.assertEqual(y.dtype, torch.float32)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_nonidempotent_amp(self):
+    @onlyAccelerator
+    def test_nonidempotent_amp(self, device):
         def f(self_s_emb, add_3):
             einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
             log_softmax_2 = einsum_2.log_softmax(-1)
             return (log_softmax_2,)
 
+        device_type = torch.device(device).type
         args = [
-            torch.rand((1, 256), dtype=torch.float32, device="cuda"),
-            torch.rand((30, 256), dtype=torch.float16, device="cuda"),
+            torch.rand((1, 256), dtype=torch.float32, device=device),
+            torch.rand((30, 256), dtype=torch.float16, device=device),
         ]
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.amp.autocast(device_type, enabled=True):
             self.verify_aot_autograd(f, args)
 
         args = [e.requires_grad_(True) for e in args]
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.amp.autocast(device_type, enabled=True):
             self.verify_aot_autograd(f, args)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    def test_batch_norm_amp(self):
-        device = "cuda"
+    @onlyAccelerator
+    @skipCUDAIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
+    def test_batch_norm_amp(self, device):
         input_dtype = torch.float16
         param_dtype = torch.float32
         weight, bias = (
@@ -5132,9 +5123,13 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)
         )
 
+        device_type = torch.device(device).type
+
         def bn(x):
             fn = (
-                torch.ops.aten.cudnn_batch_norm
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
                 if torch.version.hip is None
                 else torch.ops.aten.miopen_batch_norm
             )
@@ -5154,21 +5149,24 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         )
 
         ref = bn(inp)
-        cudnn_batch_norm_decomp = torch._decomp.get_decompositions(
-            {torch.ops.aten.cudnn_batch_norm}
+        batch_norm_decomp = torch._decomp.get_decompositions(
+            {
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
+            }
         )
-        aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
+        aot_fn = make_fx(bn, decomposition_table=batch_norm_decomp)(inp)
         res = aot_fn(inp)
         for a, b in zip(ref, res):
             if not torch.allclose(a, b):
                 raise AssertionError(f"Tensors not allclose: {a} vs {b}")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @onlyAccelerator
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     @torch._functorch.config.patch(recompute_views=True)
-    def test_saved_tensors_hooks_mutations_raise(self):
+    def test_saved_tensors_hooks_mutations_raise(self, device):
         ctx = torch.autograd.graph.saved_tensors_hooks
-        device = "cuda"
 
         class SAF(torch.autograd.Function):
             @staticmethod
@@ -5206,7 +5204,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             except torch._dynamo.exc.BackendCompilerFailed as e:
                 raise e.inner_exception from e
 
-    def _make_model_and_input(self, hidden=1024, vocab=4096, seq_len=128):
+    def _make_model_and_input(self, device, hidden=1024, vocab=4096, seq_len=128):
         """Build a small model that produces non-scalar output (like an LM head)."""
         model = nn.Sequential(
             nn.Linear(hidden, hidden, bias=False),
@@ -5214,9 +5212,9 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             nn.Linear(hidden, hidden, bias=False),
             nn.ReLU(),
             nn.Linear(hidden, vocab, bias=False),
-        ).cuda()
-        x = torch.randn(seq_len, hidden, device="cuda", requires_grad=True)
-        labels = torch.randint(0, vocab, (seq_len,), device="cuda")
+        ).to(device)
+        x = torch.randn(seq_len, hidden, device=device, requires_grad=True)
+        labels = torch.randint(0, vocab, (seq_len,), device=device)
         return model, x, labels
 
     def _make_refcount_probe(self):
@@ -5258,8 +5256,8 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             "removing all user-visible references",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_freed_compiled_model_and_loss(self):
+    @onlyAccelerator
+    def test_tangent_freed_compiled_model_and_loss(self, device):
         """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
 
         Mirrors torchtitan's simple_fsdp training loop:
@@ -5270,7 +5268,7 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
         The tangent for model backward is created internally by loss backward.
         No user variable holds it — only the C++ pyInputs tuple on the stack.
         The boxed calling convention alone frees it."""
-        model, x, labels = self._make_model_and_input()
+        model, x, labels = self._make_model_and_input(device)
         compiled_model = torch.compile(model, backend="inductor")
 
         def loss_fn(pred, labels):
@@ -5287,13 +5285,13 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_freed_compiled_model_eager_loss(self):
+    @onlyAccelerator
+    def test_tangent_freed_compiled_model_eager_loss(self, device):
         """Scenario: compiled model + eager loss (common training pattern).
 
         Similar to torchtitan but loss is not compiled. The tangent is
         created by eager cross_entropy backward. Boxed convention frees it."""
-        model, x, labels = self._make_model_and_input()
+        model, x, labels = self._make_model_and_input(device)
         compiled_model = torch.compile(model, backend="inductor")
 
         Probe, refcount_box = self._make_refcount_probe()
@@ -5305,21 +5303,21 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
 
         self._assert_no_extra_refs(refcount_box)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_user_provided_via_pop(self):
+    @onlyAccelerator
+    def test_tangent_user_provided_via_pop(self, device):
         """Scenario: user creates tangent but releases it before backward runs.
 
         The user wraps the tangent in a list and calls out.backward(l.pop()).
         After pop(), no Python variable holds the tangent — same as torchtitan.
         The boxed calling convention should free it."""
-        model, x, _labels = self._make_model_and_input()
+        model, x, _labels = self._make_model_and_input(device)
         compiled_model = torch.compile(model, backend="inductor")
 
         def loss_fn(pred, labels):
             return torch.nn.functional.cross_entropy(pred.float(), labels)
 
         compiled_loss = torch.compile(loss_fn, backend="inductor")
-        _, _, labels = self._make_model_and_input()
+        _, _, labels = self._make_model_and_input(device)
 
         Probe, refcount_box = self._make_refcount_probe()
         pred = compiled_model(x)
@@ -12807,6 +12805,10 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_device_type_tests(
+    TestAOTAutogradDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
+
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
