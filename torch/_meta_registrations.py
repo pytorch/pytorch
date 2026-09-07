@@ -4823,13 +4823,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     # Do not allow int+float->int in-place
     if is_integeric(self) and is_floatic(other):
         raise RuntimeError(
-            "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change."
+            "Promotion of int.add/sub_(float) in an in-place op is not possible due to element size change."
         )
 
     # Do not allow bool+other->bool in-place
     if is_booleanic(self) and not is_booleanic(other):
         raise RuntimeError(
-            "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change."
+            "Promotion of bool.add/sub_(others) in an in-place op is not possible due to element size change."
         )
 
     if isinstance(other, torch.Tensor):
