@@ -23,7 +23,12 @@ from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..shape_propagation import BlockShapeType
-from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
+from ..utils import (
+    DeferredLineBase,
+    IndentedBuffer,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 
@@ -857,3 +862,89 @@ def template_fusion_with_epilogues_supported(
         if n.node is not None
     ]
     return _template_fusion_supported(template_outputs, epilogue_nodes)
+
+
+class ParallelExceptionCapture:
+    """Plumbing that carries an exception out of one OpenMP region.
+
+    An exception may not leave an OpenMP structured block: doing so calls
+    std::terminate and aborts the process instead of raising into Python
+    (pytorch#195402, pytorch#126691).  Each thread stashes the first exception
+    it sees and we rethrow it once the region has joined, mirroring
+    at::internal::invoke_parallel in ATen/ParallelOpenMP.h.
+
+    Most kernels contain nothing that can throw, so the declarations and the
+    trailing rethrow are written as deferred lines and only materialize if
+    something inside the region actually asks for a guard (`needed` is set by
+    :func:`catch_exceptions_inside_parallel_region`).  That keeps the generated
+    code byte-for-byte unchanged for the common case.  The guards may be
+    requested after the declarations have been written -- a later kernel in the
+    same group can land under `omp single` inside an already-open region -- so
+    the decision cannot be made eagerly.
+    """
+
+    def __init__(self, suffix: str = ""):
+        self.flag = f"inductor_kernel_err_flag{suffix}"
+        self.eptr = f"inductor_kernel_eptr{suffix}"
+        self.needed = False
+
+
+class _DeferredExceptionLine(DeferredLineBase):
+    """A line that is dropped unless its region ended up needing a guard."""
+
+    def __init__(self, line: str, capture: ParallelExceptionCapture):
+        super().__init__(line)
+        self.capture = capture
+
+    def __call__(self):
+        return self.line if self.capture.needed else None
+
+    def _new_line(self, line: str):
+        return _DeferredExceptionLine(line, self.capture)
+
+
+@contextlib.contextmanager
+def capture_exceptions_in_parallel_region(code, suffix: str = ""):
+    """Declare the state used to ferry an exception out of an OpenMP region.
+
+    Yields the :class:`ParallelExceptionCapture` that the guards inside the
+    region must be given, so they can name its variables and mark it needed.
+    """
+    capture = ParallelExceptionCapture(suffix)
+    code.writelines(
+        [
+            _DeferredExceptionLine(line, capture)
+            for line in (
+                f"std::atomic<bool> {capture.flag}{{false}};",
+                f"std::exception_ptr {capture.eptr};",
+            )
+        ]
+    )
+    yield capture
+    code.writelines(
+        [
+            _DeferredExceptionLine(line, capture)
+            for line in (
+                f"if ({capture.eptr}) {{",
+                f"    std::rethrow_exception({capture.eptr});",
+                "}",
+            )
+        ]
+    )
+
+
+@contextlib.contextmanager
+def catch_exceptions_inside_parallel_region(code, capture: ParallelExceptionCapture):
+    """Body-wrapping half of :func:`capture_exceptions_in_parallel_region`."""
+    capture.needed = True
+    code.writeline("try {")
+    yield
+    code.writelines(
+        [
+            "} catch (...) {",
+            f"    if (!{capture.flag}.exchange(true)) {{",
+            f"        {capture.eptr} = std::current_exception();",
+            "    }",
+            "}",
+        ]
+    )

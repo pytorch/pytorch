@@ -7719,6 +7719,109 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
+    def test_index_out_of_bounds_in_collapsed_parallel_region(self):
+        # https://github.com/pytorch/pytorch/issues/195402
+        # collapse(n) needs perfectly nested loops, so guarding the outer loop
+        # instead of the innermost one fails to compile.
+        def fn(x, idx):
+            return (x - 0.5)[idx]
+
+        x = torch.randn(8, 4096)
+        in_bounds = torch.tensor([0, 1, 3])
+        out_of_bounds = torch.tensor([0, 1, 9])  # dim 0 has size 8
+
+        with config.patch({"cpp.threads": 32, "cpp.min_chunk_size": 1}):
+            torch._dynamo.reset()
+            fn_opt = torch.compile(fn, dynamic=False)
+            _, code = run_and_get_cpp_code(fn_opt, x, in_bounds)
+            self.assertIn("collapse(2)", code)
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                fn_opt(x, out_of_bounds)
+
+    def test_index_out_of_bounds_under_omp_single(self):
+        # https://github.com/pytorch/pytorch/issues/195402
+        # A kernel too small to parallelise still runs under `omp single`
+        # inside the open parallel region, so a throw escapes there too.
+        def fn(a, b, idx):
+            return a * 2.0, (b - 0.5)[idx]
+
+        a = torch.randn(65536)
+        b = torch.randn(4, 2)
+        in_bounds = torch.tensor([0, 1])
+        out_of_bounds = torch.tensor([0, 9])  # dim 0 of b has size 4
+
+        with config.patch({"cpp.threads": 8, "cpp.min_chunk_size": 1}):
+            torch._dynamo.reset()
+            fn_opt = torch.compile(fn, dynamic=False)
+            _, code = run_and_get_cpp_code(fn_opt, a, b, in_bounds)
+            self.assertIn("#pragma omp single", code)
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                fn_opt(a, b, out_of_bounds)
+
+    def test_index_out_of_bounds_in_parallel_region(self):
+        # https://github.com/pytorch/pytorch/issues/195402
+        # A throw from a parallelised kernel used to abort the process. Whether
+        # the loop is parallelised depends on the tensor size, so pin it here
+        # instead of relying on the host thread count.
+        def fn(x, idx):
+            return (x - 0.5)[idx]
+
+        x = torch.randn(1, 8, 66, 66)
+        in_bounds = torch.tensor([[0]])
+        out_of_bounds = torch.tensor([[1]])  # dim 0 has size 1
+
+        for expect_parallel, patches in (
+            (True, {"cpp.threads": 4, "cpp.min_chunk_size": 1}),
+            (False, {"cpp.threads": 1, "cpp.min_chunk_size": 2**40}),
+        ):
+            with config.patch(patches):
+                torch._dynamo.reset()
+                fn_opt = torch.compile(fn, dynamic=False)
+                # compile with a valid index so we can inspect the kernel
+                _, code = run_and_get_cpp_code(fn_opt, x, in_bounds)
+                self.assertEqual("#pragma omp" in code, expect_parallel)
+                # the process must survive and raise something catchable
+                with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                    fn_opt(x, out_of_bounds)
+
+    def test_exception_plumbing_only_when_kernel_can_throw(self):
+        # https://github.com/pytorch/pytorch/issues/195402
+        # Only kernels that emit a throwing check need the try/catch and the
+        # exception_ptr that ferries the throw out of the OpenMP region.  The
+        # vast majority of parallel kernels have no bounds check at all, and
+        # their generated code must be left exactly as it was.
+        def no_bounds_check(x):
+            return x * 2.0
+
+        def with_bounds_check(x, idx):
+            return (x - 0.5)[idx]
+
+        patches = {"cpp.threads": 8, "cpp.min_chunk_size": 1}
+
+        with config.patch(patches):
+            torch._dynamo.reset()
+            _, code = run_and_get_cpp_code(
+                torch.compile(no_bounds_check, dynamic=False), torch.randn(65536)
+            )
+        self.assertIn("#pragma omp", code)
+        # assert on the C++ constructs rather than the variable names inductor
+        # happens to pick, so a rename cannot make this pass vacuously
+        self.assertNotIn("std::exception_ptr", code)
+        self.assertNotIn("std::rethrow_exception", code)
+        self.assertNotIn("catch (...)", code)
+
+        with config.patch(patches):
+            torch._dynamo.reset()
+            _, code = run_and_get_cpp_code(
+                torch.compile(with_bounds_check, dynamic=False),
+                torch.randn(8, 4096),
+                torch.tensor([0, 1, 3]),
+            )
+        self.assertIn("#pragma omp", code)
+        self.assertIn("std::exception_ptr", code)
+        self.assertIn("std::rethrow_exception", code)
+        self.assertIn("catch (...)", code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
