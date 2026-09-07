@@ -37,9 +37,10 @@ from torch._inductor.utils import (
 )
 from torch._library import capture_triton
 from torch.testing import FileCheck
-from torch.testing._internal import common_utils
+from torch.testing._internal import common_device_type, common_utils
 from torch.testing._internal.common_device_type import (
     Capability,
+    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyAccelerator,
 )
@@ -218,10 +219,11 @@ if HAS_TRITON:
 
 
 class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
+    def setUp(self):
+        if not HAS_TRITON:
+            self.skipTest("requires triton")
+
+        device = self.get_primary_device()
         try:
             device_interface = get_interface_for_device(torch.device(device).type)
         except NotImplementedError as exc:
@@ -234,6 +236,8 @@ class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
             device_interface.raise_if_triton_unavailable(device)
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
+
+        super().setUp()
 
 
 class _KernelTestsBase(_TritonDeviceTestCase):
@@ -2036,7 +2040,7 @@ class KernelTestsRuntime(_KernelTestsBase):
         x = torch.randn(4, device=device)
         y = torch.randn(4, device=device)
         args_list = [(x, y, torch.float32, tl.float32)]
-        if self.get_capabilities()[Capability.dtype.bf16]:
+        if self.get_capabilities().get(Capability.dtype.bf16, False):
             args_list.append((x, y, torch.bfloat16, tl.bfloat16))
 
         for args in args_list:
@@ -6843,25 +6847,40 @@ if HAS_TRITON:
         custom_store(out_ptr + offs, x + y, mask=mask)
 
 
-instantiate_device_type_tests(
+class _MTIATestBase(DeviceTypeTestBase):
+    device_type = "mtia"
+
+
+def _instantiate_accelerator_tests(test_class, scope, **kwargs):
+    # Preserve the legacy MTIA entry until device discovery provides a test base.
+    test_bases = common_device_type.device_type_test_bases
+    if torch.mtia.is_available() and not any(
+        base.device_type == "mtia" for base in test_bases
+    ):
+        test_bases = [*test_bases, _MTIATestBase]
+    with mock.patch.object(common_device_type, "device_type_test_bases", test_bases):
+        instantiate_device_type_tests(test_class, scope, **kwargs)
+
+
+_instantiate_accelerator_tests(
     KernelTests,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     KernelTestsCompilation,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     KernelTestsRuntime,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     KernelTestsPrecisionAndConstexpr,
     globals(),
     except_for=("cpu", "hpu"),
@@ -6893,25 +6912,25 @@ instantiate_device_type_tests(
     only_for=("xpu",),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     CustomOpTests,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     CustomOpTestsRuntime,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     MutationTests,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
+_instantiate_accelerator_tests(
     MutationTestsTritonLauncher,
     globals(),
     except_for=("cpu", "hpu"),
