@@ -13,12 +13,8 @@
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
 #include <ATen/ops/acos_native.h>
-#include <ATen/ops/acosh_native.h>
 #include <ATen/ops/asin_native.h>
-#include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
-#include <ATen/ops/atanh_native.h>
-#include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
@@ -28,7 +24,6 @@
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logical_not_native.h>
-#include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
@@ -178,20 +173,12 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   }                                                                                                                    \
   REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
 
+REGISTER_MPS_UNARY_STUB(acosh, acosh);
+REGISTER_MPS_UNARY_STUB(asinh, asinh);
+REGISTER_MPS_UNARY_STUB(atanh, atanh);
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
-
-#define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
-  TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
-    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-      return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
-    });                                                                                                          \
-  }
-
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
@@ -259,66 +246,6 @@ Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
   Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
-}
-
-TORCH_IMPL_FUNC(logit_backward_out_mps)
-(const Tensor& grad_output, const Tensor& input, std::optional<double> eps, const Tensor& grad_input) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
-
-  // Empty output
-  if (grad_input.numel() == 0)
-    return;
-
-  double eps_ = eps ? eps.value() : -1.0;
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "logit_backward_out_mps:" + getTensorsStringKey({grad_output, input}) + ":" + "[" +
-        (eps.has_value() ? std::to_string(eps.value()) : "-1") + "]";
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-      MPSGraphTensor* outputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_input);
-      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-      MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-      MPSGraphTensor* lowTensor = [mpsGraph constantWithScalar:eps_ shape:@[ @1 ] dataType:inputTensor.dataType];
-      MPSGraphTensor* inputLessThanLowPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                                            secondaryTensor:lowTensor
-                                                                                       name:nil];
-      MPSGraphTensor* highTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor secondaryTensor:lowTensor name:nil];
-      MPSGraphTensor* inputGreaterThanHighPredicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                                                   secondaryTensor:highTensor
-                                                                                              name:nil];
-      MPSGraphTensor* outOfIntervalTensor = [mpsGraph logicalORWithPrimaryTensor:inputLessThanLowPredicateTensor
-                                                                 secondaryTensor:inputGreaterThanHighPredicateTensor
-                                                                            name:nil];
-      MPSGraphTensor* oneMinusInputTensor = [mpsGraph subtractionWithPrimaryTensor:oneTensor
-                                                                   secondaryTensor:inputTensor
-                                                                              name:nil];
-      outputTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                               secondaryTensor:oneMinusInputTensor
-                                                          name:nil];
-      outputTensor = [mpsGraph divisionWithPrimaryTensor:gradOutputTensor secondaryTensor:outputTensor name:nil];
-      outputTensor = [mpsGraph selectWithPredicateTensor:outOfIntervalTensor
-                                     truePredicateTensor:zeroTensor
-                                    falsePredicateTensor:outputTensor
-                                                    name:nil];
-
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->gradInputTensor_ = outputTensor;
-    });
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
-
-    // Create dictionary of inputs and outputs
-    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
 }
 
 static void cumulative_op_impl(const Tensor& self,
@@ -413,15 +340,6 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   };
 
   mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
-}
-
-Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(self.is_complex());
-  TORCH_CHECK(self.dtype() != at::kComplexDouble);
-  mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph conjugateWithTensor:inputTensor name:nil];
-  });
-  return result;
 }
 
 } // namespace at::native

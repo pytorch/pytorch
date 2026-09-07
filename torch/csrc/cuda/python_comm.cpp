@@ -1,6 +1,4 @@
-#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/utils/pybind.h>
@@ -9,8 +7,6 @@
 
 #include <cstddef>
 #include <vector>
-
-#include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch::cuda::python {
 void initCommMethods(PyObject* module) {

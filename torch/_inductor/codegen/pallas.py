@@ -818,6 +818,7 @@ class PallasKernelOverrides(OpOverrides):
     def load_seed(name: str, offset: str) -> str:
         """Load the random seed value from a buffer."""
         # Load the seed from the buffer and add offset for uniqueness
+        # pyrefly: ignore[bad-argument-type]
         seed_offset = V.kernel.args.seed_offset("load_seed_offset", offset)
         return f"({V.kernel.args.input(name)}[0] + {seed_offset})"
 
@@ -887,7 +888,7 @@ class _BufferIndexing:
 class _BroadcastedIterVar:
     """Encapsulates information needed to codegen a broadcasted iteration var"""
 
-    # index of this var in `self.range_tree_nodes.items()``
+    # index of this var in `self.range_tree_nodes.items()`
     idx: int
     var_sym: sympy.Symbol
     entry: IterationRangesEntry

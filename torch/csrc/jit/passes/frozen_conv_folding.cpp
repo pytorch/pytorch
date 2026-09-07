@@ -106,13 +106,13 @@ bool FoldFrozenConvBatchnorm(Block* b) {
       }
 
       ConvBNParameters params;
-      params.conv_w = conv_w;
-      params.conv_b = conv_b;
-      params.bn_rm = bn_rm;
-      params.bn_rv = bn_rv;
+      params.conv_w = std::move(conv_w);
+      params.conv_b = std::move(conv_b);
+      params.bn_rm = std::move(bn_rm);
+      params.bn_rv = std::move(bn_rv);
       params.bn_eps = bn_eps;
-      params.bn_w = bn_w;
-      params.bn_b = bn_b;
+      params.bn_w = std::move(bn_w);
+      params.bn_b = std::move(bn_b);
       std::tuple<Tensor, Tensor> out = computeUpdatedConvWeightAndBias(params);
       WithInsertPoint guard(conv);
       auto fused_conv_w = b->owningGraph()->insertConstant(std::get<0>(out));

@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -25,6 +26,7 @@ if TEST_NUMPY:
 
 
 class TestLoadStateDict(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -595,6 +597,8 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 
 class TestLoadStateDictSwap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])

@@ -24,10 +24,13 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_SPARSE,
+    ROCM_VERSION,
+    evaluate_platform_supports_hipsparselt,
     xfailIfSM89PreCUDA13,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
+    e4m3_type,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex
@@ -46,7 +49,7 @@ SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 _IS_SM8X = False
 _IS_SM9X = False
 _IS_HIPSPARSELT_AVAILABLE = False
-
+_IS_HIPSPARSELT_DEVICE_SUPPORTED = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.version.cuda is not None and (
         torch.cuda.get_device_capability(0)[0] == 8
@@ -54,9 +57,8 @@ if torch.cuda.is_available():
     _IS_SM9X = torch.version.cuda is not None and (
         torch.cuda.get_device_capability(0)[0] == 9
     )
-    _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(
-        int(v) for v in torch.version.hip.split(".")[:2]
-    ) >= (7, 12)
+    _IS_HIPSPARSELT_AVAILABLE = bool(torch.version.hip) and ROCM_VERSION >= (7, 12)
+    _IS_HIPSPARSELT_DEVICE_SUPPORTED = evaluate_platform_supports_hipsparselt()
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = (
@@ -65,7 +67,7 @@ if torch.cuda.is_available():
 
     # add cuSPASRELt tests if available
     if torch.backends.cusparselt.is_available() and (
-        _IS_SM8X or _IS_SM9X or _IS_HIPSPARSELT_AVAILABLE
+        _IS_SM8X or _IS_SM9X or _IS_HIPSPARSELT_DEVICE_SUPPORTED
     ):
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = (
             SparseSemiStructuredTensorCUSPARSELT
@@ -244,7 +246,10 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS,
         "cusparselt not supported on this machine",
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     def test_mlp_contiguous_relu_compile_cusparselt(self):
         """
         test for cuSPASRELt meta registrations (_cslt_sparse_mm) + torch.compile
@@ -295,6 +300,43 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         # Torch compile
         output = torch.compile(fn)(x)
         output.backward(output)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    def test_cutlass_mm_functionalization_decomp(self):
+        """Test that semi_structured::cutlass_mm decomposes under FunctionalTensorMode.
+
+        This verifies the register_torch_dispatch(FunctionalTensorMode) registration
+        works correctly -- the custom op should decompose into aten._sparse_semi_structured_mm
+        (or _addmm) + pad/narrow. Does not require actual CUTLASS execution (uses FakeTensorMode).
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        from torch.sparse.semi_structured import _ensure_cutlass_mm_registered
+
+        _ensure_cutlass_mm_registered()
+
+        out_features, k, n = 32, 64, 16
+        with FakeTensorMode() as fake_mode:
+            dense = torch.randn(k, n, device="cuda", dtype=torch.float16)
+            packed = torch.randn(out_features, k // 2, device="cuda", dtype=torch.float16)
+            meta = torch.randint(0, 10, (out_features, k // 16), device="cuda", dtype=torch.int16)
+
+            with FunctionalTensorMode():
+                dense_f = FunctionalTensor.to_functional(dense)
+                packed_f = FunctionalTensor.to_functional(packed)
+                meta_f = FunctionalTensor.to_functional(meta)
+
+                result = torch.ops.semi_structured.cutlass_mm(
+                    dense_f, packed_f, meta_f, None, out_features, 8, 8, False
+                )
+
+            self.assertEqual(result.shape, torch.Size([out_features, n]))
 
 
 class TestSparseSemiStructured(TestCase):
@@ -348,14 +390,19 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B)
             else:
                 if torch.version.hip:
-                    self.skipTest(
-                        "Skipping int8 sparse mm (NN, cuSPARSELt) test on ROCm"
+                    dense_result = torch.mm(A.cpu(), B.cpu()).to(
+                        device, dtype=torch.int8
                     )
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit",
-                ):
                     sparse_result = torch.mm(A_sparse, B)
+                    torch.testing.assert_close(
+                        dense_result, sparse_result, rtol=1e-3, atol=1e-3
+                    )
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit",
+                    ):
+                        sparse_result = torch.mm(A_sparse, B)
         else:
             dense_result = torch.mm(A, B)
             sparse_result = torch.mm(A_sparse, B)
@@ -388,14 +435,19 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 if torch.version.hip:
-                    self.skipTest(
-                        "Skipping int8 sparse mm (NT, cusparselt, shape=(1,128)) test on ROCm"
+                    dense_result = torch.mm(A.cpu(), B.t().cpu()).to(
+                        device, dtype=torch.int8
                     )
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit",
-                ):
                     sparse_result = torch.mm(A_sparse, B.t())
+                    torch.testing.assert_close(
+                        dense_result, sparse_result, rtol=1e-3, atol=1e-3
+                    )
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit",
+                    ):
+                        sparse_result = torch.mm(A_sparse, B.t())
         elif dtype is torch.int8:
             # test transpose
             dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int8)
@@ -1115,7 +1167,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.allow_tf32
+            orig = torch.backends.cuda.matmul.fp32_precision
             torch.backends.cuda.matmul.allow_tf32 = True
 
         batch_shapes = [[], [3], [3, 1]]
@@ -1155,7 +1207,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             )
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.allow_tf32 = orig
+            torch.backends.cuda.matmul.fp32_precision = orig
 
     @unittest.skipIf(
         TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS"
@@ -1220,7 +1272,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.allow_tf32
+            orig = torch.backends.cuda.matmul.fp32_precision
             torch.backends.cuda.matmul.allow_tf32 = True
 
         dtype_out = {
@@ -1243,7 +1295,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             run_test(m, n, k, device, dtype, dtype_out[dtype], use_input, rtol, atol)
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.allow_tf32 = orig
+            torch.backends.cuda.matmul.fp32_precision = orig
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
@@ -1292,7 +1344,9 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
 
 
-def to_float8(x, dtype=torch.float8_e4m3fn):
+# e4m3_type is float8_e4m3fnuz on gfx942 (MI300 has hardware-native FNUZ FP8)
+# and float8_e4m3fn on gfx950/CUDA.
+def to_float8(x, dtype=e4m3_type):
     finfo = torch.finfo(dtype)
     # Calculate the scale as dtype max divided by absmax
     scale = finfo.max / x.abs().max().clamp(min=1e-12)
@@ -1318,15 +1372,18 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest("cuSPARSELt not enabled")
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
+    )
     @xfailIfSM89PreCUDA13
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
-        if torch.backends.cusparselt.version() < 602:
+        if torch.backends.cusparselt.version() < 602 and not torch.version.hip:
             self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
@@ -1341,37 +1398,70 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         ):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
+    )
     @xfailIfSM89PreCUDA13
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
-        x = rand_sparse_semi_structured_mask(
-            k, l, dtype=torch.float8_e4m3fn, device=device
-        )
-        y = torch.full((m, l), 0.25, device=device, dtype=torch.float8_e4m3fn).t()
+        x = rand_sparse_semi_structured_mask(k, l, dtype=e4m3_type, device=device)
+        y = torch.full((m, l), 0.25, device=device, dtype=e4m3_type).t()
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
+        # hipSparseLt only produces fp32 output for fp8 inputs
+        out_dtype = torch.float32 if TEST_WITH_ROCM else e4m3_type
         out_fp8 = torch._scaled_mm(
-            x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn
+            x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
         )
 
         x_sparse = to_sparse_semi_structured(x)
         out_fp8_sparse = torch._scaled_mm(
-            x_sparse, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn
+            x_sparse, y, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
         )
-        # this fails on ROCm currently because hipblaslt doesn't have amax op
         out_fp32 = out_fp8.to(torch.float32)
         out_fp32_sparse = out_fp8_sparse.to(torch.float32)
         torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    # Gated on FP8_SPARSE, not FP8: this compresses an fp8 tensor, which needs
+    # cuSPARSELt v0.6.2+. No xfailIfSM89PreCUDA13 either -- the dtype mismatch
+    # is rejected before any matmul runs, so the test passes on SM89 and an
+    # expectedFailure would turn into an unexpected success.
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
+    )
+    def test_sparse_semi_structured_scaled_mm_mixed_fp8_dtypes(self, device) -> None:
+        # e4m3fn and e4m3fnuz have different exponent biases, so a mismatched
+        # pair must be rejected rather than silently reinterpreted.
+        other_type = (
+            torch.float8_e4m3fn
+            if e4m3_type is torch.float8_e4m3fnuz
+            else torch.float8_e4m3fnuz
+        )
+        (k, l, m) = (32, 64, 32)
+        x = rand_sparse_semi_structured_mask(k, l, dtype=e4m3_type, device=device)
+        y = torch.full((m, l), 0.25, device=device, dtype=other_type).t()
+        scale = torch.tensor(1.0, device=device)
+        x_sparse = to_sparse_semi_structured(x)
+        with self.assertRaisesRegex(
+            AssertionError, "expected A and B to have the same dtype"
+        ):
+            torch._scaled_mm(
+                x_sparse, y, scale_a=scale, scale_b=scale, out_dtype=torch.float32
+            )
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires MI300+ on ROCm 7.12+",
     )
     @xfailIfSM89PreCUDA13
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -1379,6 +1469,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def test_sparse_semi_structured_scaled_mm(
         self, dense_input_shape, device, out_dtype
     ):
+        if TEST_WITH_ROCM and out_dtype is not torch.float32:
+            self.skipTest("hipSparseLt only supports float32 output for fp8 inputs")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
@@ -1428,7 +1520,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     def test_cslt_sparse_mm_alpha_compile_autotune(self, device, out_dtype):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).to(device)
         B = torch.ones((128, 256), device=device, dtype=torch.int8).t()
@@ -1456,7 +1551,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         )
 
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):
         A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
         B = torch.ones((128, 256), device=device).to(torch.int8).t()
@@ -1477,11 +1575,13 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
@@ -1491,11 +1591,13 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     @inference_dtypes
     def test_csrc_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
@@ -1513,7 +1615,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("dense_input_shape", [(128, 1), (128, 3)])
     def test_mm_padded_output_shape(self, dtype, dense_input_shape, device):
@@ -1531,7 +1636,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         self.assertEqual(sparse_result.shape, dense_result.shape)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("dense_input_shape", [(1, 128), (3, 128)])
     def test_mm_padded_output_shape_sparse_second(self, dtype, dense_input_shape, device):
@@ -1550,7 +1658,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         self.assertEqual(sparse_result.shape, dense_result.shape)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("dense_input_shape", [(1, 128), (3, 128)])
     def test_addmm_padded_output_shape_sparse_second(self, dtype, dense_input_shape, device):
@@ -1569,13 +1680,16 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         self.assertEqual(sparse_result.shape, dense_result.shape)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     def test_cusparselt_backend(self):
         if not torch.backends.cusparselt.is_available():
             raise AssertionError("cusparselt backend should be available")
 
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        if torch.backends.cusparselt.version() < 602:
+        if torch.backends.cusparselt.version() < 602 and not torch.version.hip:
             raise AssertionError(
                 f"cusparselt version should be >= 602, got {torch.backends.cusparselt.version()}"
             )
@@ -1657,7 +1771,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             result, A_dense.cpu().to(torch.float32), rtol=1e-3, atol=1e-3
         )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
+        "HIPSPARSELt is not available for ROCm versions < 7.12"
+    )
     def test_cslt_sparse_tensor_with_alg_id(self, device):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16).cuda()
         A_compressed = torch._cslt_compress(A)
@@ -1672,17 +1789,17 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     def test_cslt_compress_fp8(self, device):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         A_fp8, _ = to_float8(A)
         compressed = torch._cslt_compress(A_fp8)
-        self.assertEqual(compressed.dtype, torch.float8_e4m3fn)
+        self.assertEqual(compressed.dtype, e4m3_type)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     @parametrize("dense_input_shape", [(256, 128)])
     def test_cslt_sparse_mm_fp8_to_fp32(self, dense_input_shape, device):
@@ -1702,10 +1819,64 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8_SPARSE,
-        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI350+ (gfx950) on ROCm",
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
     )
     @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific out_dtype restriction")
-    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float8_e4m3fn])
+    def test_cslt_sparse_mm_fp8_default_out_dtype_rocm(self, device):
+        # hipSparseLt writes fp32 for fp8 inputs, so an omitted out_dtype must
+        # still allocate the result as fp32 rather than inheriting fp8 from B.
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(128, 128, device=device).to(torch.float16).t()
+
+        A_fp8, _ = to_float8(A)
+        B_fp8, _ = to_float8(B)
+
+        compressed = torch._cslt_compress(A_fp8)
+        sparse_result = torch._cslt_sparse_mm(compressed, B_fp8)
+
+        self.assertEqual(sparse_result.dtype, torch.float32)
+        dense_result = torch.mm(A_fp8.to(torch.float32), B_fp8.to(torch.float32))
+        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-1, atol=1e-1)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
+    )
+    def test_cslt_sparse_mm_fp8_compile(self, device):
+        # Exercises meta__cslt_sparse_mm with fp8 inputs (e4m3fnuz on gfx942),
+        # including the omitted-out_dtype path where the fake tensor must be
+        # fp32 on ROCm to match the eager result.
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(128, 128, device=device).to(torch.float16).t()
+
+        A_fp8, _ = to_float8(A)
+        B_fp8, _ = to_float8(B)
+        compressed = torch._cslt_compress(A_fp8)
+
+        def mm_fp32_out(compressed_A, dense_B):
+            return torch._cslt_sparse_mm(compressed_A, dense_B, out_dtype=torch.float32)
+
+        def mm_default_out(compressed_A, dense_B):
+            return torch._cslt_sparse_mm(compressed_A, dense_B)
+
+        for fn in (mm_fp32_out, mm_default_out):
+            ref = fn(compressed, B_fp8)
+            res = torch.compile(fn, fullgraph=True)(compressed, B_fp8)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res.to(torch.float32), ref.to(torch.float32))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8_SPARSE,
+        "FP8 sparse requires cuSPARSELt v0.6.2+ on SM 8.9+ or MI300+ on ROCm 7.12+",
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific out_dtype restriction")
+    # e4m3_type is named explicitly so the generated test id does not change
+    # between gfx942 (fnuz) and gfx950 (fn).
+    @parametrize(
+        "out_dtype",
+        [torch.float16, torch.bfloat16, subtest(e4m3_type, name="fp8")],
+    )
     def test_cslt_sparse_mm_fp8_unsupported_out_dtype_rocm(self, out_dtype, device):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(128, 128, device=device).to(torch.float16).t()
@@ -1719,6 +1890,20 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             "Unsupported out_dtype passed, must be float32 for fp8 inputs on ROCm",
         ):
             torch._cslt_sparse_mm(compressed, B_fp8, out_dtype=out_dtype)
+
+class TestComputeCompressedSwizzledBitmaskDevice(TestCase):
+    """
+    This contains a device-agnostic regression test for
+        _compute_compressed_swizzled_bitmask
+    """
+
+    def test_compute_compressed_swizzled_bitmask_matches_input_device_cpu(self):
+        """Ensure _compute_compressed_swizzled_bitmask output device matches input device on CPU."""
+        dense = rand_sparse_semi_structured_mask(
+            128, 128, dtype=torch.float32, device="cpu"
+        )
+        compressed_swizzled_bitmask = _compute_compressed_swizzled_bitmask(dense)
+        self.assertEqual(compressed_swizzled_bitmask.device, dense.device)
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")

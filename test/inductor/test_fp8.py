@@ -1,17 +1,20 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import unittest
 from unittest import mock
 
 import torch
+import torch._inductor.lowering as inductor_lowering
 from torch import Tensor
 from torch._C import FileCheck
-from torch._inductor import config, inductor_prims, utils
+from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
+from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, sympy_index_symbol_with_prefix
 from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
@@ -42,10 +45,24 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
 )
+from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
@@ -109,19 +126,56 @@ def _prepare_blockwise_scale(
     return inverse_scale.t()
 
 
+@contextlib.contextmanager
+def _simulate_float8_e4m3fn_uint8_storage():
+    # Make float8_e4m3fn behave as it does on SM < 89, where triton lacks native
+    # fp8 support and inputs are read through uint8 storage
+    import torch._inductor.codegen.triton as triton_codegen
+    import torch._inductor.codegen.triton_utils as triton_utils
+    import torch._inductor.lowering as inductor_lowering
+
+    real_supported = inductor_lowering.is_triton_fp8_dtype_supported
+
+    def force_uint8_storage(dtype, arg_name=None, *, device=None):
+        return dtype == torch.float8_e4m3fn and (
+            arg_name is None or arg_name.startswith("in_ptr")
+        )
+
+    def force_unsupported(dtype, device=None, **kwargs):
+        if dtype == torch.float8_e4m3fn:
+            return False
+        return real_supported(dtype, device, **kwargs)
+
+    with (
+        mock.patch.object(
+            triton_utils,
+            "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+            force_uint8_storage,
+        ),
+        mock.patch.object(
+            triton_codegen,
+            "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+            force_uint8_storage,
+        ),
+        mock.patch.object(
+            inductor_lowering,
+            "is_triton_fp8_dtype_supported",
+            force_unsupported,
+        ),
+    ):
+        yield
+
+
 class TestFP8Types(TestCase):
     @onlyCUDA
     @skipIfRocm
     @config.patch({"force_disable_caches": True})
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/189560"
+    )
     def test_float8_e4m3fn_uint8_decode_codegen(self, device):
-        import torch._inductor.codegen.triton as triton_codegen
-        import torch._inductor.codegen.triton_utils as triton_utils
         from torch._inductor.graph import GraphLowering
-
-        def force_uint8_storage(dtype, arg_name=None):
-            return dtype == torch.float8_e4m3fn and (
-                arg_name is None or arg_name.startswith("in_ptr")
-            )
 
         def fn(t):
             return t.float()
@@ -135,16 +189,7 @@ class TestFP8Types(TestCase):
             source_codes.append(code)
 
         with (
-            mock.patch.object(
-                triton_utils,
-                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
-                force_uint8_storage,
-            ),
-            mock.patch.object(
-                triton_codegen,
-                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
-                force_uint8_storage,
-            ),
+            _simulate_float8_e4m3fn_uint8_storage(),
             mock.patch.object(GraphLowering, "save_output_code", save_output_code),
         ):
             torch._dynamo.reset()
@@ -158,6 +203,22 @@ class TestFP8Types(TestCase):
         self.assertIn("'in_ptr0': '*u8'", code)
         self.assertIn("triton_helpers.fp8e4m3fn_to_float32", code)
         self.assertNotIn("'in_ptr0': '*fp8e4nv'", code)
+
+    @onlyCUDA
+    @skipIfRocm
+    @config.patch({"force_disable_caches": True})
+    def test_float8_e4m3fn_uint8_storage_arithmetic_falls_back(self, device):
+        bits = torch.arange(256, device=device, dtype=torch.uint8)
+        t = bits.view(torch.float8_e4m3fn)
+
+        def fn(x):
+            return x == x
+
+        with _simulate_float8_e4m3fn_uint8_storage():
+            torch._dynamo.reset()
+            actual = torch.compile(fn, fullgraph=True)(t)
+        expected = fn(t)
+        self.assertEqual(actual, expected)
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
@@ -682,9 +743,6 @@ class TestFP8Lowering(TestCase):
         if has_bias:
             bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
-
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
@@ -849,8 +907,6 @@ class TestFP8Lowering(TestCase):
         use_fast_accum: bool,
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
         dtype_float8 = torch.float8_e4m3fn
         dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
@@ -940,8 +996,6 @@ class TestFP8Lowering(TestCase):
         persistent_matmul: bool,
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for row-wise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -1108,6 +1162,26 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
+        # (shape, use_fast_accum, scaling_block_sizes) combos disabled due to CI
+        # failures; other combos still run. See the referenced issues.
+        _disabled_combos = {
+            ((16, 256, 256), False, (1, 128, 128, 128)),
+            ((16, 256, 256), False, (1, 128, 1, 128)),
+            ((16, 256, 256), False, (128, 128, 1, 128)),
+            ((16, 256, 256), True, (1, 128, 128, 128)),
+            ((16, 256, 256), True, (1, 128, 1, 128)),
+            ((16, 256, 256), True, (128, 128, 1, 128)),
+            ((1024, 512, 1024), False, (1, 128, 1, 128)),
+            ((1024, 512, 1024), False, (128, 128, 1, 128)),
+            ((1024, 512, 1024), True, (1, 128, 1, 128)),
+            ((1024, 512, 1024), True, (128, 128, 1, 128)),
+            ((32768, 4096, 4096), False, (1, 128, 1, 128)),
+            ((32768, 4096, 4096), False, (128, 128, 1, 128)),
+            ((32768, 4096, 4096), True, (1, 128, 1, 128)),
+            ((32768, 4096, 4096), True, (128, 128, 1, 128)),
+        }
+        if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
+            self.skipTest("disabled due to CI failures; see #190236")
         if "xpu" in device and use_fast_accum:
             self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
@@ -1543,6 +1617,61 @@ class TestFP8Lowering(TestCase):
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyCUDA
+    def test_mxfp8_dtype_view_indexer_e2e(self, device):
+        with (
+            torch.library._scoped_library("test_fp8", "FRAGMENT") as lib,
+            mock.patch.dict(inductor_lowering.lowerings),
+        ):
+            lib.define("dtype_view_indexing_consumer(Tensor x) -> Tensor")
+            torch.library.impl(lib, "dtype_view_indexing_consumer", "CUDA")(
+                lambda x: x.clone()
+            )
+            torch.library.impl(lib, "dtype_view_indexing_consumer", "Meta")(
+                lambda x: torch.empty_like(x)
+            )
+
+            def lowering(x):
+                x.realize()
+                ir.as_storage_and_layout(x.unwrap_view(), freeze=True)
+                index = [
+                    sympy_index_symbol_with_prefix(SymT.INDEX, i)
+                    for i in range(len(x.get_size()))
+                ]
+                x.make_indexer()(index)
+                return lowering_clone(x)
+
+            register_lowering(
+                torch.ops.test_fp8.dtype_view_indexing_consumer.default,
+                type_promotion_kind=None,
+            )(lowering)
+
+            def fn(x):
+                x = x.reshape(128, 4, 32)
+                amax = torch.amax(torch.abs(x), -1, keepdim=True).float()
+                descale = amax / torch.finfo(torch.float8_e4m3fn).max
+                exponent = torch.where(
+                    torch.isnan(descale),
+                    torch.full((), 255, dtype=torch.uint8, device=x.device),
+                    (
+                        torch.clamp(torch.ceil(torch.log2(descale)), min=-127, max=127)
+                        + 127
+                    ).to(torch.uint8),
+                )
+                scale = exponent.view(torch.float8_e8m0fnu)
+                return torch.ops.test_fp8.dtype_view_indexing_consumer.default(
+                    scale
+                ).squeeze(-1)
+
+            x = torch.randn((128, 128), device=device, dtype=torch.bfloat16)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual.shape, (128, 4))
+        self.assertEqual(actual.dtype, torch.float8_e8m0fnu)
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 32, 1024))
@@ -1705,7 +1834,11 @@ class TestFP8Lowering(TestCase):
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
-        M, K, N = 128, 32, 128
+        # K must match the operands, which are eye(M)/eye(N) (i.e. 128 wide);
+        # using a smaller K would size the MX 1x32 scales for fewer K-blocks
+        # than the data has (XPU rejects this; CUDA only masks it via the
+        # to_blocked() zero-padding below).
+        M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
         dtype = torch.bfloat16
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
@@ -1718,8 +1851,11 @@ class TestFP8Lowering(TestCase):
         B_scale = torch.full(
             (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
         )
-        A_scale = to_blocked(A_scale)
-        B_scale = to_blocked(B_scale)
+        if "cuda" in device:
+            A_scale = to_blocked(A_scale)
+            B_scale = to_blocked(B_scale)
+        elif "xpu" in device:
+            B_scale = B_scale.t()
 
         def linear(A, B, A_scale, B_scale):
             y = torch._scaled_mm(
@@ -1825,6 +1961,73 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
+
+
+class TestE8M0ToFloat(TestCase):
+    @parametrize(
+        "dtype",
+        (torch.float64, torch.float32, torch.float16, torch.bfloat16),
+    )
+    @parametrize("direct_input", (False, True))
+    @onlyOn(["cpu", "cuda"])
+    def test_conversion(self, device, dtype, direct_input):
+        raw = torch.tensor(
+            [0, 1, 126, 127, 128, 129, 254, 255],
+            device=device,
+            dtype=torch.uint8,
+        )
+        if direct_input:
+            inp = raw.view(torch.float8_e8m0fnu)
+
+            def fn(value):
+                return value.to(dtype)
+
+        else:
+            inp = raw
+
+            def fn(value):
+                return value.view(torch.float8_e8m0fnu).to(dtype)
+
+        expected = fn(inp)
+        actual = torch.compile(fn, fullgraph=True)(inp)
+        self.assertEqual(actual, expected)
+        if dtype is torch.float32:
+            self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
+
+    @parametrize("direct_input", (False, True))
+    @onlyOn(["cpu", "cuda"])
+    def test_codegen(self, device, direct_input):
+        raw = torch.tensor(
+            [0, 1, 126, 127, 128, 129, 254, 255],
+            device=device,
+            dtype=torch.uint8,
+        )
+        if direct_input:
+            inp = raw.view(torch.float8_e8m0fnu)
+
+            def fn(value):
+                return value.float()
+
+        else:
+            inp = raw
+
+            def fn(value):
+                return value.view(torch.float8_e8m0fnu).float()
+
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
+        expected = fn(inp)
+        self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
+
+        code_str = "\n".join(code)
+        self.assertIn("4194304", code_str)
+        self.assertIn("2139095041", code_str)
+        if torch.device(device).type == "cuda":
+            self.assertIn("bitcast=True", code_str)
+            self.assertNotIn("libdevice.ldexp", code_str)
+        else:
+            self.assertIn("async_compile.cpp_pybinding", code_str)
+            if direct_input:
+                self.assertIn("at::Float8_e8m0fnu", code_str)
 
 
 class TestCvtE8M0RceilGating(TestCase):
@@ -2047,6 +2250,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":

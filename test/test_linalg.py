@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
 import numpy as np
 
@@ -27,22 +28,22 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
-     skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
+     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
+    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -67,12 +68,13 @@ if TEST_SCIPY:
 def blaslt_supported_device():
     if torch.cuda.is_available():
         if torch.version.hip:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             archs = ['gfx90a', 'gfx94']
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx110', 'gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            if ROCM_VERSION >= (7, 14):
+                archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -126,12 +128,15 @@ def get_tunableop_untuned_filename():
 class TestLinalg(TestCase):
     def setUp(self):
         super().setUp()
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
         if torch.cuda.is_available():
             torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        if torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
     def _get_other_device(self, dtype=None):
@@ -250,6 +255,13 @@ class TestLinalg(TestCase):
             torch.eig(a)
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
             a.eig()
+
+    def test_qr_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.qr(a)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            a.qr()
 
     def test_symeig_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
@@ -688,7 +700,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex(self, device, dtype):
@@ -927,6 +939,62 @@ class TestLinalg(TestCase):
             self.assertIsNotNone(A.grad)
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
+
+    @skipIfTorchDynamo("dynamo cannot trace the functorch transforms and autograd.functional used here")
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_det_slogdet_solve_second_order_forward_ad(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192540:
+        # the JVPs of det/slogdet/solve reused the saved non-differentiable LU,
+        # so second derivatives taken through a JVP silently dropped the
+        # A-dependence. Checks forward-over-forward against the autograd
+        # Hessian and classic-API reverse-over-forward against jvp-of-grad,
+        # neither of which routes through the fixed path.
+        # Also covers https://github.com/pytorch/pytorch/issues/192521: under
+        # torch.func the det backward must avoid the SVD-adjugate branch, whose
+        # 1/(S_i^2 - S_j^2) terms are silently wrong for clustered singular
+        # values and NaN for an exact tie.
+        gen = torch.Generator(device=device).manual_seed(0)
+        A = torch.randn(3, 3, generator=gen, device=device, dtype=dtype)
+        A = A + 3 * torch.eye(3, device=device, dtype=dtype)
+        V = torch.randn(3, 3, generator=gen, device=device, dtype=dtype)
+        b = torch.randn(3, generator=gen, device=device, dtype=dtype)
+        c = torch.randn(3, generator=gen, device=device, dtype=dtype)
+        fns = (
+            torch.linalg.det,
+            lambda X: torch.linalg.slogdet(X).logabsdet,
+            lambda X: c @ torch.linalg.solve(X, b),
+        )
+        for f in fns:
+            H = torch.func.jacfwd(torch.func.jacfwd(f))(A)
+            Href = torch.autograd.functional.hessian(f, A)
+            self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
+            Ag = A.clone().requires_grad_()
+            with fwAD.dual_level():
+                tangent = fwAD.unpack_dual(f(fwAD.make_dual(Ag, V)))[1]
+            g = torch.autograd.grad(tangent, Ag)[0]
+            g_ref = torch.func.jvp(torch.func.grad(f), (A,), (V,))[1]
+            self.assertEqual(g, g_ref, atol=1e-9, rtol=1e-7)
+        # Singular inputs raise in the differentiable recompute instead of
+        # silently returning wrong finite numbers.
+        S = torch.diag(torch.tensor([1.0, 0.0], device=device, dtype=dtype))
+        Vs = torch.eye(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "singular"):
+            torch.func.jvp(lambda X: torch.func.jvp(
+                torch.linalg.det, (X,), (Vs,))[1], (S,), (Vs,))
+        # Q has singular values approx (2, 2 - 9e-16, 1), a tight cluster; the
+        # identity is an exact threefold tie.
+        Q = torch.tensor(
+            [[0.36499817017502284, -1.7968303440068301, -0.66579697838921992],
+             [1.7322951423447641, 0.2662708516337266, -0.36118249842996208],
+             [-0.37828499755800576, -0.82543622292798269, 1.0808549916157837]],
+            device=device, dtype=dtype)
+        for M in (Q, torch.eye(3, device=device, dtype=dtype)):
+            H = torch.func.hessian(torch.linalg.det)(M)
+            self.assertFalse(torch.isnan(H).any())
+            Href = torch.autograd.functional.hessian(torch.linalg.det, M)
+            self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -2362,7 +2430,7 @@ class TestLinalg(TestCase):
         # Valid if (vals[0]=λ AND vals[1]=λ*) OR (vals[0]=λ* AND vals[1]=λ)
         self.assertTrue(
             (match_0_pos and match_1_neg) or (match_0_neg and match_1_pos),
-            f"Expected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
+            lambda msg: f"{msg}\nExpected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
         )
 
         # Verify output is complex type
@@ -3065,6 +3133,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @skipIfRocmVersionAtLeast([7, 14])
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -3298,7 +3367,6 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -4068,53 +4136,6 @@ class TestLinalg(TestCase):
         check([a, make_tensor(3, dtype=dtype, device=device)], None, "cannot be multiplied")
         check([a, make_tensor((3, 2), dtype=dtype, device=device), a], None, "cannot be multiplied")
 
-    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
-    @dtypes(*floating_and_complex_types())
-    def test_qr(self, device, dtype):
-        def run_test(tensor_dims, some):
-            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
-            Q, R = torch.qr(A, some=some)
-
-            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
-            m, n = tensor_dims[-2:]
-            n_columns = m if (not some) and m > n else min(m, n)
-            self.assertEqual(Q.size(-2), m)
-            self.assertEqual(R.size(-1), n)
-            self.assertEqual(Q.size(-1), n_columns)
-
-            A_ = A.cpu().numpy()
-            Q_ = Q.cpu().numpy()
-            R_ = R.cpu().numpy()
-
-            # Check1: A = QR
-            self.assertEqual(A_, np.matmul(Q_, R_))
-
-            # Check2: A = QR (with out)
-            Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
-            torch.qr(A, some=some, out=(Q_out, R_out))
-            Q_out_ = Q_out.cpu().numpy()
-            R_out_ = R_out.cpu().numpy()
-            self.assertEqual(A_, np.matmul(Q_out_, R_out_))
-
-            # Check3: Q == Q_out, R == R_out
-            self.assertEqual(Q_, Q_out_)
-            self.assertEqual(R_, R_out_)
-
-            # Check4: Q^{T}Q = I, triu(R) = R
-            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
-            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
-            self.assertEqual(R.triu(), R)
-
-        tensor_dims_list = [(0, 5), (0, 0), (5, 0),  # Empty Tensors
-                            (2, 1, 0, 5), (2, 1, 0, 0), (2, 1, 5, 0), (2, 0, 5, 5),  # Batched empty Tensors
-                            (3, 5), (5, 5), (5, 3),  # Single matrix
-                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
-                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
-        for tensor_dims, some in itertools.product(tensor_dims_list, [True, False]):
-            run_test(tensor_dims, some)
-
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -4266,6 +4287,19 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
+    def test_polar_autograd(self, device, dtype, shape):
+        # Full column rank (distinct singular values) keeps A^H A positive-definite,
+        # the regime where the decomposition is differentiable.
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(*shape, device=device, dtype=dtype).requires_grad_(True)
+        # check_undefined_grad=False: dynamo_wrapped traces backward with grad defined.
+        self.assertTrue(torch.autograd.gradcheck(torch.linalg.polar, (A,), check_undefined_grad=False, check_forward_ad=True))
+        self.assertTrue(torch.autograd.gradgradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double)
     def test_polar_ill_conditioned(self, device, dtype):
         # QDWH is designed to stay accurate on ill-conditioned inputs. Build a
@@ -4302,6 +4336,13 @@ class TestLinalg(TestCase):
         if torch.device(device).type != "cuda":
             self.skipTest("cuSOLVER Xpolar path is CUDA-only")
         from torch._native.ops.polar import nvmath_impl as nv
+        from torch._native.ops.polar.impl import _check_nvmath
+
+        # The test invokes the Xpolar kernel directly, bypassing the override's
+        # runtime gate/fallback, so skip when the loaded cuSOLVER does not expose
+        # Xpolar (e.g. a CUDA runtime older than the version that added it).
+        if not _check_nvmath():
+            self.skipTest("cuSOLVER runtime does not expose Xpolar")
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         A = make_fullrank(32, 16, device=device, dtype=dtype)
@@ -5104,6 +5145,37 @@ class TestLinalg(TestCase):
         self.assertIs(ans, out)
         self.assertTrue(ans.is_contiguous())
         assertEqual(ans, expected)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    @parametrize(
+        "shape, stride",
+        [
+            ((4, 1, 8), (8, 32, 1)),
+            ((1, 4, 8), (8, 8, 1)),
+        ],
+    )
+    def test_matmul_folds_viewable_size_one_dim(self, device, dtype, shape, stride):
+        x = torch.empty_strided(shape, stride, device=device, dtype=dtype).normal_()
+        y = torch.randn((8, 5), device=device, dtype=dtype)
+
+        self.assertEqual(x.shape, shape)
+        self.assertEqual(x.stride(), stride)
+        self.assertEqual(x.reshape(-1, x.shape[-1]).stride(), (8, 1))
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            result = torch.matmul(x, y)
+
+        expected = x.reshape(-1, x.shape[-1]).mm(y).reshape(
+            *x.shape[:-1], y.shape[-1]
+        )
+        self.assertEqual(result, expected)
+
+        op_names = {event.key for event in prof.key_averages()}
+        self.assertIn("aten::mm", op_names)
+        self.assertNotIn("aten::bmm", op_names)
 
     def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
         """
@@ -6412,6 +6484,241 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
+    @onlyCUDA
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
+                        torch.bfloat16: 5e-2, torch.half: 5e-2})
+    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
+    @parametrize("beta", [1.0, 0.75, -2.0])
+    @parametrize("alpha", [1.0, 0.5, 0.0])
+    @parametrize("shape", [(64, 96, 32), (1, 8, 32)])
+    @parametrize("transpose_mat1", [False, True])
+    @parametrize("transpose_mat2", [False, True])
+    @tf32_on_and_off(0.05)
+    def test_addmm_out_distinct_c_and_d(self, device, dtype, beta, alpha, shape,
+                                        transpose_mat1, transpose_mat2):
+        # When `out` is a distinct tensor from `input`, CUDA addmm can hand C and D
+        # to cuBLASLt as separate pointers instead of copying C into D first.
+        # alpha == 0 and a skinny m are both covered on purpose: with no GEMM to
+        # run, cuBLASLt may skip writing D and silently drop the beta * C term,
+        # and whether it does depends on the shape and the algorithm chosen.
+        m, n, k = shape
+        mat1 = make_tensor((k, m) if transpose_mat1 else (m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((n, k) if transpose_mat2 else (k, n), dtype=dtype, device=device, low=-1, high=1)
+        if transpose_mat1:
+            mat1 = mat1.t()
+        if transpose_mat2:
+            mat2 = mat2.t()
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+
+        inp_before = inp.clone()
+        # Deliberately not `empty`: a path that never writes D would otherwise be
+        # able to pass on whatever the allocator happened to hand back.
+        out = torch.full((m, n), 7.0, dtype=dtype, device=device)
+        res = torch.addmm(inp, mat1, mat2, beta=beta, alpha=alpha, out=out)
+        self.assertIs(res, out)
+        ref = beta * inp.double() + alpha * (mat1.double() @ mat2.double())
+        self.assertEqual(out, ref.to(dtype), exact_dtype=False)
+        # `input` is the C operand, not scratch space
+        self.assertEqual(inp, inp_before)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_addmm_out_distinct_c_and_d_fallbacks(self, device, dtype):
+        # Shapes/layouts the distinct-C/D path declines must still be correct
+        # through the copy-then-GEMM fallback.
+        m, n, k = 32, 48, 16
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        mm = mat1.double() @ mat2.double()
+        tol = 5e-2 if dtype is torch.bfloat16 else 1e-4
+
+        def check(inp, out=None, beta=0.75, alpha=1.0):
+            if out is None:
+                out = torch.empty((m, n), dtype=dtype, device=device)
+            res = torch.addmm(inp, mat1, mat2, beta=beta, alpha=alpha, out=out)
+            ref = beta * inp.double().expand(m, n) + alpha * mm
+            self.assertEqual(res, ref.to(dtype), atol=tol, rtol=tol, exact_dtype=False)
+
+        # 1D / broadcast `input` goes down the bias or expand path
+        check(make_tensor((n,), dtype=dtype, device=device, low=-1, high=1))
+        check(make_tensor((1, n), dtype=dtype, device=device, low=-1, high=1))
+        check(make_tensor((m, 1), dtype=dtype, device=device, low=-1, high=1))
+        # beta == 0 ignores `input` entirely
+        check(make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1), beta=0.0)
+        # strided (non row-major) `input` cannot be described by a leading dimension
+        wide_inp = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)
+        check(wide_inp[:, ::2])
+        # column-major `input`
+        check(make_tensor((n, m), dtype=dtype, device=device, low=-1, high=1).t())
+        # `input` aliasing `out`
+        aliased = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+        expected = 0.75 * aliased.double() + mm
+        torch.addmm(aliased, mat1, mat2, beta=0.75, alpha=1.0, out=aliased)
+        self.assertEqual(aliased, expected.to(dtype), atol=tol, rtol=tol, exact_dtype=False)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_out_distinct_c_and_d_is_selected(self, device, dtype):
+        # The point of the distinct-C/D path is that C is not copied into the
+        # output first, so assert on the kernels actually launched: the fast
+        # path is a lone GEMM, the fallback additionally copies C.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 256, 384, 128
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        out = torch.empty((m, n), dtype=dtype, device=device)
+
+        def kernel_count(inp):
+            for _ in range(3):  # warm up autotuning/handle creation
+                torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+                torch.cuda.synchronize()
+            return sum(1 for e in prof.events()
+                       if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+
+        contiguous = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+        padded = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)[:, :n]
+        # rejected by the guard: not row-major, so C must be copied first
+        column_major = make_tensor((n, m), dtype=dtype, device=device, low=-1, high=1).t()
+
+        contiguous_kernels = kernel_count(contiguous)
+        self.assertEqual(contiguous_kernels, 1)
+        self.assertEqual(kernel_count(padded), 1)
+        self.assertGreater(kernel_count(column_major), contiguous_kernels)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_addmm_out_padded_leading_dim(self, device, dtype):
+        # cuBLASLt can consume a row-major operand whose rows are padded, so the
+        # distinct-C/D path accepts a leading dimension larger than the width.
+        m, n, k = 32, 48, 16
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        mm = mat1.double() @ mat2.double()
+        tol = 5e-2 if dtype is torch.bfloat16 else 1e-4
+
+        wide_inp = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)
+        inp = wide_inp[:, :n]
+        self.assertEqual(inp.stride(0), 2 * n)
+        expected = (0.75 * inp.double() + mm).to(dtype)
+
+        # padded C, contiguous D
+        out = torch.empty((m, n), dtype=dtype, device=device)
+        res = torch.addmm(inp, mat1, mat2, beta=0.75, out=out)
+        self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
+
+        # padded C and padded D: the columns outside the view must be untouched
+        wide_out = make_tensor((m, 2 * n), dtype=dtype, device=device, low=-1, high=1)
+        untouched = wide_out[:, n:].clone()
+        res = torch.addmm(inp, mat1, mat2, beta=0.75, out=wide_out[:, :n])
+        self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
+        self.assertEqual(wide_out[:, n:], untouched)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.bfloat16, torch.half)
+    @parametrize("shape", [(2, 256, 1024), (18, 128, 128), (64, 96, 32), (256, 384, 128)])
+    def test_addmm_out_distinct_c_and_d_no_less_accurate(self, device, dtype, shape):
+        # Compare against the form this path replaces: with `out` aliasing `input`,
+        # C is already in D and the GEMM runs in place, which is what
+        # copy-then-GEMM produced.
+        #
+        # The two are not bit-identical. Handing cuBLASLt distinct C and D changes
+        # which algorithm its heuristic returns, and on most of these shapes that
+        # moves roughly 30% of the elements by an ulp or two. What has to hold is
+        # that the new path is no *less* accurate, so both are measured against an
+        # fp64 reference rather than against each other.
+        m, n, k = shape
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+
+        aliased = inp.clone()
+        torch.addmm(aliased, mat1, mat2, beta=1.0, out=aliased)
+
+        out = torch.full((m, n), 7.0, dtype=dtype, device=device)
+        torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+
+        ref = inp.double() + (mat1.double() @ mat2.double())
+        err_distinct = (out.double() - ref).abs().amax()
+        err_aliased = (aliased.double() - ref).abs().amax()
+        # Slack, so a shape where the two are effectively tied cannot flake.
+        self.assertLessEqual(err_distinct, err_aliased * 2 + 1e-6)
+
+        # The drift must stay within GEMM rounding: this catches a genuine
+        # divergence, as opposed to the last-bit algorithm difference above.
+        tol = 5e-2 if dtype == torch.bfloat16 else 1e-2
+        self.assertEqual(out, aliased, atol=tol, rtol=tol)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_out_distinct_c_and_d_float_out_reduced_input(self, device, dtype):
+        # Reduced-precision inputs with an fp32 output (the `out_dtype` overload)
+        # go through a separate cuBLASLt entry point, and the distinct-C/D guard
+        # requires C, D and mat1 to share a dtype. This combination must therefore
+        # keep the pre-existing copy-then-GEMM behavior: correct, and launching
+        # more than the single kernel the fast path does.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 64, 96, 32
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+
+        def kernel_count(fn):
+            for _ in range(3):  # warm up autotuning/handle creation
+                fn()
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                fn()
+                torch.cuda.synchronize()
+            return sum(1 for e in prof.events()
+                       if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+
+        same_out = torch.empty((m, n), dtype=dtype, device=device)
+        same_dtype_kernels = kernel_count(
+            lambda: torch.addmm(inp, mat1, mat2, beta=1.0, out=same_out))
+        self.assertEqual(same_dtype_kernels, 1)
+
+        float_out = torch.full((m, n), 7.0, dtype=torch.float32, device=device)
+        mixed_kernels = kernel_count(
+            lambda: torch.addmm(inp, mat1, mat2, torch.float32, beta=1.0, out=float_out))
+        self.assertGreater(mixed_kernels, same_dtype_kernels)
+
+        ref = inp.double() + (mat1.double() @ mat2.double())
+        self.assertEqual(float_out, ref.to(torch.float32), atol=5e-2, rtol=5e-2,
+                         exact_dtype=False)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.double)
+    def test_addmm_out_distinct_c_and_d_not_selected_for_fp32(self, device, dtype):
+        # fp32/fp64 deliberately stay on copy-then-GEMM. Distinct C and D changes
+        # the algorithm cuBLASLt picks, which shifts results by an ulp or two and
+        # breaks tests requiring deterministic output; fp32/fp64 have little to
+        # gain from the avoided copy, so they are not worth that trade.
+        from torch.profiler import profile, ProfilerActivity
+
+        m, n, k = 256, 384, 128
+        mat1 = make_tensor((m, k), dtype=dtype, device=device, low=-1, high=1)
+        mat2 = make_tensor((k, n), dtype=dtype, device=device, low=-1, high=1)
+        inp = make_tensor((m, n), dtype=dtype, device=device, low=-1, high=1)
+        out = torch.empty((m, n), dtype=dtype, device=device)
+
+        for _ in range(3):
+            torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+        torch.cuda.synchronize()
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            torch.addmm(inp, mat1, mat2, beta=1.0, out=out)
+            torch.cuda.synchronize()
+        kernels = sum(1 for e in prof.events()
+                      if e.device_type.name == "CUDA" and e.self_device_time_total > 0)
+        self.assertGreater(kernels, 1)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
@@ -6603,7 +6910,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
                                lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7",
+                               r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
         self.assertRaisesRegex(RuntimeError,
                                r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
@@ -6705,6 +7012,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
             self.skipTest("_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later")
 
@@ -6773,6 +7083,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_compile_int4_mm(self, device, m, k, n):
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
+
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
             self.skipTest("_convert_weight_to_int4pack_cuda supported only for CDNA2 or later")
@@ -8077,7 +8390,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # slogdet implementations when det is near zero due to precision
             # issues.
             if sdet.item() < 0:
-                self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
+                self.assertTrue(logdet.item() != logdet.item(), lambda msg: f'{msg}\n{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
                                  atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
@@ -8087,7 +8400,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # Testing bug in #34061 (https://github.com/pytorch/pytorch/issues/34061)
         for n in range(250, 551, 100):
             mat = torch.randn(n, n, dtype=dtype, device=device)
-            q, _ = torch.qr(mat)
+            q, _ = torch.linalg.qr(mat)
             ref_det, ref_logabsdet = reference_slogdet(q)
             test_single_det(q, (ref_det, ref_logabsdet), 'orthogonal')
 
@@ -9061,6 +9374,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.randn(n, dtype=dtype, device=device)
+
+        if (
+            torch.device(device).type == "cuda"
+            and dtype == torch.float32
+            and not TEST_WITH_ROCM
+            and torch.cuda.get_device_capability(device) == (11, 0)
+        ):
+            # Remove this sentinel when zero-workspace cublasSgemv works on SM 11.0.
+            previous_workspace_size = torch.backends.cuda.cublas_workspace_size()
+            cublas_error = "CUBLAS_STATUS_NOT_SUPPORTED.*cublasSgemv"
+            try:
+                torch.backends.cuda.cublas_workspace_size(0)
+                with self.assertRaisesRegex(RuntimeError, cublas_error):
+                    torch.matmul(A, B)
+            finally:
+                torch.backends.cuda.cublas_workspace_size(previous_workspace_size)
+                torch._C._cuda_clearCublasWorkspaces()
+
         C = torch.matmul(A, B)
 
         # Sanity Checks
@@ -9179,10 +9510,14 @@ class TestLinalgCudaOnly(TestCase):
         super().setUp()
         if not torch.cuda.is_available():
             self.skipTest("CUDA required")
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
     def check_single_matmul(self, x, y):
@@ -9952,41 +10287,163 @@ class TestLinalgCudaOnly(TestCase):
         if not torch.cuda.is_bf16_supported():
             raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
 
-        with self._tunableop_ctx():
-            torch.cuda.tunable.set_rotating_buffer_size(0)
-            torch.cuda.tunable.set_max_tuning_duration(1)
-            torch.cuda.tunable.set_max_tuning_iterations(3)
+        def parse_tunable_log(log):
+            tuned = {}
+            current_key = None
 
-            A = torch.randn(128, 256, device=device, dtype=dtype)
-            B = torch.randn(256, 96, device=device, dtype=dtype)
-            torch.matmul(A, B)
+            finding_re = re.compile(
+                r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
+            )
+            tuning_re = re.compile(
+                r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
+            )
+            timing_re = re.compile(
+                r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
+            )
+            fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
 
-            X = torch.randn(512, 512, device=device, dtype=dtype)
-            W = torch.randn(512, 512, device=device, dtype=dtype)
-            bias = torch.randn(512, device=device, dtype=dtype)
-            torch.nn.functional.linear(X, W, bias)
+            for line in log.splitlines():
+                finding_match = finding_re.search(line)
+                if finding_match:
+                    current_key = (finding_match.group(1), finding_match.group(2))
+                    tuned[current_key] = {
+                        "candidate_count": int(finding_match.group(3)),
+                        "tried": set(),
+                        "timings": {},
+                        "winner": None,
+                    }
+                    continue
 
-            for b, m, k, n in (
-                    (8, 128, 256, 192),
-                    (16, 128, 256, 256),
-                    (8, 256, 256, 256),
-                    (2, 512, 512, 512)):
-                batch_A = torch.randn(b, m, k, device=device, dtype=dtype)
-                batch_B = torch.randn(b, k, n, device=device, dtype=dtype)
-                torch.bmm(batch_A, batch_B)
+                tuning_match = tuning_re.search(line)
+                if tuning_match:
+                    key = (tuning_match.group(1), tuning_match.group(2))
+                    tuned.setdefault(
+                        key,
+                        {
+                            "candidate_count": 0,
+                            "tried": set(),
+                            "timings": {},
+                            "winner": None,
+                        },
+                    )["tried"].add(tuning_match.group(3))
+                    continue
 
-            results = torch.cuda.tunable.get_results()
-            result_strings = [str(row) for row in results]
-            self.assertTrue(
-                any("Gemm_Cublaslt_" in row for row in result_strings), results)
-            self.assertTrue(
-                any("GemmTunableOp" in row for row in result_strings), results)
-            self.assertTrue(
-                any("GemmStridedBatchedTunableOp" in row for row in result_strings),
-                results)
-            self.assertTrue(
-                any("GemmAndBiasTunableOp" in row for row in result_strings),
-                results)
+                timing_match = timing_re.search(line)
+                if timing_match and current_key is not None:
+                    tuned[current_key]["timings"][timing_match.group(2)] = float(
+                        timing_match.group(1)
+                    )
+                    continue
+
+                fastest_match = fastest_re.search(line)
+                if fastest_match:
+                    key = (fastest_match.group(1), fastest_match.group(2))
+                    tuned.setdefault(
+                        key,
+                        {
+                            "candidate_count": 0,
+                            "tried": set(),
+                            "timings": {},
+                            "winner": None,
+                        },
+                    )["winner"] = fastest_match.group(3)
+
+            return tuned
+
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        # Create the results file in the parent so we can always clean it up,
+        # even if the subprocess is killed before its own teardown runs.
+        results_dir = tempfile.mkdtemp(prefix="tunableop_cublaslt_candidate_")
+        results_filename = os.path.join(results_dir, "results.csv")
+
+        script = textwrap.dedent(
+            """
+            import torch
+
+            results_filename = {results_filename!r}
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(3)
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(8)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+
+                device = {device!r}
+                dtype = {dtype}
+
+                A = torch.randn(128, 256, device=device, dtype=dtype)
+                B = torch.randn(256, 96, device=device, dtype=dtype)
+                torch.matmul(A, B)
+
+                X = torch.randn(512, 512, device=device, dtype=dtype)
+                W = torch.randn(512, 512, device=device, dtype=dtype)
+                bias = torch.randn(512, device=device, dtype=dtype)
+                torch.nn.functional.linear(X, W, bias)
+
+                for b, m, k, n in (
+                        (8, 128, 256, 192),
+                        (16, 128, 256, 256),
+                        (8, 256, 256, 256),
+                        (2, 512, 512, 512)):
+                    batch_A = torch.randn(b, m, k, device=device, dtype=dtype)
+                    batch_B = torch.randn(b, k, n, device=device, dtype=dtype)
+                    torch.bmm(batch_A, batch_B)
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        ).format(results_filename=results_filename, device=device, dtype=dtype)
+
+        env = os.environ.copy()
+        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
+
+        tuned = parse_tunable_log(result.stdout)
+        self.assertGreater(len(tuned), 0, result.stdout)
+        self.assertTrue(any(key[0].startswith("GemmTunableOp") for key in tuned), tuned)
+        self.assertTrue(
+            any(key[0].startswith("GemmStridedBatchedTunableOp") for key in tuned),
+            tuned,
+        )
+        self.assertTrue(any(key[0].startswith("GemmAndBiasTunableOp") for key in tuned), tuned)
+        self.assertTrue(
+            any(
+                info["candidate_count"] > 1
+                and any(c.startswith("Gemm_Cublaslt_") for c in info["tried"])
+                and len(info["timings"]) > 1
+                for info in tuned.values()
+            ),
+            (tuned, result.stdout),
+        )
+
+        for key, info in tuned.items():
+            if not info["timings"]:
+                continue
+            self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
+            winner_time = info["timings"][info["winner"]]
+            fastest_time = min(info["timings"].values())
+            self.assertEqual(winner_time, fastest_time, (key, info))
 
     @skipIfRocm
     @dtypes(torch.half)
@@ -10277,12 +10734,41 @@ class TestLinalgCudaOnly(TestCase):
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
 
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @dtypes(torch.float)
+    def test_bfx9_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            a = torch.randn(37, 37, device=device, dtype=dtype)
+            b = torch.randn(37, 37, device=device, dtype=dtype)
+
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            torch.mm(a, b)
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            torch.mm(a, b)
+
+            results = torch.cuda.tunable.get_results()
+            signatures = (
+                ("GemmTunableOp_float_NN", "nn_37_37_37_ld_37_37_37"),
+                (
+                    "GemmTunableOp_bfx9_NN",
+                    "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
+                ),
+            )
+            for op_signature, params_signature in signatures:
+                self.assertIsNotNone(
+                    find_tunableop_result(results, op_signature, params_signature)
+                )
+
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
                 # Reference number of results
@@ -10332,19 +10818,14 @@ class TestLinalgCudaOnly(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
-
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
         import os
 
-        try:
+        with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
@@ -10400,10 +10881,6 @@ class TestLinalgCudaOnly(TestCase):
                 # Compare Param Signature of untuned and tuned results
                 ok = self._compare_untuned_tuned_entries()
                 self.assertTrue(ok)
-
-        finally:
-            # Disable TF32
-            torch.backends.cuda.matmul.allow_tf32 = False
 
     @dtypes(torch.float16)
     def test_blaslog_tunableop(self, device, dtype):
@@ -10486,7 +10963,6 @@ class TestLinalgCudaOnly(TestCase):
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
 
-    # Fails with triton 3.7
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
         import os
@@ -10629,6 +11105,57 @@ class TestLinalgCudaOnly(TestCase):
 
 
             # Compare Param Signature of untuned and tuned results
+            ok = self._compare_untuned_tuned_entries()
+            self.assertTrue(ok)
+
+    @dtypes(torch.float)
+    def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
+        # Regression test for https://github.com/ROCm/TheRock/issues/5553
+        # When a sub-matrix's leading dimension coincides with one of the GEMM
+        # dimensions (m, n, k), offline tuning used to misclassify it as a tight
+        # (non-sub) matrix and silently tuned the wrong shape, dropping the
+        # padded leading dimension. Here lda (== n == 6) is padded and differs
+        # from its tight value (m == 4), so the recorded and tuned param
+        # signatures must match (nt_6_4_2_ld_6_6_6). Before the fix the tuned
+        # entry drifted to nt_6_4_2_ld_6_4_6 and this comparison failed.
+        import os
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # record a sub-matrix GEMM whose leading dim aliases a GEMM dim
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            # n > m so the padded lda (== n) differs from the tight lda (== m)
+            n = 6
+            m = 4
+            k = 2
+
+            # 'NT' -> records GemmTunableOp_<dtype>_NT, nt_6_4_2_ld_6_6_6
+            matA = torch.rand(n, n, dtype=dtype, device=device).t()
+            matB = torch.rand(n, n, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # tune the recorded GEMM
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            # Every recorded Op+Param signature must appear in the tuned results.
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
@@ -10957,8 +11484,205 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(ck_out, cpu_out)
 
 
+class TestGroupedMM(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
+        # writing allow_tf32 back can't always reproduce the original
+        # fp32_precision value (e.g. the "none" default).
+        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.allow_tf32 = False
+
+    def tearDown(self):
+        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        super().tearDown()
+
+    def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
+        for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
+            a = a.clone().detach().requires_grad_()
+            b = b.clone().detach().requires_grad_()
+            out_ref = torch.mm(a, b.t())
+            out_ref.backward(gO)
+            self.assertEqual(out, out_ref)
+            if agrad is not None:
+                self.assertEqual(agrad, a.grad)
+                self.assertEqual(bgrad, b.grad)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, dtype):
+        m, n, k, n_groups = 16, 32, 64, 4
+        if a_row_major:
+            a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        else:
+            a = torch.randn(k * n_groups + k * int(strided), m, device=device, dtype=dtype).t()[:, :k * n_groups]
+
+        if b_row_major:
+            b = torch.randn(n, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
+        else:
+            b = torch.randn(k * n_groups + k * int(strided), n, device=device, dtype=dtype).t()[:, :k * n_groups]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+
+        f = F.grouped_mm
+        out = f(a, b.t(), offs=offs, out_dtype=dtype)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        offs_cpu = offs.cpu()
+        alist, blist, agradlist, bgradlist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[:, start:offs_cpu[i]])
+            blist.append(b[:, start:offs_cpu[i]])
+            agradlist.append(a.grad[:, start:offs_cpu[i]])
+            bgradlist.append(b.grad[:, start:offs_cpu[i]])
+            start = offs_cpu[i]
+        self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, dtype):
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
+        if a_row_major:
+            a = torch.randn(m * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        else:
+            a = torch.randn(k, (m + 2 * s_int) * n_groups, device=device, dtype=dtype).t()[:m * n_groups, :]
+
+        if b_row_major:
+            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.t()
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+        for check_zero_size in (False, True):
+            if check_zero_size and n_groups <= 1:
+                continue
+
+            a.grad = None
+            b.grad = None
+            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+
+            f = F.grouped_mm
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
+            gO = torch.rand_like(out)
+            if not check_zero_size:
+                out.backward(gO)
+            offs_cpu = offs.cpu()
+            alist, agradlist, gOlist, outlist = [], [], [], []
+            bgradlist = [None] * n_groups if check_zero_size else b.grad
+            start = 0
+            for i in range(n_groups):
+                alist.append(a[start:offs_cpu[i]])
+                agradlist.append(None if check_zero_size else a.grad[start:offs_cpu[i]])
+                outlist.append(out[start:offs_cpu[i]])
+                gOlist.append(gO[start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
+        if a_row_major:
+            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        if b_row_major:
+            b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            b = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), n, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.transpose(-2, -1)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+
+        f = F.grouped_mm
+        out = f(a, b.transpose(-2, -1), out_dtype=dtype)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("strided", [False, True])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, dtype):
+        s_int = int(strided)
+        m, n, k, n_groups = 16, 32, 64, 4
+        if a_row_major:
+            a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device, dtype=dtype)[::(1 + s_int), :, :k]
+        else:
+            a = torch.randn(n_groups * (1 + s_int), k * (1 + s_int), m, device=device,
+                            dtype=dtype).transpose(-2, -1)[::(1 + s_int), :, :k]
+        if b_row_major:
+            b = torch.randn(n * n_groups, k * (1 + s_int), device=device, dtype=dtype)[:, :k]
+        else:
+            b = torch.randn(k, n * (n_groups + s_int), device=device, dtype=dtype).transpose(-2, -1)[:n * n_groups, :]
+
+        a.requires_grad_(True)
+        b.requires_grad_(True)
+
+        a_contig = a if a_row_major else a.transpose(-2, -1)
+        self.assertTrue(a_contig.is_contiguous() is not strided)
+        b_contig = b if b_row_major else b.transpose(-2, -1)
+        self.assertTrue(b_contig.is_contiguous() is not strided)
+        for check_zero_size in (False, True):
+            if check_zero_size and n_groups <= 1:
+                continue
+
+            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+
+            f = F.grouped_mm
+            out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
+            gO = torch.rand_like(out)
+            if not check_zero_size:
+                out.backward(gO)
+            offs_cpu = offs.cpu()
+            blist, outlist, bgradlist, gOlist = [], [], [], []
+            agradlist = [None] * n_groups if check_zero_size else a.grad
+            start = 0
+            for i in range(n_groups):
+                blist.append(b[start:offs_cpu[i]])
+                bgradlist.append(b.grad[start:offs_cpu[i]])
+                outlist.append(out[:, start:offs_cpu[i]])
+                gOlist.append(gO[:, start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
+
+
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

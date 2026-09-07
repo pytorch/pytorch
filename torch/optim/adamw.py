@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 from torch import Tensor
 
 from .adam import Adam, adam
@@ -7,10 +5,12 @@ from .optimizer import (
     _capturable_doc,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _fused_doc,
     _maximize_doc,
     _params_doc,
     ParamsT,
+    StateDict,
 )
 
 
@@ -51,7 +51,7 @@ class AdamW(Adam):
     # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
     # guarantees that decoupled_weight_decay will always be True for loading any state into
     # AdamW
-    def __setstate__(self, state):
+    def __setstate__(self, state: StateDict) -> None:
         super().__setstate__(state)
         for group in self.param_groups:
             group["decoupled_weight_decay"] = True
@@ -152,10 +152,6 @@ def adamw(
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs AdamW algorithm computation.
-
-    See :class:`~torch.optim.AdamW` for details.
-    """
     adam(
         params,
         grads,
@@ -179,3 +175,14 @@ def adamw(
         maximize=maximize,
         decoupled_weight_decay=True,
     )
+
+
+adamw.__doc__ = (
+    _functional_api_doc.format(optimizer="AdamW")
+    + r"""
+
+.. note::
+    With ``fused=True``, CUDA supports FP32 parameters and gradients with
+    BF16 moment buffers. See :ref:`functional-adamw-bf16-state` for an example.
+"""
+)

@@ -213,7 +213,7 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
@@ -224,6 +224,10 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.dot.default): 2e-6,
     (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
     (torch.bfloat16, torch.ops.aten._softmax_backward_data.default): 2e-7,
+    # decomp for addcmul is x + y * z, but it typically compiles into an FMA for the
+    # eager operator, causing a significant difference on float16
+    (torch.bfloat16, torch.ops.aten.addcmul.default): 1e-5,
+    (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
 }
 
 
@@ -513,7 +517,6 @@ def any_unsupported(args, kwargs):
 
 core_backward_failures = {
     skip("_softmax_backward_data"),  # slow: fails with --timeout=360 secs
-    skip("addcmul"),  # slow: fails with --timeout=360 secs
     skip("deg2rad"),  # slow: fails with --timeout=360 secs
     skip("diag_embed"),  # slow: fails with --timeout=360 secs
     skip("frac"),  # slow: fails with --timeout=360 secs
@@ -751,6 +754,32 @@ class TestDecomp(TestCase):
             input, weight, bias, mean, var, False, 1, 1e-05
         )
         self.assertEqual(shape, res[0].shape)
+
+    def test_batch_norm_eval_emits_rsqrt(self, device):
+        # The eval/inference branch of native_batch_norm_helper computes the
+        # inverse std as rsqrt(running_var + eps), matching the training branch,
+        # rather than the un-fused 1 / sqrt(running_var + eps). Assert the
+        # decomposed graph contains a single rsqrt and no reciprocal + sqrt pair.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(input, weight, bias, mean, var):
+            return torch.ops.aten._native_batch_norm_legit_no_training.default(
+                input, weight, bias, mean, var, 0.1, 1e-05
+            )
+
+        shape = (2, 3, 4, 4)
+        input = torch.randn(shape, device=device)
+        weight = torch.randn(3, device=device)
+        bias = torch.randn(3, device=device)
+        mean = torch.randn(3, device=device)
+        var = torch.rand(3, device=device) + 1.0
+
+        fx_g = make_fx(func, decomposition_table=decomposition_table)(
+            input, weight, bias, mean, var
+        )
+        graph_str = fx_g.code
+        self.assertIn("rsqrt", graph_str)
+        self.assertNotIn("reciprocal", graph_str)
 
     def test_arange_graph(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx

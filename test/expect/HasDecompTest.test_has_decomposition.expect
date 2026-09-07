@@ -512,10 +512,14 @@ aten::_pdist_backward.out
 aten::_pdist_forward
 aten::_pdist_forward.out
 aten::_philox_key_fold_in
+aten::_philox_key_fold_in.Tensor
 aten::_philox_key_split
 aten::_philox_normal
 aten::_philox_normal.out
 aten::_philox_normal_
+aten::_philox_randint
+aten::_philox_randint.out
+aten::_philox_randint_
 aten::_philox_uniform
 aten::_philox_uniform.out
 aten::_philox_uniform_
@@ -542,6 +546,7 @@ aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_grouped_mm
 aten::_scaled_grouped_mm_v2
+aten::_scaled_grouped_mm_v2.out
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_scaled_mm_v2

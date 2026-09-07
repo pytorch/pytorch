@@ -244,6 +244,25 @@ TEST(TensorIteratorTest, ForEachConstInput) {
   EXPECT_TRUE(out.eq(a).all().item<bool>());
 }
 
+// Channels-last inputs are not plain-contiguous, so compute_fast_setup_type
+// falls through the contiguous check into the channels-last loop and selects
+// CHANNELS_LAST fast setup. Observe this via the channels-last output format.
+TEST(TensorIteratorTest, FastSetupChannelsLast) {
+  auto in1 = at::randn({2, 3, 4, 5}).contiguous(at::MemoryFormat::ChannelsLast);
+  auto in2 = at::randn({2, 3, 4, 5}).contiguous(at::MemoryFormat::ChannelsLast);
+  ASSERT_FALSE(in1.is_contiguous(at::MemoryFormat::Contiguous));
+  ASSERT_TRUE(in1.is_contiguous(at::MemoryFormat::ChannelsLast));
+
+  Tensor out;
+  auto iter = TensorIterator::binary_op(out, in1, in2);
+  at::native::cpu_serial_kernel(
+      iter, [=](float a, float b) -> float { return a + b; });
+
+  EXPECT_TRUE(iter.output(0).is_contiguous(at::MemoryFormat::ChannelsLast));
+  EXPECT_FALSE(iter.output(0).is_contiguous(at::MemoryFormat::Contiguous));
+  EXPECT_TRUE(iter.output(0).equal(in1.add(in2)));
+}
+
 #define MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE(ctype,name)                                             \
 TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                                         \
   auto in1 = random_tensor_for_type(k##name);                                                       \

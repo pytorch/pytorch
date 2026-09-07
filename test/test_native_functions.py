@@ -1,7 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, HardwareClassification
 
 # End-to-end tests of features in native_functions.yaml
 
@@ -17,6 +17,7 @@ class IntListWrapperModule(torch.nn.Module):
 
 
 class TestNativeFunctions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def _lists_with_str(self):
         return [

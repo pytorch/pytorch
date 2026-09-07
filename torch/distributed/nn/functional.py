@@ -81,7 +81,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None`.
+            Receivers must pass ``None``.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -297,7 +297,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank(group=group)
+        ctx.global_rank = dist.get_rank()
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -308,7 +308,7 @@ class _Broadcast(Function):
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         gx = _Reduce.apply(ctx.src, ReduceOp.SUM, ctx.group, grad_output)
-        if ctx.src != ctx.rank:
+        if ctx.src != ctx.global_rank:
             gx.zero_()
         return (None, None, gx)
 
@@ -415,7 +415,7 @@ class _AllGather(Function):
             gx = torch.empty_like(grad_outputs[rank])
             gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
-            # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
+            # As many backends don't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
             tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
             gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)

@@ -35,7 +35,7 @@ class Arguments {
     }
   }
 
-  // Returns a view of pairs consist of the argument index and
+  // Returns a view of pairs consisting of the argument index and
   // the corresponding Value pointer from the graph.
   auto getDynamicArgs() const {
     std::vector<std::pair<size_t, Value*>> ret;

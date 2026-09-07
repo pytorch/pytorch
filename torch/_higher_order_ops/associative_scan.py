@@ -8,9 +8,13 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._higher_order_ops.utils import (
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
+    _move_batch_dims_to_last_for_scan,
+    _VmapCombineFnWrapper,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     create_bw_fn,
@@ -103,7 +107,6 @@ class AssociativeScanOp(HigherOrderOperator):
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import materialize_as_graph
 
         # For associative scan, we need two copies of xs for the combine function
         # The combine function takes two elements and returns one element
@@ -164,24 +167,34 @@ def associative_scan(
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    This operator requires runtime code generation and so requires support for
-    ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
+    With ``combine_mode="pointwise"``, efficient execution requires runtime code
+    generation via ``torch.compile``, and codegen is only supported on backends
+    with scan support (currently CUDA and XPU). On other devices the operator
+    still runs eagerly via the generic fallback.
 
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
-            This function must be pure, i.e., no lifted arguments are supported at the moment,
-            satisfy the associative property and have no side-effects.
+            This function must be pure, satisfy the associative property and have no
+            side-effects. It may close over lifted arguments (e.g. freevars). On the
+            autograd path in eager mode, tensor freevars are permitted as long as they do
+            not require gradients (gradients for lifted arguments are not supported). Under
+            ``torch.compile`` with ``backend="inductor"`` tensor freevars are still rejected
+            outright; only ``int``/``SymInt`` lifted arguments are supported there.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
-            All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
-            If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations
-            and ``xs`` must be CUDA tensors.
+            If ``combine_mode=pointwise``, ``combine_fn`` must be pure and may only contain pointwise
+            operations; under ``torch.compile`` ``xs`` must be on a backend with scan codegen support
+            (CUDA or XPU), otherwise the generic fallback is used.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
+    Returns:
+        A pytree of the same structure and shape as ``xs``. If the scan dimension has size 0,
+        the output mirrors the (empty) input unchanged. The gradient with respect to ``xs``
+        is also empty (size 0 along ``dim``), since there are no elements to differentiate through.
 
     Example::
 
@@ -212,14 +225,6 @@ def associative_scan(
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        privateuse1_backend = torch._C._get_privateuse1_backend_name()
-        if cm == "pointwise" and not all(
-            l.device.type in ("cuda", "xpu", privateuse1_backend) for l in lxs
-        ):
-            raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on "
-                "CUDA, XPU, or a PrivateUse1 backend"
-            )
 
         # Checks for xs
         if len(lxs) == 0:
@@ -231,13 +236,7 @@ def associative_scan(
                 "xs leaves must dense Tensors, consider using `to_dense()`"
             )
         if any(x.ndim <= d for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise ValueError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise ValueError("All xs leaves must have at least 'dim + 1' dimensions")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -498,81 +497,80 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             This creates a recursive data dependency structure where each output yst
             depends on all prior inputs xs0 through xst. The dependency can be visualized as:
 
-    Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
-                        \    /       |      |      |
-                         \  /        |      |      |
-    Level 1:              ys1 ───────┘      |      |
-                           \               /       |
-                            \             /        |
-    Level 2:                 ys2 ────────┘         |
-                              \                   /
-                               \                 /
-    Level 3:                    ys3 ────────────┘
-                                 \
-                                  \
-    Level 4:                        ys4
+        Level 0 (Input):    xs0      xs1      xs2      xs3      xs4
+                              \      /          |        |        |
+                               \    /           |        |        |
+        Level 1:                ys1 ────────────┘        |        |
+                                  \                     /         |
+                                   \                   /          |
+        Level 2:                    ys2 ───────────────┘          |
+                                      \                          /
+                                       \                        /
+        Level 3:                        ys3 ────────────────────┘
+                                          \
+        Level 4:                           ys4
 
 
-    We could get the following backward gradient graph:
+        We could get the following backward gradient graph:
 
 
-    Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                         \      /       |       |       |
-                          \    /        |       |       |
-    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |       |
-                            \                  /        |
-                             \                /         |
-    Level 2:    gl_ys2     ─> g_ys2  ────────┘          |
-                               \                       /
-                                \                    /
-    Level 3:    gl_ys3        ─> g_ys3  ────────────┘
-                                  \
-                                   \
-    Level 4:    gl_ys4           ─> g_ys4,
+        Level 0 (output):   g_xs0    g_xs1    g_xs2    g_xs3    g_xs4
+                              \      /          |        |        |
+                               \    /           |        |        |
+        Level 1:    gl_ys1 ──> g_ys1 ───────────┘        |        |
+                                  \                     /         |
+                                   \                   /          |
+        Level 2:    gl_ys2 ──> g_ys2 ───────────────────┘         |
+                                      \                          /
+                                       \                        /
+        Level 3:    gl_ys3 ──> g_ys3 ────────────────────────────┘
+                                          \
+        Level 4:    gl_ys4 ──> g_ys4
 
-    where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
+        where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
 
-    To calculate the gradients of the inputs, the chain rule suggests:
+        To calculate the gradients of the inputs, the chain rule suggests:
 
-    g_xs0 = g_ys1
-    g_xs1 = g_ys1 * bw(ys0, xs1) = g_ys1 * bwxs01
-    g_xs2 = g_ys2 * bw(ys1, xs2) = g_ys2 * bwxs12
-    g_xs3 = g_ys3 * bw(ys2, xs3) = g_ys3 * bwxs23
-    g_xs4 = g_ys4 * bw(ys3, xs4) = g_ys4 * bwxs34
+        g_xs0 = g_ys1
+        g_xs1 = g_ys1 * bw(ys0, xs1) = g_ys1 * bwxs01
+        g_xs2 = g_ys2 * bw(ys1, xs2) = g_ys2 * bwxs12
+        g_xs3 = g_ys3 * bw(ys2, xs3) = g_ys3 * bwxs23
+        g_xs4 = g_ys4 * bw(ys3, xs4) = g_ys4 * bwxs34
 
-    Notice the bw(...) is just the single step bw (instantaneous gradients), whose formula can be computed from combine_fn.
-    For example bw(ys3, xs4) (also abbreviated with bwxs34) computes the gradients ∂/∂xs4 combine_fn(ys3, xs4).
-    Similarly, bw(ys4, ys3) (also abbreviated with bwys43) computes the gradients ∂/∂ys3 combine_fn(ys3, xs4).
+        Notice the bw(...) is just the single step bw (instantaneous gradients), whose formula can be computed from combine_fn.
+        For example bw(ys3, xs4) (also abbreviated with bwxs34) computes the gradients ∂/∂xs4 combine_fn(ys3, xs4).
+        Similarly, bw(ys4, ys3) (also abbreviated with bwys43) computes the gradients ∂/∂ys3 combine_fn(ys3, xs4).
 
-    Let's break down how to calculate g_ys by recursively substituting the unknowns:
+        Let's break down how to calculate g_ys by recursively substituting the unknowns:
 
-    g_ys1 = gl_ys1 + g_ys2 * bw(ys2, ys1)
-          = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                   + g_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                   + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
+        g_ys1 = gl_ys1 + g_ys2 * bw(ys2, ys1)
+              = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
+              = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
+              = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1)
+                    + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
 
-    Let's do the same for all the g_ys:
-    g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_y4 * bw(ys4, ys3) * bw(ys3, ys2)
-    g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
-    g_ys4 = gl_ys4
+        Let's do the same for all the g_ys:
+        g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2)
+        g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
+        g_ys4 = gl_ys4
 
-    Notice that the above can be re-written as columnwise multiplication of y_mat and gl_ys:
+        Notice that the above can be re-written as a right-to-left associative_scan with flat operator
 
-    g_ys1   1, bwys21, bwys321, bwys4321       gl_ys1
-    g_ys2 = 0,    1  , bwys321, bwys4321   .   gl_ys2
-    g_ys3   0,    0  ,     1  , bwys4321       gl_ys3
-    g_ys4   0,    0  ,     0  ,        1       gl_ys4,
+        def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
+            return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl) # gl_next + bw_next * gl
 
-    where bwys21 is an abbreviation for bw(ys2, ys1),
-    bwys321 is an abbreviation for bw(ys3, ys2) * bw(ys2, ys1) so on and so forth.
+        The recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst) means step t consumes
+        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, 1], where
+        bwys21 abbreviates bw(ys2, ys1) and so on. The final step (g_ys4) has no successor,
+        so bwys_aligned is padded with a single 1. gl_ys is used as-is (no padding):
 
-    We could effectively compute the upper triangular matrix y_mat with:
-    cumprod([1, bwys21, bwys32, bwys43]) then masking out the values as needed.
-    Thus, only [1, bwys21, bwys32, bwys43] are required to compute the y_mat.
+        bwys_aligned = [bwys21, bwys32, bwys43, 1]
+        gl_ys        = [gl_ys1, gl_ys2, gl_ys3, gl_ys4]
 
+        g_ys is recovered by flipping, scanning left-to-right, and flipping back:
+            leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+            result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
+            g_ys = result_rev[1].flip([0])
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -603,56 +601,36 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 bwys = [bw(ys1, ys0), bw(ys2, ys1), ..., bw(ysT, ys{T-1})]
                 bwxs = [bw(ys1, xs0), bw(ys2, xs1), ..., bw(ys{T-1}, xsT)]
 
-        5.) Compute the gradient transition matrix y_mat
+        5.) Compute the gradients using a right-to-left associative scan
 
-            As shown in the example above, each input xst affects all later outputs ysi for i ≥ t.
+            As shown in the example above, each input xst affects all later outputs ysi for i >= t.
             According to the chain rule, each such path contributes a product of local gradients g_ysk.
 
             For example:
-                ∂ysT/∂xst = ∂ysT/∂ys{T-1} * ∂ys{T-1}/∂ys{T-2} * ... * ∂ys{t+1}/∂yst * ∂yst/∂xst
-                        = bw(ysT, ys{T-1}) * bw(ys{T-1}, ys{T-2}) * ... * bw(ys{t+1}, yst) * bw(ys{t-1}, xst)
+                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
 
-            This motivates the use of a cumulative product over bwys to compute all such paths efficiently.
+            This motivates a right-to-left associative scan over bwys and gl_ys.
+            We call the raw associative_scan_op HOP with the flat operator
+            g_ys_combine_fn_flat above, so the backward scan is Triton-lowerable under
+            compiled autograd; in eager it dispatches to generic_associative_scan.
 
-            We now construct the matrix of gradient transition paths:
+            5.1) Align bwys to the recurrence
 
-            5.1 Repeat g_y values to form the base matrix
-                y_mat = [[1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43]]
+                bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
 
-            5.2 Mask the lower triangle (inclusive) with 1s
-                y_mat = [[1, bwys21, bwys32, bwys43],
-                         [1, 1     , bwys32, bwys43],
-                         [1, 1     , 1     , bwys43],
-                         [1, 1     , 1     , 1    ]]
+                Step t consumes bwys[t+1] (the local ys-gradient of the next step), so bwys
+                is shifted one step forward. The final step has no successor, so a single 1
+                is appended as padding; it does not affect the final g_ys. gl_ys is used
+                unchanged.
 
-            5.3 Apply cumulative product row-wise
-                y_mat = cumprod(y_mat, dim=1)
-                Resulting in:
-                y_mat = [[1, bwys21, bwys32 * bwys21, bwys43 * bwys32 * bwys21],
-                         [1, 1      , bwys32         , bwys43 * bwys32         ],
-                         [1, 1      , 1              , bwys43                  ],
-                         [1, 1      , 1              , 1                       ]]
+            5.2) Flip, scan left-to-right, and flip back
 
-            5.4 Zero out the lower triangle (exclusive)
-                Final y_mat:
-                y_mat = [[1, bwys21, bwys32 * bwys21, bwys43 * bwys32 * bwys21],
-                         [0, 1      , bwys32         , bwys43 * bwys32         ],
-                         [0, 0      , 1              , bwys43                  ],
-                         [0, 0      , 0              , 1                       ]]
+                leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+                result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
+                g_ys = result_rev[1].flip([0])
 
-        6.) Scale the y_mat with the upstream gradients gl_ys
-            scaled_y_mat = y_mat * gl_ys
-            Each entry now holds the full contribution of ∂L/∂ysj to ∂L/∂xsi via the path through ysj.
-
-        7.) Reduce the scaled_y_mat with a row-wise sum
-            summed_y_mat = scaled_y_mat.sum(dim=1)
-            This accumulates all downstream contributions for each xst.
-
-        8.) Scale with the instantaneous input gradients bwxs
-            g_xs = summed_y_mat * bwxs
+        6.) Scale with the instantaneous input gradients bwxs
+            g_xs = g_ys * bwxs
 
             This gives the final input gradients:
                 g_xs = [∂L/∂xs0, ∂L/∂xs1, ..., ∂L/∂xsT]
@@ -682,7 +660,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         scan_length = xs[0].shape[0]
         ctx._scan_length = scan_length
 
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -716,7 +694,13 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
-        ndim = outs[0].ndim
+
+        if scan_length == 0:
+            return (
+                *[None] * 3,
+                *[torch.zeros_like(x) for x in xs],
+                *[None] * num_additional_inputs,
+            )
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
@@ -747,8 +731,23 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # vmap joint graph over scan dimension to compute the individual
         # gradients for each time slice ``t`` in parallel.
         # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
+        # Only the per-timestep tensors are mapped over dim 0; additional_inputs are
+        # lifted (not stacked along the scan dim), so they are broadcast via in_dim=None.
+        in_dims = (
+            *([0] * num_xs),
+            *([0] * num_xs),
+            *([None] * num_additional_inputs),
+            *([0] * num_xs),
+        )
+
+        # create_bw_fn returns one grad per primal: 2*num_xs (for ys{t-1} and xs) plus
+        # one per additional_input, appended last. Drop the trailing additional_input grads
+        # as they are not differentiated.
+        def combine_fn_bw_gm_xs(*args):
+            return combine_fn_bw_gm(*args)[: 2 * num_xs]
+
         # pyrefly: ignore [bad-argument-type]
-        mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
+        mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm_xs, in_dims, 0)
 
         # 4.) Compute the single step bw (instantaneous gradients) at every step ``t``
         # Use a ones_like tensor in order not to scale the bwyst and bwxst,
@@ -760,77 +759,55 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
         bwys, bwxs = split_into_chunks(grads, [num_xs, num_xs])
 
-        def compute_y_mat(bwys: torch.Tensor) -> torch.Tensor:
-            # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
-            def compute_helper_tril_mask(diagonal):
-                def expand_masks(mask):
-                    for _ in range(ndim - 1):
-                        mask = mask.unsqueeze(-1)
-                    return mask
+        def compute_gys_associative_scan(
+            gl_ys: torch.Tensor, bwys: torch.Tensor
+        ) -> torch.Tensor:
+            """
+            Computes the gradient g_ys via a right-to-left associative scan:
+            I.e., the gradients are computed from the last time step to the first, following this equation
+                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
+            """
 
-                tril_mask = torch.tril(
-                    torch.ones(
-                        scan_length, scan_length, device=bwys.device, dtype=torch.bool
-                    ),
-                    diagonal=diagonal,
-                )
-                tril_mask = expand_masks(tril_mask)
-                tril_mask = tril_mask.expand(-1, -1, *bwys.shape[1:])
-                return tril_mask
+            # 5.1) Align bwys to the recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst):
+            # step t consumes bwys[t+1], and the last step (t = T-1) has no successor, so
+            # pad with ones.
+            bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
 
-            # The ones mask is used to fill the main diagonal and all elements below it with 1s
-            ones_mask = compute_helper_tril_mask(0)
+            def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
+                return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
 
-            # The zero mask is used to set all elements below the main diagonal to 0
-            zeros_mask = compute_helper_tril_mask(-1)
+            # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
+            # associative_scan_op HOP (not generic_associative_scan) so this scan is
+            # Triton-lowerable under compiled autograd.
+            result_rev = associative_scan_op(
+                g_ys_combine_fn_flat,
+                [bwys_aligned.flip([0]), gl_ys.flip([0])],
+                (),
+            )
+            g_ys = result_rev[1].flip([0])
 
-            # 5.1) Repeat the elements of bwys to form the square matrix
-            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim)
+            return g_ys
 
-            # 5.2) Fill the lower triangular part, including the diagonal,
-            # of the h_mat with 1s. I.e., use the ones_mask to fill with 1s.
-            y_mat.masked_fill_(ones_mask, 1.0)
+        def compute_grad(
+            bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor
+        ) -> torch.Tensor:
+            # The first output ys0 equals xs0, so its instantaneous input gradient is 1.
+            # Build a fresh tensor rather than mutating bwxs in place: for an additive
+            # combine_fn the joint graph can return the same tensor object for both the
+            # ys and xs grads, so bwxs may alias bwys and an in-place fill_ would clobber it.
+            bwxs = torch.cat([torch.ones_like(bwxs[0:1]), bwxs[1:]], 0)
 
-            # 5.3) Compute the cumulative products across dim + 1
-            y_mat = y_mat.cumprod(dim=dim + 1)
+            # 5.) Compute the gradients via an associative_scan
+            g_ys = compute_gys_associative_scan(gl_ys, bwys)
 
-            # 5.4) Replace the elements we filled with 1s before with 0s
-            y_mat.masked_fill_(zeros_mask, 0.0)
-
-            return y_mat
-
-        def compute_grad(bwxs, bwys, gl_ys):
-            # Set the first gradient component of bwxs to 1.0, per definition.
-            torch.select(bwxs, dim, 0).fill_(1.0)
-
-            # 5.) Compute the gradient transition matrix
-            y_mat = compute_y_mat(bwys)
-
-            # 6.) scale the y_mat with the upstream gradients gl_ys
-            scaled_y_mat = y_mat * gl_ys
-
-            # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
-            summed_y_mat = scaled_y_mat.sum(dim + 1)
-
-            # 8.) Scale with the bwxs to obtain the final gradients g_xs
-            g_xs = summed_y_mat * bwxs
+            # 6.) Scale with the instantaneous input gradients bwxs
+            g_xs = g_ys * bwxs
 
             return g_xs
 
-        # Stack all leaves of the gradients along the first dimension.
-        # This is useful as later the gradients of those leaves can be computed in parallel.
-        bwxs_stacked_leaves = torch.stack(bwxs)
-        bwys_stacked_leaves = torch.stack(bwys)
-        gl_ys_stacked_leaves = torch.stack(gl_ys)
-
-        # The compute_grad function is parallelized across all individual leaves of xs
-        # as these gradients can be computed independently from each other
-        # TODO: torch.vmap may create composability issues
-        compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
-
-        g_xs = compute_grad_mapped(
-            bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves
-        )
+        # Compute the gradients of all leaves sequentially
+        # TODO: Use torch.vmap here for parallelization, requires vmap of associative_scan
+        g_xs = [compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(num_xs)]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
@@ -839,17 +816,27 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 @associative_scan_op.py_autograd_impl
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
     num_xs = len(xs)
-    num_additional_inputs = len(additional_inputs)
 
-    if num_additional_inputs > 0:
+    # additional_inputs may interleave Tensors with integer/SymInt constants lifted
+    # by dynamo (e.g. shape SymInts of a dynamic-shaped closed-over tensor, inserted
+    # before the tensor itself). Only Tensor additional_inputs participate in autograd;
+    # gradients for lifted parameters are not supported yet.
+    # NOTE: the isinstance guard below is defensive against such interleaved non-Tensor
+    # entries. It is currently unexercised in CI because every pointwise autograd test
+    # skips compile_dynamic_shape, which is what would produce a lifted SymInt here.
+    if any(a.requires_grad for a in additional_inputs if isinstance(a, torch.Tensor)):
         raise RuntimeError(
             "Associative_scan does currently not support gradients for lifted parameters!"
         )
 
+    # Pass all additional_inputs through in their original order. combine_fn is invoked
+    # purely positionally as operator(*lhs, *rhs, *additional_inputs), so preserving the
+    # interleaved order is required; backward excludes them from the vmap batch dims and
+    # drops their grad slots (see AssociativeScanAutogradOp.backward).
     flat_out = AssociativeScanAutogradOp.apply(
         combine_fn,
         num_xs,
-        num_additional_inputs,
+        len(additional_inputs),
         *(tuple(xs) + tuple(additional_inputs)),
     )
     return (*flat_out,)
@@ -898,6 +885,60 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     return ctx.wrap_tensors(ret)
 
 
+# Note [associative_scan vmap coverage]
+# This batch rule is dispatched only when the associative_scan_op HOP is present
+# under a vmap layer. The frontend builds that HOP for combine_mode="pointwise";
+# combine_mode="generic" is a pure-Python decomposition (generic_associative_scan)
+# that never constructs the HOP, so vmap over a generic scan is handled entirely
+# by the batching rules of the individual aten ops and never reaches this rule.
+# Consequently only the pointwise cases in the vmap tests exercise the code below;
+# the generic cases guard the frontend decomposition instead. This rule is itself
+# device-agnostic, since in eager the HOP dense-decomposes on any device; the
+# CUDA-only parametrization of those tests and the compile-time lowering failure
+# are properties of the lowered pointwise scan, not of this rule.
+@associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def associative_scan_batch_rule(interpreter, combine_fn, xs, additional_inputs):
+    unbatched_args, in_dims = unwrap_batched(
+        (xs, additional_inputs), interpreter.level()
+    )
+    # move to last dim to not interfere with scan's batching
+    unbatched_xs, unbatched_additional_inputs = _move_batch_dims_to_last_for_scan(
+        unbatched_args, in_dims
+    )
+    xs_in_dims, additional_in_dims = in_dims
+    xs_move_dims = _batch_dims_as_last_for_scan(xs_in_dims)
+    additional_move_dims = _batch_dims_as_last_for_scan(additional_in_dims)
+    # combine_fn is called with (lhs xs leaves, rhs xs leaves, additional_inputs),
+    # so the xs batch-dim markers must be duplicated. See generic_associative_scan.
+    after_move_dims = (*xs_move_dims, *xs_move_dims, *additional_move_dims)
+
+    with interpreter.lower():
+        # generic_associative_scan feeds combine_fn outputs back as the left-hand
+        # args on later levels, reusing after_move_dims; that is only valid if the
+        # outputs keep the same batch dims as xs. expected_out_dims makes the wrapper
+        # raise a clear error otherwise instead of silently mismatching downstream.
+        wrapper = _VmapCombineFnWrapper(
+            combine_fn,
+            after_move_dims,
+            interpreter.batch_size(),
+            interpreter.randomness(),
+            expected_out_dims=xs_move_dims,
+            op_name="associative_scan",
+        )
+        unwrapped_out = associative_scan_op(
+            wrapper, unbatched_xs, unbatched_additional_inputs
+        )
+
+    out_dims = wrapper.out_dims
+    if out_dims is None:
+        # Scan was a no-op (scan length < 2): the combine_fn is never called, so
+        # outputs alias xs one-to-one and their batch dims equal the xs batch dims.
+        out_dims = xs_move_dims
+    # wrap_batched matches bdims against the output container; associative_scan_op
+    # returns a list, so pass a tuple to align with the tuple out_dims.
+    return wrap_batched(tuple(unwrapped_out), out_dims, interpreter.level())
+
+
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(xs)
     result_flat: list[Any] = []
@@ -919,8 +960,11 @@ def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
         r_flat, _ = pytree.tree_flatten(r)
         result_flat.append(r_flat)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
-        for leave_ind in range(num_leaves)
-    ]
+    if len(result_flat) == 0:
+        results = list(inp_leaves)
+    else:
+        results = [
+            torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+            for leave_ind in range(num_leaves)
+        ]
     return pytree.tree_unflatten(results, spec)

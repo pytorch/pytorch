@@ -1355,7 +1355,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
                      Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
                      square image :math:`H_{out} \times H_{out}`. :math:`H_{out}` and :math:`W_{out}`
-                     can be either a ``int``, or ``None`` which means the size will be the same as that
+                     can be either an ``int``, or ``None`` which means the size will be the same as that
                      of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
@@ -1398,7 +1398,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
                      Can be a tuple :math:`(D_{out}, H_{out}, W_{out})` or a single
                      :math:`D_{out}` for a cube :math:`D_{out} \times D_{out} \times D_{out}`.
-                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
+                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either an
                      ``int``, or ``None`` which means the size will be the same as that of the input.
 
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1483,7 +1483,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single H for a square image H x H.
-                     H and W can be either a ``int``, or ``None`` which means the size will
+                     H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:
@@ -1523,7 +1523,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
-                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     D, H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:

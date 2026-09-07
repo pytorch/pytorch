@@ -43,12 +43,12 @@ macro(append_wholearchive_lib_if_found)
 endmacro()
 
 include(FindPackageHandleStandardArgs)
+include(CMakeFindDependencyMacro)
 
 if(DEFINED ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
 else()
   # Assume we are in <install-prefix>/share/cmake/Torch/TorchConfig.cmake
-  get_filename_component(CMAKE_CURRENT_LIST_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
   get_filename_component(TORCH_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE)
 endif()
 
@@ -59,7 +59,7 @@ set(TORCH_INCLUDE_DIRS
 
 # Library dependencies.
 if(@BUILD_SHARED_LIBS@)
-  find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
+  find_dependency(Caffe2 PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
   set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
   append_torchlib_if_found(c10)
 else()
@@ -143,7 +143,7 @@ endif()
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 # the statements below changes target properties on
-# - the imported target from Caffe2Targets.cmake in shared library mode (see the find_package above)
+# - the imported target from Caffe2Targets.cmake in shared library mode (see the find_dependency above)
 #    - this is untested whether it is the correct (or desired) methodology in CMake
 # - the imported target created in this file in static library mode
 if(NOT @BUILD_SHARED_LIBS@)
@@ -155,10 +155,25 @@ if(NOT @BUILD_SHARED_LIBS@)
 endif()
 set_target_properties(torch PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
-    CXX_STANDARD 20
 )
+
+# CMake only reports compile features after CXX has been enabled.
+if(CMAKE_CXX_COMPILER_LOADED)
+  # The feature can be absent because CMake does not recognize it or the compiler does not support the standard.
+  if("cxx_std_@CMAKE_CXX_STANDARD@" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    # Compile features specify a minimum and preserve a newer standard selected by the consumer.
+    target_compile_features(torch INTERFACE cxx_std_@CMAKE_CXX_STANDARD@)
+  else()
+    message(STATUS "TorchConfig: The CXX compiler does not report cxx_std_@CMAKE_CXX_STANDARD@ support; forcing C++@CMAKE_CXX_STANDARD@. If the compiler does not support C++@CMAKE_CXX_STANDARD@, compilation will fail.")
+    if(MSVC)
+      set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:/std:c++@CMAKE_CXX_STANDARD@>")
+    else()
+      set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-std=c++@CMAKE_CXX_STANDARD@>")
+    endif()
+  endif()
+endif()
 if(TORCH_CXX_FLAGS)
-  set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
+  set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
 endif()
 
 find_package_handle_standard_args(Torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)

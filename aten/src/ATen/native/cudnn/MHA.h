@@ -3,6 +3,9 @@
 
 namespace at::native {
 
+// Check the pointer and stride alignment cuDNN requires for varlen tensors.
+bool has_aligned_varlen_layout(const Tensor& tensor);
+
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
@@ -38,6 +41,8 @@ void run_cudnn_SDP_fprop_nestedtensor(
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
+    const std::optional<Tensor>& seqused_k,
+    const std::optional<Tensor>& page_table,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,

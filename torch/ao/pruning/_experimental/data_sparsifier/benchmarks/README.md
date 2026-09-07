@@ -44,7 +44,7 @@ The benchmark codes depend on the [DLRM codebase](https://github.com/facebookres
 # This should also dump kaggleAdDisplayChallenge_processed.npz in the path where data is present
 ```
 
-4. Copy the scripts data sparsifier benchmark scripts into to the dlrm directory.
+4. Copy the scripts data sparsifier benchmark scripts into the dlrm directory.
 
 ## Scripts to run each experiment.
 
@@ -92,6 +92,6 @@ GPU: A100
 
 
 ## Future work
-1. **Evaluate memory savings**: The idea is to use torch.sparse tensors to store weights of the embedding bags so that the model memory consumption improves. This will be possible once the embedding bags starts supporting torch.sparse backend.
+1. **Evaluate memory savings**: The idea is to use torch.sparse tensors to store weights of the embedding bags so that the model memory consumption improves. This will be possible once the embedding bags start supporting torch.sparse backend.
 
 2. **Sparsifying activations**: Use activation sparsifier to sparsify the activations of the dlrm model. The idea is to sparsify the features before feeding to the top dense layer (sparsify ```z``` [here](https://github.com/facebookresearch/dlrm/blob/11afc52120c5baaf0bfe418c610bc5cccb9c5777/dlrm_s_pytorch.py#L595)).

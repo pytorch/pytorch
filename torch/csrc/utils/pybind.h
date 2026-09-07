@@ -398,7 +398,7 @@ namespace torch::impl {
 //
 // Attaching the GIL release logic to the holder pointer rather than the
 // actual destructor of T is helpful when T is Python-agnostic and
-// shouldn't refer to the PYthon API.
+// shouldn't refer to the Python API.
 //
 // Note there are limitations to the correctness of code that makes use of this.
 // In particular, if a shared_ptr is constructed from C++ code without this

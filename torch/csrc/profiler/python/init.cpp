@@ -5,11 +5,10 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/cupti/monitor_python.h>
+#include <torch/csrc/profiler/cuspy/cuspy_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -383,13 +382,36 @@ void initPythonBindings(PyObject* module) {
       .value("ITT", ActiveProfilerType::ITT)
       .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
-  py::enum_<ActivityType>(m, "ProfilerActivity")
-      .value("CPU", ActivityType::CPU)
-      .value("XPU", ActivityType::XPU)
-      .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA)
-      .value("HPU", ActivityType::HPU)
-      .value("PrivateUse1", ActivityType::PrivateUse1);
+  py::enum_<ActivityType>(
+      m, "ProfilerActivity", "Device kinds that the profiler supports.")
+      .value("CPU", ActivityType::CPU, "CPU events (operators, runtime, ...).")
+      .value(
+          "XPU",
+          ActivityType::XPU,
+          "Intel XPU device activity. In a fine-grained activity dict "
+          "(``{ProfilerActivity.XPU: [...]}``), names that are not XPU "
+          "activity types are interpreted as Intel XPU hardware metric names "
+          "and enable the per-kernel scope profiler, e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\", \"GpuCoreClocks\"]}``. The "
+          "metric values are attached to each kernel as Perfetto counters. "
+          "Hardware metric collection requires ``ZET_ENABLE_METRICS=1`` and "
+          "access to the GPU performance counters "
+          "(``perf_stream_paranoid``/``observation_paranoid`` set to ``0``). "
+          "Metric names are device-specific and defined by the driver, not by "
+          "PyTorch. Because a dict entry collects exactly what it lists, "
+          "requesting only metrics (e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\"]}``) does not also collect "
+          "the default XPU activities; list the desired activity type names "
+          "alongside the metrics to keep tracing them, e.g. "
+          "``{ProfilerActivity.XPU: [\"CONCURRENT_KERNEL\", \"XPU_RUNTIME\", "
+          "\"GpuTime\"]}``.")
+      .value("MTIA", ActivityType::MTIA, "MTIA device activity.")
+      .value("CUDA", ActivityType::CUDA, "CUDA kernels and runtime.")
+      .value("HPU", ActivityType::HPU, "HPU device activity.")
+      .value(
+          "PrivateUse1",
+          ActivityType::PrivateUse1,
+          "PrivateUse1 backend activity.");
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -418,8 +440,7 @@ void initPythonBindings(PyObject* module) {
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
-          "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
-          "       match the parent python event duration. This feature is new and currently disabled by default.\n"
+          "    adjust_profiler_step (bool) : DEPRECATED and ignored.\n"
           "    disable_external_correlation (bool) : whether to disable external correlation\n"
           "    profile_all_threads (bool) : whether to profile all threads\n"
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
@@ -505,12 +526,15 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
-      // profiler_metrics and profiler_measure_per_kernel are deprecated
-      // no-ops, exposed read-only so the Python layer can detect them and warn.
+      // profiler_metrics, profiler_measure_per_kernel and adjust_profiler_step
+      // are deprecated no-ops, exposed read-only so the Python layer can detect
+      // them and warn.
       .def_readonly("profiler_metrics", &ExperimentalConfig::profiler_metrics)
       .def_readonly(
           "profiler_measure_per_kernel",
           &ExperimentalConfig::profiler_measure_per_kernel)
+      .def_readonly(
+          "adjust_profiler_step", &ExperimentalConfig::adjust_profiler_step)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
@@ -554,15 +578,14 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
-            PyObject* layout_obj =
-                torch::autograd::utils::wrap(metadata.layout_);
-            return py::reinterpret_borrow<py::object>(layout_obj);
+            return py::reinterpret_steal<py::object>(
+                torch::autograd::utils::wrap(metadata.layout_));
           })
       .def_readonly("device", &TensorMetadata::device_)
       .def_property_readonly(
           "dtype",
           [](const TensorMetadata& metadata) {
-            return py::reinterpret_borrow<py::object>(
+            return py::reinterpret_steal<py::object>(
                 torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::size_dim_)
@@ -717,10 +740,8 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  initCuptiMonitorBindings(m);
-  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
-    throw python_error();
-  }
+  initCuspyBindings(m);
+  TORCH_CHECK_PYTHON(PyModule_AddType(m.ptr(), &THPCapturedTracebackType) >= 0);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
@@ -783,17 +804,12 @@ void initPythonBindings(PyObject* module) {
   RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
   RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
 
-  if (PyType_Ready(&RecordFunctionFast_Type) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&RecordFunctionFast_Type) >= 0);
 
-  Py_INCREF(&RecordFunctionFast_Type);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
           m.ptr(),
           "_RecordFunctionFast",
-          (PyObject*)&RecordFunctionFast_Type) != 0) {
-    Py_DECREF(&RecordFunctionFast_Type);
-    throw python_error();
-  }
+          (PyObject*)&RecordFunctionFast_Type) == 0);
 }
 } // namespace torch::profiler

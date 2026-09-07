@@ -142,12 +142,6 @@ def lazy_load_decompositions() -> None:
         if DECOMPOSITIONS_LOADED:
             return
 
-        import os
-
-        if not (os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__):
-            DECOMPOSITIONS_LOADED = True
-            return
-
         # use an alternate way to register an operator into the decomposition table
         # _register_jit_decomposition doesn't work for some operators, e.g. addr,
         #  because the Tensor types generated cannot be unioned by torchscript

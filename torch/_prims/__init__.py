@@ -250,8 +250,8 @@ def TensorMeta(
             raise AssertionError(
                 f"tensorlike must be torch.Tensor, got {type(tensorlike)}"
             )  # mypy
-        inferred_shape = tuple(tensorlike.shape)
-        inferred_strides = tuple(tensorlike.stride())
+        inferred_shape = tensorlike.shape
+        inferred_strides = tensorlike.stride()
         inferred_dtype = tensorlike.dtype
         inferred_device = tensorlike.device
     else:
@@ -382,6 +382,10 @@ def _make_prim(
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
         p.impl_aten = impl_aten
+
+    torch._C._fake_dispatch_register_prim_meta(
+        _prim._schema.name, _prim._schema.overload_name
+    )
 
     return _prim
 

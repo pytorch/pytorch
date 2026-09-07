@@ -46,7 +46,7 @@ Python interpreter, so that this exception can be propagated
 accordingly; however, because the Python API is C-based, what actually
 will happen is it will return control to whatever C++ code called it.
 Similarly, if we raise a C++ exception, prior to returning to the Python
-interpreter, we must set the Python error flags, so it turns into a C++
+interpreter, we must set the Python error flags, so it turns into a Python
 exception.
 
 Moreover, when using the following macros, the generated warnings

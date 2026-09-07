@@ -96,7 +96,7 @@ def avg_pool3d(
     divisor_override=None,
 ):
     r"""
-    Applies 3D average-pooling operation in :math:`kD \ times kH \times kW` regions by step size
+    Applies 3D average-pooling operation in :math:`kD \times kH \times kW` regions by step size
     :math:`sD \times sH \times sW` steps. The number of output features is equal to the number of
     input planes.
 
@@ -209,6 +209,7 @@ def conv1d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(33, 16, 3, dtype=torch.float)
         >>> inputs = torch.randn(20, 16, 50, dtype=torch.float)
@@ -281,6 +282,7 @@ def conv2d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
@@ -357,6 +359,7 @@ def conv3d(
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
+        >>> warnings.filterwarnings("ignore", message=".*quantized tensor creation functions")  # docs: hide
         >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)

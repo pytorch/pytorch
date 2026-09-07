@@ -36,8 +36,8 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
   for (const auto& t : tensors1) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), tensors3.vec(), std::move(vec_res)};
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), tensors3.vec(), std::move(vec_res));
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -68,8 +68,8 @@ void foreach_tensor_lerp_ternary_cuda_(
     return foreach_tensor_ternary_lerp_slow_(tensors1, tensors2, tensors3);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), tensors3.vec()};
+  auto tensor_lists =
+      c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec(), tensors3.vec());
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -103,8 +103,8 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
   for (const auto& t : tensors1) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), std::move(vec_res)};
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), std::move(vec_res));
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -136,8 +136,7 @@ void foreach_tensor_lerp_list_cuda_(
     return foreach_tensor_lerp_list_kernel_slow_(tensors1, tensors2, weight);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -172,8 +171,8 @@ std::vector<at::Tensor> foreach_tensor_lerp_scalarlist_cuda(
   for (const auto& t : tensors1) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), std::move(vec_res)};
+  auto tensor_lists = c10::make_nested<Tensor>(
+      tensors1.vec(), tensors2.vec(), std::move(vec_res));
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -206,8 +205,7 @@ void foreach_tensor_lerp_scalarlist_cuda_(
         tensors1, tensors2, scalars);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors1.vec(), tensors2.vec());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,

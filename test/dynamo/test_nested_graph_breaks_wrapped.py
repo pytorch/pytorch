@@ -116,6 +116,7 @@ xfails = [
     NestedGraphBreaksMiscTests.test_precompile_entries_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_entry_hit_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_precompile_fail_on_recompile_nested_graph_breaks,  # noqa: F821
+    NestedGraphBreaksDecoratorTests.test_compile_staticmethod_caching_precompile_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_deep_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksMiscTests.test_torch_guards_stack_frame_register_inlining_nested_graph_breaks,  # noqa: F821
     # differing op_count

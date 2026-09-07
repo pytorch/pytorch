@@ -43,9 +43,7 @@ void device_lazy_init(at::DeviceType device_type) {
   pybind11::gil_scoped_acquire g;
   std::string module_name = "torch." + at::DeviceTypeName(device_type, true);
   auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
-  if (!module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(module);
 
   if (device_type == at::DeviceType::PrivateUse1) {
     auto has_lazy_init_method =
@@ -57,9 +55,7 @@ void device_lazy_init(at::DeviceType device_type) {
   }
 
   auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
-  if (!res) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(res);
 
   is_initialized[static_cast<int>(device_type)] = true;
 }

@@ -33,6 +33,8 @@ std::string tmppath() {
   // Create temporary file
   auto fd = mkstemp(&tmp[0]);
   if (fd == -1) {
+    // Carries errno as a std::error_code, which TORCH_CHECK cannot express.
+    // @allow-raw-throw: std::system_error carrying errno
     throw std::system_error(errno, std::system_category());
   }
   close(fd);

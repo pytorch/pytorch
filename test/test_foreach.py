@@ -16,10 +16,10 @@ from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
-    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -32,6 +32,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_methods_invocations import (
     foreach_binary_op_db,
+    foreach_op_db,
     foreach_other_op_db,
     foreach_pointwise_op_db,
     foreach_reduce_op_db,
@@ -59,18 +60,20 @@ class RegularFuncWrapper:
     def __init__(self, func):
         self.func = func
 
-    def __call__(self, inputs, scalars=None, **kwargs):
-        if scalars is not None:
+    def __call__(self, inputs, value=None, **kwargs):
+        has_per_input_values = isinstance(value, (list, tuple)) or (
+            torch.is_tensor(value) and value.ndim > 0
+        )
+        if has_per_input_values:
             if len(inputs) != 3:
                 raise AssertionError(f"expected len(inputs) == 3, got {len(inputs)}")
-            # We need to distribute each scalar to the regular func and it needs
-            # special consideration as it is a keyword only argument to the
-            # regular func. (Strangely, it is not a keyword only argument to the
-            # foreach func)
+            # The regular operation accepts one keyword-only value per call.
             return [
-                self.func(*i, value=scalars[idx], **kwargs)
+                self.func(*i, value=value[idx], **kwargs)
                 for idx, i in enumerate(zip(*inputs))
             ]
+        if value is not None:
+            kwargs["value"] = value
         if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
@@ -184,11 +187,7 @@ class TestForeach(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/100811
     @onlyAccelerator
     @ops(
-        foreach_unary_op_db
-        + foreach_binary_op_db
-        + foreach_pointwise_op_db
-        + foreach_reduce_op_db
-        + foreach_other_op_db,
+        foreach_op_db,
         dtypes=(torch.float32,),
     )
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
@@ -212,13 +211,7 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
-    @ops(
-        foreach_unary_op_db
-        + foreach_binary_op_db
-        + foreach_pointwise_op_db
-        + foreach_reduce_op_db
-        + foreach_other_op_db,
-    )
+    @ops(foreach_op_db)
     @parametrize(
         "noncontiguous,inplace",
         [(False, False), (False, True), (True, False), (True, True)],
@@ -242,6 +235,10 @@ class TestForeach(TestCase):
             expect_fastpath = not (
                 noncontiguous or sample.disable_fastpath or div_slowpath
             )
+            # test both tuple and list (contiguous and inplace) inputs
+            foreach_input = (
+                tuple(sample.input) if inplace and noncontiguous else sample.input
+            )
             ref_input, ctxmgr = sample.input, nullcontext()
             if inplace:
                 with torch.no_grad():
@@ -250,7 +247,7 @@ class TestForeach(TestCase):
             try:
                 with ctxmgr:
                     actual = func(
-                        [sample.input, *sample.args],
+                        [foreach_input, *sample.args],
                         self.is_cuda,
                         expect_fastpath,
                         **sample.kwargs,
@@ -259,6 +256,8 @@ class TestForeach(TestCase):
                 with self.assertRaises(type(e)):
                     ref([ref_input, *sample.ref_args], **ref_kwargs)
             else:
+                if inplace:
+                    self.assertIs(actual, foreach_input)
                 expected = ref([ref_input, *sample.ref_args], **ref_kwargs)
                 self.assertEqual(expected, actual)
 
@@ -399,7 +398,10 @@ class TestForeach(TestCase):
             kwargs = sample.kwargs.copy()
             disable_fastpath = sample.disable_fastpath and is_fastpath
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-            scalars = kwargs.pop("scalars", None)
+            value = kwargs.get("value")
+            scalars = value if isinstance(value, (list, tuple)) else None
+            if scalars is not None:
+                kwargs.pop("value")
 
             if is_fastpath and scalars:
                 sample = sample.transform(
@@ -545,7 +547,7 @@ class TestForeach(TestCase):
             self.assertEqual(expected, actual)
         if scalars is not None:
             kwargs = kwargs.copy()
-            kwargs["scalars"] = scalars
+            kwargs["value"] = scalars
             try:
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
             except RuntimeError as e:
@@ -570,14 +572,14 @@ class TestForeach(TestCase):
             [torch.randn([0], device=device, dtype=dtype)],
             [torch.empty_strided((0, 1), (0, 0), dtype=dtype, device=device)],
         ]:
-            res = torch._foreach_add(tensors, 1)
+            res = torch.foreach.add(tensors, 1)
             self.assertEqual(res, tensors)
 
-            torch._foreach_add_(tensors, 1)
+            torch.foreach.add_(tensors, 1)
             self.assertEqual(res, tensors)
 
             # Regression test for https://github.com/pytorch/pytorch/issues/113156
-            torch._foreach_mul_(tensors, 1)
+            torch.foreach.mul_(tensors, 1)
 
     @onlyAccelerator
     @dtypes(torch.float32)
@@ -590,7 +592,7 @@ class TestForeach(TestCase):
         left_inputs = [tensor, strided_tensor]
         right_inputs = [strided_tensor, tensor]
         compare_result = tensor + strided_tensor
-        foreach_add_check_ = ForeachFuncWrapper(torch._foreach_add)
+        foreach_add_check_ = ForeachFuncWrapper(torch.foreach.add)
         out = foreach_add_check_(
             (left_inputs, right_inputs), is_cuda=self.is_cuda, expect_fastpath=True
         )
@@ -686,7 +688,7 @@ class TestForeach(TestCase):
         tensors1 = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
         tensors2 = [torch.ones(11, 11, device=device, dtype=dtype) for _ in range(10)]
 
-        if dtype == torch.bool and foreach_op == torch._foreach_sub:
+        if dtype == torch.bool and foreach_op == torch.foreach.sub:
             for fop in ops_to_test:
                 with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
                     fop(tensors1, tensors2)
@@ -712,7 +714,7 @@ class TestForeach(TestCase):
                 foreach_op([tensor1], [tensor2])
             if (
                 dtype in integral_types_and(torch.bool)
-                and foreach_op == torch._foreach_div
+                and foreach_op == torch.foreach.div
             ):
                 with self.assertRaisesRegex(RuntimeError, "result type"):
                     foreach_op_([tensor1], [tensor2])
@@ -1056,7 +1058,7 @@ class TestForeach(TestCase):
         # Large tensor with positive values
         y = torch.rand(1024, 1024, device=device, dtype=dtype)
 
-        result = torch._foreach_max([x, y])
+        result = torch.foreach.max([x, y])
 
         # Verify x's max is the actual max of x (a negative number)
         expected_x_max = x.max()
@@ -1123,6 +1125,29 @@ class TestForeach(TestCase):
 
             self.assertEqual(expect, actual, equal_nan=True)
 
+    @onlyCUDA
+    @dtypes(torch.complex128)
+    def test_foreach_scalarlist_complex_double_many_tensors(self, device, dtype):
+        # Prevent regressions for complex double MTA chunking, see #189827
+        N = 600
+        scalars = [i + 2.0 for i in range(N)]
+
+        def make_tensors():
+            return [
+                torch.full((1, 1, 1), i + 1, dtype=dtype, device=device)
+                for i in range(N)
+            ]
+
+        # out-of-place: depth 2
+        tensors = make_tensors()
+        expect = [t / s for t, s in zip(tensors, scalars)]
+        self.assertEqual(torch.foreach.div(tensors, scalars), expect)
+
+        # in-place: depth 1
+        tensors = make_tensors()
+        torch.foreach.div_(tensors, scalars)
+        self.assertEqual(tensors, expect)
+
     @onlyAccelerator
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
@@ -1168,7 +1193,7 @@ class TestForeach(TestCase):
             RuntimeError,
             "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
         ):
-            torch._foreach_norm([empty_tensor], ord=math.inf)
+            torch.foreach.norm([empty_tensor], ord=math.inf)
 
         # Test with mixed empty and non-empty tensors
         non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
@@ -1176,13 +1201,13 @@ class TestForeach(TestCase):
             RuntimeError,
             "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
         ):
-            torch._foreach_norm([empty_tensor, non_empty_tensor], ord=math.inf)
+            torch.foreach.norm([empty_tensor, non_empty_tensor], ord=math.inf)
 
         # Test that L1 and L2 norms work with empty tensors (should return 0)
         # Note: This only works for floating types, int/complex may error or go to slow path
         if dtype.is_floating_point:
-            result_l1 = torch._foreach_norm([empty_tensor], ord=1)
-            result_l2 = torch._foreach_norm([empty_tensor], ord=2)
+            result_l1 = torch.foreach.norm([empty_tensor], ord=1)
+            result_l2 = torch.foreach.norm([empty_tensor], ord=2)
             self.assertEqual(result_l1[0].item(), 0.0)
             self.assertEqual(result_l2[0].item(), 0.0)
 
@@ -1198,12 +1223,12 @@ class TestForeach(TestCase):
             "max over zero elements is undefined\\."
         )
         with self.assertRaisesRegex(RuntimeError, err_re):
-            torch._foreach_max([empty_tensor])
+            torch.foreach.max([empty_tensor])
 
         # Test with mixed empty and non-empty tensors
         non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, err_re):
-            torch._foreach_max([empty_tensor, non_empty_tensor])
+            torch.foreach.max([empty_tensor, non_empty_tensor])
 
     @onlyAccelerator
     @ops(
@@ -1374,9 +1399,9 @@ class TestForeach(TestCase):
         scalar_cpu_tensor = torch.tensor(4.0, device="cpu")
 
         # For mul and div, the scalar is allowed to be on CPU too
-        actual = torch._foreach_mul(tensors, scalar_cpu_tensor)
+        actual = torch.foreach.mul(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.mul(scalar_cpu_tensor) for t in tensors])
-        actual = torch._foreach_div(tensors, scalar_cpu_tensor)
+        actual = torch.foreach.div(tensors, scalar_cpu_tensor)
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
     @onlyAccelerator
@@ -1410,7 +1435,7 @@ class TestForeach(TestCase):
                 t1_args, t2_args = tensor1s_0d, tensor2s
 
             # Test foreach_addcmul (commutative - both orderings use fast path)
-            foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
+            foreach_addcmul = ForeachFuncWrapper(torch.foreach.addcmul)
             actual_addcmul = foreach_addcmul(
                 [inputs, t1_args, t2_args],
                 is_cuda=self.is_cuda,
@@ -1425,7 +1450,7 @@ class TestForeach(TestCase):
 
             # Test foreach_addcdiv (non-commutative - only 0D tensor1 uses fast path)
             if not swap_args:
-                foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
+                foreach_addcdiv = ForeachFuncWrapper(torch.foreach.addcdiv)
                 actual_addcdiv = foreach_addcdiv(
                     [inputs, t1_args, t2_args],
                     is_cuda=self.is_cuda,
@@ -1440,7 +1465,7 @@ class TestForeach(TestCase):
 
             # Test inplace variants
             inputs_copy = [t.clone() for t in inputs]
-            foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
+            foreach_addcmul_inplace = ForeachFuncWrapper(torch.foreach.addcmul_)
             foreach_addcmul_inplace(
                 [inputs_copy, t1_args, t2_args],
                 is_cuda=self.is_cuda,
@@ -1451,7 +1476,7 @@ class TestForeach(TestCase):
 
             if not swap_args:
                 inputs_copy = [t.clone() for t in inputs]
-                foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
+                foreach_addcdiv_inplace = ForeachFuncWrapper(torch.foreach.addcdiv_)
                 foreach_addcdiv_inplace(
                     [inputs_copy, t1_args, t2_args],
                     is_cuda=self.is_cuda,
@@ -1466,14 +1491,13 @@ class TestForeach(TestCase):
             torch.div(torch.tensor(0.1, device=device), 10.0)
         )
         actual_m, actual_e = torch.frexp(
-            torch._foreach_div([torch.tensor(0.1, device=device)], [10.0])[0]
+            torch.foreach.div([torch.tensor(0.1, device=device)], [10.0])[0]
         )
         self.assertEqual(expect_m, actual_m)
         self.assertEqual(expect_e, actual_e)
 
     @onlyAccelerator
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
-    @dtypesIfXPU(torch.half, torch.bfloat16)
     def test_addcmul_alpha_one_fma_parity(self, device, dtype):
         # Test that addcmul with alpha=1 produces bitwise identical results
         # to add with alpha=scalar_val (when tensor1 is a 0D tensor with that value).
@@ -1507,7 +1531,7 @@ class TestForeach(TestCase):
             ]
 
             # 2. foreach_addcmul with alpha=1
-            foreach_addcmul_results = torch._foreach_addcmul(
+            foreach_addcmul_results = torch.foreach.addcmul(
                 inputs, tensor1s_0d, tensor2s, value=1.0
             )
 
@@ -1548,7 +1572,7 @@ class TestForeach(TestCase):
             torch.addcmul(inp, t1, t2, value=1.0)
             for inp, t1, t2 in zip(inputs, tensor1s, tensor2s)
         ]
-        foreach_results = torch._foreach_addcmul(inputs, tensor1s, tensor2s, value=1.0)
+        foreach_results = torch.foreach.addcmul(inputs, tensor1s, tensor2s, value=1.0)
 
         self.assertEqual(
             regular_results,
@@ -1564,7 +1588,7 @@ class TestForeach(TestCase):
             make_tensor((2, 2), dtype=torch.float, device=device) for _ in range(2)
         ]
         with self.assertRaisesRegex(RuntimeError, "scalar tensor expected to be on"):
-            torch._foreach_add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
+            torch.foreach.add(tensors, torch.tensor(1.0, device="cpu"), alpha=1.0)
 
         tensors = [
             make_tensor((2, 2), dtype=torch.float, device=d) for d in ("cpu", device)
@@ -1572,11 +1596,11 @@ class TestForeach(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "scalar tensor expected to be 0 dim but"
         ):
-            torch._foreach_mul(tensors, torch.tensor([1.0, 1.0], device=device))
+            torch.foreach.mul(tensors, torch.tensor([1.0, 1.0], device=device))
         with self.assertRaisesRegex(
             RuntimeError, "scalar tensor expected to be 0 dim but"
         ):
-            torch._foreach_add(tensors, torch.tensor([1.0, 1.0], device=device))
+            torch.foreach.add(tensors, torch.tensor([1.0, 1.0], device=device))
 
     @onlyAccelerator
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
@@ -1589,14 +1613,14 @@ class TestForeach(TestCase):
             ):
                 with torch.no_grad():
                     ref_input = [t.detach().clone() for t in sample.input]
-                foreach_copy_(sample.input, sample.args[0], non_blocking)
+                foreach_copy_(sample.input, sample.args[0], non_blocking=non_blocking)
                 for t, s in zip(ref_input, sample.args[0]):
                     copy_(t, s, non_blocking)
                 self.assertEqual(sample.input, ref_input)
                 if torch.accelerator.device_count() > 1:
                     device = torch.device(self.device_type, 1)
                     rhs_tensors = [t.to(device) for t in sample.args[0]]
-                    foreach_copy_(sample.input, rhs_tensors, non_blocking)
+                    foreach_copy_(sample.input, rhs_tensors, non_blocking=non_blocking)
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
@@ -1681,7 +1705,7 @@ class TestForeach(TestCase):
         self_tensor = torch.empty(2**31 + 1, device=device, dtype=torch.float32)
         src_tensor = torch.ones(2**31 + 1, device=device, dtype=torch.bfloat16)
 
-        torch._foreach_copy_([self_tensor], [src_tensor])
+        torch.foreach.copy_([self_tensor], [src_tensor])
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
 
@@ -1695,7 +1719,7 @@ class TestForeach(TestCase):
         copy_ = op.ref_inplace
 
         def fn(self_tensor, src_tensor, non_blocking):
-            return foreach_copy(self_tensor, src_tensor, non_blocking)
+            return foreach_copy(self_tensor, src_tensor, non_blocking=non_blocking)
 
         fn = torch.compile(fn)
         for non_blocking in (False,):
@@ -1721,11 +1745,7 @@ class TestForeach(TestCase):
     # Test reverse-mode & forward-mode AD if supported.
     @onlyAccelerator
     @ops(
-        foreach_unary_op_db
-        + foreach_binary_op_db
-        + foreach_pointwise_op_db
-        + foreach_reduce_op_db
-        + foreach_other_op_db,
+        foreach_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
     )
@@ -1933,6 +1953,195 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
 instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 
 
+class TestForeachPublicAPI(TestCase):
+    @parametrize("op", foreach_op_db, name_fn=lambda op: op.name)
+    @skipIfTorchDynamo("torch.compile does not work with foreach torch function")
+    def test_private_compatibility(self, op):
+        seen = []
+
+        class CaptureMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                seen.append(func)
+                return "handled"
+
+        def clone(t):
+            return t.detach().clone() if torch.is_tensor(t) else t
+
+        def kwargs_for_private(public_name, kwargs):
+            private_kwargs = kwargs.copy()
+            if public_name in ("addcdiv", "addcmul") and "value" in private_kwargs:
+                value = private_kwargs["value"]
+                if isinstance(value, (list, tuple)) or torch.is_tensor(value):
+                    private_kwargs["scalars"] = private_kwargs.pop("value")
+            return private_kwargs
+
+        public_name = op.name.removeprefix("_foreach_")
+        variants = (
+            (
+                public_name,
+                getattr(torch.foreach, public_name, None),
+                getattr(torch, op.name, None),
+            ),
+            (
+                public_name + "_",
+                getattr(torch.foreach, public_name + "_", None),
+                getattr(torch, op.name + "_", None),
+            ),
+        )
+        samples = tuple(
+            op.sample_inputs(
+                "cpu",
+                torch.float32,
+                num_input_tensors=[2],
+                allow_higher_dtype_scalars=True,
+            )
+        )
+        for name, public, private in variants:
+            if public is None or private is None:
+                self.assertIs(public, private)
+                continue
+
+            self.assertEqual(public.__name__, name)
+            self.assertIn(name, torch.foreach.__all__)
+            self.assertEqual(public.__module__, "torch.foreach")
+            self.assertFalse(hasattr(torch, f"foreach_{name}"))
+
+            # test __torch_function__ mode
+            override_sample = samples[0].transform(clone)
+            with CaptureMode():
+                override_result = public(
+                    override_sample.input,
+                    *override_sample.args,
+                    **override_sample.kwargs,
+                )
+            self.assertEqual(override_result, "handled")
+            self.assertIs(seen[-1], public)
+
+            for sample in samples:
+                public_sample = sample.transform(clone)
+                private_sample = sample.transform(clone)
+                private_kwargs = kwargs_for_private(public_name, private_sample.kwargs)
+
+                try:
+                    public_result = public(
+                        public_sample.input,
+                        *public_sample.args,
+                        **public_sample.kwargs,
+                    )
+                except Exception as public_error:
+                    with self.assertRaises(type(public_error)) as private_error:
+                        private(
+                            private_sample.input,
+                            *private_sample.args,
+                            **private_kwargs,
+                        )
+                    self.assertEqual(str(public_error), str(private_error.exception))
+                    continue
+
+                private_result = private(
+                    private_sample.input,
+                    *private_sample.args,
+                    **private_kwargs,
+                )
+                self.assertEqual(public_result, private_result)
+                if public.__name__.endswith("_"):
+                    self.assertIs(public_result, public_sample.input)
+                    self.assertIs(private_result, private_sample.input)
+
+    @parametrize("tensor_base", (False, True))
+    def test_pow_scalar_self_private_compatibility(self, tensor_base):
+        base = torch.tensor(2.0) if tensor_base else 2.0
+        exponents = [torch.tensor(2.0), torch.tensor(3.0)]
+        self.assertEqual(
+            torch.foreach.pow(base, exponents), torch._foreach_pow(base, exponents)
+        )
+
+    @parametrize("name", ("addcmul", "addcdiv"))
+    @parametrize("in_place", (False, True))
+    def test_pointwise_packed_tensor_private_compatibility(self, name, in_place):
+        suffix = "_" if in_place else ""
+        public = getattr(torch.foreach, name + suffix)
+        private = getattr(torch, f"_foreach_{name}{suffix}")
+        public_inputs = [torch.tensor([1.0]), torch.tensor([2.0])]
+        private_inputs = [tensor.clone() for tensor in public_inputs]
+        tensor1 = [torch.tensor([3.0]), torch.tensor([4.0])]
+        tensor2 = [torch.tensor([5.0]), torch.tensor([6.0])]
+        values = torch.tensor([0.5, 1.5])
+
+        public_result = public(public_inputs, tensor1, tensor2, value=values)
+        private_result = private(private_inputs, tensor1, tensor2, values)
+
+        self.assertEqual(public_result, private_result)
+        if in_place:
+            self.assertIs(public_result, public_inputs)
+            # Private compatibility APIs do not return the original list or
+            # tuple under torch.compile + we do not bother fixing them.
+            if not torch.compiler.is_compiling():
+                self.assertIs(private_result, private_inputs)
+
+    def test_invalid_call_precedes_torch_function_override(self):
+        seen = []
+
+        class CaptureMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                seen.append(func)
+                return "handled"
+
+        inputs = [torch.ones(1)]
+        with CaptureMode():
+            with self.assertRaisesRegex(
+                TypeError, r"add\(\) got an unexpected keyword argument 'unexpected'"
+            ):
+                torch.foreach.add(inputs, unexpected=1)
+            with self.assertRaisesRegex(
+                TypeError,
+                r"pow\(\) got some positional-only arguments passed as keyword arguments: 'input, exponent'",
+            ):
+                torch.foreach.pow(input=inputs, exponent=2)
+
+        self.assertEqual(seen, [])
+
+    @parametrize("in_place", (False, True))
+    def test_add_shared_tensor_dispatch_requires_explicit_alpha(self, in_place):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        seen = []
+
+        class CaptureMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                seen.append(func)
+                return func(*args, **(kwargs or {}))
+
+        suffix = "_" if in_place else ""
+        public = getattr(torch.foreach, "add" + suffix)
+        op_packet = getattr(torch.ops.aten, "_foreach_add" + suffix)
+        other = torch.tensor(1.0)
+
+        # no user alpha = Scalar overload
+        inputs = [torch.zeros(1)]
+        with CaptureMode():
+            result = public(inputs, other)
+
+        if in_place:
+            self.assertIs(result, inputs)
+        self.assertEqual(result[0], torch.ones(1))
+        self.assertIs(seen[-1], op_packet.Scalar)
+
+        # yes user alpha = Tensor overload
+        inputs = [torch.zeros(1)]
+        seen.clear()
+        with CaptureMode():
+            result = public(inputs, other, alpha=1.0)
+
+        if in_place:
+            self.assertIs(result, inputs)
+        self.assertEqual(result[0], torch.full((1,), 1.0))
+        self.assertEqual(seen, [op_packet.Tensor])
+
+
+instantiate_parametrized_tests(TestForeachPublicAPI)
+
+
 _FOREACH_MM_SHAPES = [
     # (label, [(M, N, K)] * G)
     ("single_group", [(64, 64, 64)]),
@@ -1952,7 +2161,7 @@ class TestForeachMM(TestCase):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
         ref = [torch.mm(a, b) for a, b in zip(A, B)]
-        out = torch._foreach_mm(A, B)
+        out = torch.foreach.mm(A, B)
         self.assertEqual(len(out), len(ref))
         # Grouped GEMM backends may use different accumulation order than
         # torch.mm, so fp32 needs relaxed tolerances.
@@ -1993,7 +2202,7 @@ class TestForeachMM(TestCase):
         ]
 
         def fn(*tensors):
-            return torch._foreach_mm(list(tensors[:G]), list(tensors[G:]))
+            return torch.foreach.mm(list(tensors[:G]), list(tensors[G:]))
 
         gradcheck(fn, (*A, *B))
 
@@ -2130,7 +2339,7 @@ class TestForeachMM(TestCase):
         with unittest.mock.patch.object(
             impl, "_check_nvmath_cublaslt", return_value=False
         ):
-            out = torch._foreach_mm(A, B)
+            out = torch.foreach.mm(A, B)
         for o, r in zip(out, ref):
             self.assertEqual(o, r)
 
@@ -2161,6 +2370,13 @@ class TestForeachMM(TestCase):
         name_fn=lambda label, shapes: label,
     )
     def test_foreach_mm_nvmath(self, label, shapes):
+        from torch._native.ops.foreach_mm.impl import _check_nvmath_cublaslt
+
+        if not _check_nvmath_cublaslt():
+            self.skipTest(
+                "cuBLASLt grouped GEMM unavailable (nvmath present but "
+                "cublasLtGroupedMatrixLayoutCreate missing)"
+            )
         self._check(shapes, torch.bfloat16, "cuda")
 
 

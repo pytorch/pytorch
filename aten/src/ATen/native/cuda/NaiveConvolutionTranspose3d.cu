@@ -103,6 +103,12 @@ static inline void slow_conv_transpose3d_shape_check(
         "x kernel_depth x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
+    TORCH_CHECK(
+        weight.size(2) == kernel_depth && weight.size(3) == kernel_height &&
+            weight.size(4) == kernel_width,
+        "kernel_size (", kernel_depth, ", ", kernel_height, ", ", kernel_width,
+        ") must match weight spatial dimensions (",
+        weight.size(2), ", ", weight.size(3), ", ", weight.size(4), ")");
     if (bias.defined()) {
       check_dim_size(bias, 1, 0, weight.size(1));
     }
@@ -919,7 +925,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(co
 
   if (grad_bias.defined()) {
     grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
@@ -992,7 +997,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cuda(
 
   if (grad_bias.defined()) {
     grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {

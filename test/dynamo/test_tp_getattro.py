@@ -1,12 +1,19 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for getattro_impl: unified attribute access protocol in Dynamo."""
+"""Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
+
+import inspect
+import types
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton_package
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- getattr() builtin ---
 
     def test_getattr_constant(self):
@@ -239,6 +246,24 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 123)
 
+    def test_udov_non_function_getattr_graph_breaks(self):
+        """Non-function __getattr__ (callable instance) triggers a graph break."""
+
+        class CallableGetattr:
+            def __call__(self, name):
+                return 42
+
+        class MyObj:
+            __getattr__ = CallableGetattr()
+
+        def fn(obj):
+            return obj.dynamic
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnt)(MyObj())
+        self.assertEqual(result, 42)
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_udov_getattribute_override(self):
         class MyObj:
             def __getattribute__(self, name):
@@ -402,7 +427,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, torch.sin(x))
 
-    # --- Descriptor protocol (tp_descr_get through getattro_impl) ---
+    # --- Descriptor protocol (tp_descr_get through tp_getattro_impl) ---
 
     def test_data_descriptor_priority_over_instance_dict(self):
         """Data descriptors (property) take precedence over instance __dict__."""
@@ -547,6 +572,28 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
 
+    def test_nonstandard_c_method_descriptor_graph_break_binding(self):
+        if not has_triton_package():
+            self.skipTest("requires Triton package")
+
+        from triton._C.libtriton import ir
+
+        context = ir.context()
+        ir.load_dialects(context)
+        builder = ir.builder(context)
+        descriptor = inspect.getattr_static(type(builder), "get_loc")
+        if not inspect.ismethoddescriptor(descriptor) or isinstance(
+            descriptor, types.MethodDescriptorType
+        ):
+            self.skipTest("requires a nonstandard C method descriptor")
+        bound_method_type = type(builder.get_loc)
+
+        def fn():
+            builder.get_loc()
+            return isinstance(builder.get_loc, bound_method_type)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
+
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
 
@@ -581,6 +628,64 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 42)
+
+    def test_delattr_exposes_class_attr(self):
+        """Deleting an instance attr exposes the class attr underneath."""
+
+        class MyObj:
+            x = "class"
+
+            def __init__(self):
+                self.x = "instance"
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "class")
+
+    def test_delattr_then_hasattr_false(self):
+        """Deleting the only attr makes hasattr return False."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            del obj.x
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
+
+    def test_dict_replacement_attr_found(self):
+        """Replacing __dict__ wholesale; lookup finds the attr in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"x": 42, "y": 99}
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_dict_replacement_attr_not_found(self):
+        """Replacing __dict__ wholesale; attr not in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"y": 99}
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
 
     # --- UnspecializedNNModule pending mutation ---
 
@@ -655,7 +760,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager")()
 
     def test_range_start_stop_step(self):
-        """RangeVariable.getattro_impl fast path for start/stop/step."""
+        """RangeVariable.tp_getattro_impl fast path for start/stop/step."""
 
         def fn():
             r = range(2, 10, 3)
@@ -849,6 +954,424 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         MyClass.value = 20
         self.assertEqual(fn(x), x + 20)
         self.assertEqual(cnt.frame_count, 2)
+
+    # --- C descriptor type check (descr_check equivalent) ---
+
+    def test_method_descriptor_incompatible_type(self):
+        class Borrower:
+            append = list.append
+
+        def fn(x, obj):
+            obj.append
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_wrapper_descriptor_incompatible_type(self):
+        class Borrower:
+            add = list.__add__
+
+        def fn(x, obj):
+            obj.add
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_member_descriptor_incompatible_type(self):
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            x = Alien.x
+
+        def fn(x, obj):
+            obj.x
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_getset_descriptor_incompatible_type(self):
+        class Borrower:
+            denominator = int.denominator
+
+        def fn(x, obj):
+            obj.denominator
+            return x + 1
+
+        x = torch.randn(4)
+        b = Borrower()
+        with self.assertRaises(TypeError):
+            fn(x, b)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, b)
+
+    def test_method_descriptor_compatible_type(self):
+        def fn(x):
+            l = [1, 2, 3]
+            l.append(4)
+            return x
+
+        x = torch.randn(4)
+        eager = fn(x).sum()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)(x).sum()
+        self.assertEqual(eager, compiled)
+
+    # --- UserFunctionVariable attribute mutation ---
+
+    def test_function_setattr_then_getattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_function_hasattr_after_setattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return hasattr(target, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_function_preexisting_attr(self):
+        def target():
+            return 0
+
+        target.x = 10
+
+        def fn():
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 10)
+
+    def test_function_setattr_persists(self):
+        def target():
+            return 0
+
+        def fn(x):
+            target.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(target.my_attr, 99)
+
+    def test_function_setattr_tensor_value(self):
+        def target():
+            return 0
+
+        def fn(x):
+            target.data = x + 1
+            return target.data
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
+        self.assertEqual(result, torch.tensor(6))
+        self.assertEqual(target.data, torch.tensor(6))
+
+    def test_function_setattr_cross_compilation(self):
+        def target():
+            return 0
+
+        def fn1():
+            target.x = 42
+
+        def fn2():
+            return target.x
+
+        torch.compile(fn1, backend="eager", fullgraph=True)()
+        self.assertEqual(target.x, 42)
+        result = torch.compile(fn2, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_function_overwrite_preexisting_attr(self):
+        def target():
+            return 0
+
+        target.x = 10
+
+        def fn():
+            target.x = 42
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+        self.assertEqual(target.x, 42)
+
+    # --- PythonModuleVariable attribute mutation ---
+
+    def test_module_setattr_then_getattr(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn():
+            mod.x = 42
+            return mod.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_module_hasattr_after_setattr(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn():
+            mod.x = 42
+            return hasattr(mod, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_module_setattr_persists(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn(x):
+            mod.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(mod.my_attr, 99)
+
+    # --- UserDefinedClassVariable attribute mutation ---
+
+    def test_class_setattr_then_getattr(self):
+        class MyClass:
+            pass
+
+        def fn():
+            MyClass.x = 42
+            return MyClass.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_class_hasattr_after_setattr(self):
+        class MyClass:
+            pass
+
+        def fn():
+            MyClass.x = 42
+            return hasattr(MyClass, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_class_setattr_persists(self):
+        class MyClass:
+            pass
+
+        def fn(x):
+            MyClass.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(MyClass.my_attr, 99)
+
+    # --- SkipFunctionVariable attribute mutation ---
+
+    def test_skip_function_setattr_then_getattr(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn():
+            skipped.x = 42
+            return skipped.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_skip_function_setattr_persists(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn(x):
+            skipped.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(skipped.my_attr, 99)
+
+    def test_skip_function_hasattr_after_setattr(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn():
+            skipped.x = 42
+            return hasattr(skipped, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_polyfilled_function_hasattr_after_setattr(self):
+        def my_polyfill(x):
+            return x
+
+        def my_replacement(x):
+            return x
+
+        torch.compiler.substitute_in_graph(my_polyfill)(my_replacement)
+        try:
+
+            def fn():
+                my_polyfill.x = 42
+                return hasattr(my_polyfill, "x")
+
+            result = torch.compile(fn, backend="eager", fullgraph=True)()
+            self.assertTrue(result)
+        finally:
+            if hasattr(my_polyfill, "x"):
+                del my_polyfill.x
+
+    # --- Additional coverage for setattr mutation paths ---
+
+    def test_two_setattrs_on_same_object(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            target.y = 99
+            return target.x + target.y
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 141)
+
+    def test_hasattr_nonexistent_on_opted_in_vt(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return hasattr(target, "nonexistent")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_getattr_with_default_after_setattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return getattr(target, "x", "sentinel")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_polyfilled_function_setattr(self):
+        def my_polyfill(x):
+            return x
+
+        def my_replacement(x):
+            return x
+
+        torch.compiler.substitute_in_graph(my_polyfill)(my_replacement)
+        try:
+
+            def fn(x):
+                my_polyfill._my_attr = "mutated"
+                return x + 1
+
+            x = torch.randn(4)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(my_polyfill._my_attr, "mutated")
+            self.assertEqual(result, x + 1)
+        finally:
+            if hasattr(my_polyfill, "_my_attr"):
+                del my_polyfill._my_attr
+
+    # --- Mutation opt-in guard tests ---
+
+    def test_torch_internal_class_setattr_graph_breaks(self):
+        """setattr on torch-internal classes should graph break."""
+
+        def fn(x):
+            torch.nn.Linear.my_attr = 42
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
+    def test_torch_toplevel_class_setattr_graph_breaks(self):
+        """setattr on classes with __module__=='torch' should graph break."""
+
+        def fn(x):
+            torch.Size.my_attr = 42
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
+    def test_metaclass_setattr_works(self):
+        """setattr on class with custom metaclass __setattr__ works because
+        side-effect replay calls setattr() which goes through the metaclass.
+        """
+
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                super().__setattr__(name, value)
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn(x):
+            MyClass.my_attr = 42
+            return x + 1
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(MyClass.my_attr, 42)
+
+    def test_class_delattr(self):
+        """delattr on a class works (graph breaks at the del, but replays)."""
+
+        class MyClass:
+            pass
+
+        def fn(x):
+            MyClass.y = 42
+            del MyClass.y
+            return x + 1
+
+        result = torch.compile(fn, backend="eager")(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertFalse(hasattr(MyClass, "y"))
 
 
 if __name__ == "__main__":

@@ -603,13 +603,19 @@ class SymPyValueRangeAnalysis:
             return ValueRanges(value_range, value_range)
         return ValueRanges(-int_oo, int_oo)
 
-    @staticmethod
-    def eq(a, b):
+    @classmethod
+    def eq(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if a.is_singleton() and b.is_singleton() and a.lower == b.lower:
             return ValueRanges.wrap(sympy.true)
-        elif a.lower > b.upper or b.lower > a.upper:  # ranges disjoint
+        # sympy booleans do not support ordered comparison (bool >/< raises), so
+        # map them to {0, 1} before the disjoint-range test below.
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
+        if a.lower > b.upper or b.lower > a.upper:  # ranges disjoint
             return ValueRanges.wrap(sympy.false)
         return ValueRanges(sympy.false, sympy.true)
 
@@ -911,10 +917,24 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def minimum(cls, a, b):
+        a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool != b.is_bool:
+            raise AssertionError(
+                "operands must both be boolean ValueRanges or both non-boolean"
+            )
+        if a.is_bool:
+            return cls.and_(a, b)
         return cls.min_or_max(a, b, sympy.Min)
 
     @classmethod
     def maximum(cls, a, b):
+        a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool != b.is_bool:
+            raise AssertionError(
+                "operands must both be boolean ValueRanges or both non-boolean"
+            )
+        if a.is_bool:
+            return cls.or_(a, b)
         return cls.min_or_max(a, b, sympy.Max)
 
     @staticmethod

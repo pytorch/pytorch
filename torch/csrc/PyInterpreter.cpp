@@ -2,7 +2,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
@@ -195,9 +194,7 @@ py::object torchDispatchFromTensorImpl(
     const char* module_name,
     // WARNING: MUST NOT BE TENSOR ARGS
     c10::SmallVector<py::object, 1> extra_args = {}) {
-  if (torch_api_function == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_api_function != nullptr);
   TORCH_CHECK(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
@@ -218,8 +215,7 @@ py::object torchDispatchFromTensorImpl(
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
   int64_t i = 1;
   for (auto& a : extra_args) {
-    if (a.ptr() == nullptr)
-      throw python_error();
+    TORCH_CHECK_PYTHON(a.ptr() != nullptr);
     PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
     i++;
   }
@@ -354,16 +350,13 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   // TODO: if necessary, can optimize to cache the cache lookup
   // TODO: if necessary, can optimize OpOverload to have slots
   auto cache = py::dict(torch_api_function_overload.attr("_dispatch_cache"));
-  if (cache.ptr() == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(cache.ptr() != nullptr);
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
   PyObject* raw_handler = nullptr;
-  if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
-    // There was an error that is not missing key (which would return 0)
-    throw python_error();
-  }
+  // There was an error that is not missing key (which would return 0)
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) >= 0);
   auto handler = py::reinterpret_steal<py::object>(raw_handler);
   if (handler.ptr() == nullptr) {
     // Slow path
@@ -387,9 +380,7 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   py::object obj = py::reinterpret_steal<py::object>(
       PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
-  if (obj.ptr() == nullptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj.ptr() != nullptr);
 
   pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }

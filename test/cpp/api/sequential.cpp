@@ -368,6 +368,47 @@ TEST_F(SequentialTest, IsCloneable) {
   }
 }
 
+TEST_F(SequentialTest, ClonePreservesSubmoduleNames) {
+  // clone() used to push the cloned submodules back unnamed, which renumbers
+  // them 0..N-1 and silently rewrites the state_dict keys. See gh-71069.
+  Sequential sequential(
+      {{"encoder", Linear(4, 3)}, {"act", Functional(torch::relu)}});
+  Sequential clone =
+      std::dynamic_pointer_cast<SequentialImpl>(sequential->clone());
+
+  ASSERT_EQ(
+      sequential->named_children().keys(), clone->named_children().keys());
+  ASSERT_EQ(clone->named_children()[0].key(), "encoder");
+  ASSERT_EQ(clone->named_children()[1].key(), "act");
+
+  // The keys users actually save and load.
+  ASSERT_EQ(
+      clone->named_parameters().keys(), sequential->named_parameters().keys());
+
+  // A submodule pushed without a name keeps the positional name it was given,
+  // rather than being renumbered around the named ones.
+  Sequential mixed({{"first", Linear(4, 3)}});
+  mixed->push_back(Functional(torch::relu));
+  mixed->push_back("last", Linear(3, 2));
+  Sequential mixed_clone =
+      std::dynamic_pointer_cast<SequentialImpl>(mixed->clone());
+  ASSERT_EQ(
+      mixed_clone->named_children().keys(), mixed->named_children().keys());
+  ASSERT_EQ(mixed_clone->named_children()[1].key(), "1");
+
+  // Entirely unnamed containers are unaffected: the auto-assigned names round
+  // trip, including when two submodules share a type.
+  Sequential unnamed(
+      Linear(4, 3),
+      Functional(torch::relu),
+      Linear(3, 2),
+      Functional(torch::relu));
+  Sequential unnamed_clone =
+      std::dynamic_pointer_cast<SequentialImpl>(unnamed->clone());
+  ASSERT_EQ(
+      unnamed_clone->named_children().keys(), unnamed->named_children().keys());
+}
+
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 

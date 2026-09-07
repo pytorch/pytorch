@@ -1,9 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pow.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/UnaryKernel.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -66,6 +68,85 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
   }
 }
 
+// Replacement values are computed per-dtype like the CUDA kernel (posinf and
+// neginf default to the input dtype's max/lowest) and ride at float, which
+// represents half/bfloat extrema exactly. Integral inputs never reach the
+// stub (nan_to_num_out copies them through).
+static void nan_to_num_kernel_mps(TensorIteratorBase& iter,
+                                  std::optional<double> nan,
+                                  std::optional<double> pos_inf,
+                                  std::optional<double> neg_inf) {
+  if (isComplexType(iter.common_dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.common_dtype(), "nan_to_num_mps", [&]() {
+      using value_t = c10::scalar_value_type<scalar_t>::type;
+      NanToNumParams<float> params{static_cast<float>(static_cast<value_t>(nan.value_or(0.))),
+                                   static_cast<float>(pos_inf.has_value() ? static_cast<value_t>(*pos_inf)
+                                                                          : std::numeric_limits<value_t>::max()),
+                                   static_cast<float>(neg_inf.has_value() ? static_cast<value_t>(*neg_inf)
+                                                                          : std::numeric_limits<value_t>::lowest())};
+      lib.exec_unary_kernel_with_params(iter, "nan_to_num", params, "NanToNumParams_float", /*ilp_threshold=*/1u << 18);
+    });
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "nan_to_num_mps", [&]() {
+    NanToNumParams<float> params{static_cast<float>(static_cast<scalar_t>(nan.value_or(0.))),
+                                 static_cast<float>(pos_inf.has_value() ? static_cast<scalar_t>(*pos_inf)
+                                                                        : std::numeric_limits<scalar_t>::max()),
+                                 static_cast<float>(neg_inf.has_value() ? static_cast<scalar_t>(*neg_inf)
+                                                                        : std::numeric_limits<scalar_t>::lowest())};
+    lib.exec_unary_kernel_with_params(iter, "nan_to_num", params, "NanToNumParams_float", /*ilp_threshold=*/1u << 18);
+  });
+}
+
+// frexp writes two outputs, so it cannot use the shared exec_unary_kernel path.
+static void frexp_kernel_mps(TensorIteratorBase& iter) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  // Keep numel within the kernels' uint thread-grid index (both the dense and
+  // strided variants dispatch 1D). Offsets themselves are 64-bit inside the
+  // kernel, so this split is only about grid sizing, not offset width.
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      frexp_kernel_mps(sub_iter);
+    }
+    return;
+  }
+
+  const bool is_dense = iter.is_contiguous();
+  // dtype(0) is the mantissa's, which frexp_out pins to the input's dtype.
+  const auto kernel_name =
+      fmt::format("frexp_{}_{}", is_dense ? "dense" : "strided", mps::scalarToMetalTypeString(iter.dtype(0)));
+  auto pipelineState = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(pipelineState, kernel_name, /*isGraph=*/false, stream);
+
+      [computeEncoder setComputePipelineState:pipelineState];
+      mps::bind_iter_tensors(computeEncoder, iter);
+      if (!is_dense) {
+        // Pass the iterator's byte strides straight through; the kernel indexes
+        // with the shared long-offset primitives. Strides come from the
+        // iterator and not the tensors, since reorder_dimensions() and
+        // coalesce_dimensions() leave iter.shape() in a different order from
+        // the operands' own.
+        mps::mtl_setArgs<3>(computeEncoder,
+                            iter.shape(),
+                            iter.strides(0),
+                            iter.strides(1),
+                            iter.strides(2),
+                            static_cast<uint32_t>(iter.ndim()));
+      }
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
+
+      getMPSProfiler().endProfileKernel(pipelineState, stream);
+    }
+  });
+}
+
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
@@ -97,9 +178,11 @@ REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
+REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);
 REGISTER_DISPATCH(polygamma_stub, polygamma_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, nan_to_num_kernel_mps);
 } // namespace at::native

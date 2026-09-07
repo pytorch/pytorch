@@ -238,7 +238,7 @@ struct PythonResolver : public Resolver {
 
   /**
    * While compiling classes, the class type we're compiling will not be
-   * available in Python, since we haven't fowner_ defining the class yet. So
+   * available in Python, since we haven't finished defining the class yet. So
    * in order to make the class type available to its own methods, we need to
    * explicitly resolve it.
    *
@@ -493,7 +493,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
-    if (!defaults.count(impl_params[i].ident().name())) {
+    if (!defaults.contains(impl_params[i].ident().name())) {
       throw(
           ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
@@ -648,7 +648,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
-      if (visited.count(item.a.internalToPointer())) {
+      if (visited.contains(item.a.internalToPointer())) {
         continue;
       }
       visited.emplace(item.a.internalToPointer());
@@ -1163,7 +1163,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   for (const char* mm_name : magic_method_names) {
-    if (special_magic_methods.count(mm_name)) {
+    if (special_magic_methods.contains(mm_name)) {
       object_class.def(mm_name, special_magic_methods[mm_name]);
     } else {
       object_class.def(
@@ -1256,7 +1256,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             m.save(buf, _extra_files);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def(
@@ -1285,7 +1285,7 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream buf;
             m._save_for_mobile(
                 buf, _extra_files, _save_mobile_debug_info, _use_flatbuffer);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
           py::arg("_save_mobile_debug_info") = false,
@@ -1688,7 +1688,7 @@ void initJitScriptBindings(PyObject* module) {
             module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
-            return py::bytes(buf.str());
+            return py::bytes(std::move(buf).str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
@@ -2183,7 +2183,8 @@ void initJitScriptBindings(PyObject* module) {
         std::ostringstream buffer_output;
         bool success =
             _backport_for_mobile(filename_input, buffer_output, version);
-        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+        return success ? py::bytes(std::move(buffer_output).str())
+                       : py::bytes("");
       });
   m.def(
       "_backport_for_mobile_from_buffer_to_buffer",
@@ -2191,7 +2192,8 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer_input);
         std::ostringstream buffer_output;
         bool success = _backport_for_mobile(in, buffer_output, version);
-        return success ? py::bytes(buffer_output.str()) : py::bytes("");
+        return success ? py::bytes(std::move(buffer_output).str())
+                       : py::bytes("");
       });
   m.def("_get_model_bytecode_version", [](const std::string& filename) {
     return _get_model_bytecode_version(filename);

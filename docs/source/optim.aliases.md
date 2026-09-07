@@ -1,6 +1,10 @@
 # Aliases in torch.optim
 
-The following are aliases to their counterparts in ``torch.optim`` in the nested namespaces in which they are defined. For any of these APIs, feel free to use the top-level version in ``torch.optim`` like ``torch.optim.Adam`` or the nested version ``torch.optim.adam.Adam``.
+Most optimizer classes are available both from ``torch.optim`` and from the
+nested module in which they are defined. For example, ``torch.optim.Adam`` and
+``torch.optim.adam.Adam`` refer to the same class. While some functional optimizer APIs are exposed in their respective nested modules, all functional
+optimizer APIs are available in the {mod}`torch.optim.functional` namespace; see
+{ref}`functional-optimizer-api` for usage guidance.
 
 ```{eval-rst}
 .. automodule:: torch.optim.adadelta

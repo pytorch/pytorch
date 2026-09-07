@@ -59,12 +59,10 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
-#include <ATen/ops/copy.h>
 #include <ATen/ops/linalg__powsum.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
-#include <ATen/ops/minimum.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/pow.h>
 #endif

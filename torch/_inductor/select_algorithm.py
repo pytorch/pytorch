@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import ast
 import contextlib
 import dataclasses
 import functools
@@ -18,6 +17,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -60,6 +60,7 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
+    TensorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -78,7 +79,7 @@ from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties
+from .runtime.hints import DeviceProperties, TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -559,7 +560,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: WorkspaceArg | None = None,
         prologue_loads_all_inputs=False,
         hint_override: int | None = None,
-        triton_meta: dict[str, object] | None = None,
+        triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
@@ -634,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: dict[str, object] | None = triton_meta
+        self.triton_meta: TritonMeta | None = triton_meta
         self._index_dtype_override = index_dtype_override
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: list[ir.ComputedBuffer] | None = subgraphs
@@ -688,9 +689,6 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
-        self._load_input_loop_invariant_code = IndentedBuffer()
-        self._load_input_loop_invariant_index_replacements: dict[str, str] = {}
-        self._load_input_loop_invariant_enabled = False
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -836,9 +834,17 @@ class TritonTemplateKernel(TritonKernel):
         )
         contiguous_index = self.rename_indexing(contiguous_index)
         self.body.writeline(f"{xindex_name} = " + texpr(contiguous_index))
-        self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-            xindex_name
-        )
+        xindex_entry = self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths))
+        old_symbol = xindex_entry.symbol()
+        xindex_entry.set_name(xindex_name)
+        # Re-key only range_tree_nodes: get_block_shape resolves the renamed symbol
+        # via this dict. Unlike the TMA re-key, var_list/var_ranges are left alone --
+        # in the single-dim case old_symbol is the construct_entries-renamed name,
+        # not the auto symbol var_list holds, so a var_list.index() re-key would raise;
+        # the stale entries only cost codegen quality, not correctness.
+        if self.range_tree_nodes.get(old_symbol) is xindex_entry:
+            del self.range_tree_nodes[old_symbol]
+        self.range_tree_nodes[xindex_entry.symbol()] = xindex_entry
         self.template_mask = mask
         self.template_indices = indices
         return contiguous_index
@@ -890,11 +896,12 @@ class TritonTemplateKernel(TritonKernel):
         return 0
 
     def jit_lines(self):
+        """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta: dict[str, Any] = {
+        triton_meta: TritonMeta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=self.index_dtype,
@@ -917,20 +924,62 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        triton_meta_extra = cast(dict[str, Any], triton_meta)
         for k in tlx_only_cuda_options():
             if v := self.meta.get(k, None):
-                triton_meta[k] = v
+                triton_meta_extra[k] = v
 
         if self.triton_meta is None:
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
 
+        # Upgrade signature for host-side TMA: pointer args that the launcher
+        # will replace with TensorDescriptors need tensordesc<> types so Triton
+        # compiles the kernel with the correct arg types.
+        if self.host_tma_descriptor_args:
+            from .codegen.triton_utils import _type_of
+
+            sig = self.triton_meta["signature"]
+            for argname, arg in zip(argdefs, signature):
+                if (
+                    isinstance(arg, TensorArg)
+                    and arg.name in self.host_tma_descriptor_args
+                ):
+                    info = self.host_tma_descriptor_args[arg.name]
+                    block_shape = (
+                        info["block_shape"]
+                        if isinstance(info, dict)
+                        else info.block_shape
+                    )
+                    dtype = V.graph.get_dtype(arg.buffer)
+                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
+                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
+
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        if self.host_tma_descriptor_args:
+            # This meta is repr'd into the generated module, so every value must
+            # be a plain resolved dict. Epilogue accesses register a
+            # TensorDescriptorOptions (whose block shape is still symbolic), which
+            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
+            unsupported = [
+                inner
+                for inner, info in self.host_tma_descriptor_args.items()
+                if not isinstance(info, dict)
+            ]
+            if unsupported:
+                raise NotImplementedError(
+                    "host-side TMA for template epilogue accesses is not supported "
+                    f"(unresolved descriptors: {unsupported})"
+                )
+            inductor_meta["host_tma_descriptor_args"] = dict(
+                self.host_tma_descriptor_args
+            )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -953,12 +1002,14 @@ class TritonTemplateKernel(TritonKernel):
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
 
+        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        triton_meta_extra = cast(dict[str, Any], self.triton_meta)
         for k in tlx_only_cuda_options():
             if v := self.meta.get(k, None):
                 template_args += f"""
                     {k}={v},
                 """
-                self.triton_meta[k] = v
+                triton_meta_extra[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -1094,6 +1145,72 @@ class TritonTemplateKernel(TritonKernel):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
+    def tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int] | None = None,
+    ) -> str:
+        """
+        Hook called from template code to declare a TMA descriptor.
+
+        When HOST_SIDE_TMA is True: registers the input's pointer arg in
+        host_tma_descriptor_args so the launcher replaces it with a
+        TensorDescriptor. Emits an alias so the template can use desc_name.
+
+        When HOST_SIDE_TMA is False: emits device-side descriptor creation
+        using tl.make_tensor_descriptor().
+
+        dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
+            transposes a 2D tensor so the contiguous dim is last. If None,
+            uses natural order [0, 1, ...].
+        """
+        if input_name is not None:
+            node = self.named_input_nodes[input_name]
+        else:
+            node = self.output_node
+
+        size = node.get_size()
+        ndim = len(size)
+        if dim_order is None:
+            dim_order = list(range(ndim))
+
+        if self.meta.get("HOST_SIDE_TMA", False):
+            if input_name is None:
+                raise NotImplementedError(
+                    "host-side TMA descriptors for template outputs are not supported"
+                )
+            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
+            # Read dims off the IR node rather than via self.size()/self.stride():
+            # those wrap the result in tl.full(...) under int64 indexing, which is
+            # kernel-side syntax the host launcher cannot resolve.
+            node_size = node.get_size()
+            node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            desc: dict[str, Any] = {
+                "block_shape": [int(b) for b in block_shape],
+                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
+                "strides": [
+                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
+                ],
+            }
+            prev = self.host_tma_descriptor_args.get(arg_name)
+            if prev is not None and prev != desc:
+                # def_kernel dedupes operands that alias one buffer into a single
+                # kernel arg, but one tensordesc<> arg cannot describe both views.
+                raise NotImplementedError(
+                    f"host-side TMA cannot share arg {arg_name} between two "
+                    "descriptors with different shape/strides"
+                )
+            self.host_tma_descriptor_args[arg_name] = desc
+            return f"{desc_name} = {input_name}"
+
+        base_name = input_name if input_name is not None else "output"
+        stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
+        size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
+        block_str = ", ".join(str(b) for b in block_shape)
+        return f"{desc_name} = tl.make_tensor_descriptor(base={base_name}, shape=[{size_exprs}], strides=[{stride_exprs}], block_shape=[{block_str}])"
+
     def _get_subgraph(self, subgraph_number: int):
         if not isinstance(subgraph_number, int):
             raise AssertionError(
@@ -1211,7 +1328,6 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
-        loop_varying_indices: Sequence[str] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1222,9 +1338,6 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
-            loop_varying_indices (Optional[Sequence[str]]): Template index names
-                that vary across the surrounding template loop.  Used to hoist
-                prologue loads that only depend on loop-invariant indices.
         """
 
         input_node = self.named_input_nodes[input_name]
@@ -1245,7 +1358,6 @@ class TritonTemplateKernel(TritonKernel):
             no_x_dim=False,
         )
         load_code = None
-        original_indices = tuple(indices)
 
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             if not isinstance(indices, (list, tuple)):
@@ -1382,209 +1494,11 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(load_code)
 
                 result = self.body.getvalue()
-                if input_node.get_name() in self.prologue_fused_inputs:
-                    result = self._hoist_loop_invariant_load_input_code(
-                        input_name,
-                        result,
-                        original_indices,
-                        index_shape,
-                        loop_varying_indices,
-                    )
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
 
         return self._register_hook(hook_key, hook)
-
-    def load_input_loop_invariant_code(self, **index_replacements: str):
-        """Hook point for loop-invariant prologue loads.
-
-        ``load_input`` hooks are finalized before this hook, so they can append
-        loads that are safe to compute before the template's inner loop.
-        """
-        if not all(
-            isinstance(name, str) and isinstance(expr, str)
-            for name, expr in index_replacements.items()
-        ):
-            raise AssertionError("index replacements must be string pairs")
-        hook_key = "<LOAD_INPUT_LOOP_INVARIANT>"
-        self._load_input_loop_invariant_enabled = True
-        self._load_input_loop_invariant_index_replacements = {
-            name: f"_loop_invariant_{name}" for name in index_replacements
-        }
-        preamble_lines = tuple(
-            f"{self._load_input_loop_invariant_index_replacements[name]} = {expr}"
-            for name, expr in index_replacements.items()
-        )
-        self._load_input_loop_invariant_code = IndentedBuffer()
-
-        def hook():
-            hoisted_code = self._load_input_loop_invariant_code.getvalue().rstrip()
-            self._load_input_loop_invariant_code = IndentedBuffer()
-            self._load_input_loop_invariant_enabled = False
-            self._load_input_loop_invariant_index_replacements = {}
-            if not hoisted_code:
-                return ""
-            if not preamble_lines:
-                return hoisted_code
-            return "\n".join(preamble_lines) + ("\n" + hoisted_code)
-
-        return self._register_hook(hook_key, hook)
-
-    @staticmethod
-    def _assignment_lhs_and_rhs_names(line: str) -> tuple[str | None, OrderedSet[str]]:
-        # This parser only sees assignment lines emitted by Inductor's own
-        # Triton codegen for prologue subgraphs.  Any line outside that narrow
-        # shape is treated as non-hoistable.
-        try:
-            parsed = ast.parse(line.strip())
-        except SyntaxError:
-            return None, OrderedSet()
-
-        if len(parsed.body) != 1 or not isinstance(parsed.body[0], ast.Assign):
-            return None, OrderedSet()
-
-        node = parsed.body[0]
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            return None, OrderedSet()
-
-        rhs_names = OrderedSet(
-            name.id for name in ast.walk(node.value) if isinstance(name, ast.Name)
-        )
-        return node.targets[0].id, rhs_names
-
-    @staticmethod
-    def _is_generated_prologue_temp(name: str) -> bool:
-        # Keep this in sync with temporary names emitted by prologue pointwise
-        # codegen.  Unknown assigned temps still block hoisting via
-        # assigned_names, but recognizing the common forms keeps this helper
-        # conservative if a temp is referenced without a local assignment.
-        return (
-            re.fullmatch(r"tmp\d+", name) is not None
-            or re.fullmatch(r"_tmp_var\d+", name) is not None
-            or name in {"xindex", "xmask"}
-        )
-
-    @staticmethod
-    def _remove_loop_invariant_broadcast(
-        line: str,
-        invariant_indices: Sequence[str],
-        index_shape: tuple[str] | None,
-        index_replacements: dict[str, str],
-    ) -> str:
-        if not index_shape:
-            return line
-
-        shape_pattern = (
-            r"\[\s*" + r"\s*,\s*".join(re.escape(dim) for dim in index_shape) + r"\s*\]"
-        )
-        for index in invariant_indices:
-            index_pattern = re.escape(index)
-            replacement = index_replacements.get(index, index)
-            line = re.sub(
-                rf"tl\.broadcast_to\(\s*\(?\s*{index_pattern}\s*\)?\s*,\s*{shape_pattern}\s*\)",
-                replacement,
-                line,
-            )
-        return line
-
-    @staticmethod
-    def _rename_code_names(line: str, renames: dict[str, str]) -> str:
-        if not renames:
-            return line
-
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(name) for name in renames) + r")\b"
-        )
-        return pattern.sub(lambda match: renames[match.group(0)], line)
-
-    def _hoist_loop_invariant_load_input_code(
-        self,
-        input_name: str,
-        code: str,
-        indices: Sequence[str],
-        index_shape: tuple[str] | None,
-        loop_varying_indices: Sequence[str] | None,
-    ) -> str:
-        if not (
-            self._load_input_loop_invariant_enabled
-            and loop_varying_indices
-            and code.strip()
-        ):
-            return code
-
-        loop_dependent_names = OrderedSet(["k_idx", "k", *loop_varying_indices])
-        index_names = OrderedSet(index for index in indices if isinstance(index, str))
-        removable_loop_masks = OrderedSet(loop_varying_indices) - index_names
-        invariant_indices = [
-            index
-            for index in indices
-            if isinstance(index, str) and index not in loop_dependent_names
-        ]
-        if not invariant_indices:
-            return code
-
-        lines = code.splitlines()
-        parsed_assignments = [
-            self._assignment_lhs_and_rhs_names(line) for line in lines
-        ]
-        assigned_names = OrderedSet(
-            lhs for lhs, _ in parsed_assignments if lhs is not None
-        )
-        assignment_counts: defaultdict[str, int] = defaultdict(int)
-        for lhs, _ in parsed_assignments:
-            if lhs is not None:
-                assignment_counts[lhs] += 1
-
-        kept_lines: list[str] = []
-        hoisted_lines: list[str] = []
-        renames: dict[str, str] = {}
-
-        for line, (lhs, rhs_names) in zip(lines, parsed_assignments):
-            loop_deps_in_rhs = rhs_names & loop_dependent_names
-            generated_temp_deps = OrderedSet(
-                name for name in rhs_names if self._is_generated_prologue_temp(name)
-            )
-            # Keep this intentionally narrow: only direct tl.load assignments
-            # whose RHS does not mention a symbol assigned in this generated
-            # prologue body are hoisted.  Loads needing an invariant temp stay
-            # in place rather than moving before their dependency.  K-tail
-            # masks are dropped only for otherwise-invariant loads; the data
-            # loads that actually depend on the K index remain masked in-loop.
-            should_hoist = (
-                lhs is not None
-                and assignment_counts[lhs] == 1
-                and "tl.load(" in line
-                and loop_deps_in_rhs <= removable_loop_masks
-                and not (rhs_names & assigned_names)
-                and not generated_temp_deps
-            )
-            if should_hoist:
-                new_lhs = f"_loop_invariant_{input_name}_{lhs}"
-                renames[lhs] = new_lhs
-                hoisted_line = self._remove_loop_invariant_broadcast(
-                    line.strip(),
-                    invariant_indices,
-                    index_shape,
-                    self._load_input_loop_invariant_index_replacements,
-                )
-                hoisted_line = self._rename_code_names(
-                    hoisted_line,
-                    self._load_input_loop_invariant_index_replacements,
-                )
-                hoisted_line = self._rename_code_names(
-                    hoisted_line,
-                    dict.fromkeys(loop_deps_in_rhs, "None"),
-                )
-                hoisted_line = self._rename_code_names(hoisted_line, {lhs: new_lhs})
-                hoisted_lines.append(hoisted_line)
-            else:
-                kept_lines.append(self._rename_code_names(line, renames))
-
-        for line in hoisted_lines:
-            self._load_input_loop_invariant_code.writeline(line)
-
-        return "\n".join(kept_lines)
 
     def _generate_index_from_tma_index(
         self,
@@ -1956,11 +1870,11 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
-                self.load_input_loop_invariant_code,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.tma_descriptor,
                 *self.extra_template_env_fns,
             ]
         }
@@ -2003,10 +1917,10 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
-        Override the default indexing to use our custom mask and force
-        dense indexing.
+        Override the default indexing to use our custom mask and output shape.
         """
         return super().indexing(
             index,
@@ -2018,6 +1932,7 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
 
     def codegen_range_tree(self):
@@ -2787,7 +2702,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: int | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> str | None:
         def layout_key(layout: ir.Layout) -> str:
             if isinstance(layout, ir.FlexibleLayout):
@@ -2825,11 +2740,29 @@ class GeneratedCodeCache:
         ):
             return None
 
+        # def_kernel deduplicates kernel arguments by buffer name, so inputs
+        # with identical layouts can still generate different code depending
+        # on which of them alias the same buffer, e.g. mm(x, x) (one kernel
+        # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
+        #
+        # def_kernel also drops inputs found in V.graph.removed_buffers or in
+        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # only read and written while lowering generates autotune choices, and
+        # both sets are populated only later, during scheduling, whose template
+        # renders (SIMDScheduling.codegen_template via make_kernel_render)
+        # bypass this cache entirely.
+        names = [node.get_name() for node in input_nodes]
+        first_seen: dict[str, int] = {}
+        input_aliasing = tuple(
+            first_seen.setdefault(name, i) for i, name in enumerate(names)
+        )
+
         return repr(
             {
                 "input_nodes": [
                     layout_key(input.get_layout()) for input in input_nodes
                 ],
+                "input_aliasing": input_aliasing,
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "prefix_args": prefix_args,
@@ -2895,7 +2828,12 @@ class TritonTemplate(KernelTemplate):
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
-        if name in self.all_templates:
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.src_hash != self.src_hash:
             raise AssertionError("duplicate template name")
         TritonTemplate.all_templates[name] = self
         self.debug = debug
@@ -2966,7 +2904,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
     ) -> GenerateAndLoadResult | None:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -3187,7 +3125,7 @@ class TritonTemplate(KernelTemplate):
         tma_store: bool = False,
         tma_load_for_template_epilogue: bool = False,
         transpose_discontiguous_tensor_descriptors_override: bool | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -3426,20 +3364,25 @@ class ExternKernelChoice:
 
     def __init__(
         self,
-        kernel,
-        cpp_kernel=None,
+        kernel: Callable[..., Any],
+        cpp_kernel: str | None = None,
         *,
-        name=None,
-        has_out_variant=True,
-        op_overload=None,
-        use_fallback_kernel=False,
-        kernel_creator=None,
+        name: str | None = None,
+        has_out_variant: bool = True,
+        op_overload: torch._ops.OpOverload | None = None,
+        use_fallback_kernel: bool = False,
+        kernel_creator: Callable[..., ir.ExternKernel] | None = None,
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
         if not callable(kernel):
             raise AssertionError("kernel must be callable")
-        if hasattr(extern_kernels, name):
+        # A module that registers an extern kernel can be initialized more than
+        # once in a single process (e.g. a double-import path). Tolerate
+        # re-registration under an existing name as long as it wraps the same
+        # callable, but reject a genuine name collision between different kernels.
+        existing = getattr(extern_kernels, name, None)
+        if existing is not None and existing is not kernel:
             raise AssertionError(f"duplicate extern kernel: {name}")
         self.name = name
         self.cpp_kernel_name = cpp_kernel
@@ -3460,7 +3403,7 @@ class ExternKernelChoice:
     def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
         return cls._registry.get(name)
 
-    def to_callable(self):
+    def to_callable(self) -> Callable[..., Any]:
         return getattr(extern_kernels, self.name)
 
     def call_name(self):
@@ -3657,6 +3600,9 @@ class ExternKernelCaller(ChoiceCaller):
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
+        # Per-op dynamic-dims mask stamped by choices.py to drive TunableOp
+        # wildcard persistence during autotune; only extern (aten) callers use it.
+        self.tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
@@ -3712,6 +3658,14 @@ class ExternKernelCaller(ChoiceCaller):
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        mask = self.tunable_dyn_dims_mask
+        # TunableOp only exists in CUDA/ROCm builds; gate on the output device
+        # so a non-empty mask on a CPU op does not hit a missing _C binding.
+        if mask is not None and any(mask) and out.is_cuda:
+            with torch.cuda.tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self.bmreq.benchmark(*args, out=out)
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -4062,7 +4016,7 @@ def _classify_kernel_operation(
                     "grouped_mm",
                     "scaled_grouped_mm",
                     "mm_plus_mm",
-                    "blackwell_ws_persistent_device_tma",
+                    "blackwell_ws_persistent_tma",
                     "scaled_mm_device_tma_main_loop_scaling",
                 ):
                     return "mm"
@@ -4324,6 +4278,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    if not any(math.isfinite(timing) for timing in results.values()):
+                        raise self.create_no_valid_choices(
+                            name, "All choices failed to benchmark for backend."
+                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -4927,18 +4885,27 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip a choice if it has the same hash as a previously seen choice
         seen_choices: OrderedSet[str] = OrderedSet()
 
-        # Count NVGEMM choices to decide whether subprocess precompile
-        # is worth the IPC overhead (break-even is ~20 NVGEMM choices).
-        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 20
+        # Count NVGEMM choices to decide whether subprocess precompile is worth
+        # the pool-warmup/IPC overhead. Measured break-even is ~8: below ~4
+        # serial wins (~1.4s), from 8 up subprocess wins and the gap grows with
+        # count (e.g. 32 configs: 12.5s vs 22.0s serial). The break-even used to
+        # be ~20 because each worker rebuilt the ~14s kernel manifest; that
+        # overhead is gone now (workers reconstruct the one operator from
+        # metadata), so the threshold drops accordingly.
+        _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD = 8
         nvgemm_count = sum(
             1
             for c in choices
             if NVUniversalGemmCaller is not None
             and isinstance(c, NVUniversalGemmCaller)
         )
+        # Block for pool warmup when there are enough NVGEMM choices to justify
+        # it: the serial fallback (lazy compile at benchmark time) is ~15x
+        # slower, and the non-blocking use_process_pool() check can otherwise
+        # race the pool warmup when little other compilation precedes this point.
         use_nvgemm_subprocess = (
-            async_compile.use_process_pool()
-            and nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            nvgemm_count >= _NVGEMM_SUBPROCESS_PRECOMPILE_THRESHOLD
+            and async_compile.wait_process_pool_ready()
         )
 
         for c in choices:
@@ -4973,18 +4940,34 @@ class AlgorithmSelectorCache(PersistentCache):
                     cuda_ctx = CUDAContextMetadata.from_kernel(
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
-                    future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
-                        variant_name=c.bmreq.variant.name,
-                        accumulator_type=c.bmreq.accumulator_type,
-                        input_tensor_meta=c.bmreq.input_tensor_meta,
-                        output_tensor_meta=c.bmreq.output_tensor_meta,
-                        cuda_ctx=cuda_ctx,
-                        scale_type_a=c.bmreq.scale_type_a,
-                        scale_type_b=c.bmreq.scale_type_b,
-                        swizzle_type_a=c.bmreq.swizzle_type_a,
-                        swizzle_type_b=c.bmreq.swizzle_type_b,
-                    )
+                    try:
+                        future = async_compile.nvgemm_precompile(
+                            kernel_name=c.bmreq.kernel.metadata.operator_name,
+                            variant_name=c.bmreq.variant.name,
+                            accumulator_type=c.bmreq.accumulator_type,
+                            input_tensor_meta=c.bmreq.input_tensor_meta,
+                            output_tensor_meta=c.bmreq.output_tensor_meta,
+                            cuda_ctx=cuda_ctx,
+                            scale_type_a=c.bmreq.scale_type_a,
+                            scale_type_b=c.bmreq.scale_type_b,
+                            swizzle_type_a=c.bmreq.swizzle_type_a,
+                            swizzle_type_b=c.bmreq.swizzle_type_b,
+                            has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            swap_ab=c.bmreq.swap_ab,
+                            metadata=c.bmreq.kernel.metadata,
+                        )
+                    except (BrokenProcessPool, RuntimeError) as e:
+                        # A precompile worker crashed and closed the pool. Stop
+                        # using the subprocess pool and compile the remaining
+                        # choices lazily in-process rather than aborting the
+                        # whole compilation with a closed-pool error.
+                        log.warning(
+                            "NVGEMM subprocess precompile pool unusable (%s); "
+                            "falling back to lazy in-process compile",
+                            e,
+                        )
+                        use_nvgemm_subprocess = False
+                        continue
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
                     )
@@ -5117,8 +5100,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(extern_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[extern_name] = bias
 
             return {
                 **unique_example_inputs,
@@ -5126,7 +5114,11 @@ class AlgorithmSelectorCache(PersistentCache):
             }
 
         extern_choice = next(
-            (choice for choice in choices if cls._is_extern(choice)),
+            (
+                choice
+                for choice in choices
+                if cls._uses_layout_preserving_inputs(choice)
+            ),
             None,
         )
         extern_input_nodes = input_nodes
@@ -5140,7 +5132,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             extern_input_nodes = extern_choice.input_nodes
 
-            if extern_choice.name == "addmm":
+            if cls._is_extern(extern_choice) and extern_choice.name == "addmm":
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())
@@ -5214,7 +5206,8 @@ class AlgorithmSelectorCache(PersistentCache):
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
-        current_out_size = out_base.storage().size()
+        # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
+        current_out_size = out_base.untyped_storage().size() // out_base.element_size()
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
@@ -5255,11 +5248,27 @@ class AlgorithmSelectorCache(PersistentCache):
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    @staticmethod
+    def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
+        """Return whether benchmark inputs must preserve their original layout.
+
+        In-process template benchmarks use these tensors when generated kernels
+        consume runtime layout metadata. Subprocess reconstruction currently
+        preserves sizes and strides, but not nonzero storage offsets.
+        """
+        from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
+
+        return AlgorithmSelectorCache._is_extern(choice) or isinstance(
+            choice, FlyDSLTemplateCaller
+        )
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._uses_layout_preserving_inputs(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
@@ -5353,7 +5362,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._uses_layout_preserving_inputs(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()

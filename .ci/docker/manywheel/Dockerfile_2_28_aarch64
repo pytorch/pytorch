@@ -59,6 +59,15 @@ RUN git config --global --add safe.directory "*"
 COPY ./common/install_cpython.sh install_cpython.sh
 RUN CPYTHON_VERSIONS="3.15.0 3.15.0t" bash ./install_cpython.sh && rm install_cpython.sh
 
+# Install Rust toolchain (needed to build the torch._rust extension when building
+# the Python wheels).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 FROM base as openblas
 # Install openblas
 ARG OPENBLAS_VERSION

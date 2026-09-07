@@ -1,3 +1,5 @@
+import functools
+
 import triton
 import triton.language as tl
 
@@ -7,10 +9,18 @@ from torch._native.instrumentation import instrumented_triton_cache
 from ...triton import ConstTensorWrapper
 
 
-def _bmm_log_key(a, b, out, B, M, N, *strides, BLOCK_M, BLOCK_N) -> str:
+# Pin Triton's current default so the launch and its safety check use the
+# same number of warps.
+_TRITON_DEFAULT_NUM_WARPS = 4
+
+
+def _bmm_log_key(a, b, out, B, M, N, *strides, BLOCK_M, BLOCK_N, num_warps) -> str:
     # Receives the kernel's launch args; BLOCK_M/BLOCK_N are the constexprs
     # that (with shapes/dtype) form the Triton compile key.
-    return f"bmm_outer B={B} M={M} N={N} {a.dtype} BLOCK_M={BLOCK_M} BLOCK_N={BLOCK_N}"
+    return (
+        f"bmm_outer B={B} M={M} N={N} {a.dtype} "
+        f"BLOCK_M={BLOCK_M} BLOCK_N={BLOCK_N} num_warps={num_warps}"
+    )
 
 
 @instrumented_triton_cache("aten::bmm", key_fn=_bmm_log_key)
@@ -74,17 +84,31 @@ def _pick_block_sizes(m: int, n: int) -> tuple[int, int]:
     return block_m, min(triton.next_power_of_2(n), 128)
 
 
+@functools.lru_cache(maxsize=1024)
+def _bmm_outer_product_launch_config(
+    batch: int, m: int, n: int
+) -> tuple[int, int, int]:
+    """Return the 1D grid size and block sizes used to launch the kernel.
+
+    The grid has one entry for every (batch, M tile, N tile). Sharing this
+    calculation with the safety guard keeps the checked and launched grids identical.
+    """
+    block_m, block_n = _pick_block_sizes(m, n)
+    grid_size = batch * triton.cdiv(m, block_m) * triton.cdiv(n, block_n)
+    return grid_size, block_m, block_n
+
+
 def bmm_outer_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     B, M, _ = a.shape
     N = b.shape[2]
 
     out = torch.empty(B, M, N, dtype=a.dtype, device=a.device)
 
-    BLOCK_M, BLOCK_N = _pick_block_sizes(M, N)
+    grid_size, BLOCK_M, BLOCK_N = _bmm_outer_product_launch_config(B, M, N)
 
     # a and b are read-only inputs; wrap them so a copy-on-write tensor is read
     # through const_data_ptr() and not materialized. out is written directly.
-    _bmm_outer_product_kernel[(B * triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)](
+    _bmm_outer_product_kernel[(grid_size,)](
         ConstTensorWrapper(a),
         ConstTensorWrapper(b),
         out,
@@ -100,5 +124,6 @@ def bmm_outer_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         out.stride(2),
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
+        num_warps=_TRITON_DEFAULT_NUM_WARPS,
     )
     return out

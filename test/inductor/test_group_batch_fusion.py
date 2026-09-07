@@ -11,6 +11,8 @@ import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
@@ -280,8 +282,8 @@ class _TestMathOps(torch.nn.Module):
         others = [x.to(self.device) for i in range(10)]
         clamp_input = [x.clamp(min=-1000.1, max=1000.1) for x in inputs]
         clamp_other = [x.clamp(min=-1000.1, max=1000.1) for x in others]
-        nan_to_num_input = [torch.nan_to_num(x, 0.0) for x in clamp_input]
-        nan_to_num_other = [torch.nan_to_num(x, 0.0) for x in clamp_other]
+        nan_to_num_input = [torch.nan_to_num(x, 7.0) for x in clamp_input]
+        nan_to_num_other = [torch.nan_to_num(x, 7.0) for x in clamp_other]
         detach_input = [x.detach() for x in nan_to_num_input]
         detach_other = [x.detach() for x in nan_to_num_other]
         stack_input = torch.stack(detach_input, dim=0)
@@ -381,6 +383,27 @@ class TestGroupBatchFusion(TestCase):
                 4,
             )
             counters.clear()
+
+    @requires_gpu()
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={"group_linear": {"require_fbgemm": False}},
+    )
+    def test_bfx9_skips_group_linear_fusion(self):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        inputs = (torch.randn(10, 10, device=GPU_TYPE),)
+        for has_bias in (False, True):
+            with self.subTest(has_bias=has_bias):
+                counters.clear()
+                module = MyModule(10, has_bias).to(GPU_TYPE)
+                expected = module(*inputs)
+                actual = torch.compile(module)(*inputs)
+                self.assertEqual(actual, expected)
+                self.assertEqual(counters["inductor"]["group_linear"], 0)
 
     @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -760,6 +783,24 @@ class TestGroupBatchFusion(TestCase):
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_positional_args(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(x + i, -1.0, 1.0) for i in range(5)]
+                + [torch.clamp(x + i, 0.0, 2.0) for i in range(5, 10)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 2)
+        counters.clear()
+
     @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -778,14 +819,15 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
-    @unittest.skipUnless(
-        torch.xpu.is_available(),
-        "batch_linear_lhs auto-enable is XPU-only for now",
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
     )
-    def test_xpu_auto_enable_batch_linear_lhs(self):
-        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
-        # contain XPU tensors, driven by the "devices" key in the default
-        # config.pre_grad_fusion_options.
+    def test_xpu_batch_linear_lhs(self):
+        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
+        # config must make the fusion fire on XPU tensors.
         default_options = config.pre_grad_fusion_options
         self.assertIn("batch_linear_lhs", default_options)
         self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
@@ -808,7 +850,7 @@ class TestGroupBatchFusion(TestCase):
             self.assertEqual(
                 orig_fusion_options,
                 dict(config.pre_grad_fusion_options),
-                "config.pre_grad_fusion_options should not be mutated by auto-enable",
+                "config.pre_grad_fusion_options should not be mutated",
             )
             counters.clear()
 
@@ -877,6 +919,51 @@ class TestGroupBatchFusion(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+    def test_batch_linear_lhs_skips_tensor_subclass_weights(self):
+        """batch_linear_lhs match() must return None when weight is a tensor subclass.
+
+        Regression test for incompatibility with torchao W8A8 quantization:
+        fuse() calls torch.cat on the weight example_values, which raises
+        NotImplementedError for subclasses that don't implement aten.cat
+        (e.g. torchao Int8Tensor). The fix guards match() to skip subclasses.
+        See: https://github.com/pytorch/ao/pull/4560
+        """
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        class _SubclassWeight(torch.Tensor):
+            """Minimal subclass that raises on aten.cat to detect the bug."""
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.cat.default:
+                    raise AssertionError(
+                        "aten.cat called on _SubclassWeight — "
+                        "batch_linear_lhs should have been skipped"
+                    )
+                return func(*args, **(kwargs or {}))
+
+        fusion = BatchLinearLHSFusion()
+        z = 4
+
+        # Build a minimal FX graph: F.linear(x, w) with a subclass weight.
+        graph = torch.fx.Graph()
+        x_node = graph.placeholder("x")
+        w_node = graph.placeholder("w")
+        x_node.meta["example_value"] = torch.randn(2, z)
+        w_node.meta["example_value"] = torch.randn(z, z).as_subclass(_SubclassWeight)
+        linear_node = graph.call_function(
+            torch.nn.functional.linear, args=(x_node, w_node)
+        )
+        linear_node.meta["example_value"] = torch.randn(2, z)
+        graph.output(linear_node)
+
+        # match() must return None (skip) for a subclass weight.
+        result = fusion.match(linear_node)
+        self.assertIsNone(
+            result,
+            "batch_linear_lhs should skip (return None) when weight is a tensor subclass",
+        )
 
 
 class _TestBMMFusionModule(torch.nn.Module):

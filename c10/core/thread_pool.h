@@ -7,7 +7,6 @@
 #include <mutex>
 #include <queue>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <c10/macros/Export.h>
@@ -40,20 +39,7 @@ class C10_API TaskThreadPoolBase {
 
 class C10_API ThreadPool : public c10::TaskThreadPoolBase {
  protected:
-  struct task_element_t {
-    bool run_with_id;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const std::function<void()> no_id;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const std::function<void(std::size_t)> with_id;
-
-    explicit task_element_t(std::function<void()> f)
-        : run_with_id(false), no_id(std::move(f)), with_id(nullptr) {}
-    explicit task_element_t(std::function<void(std::size_t)> f)
-        : run_with_id(true), no_id(nullptr), with_id(std::move(f)) {}
-  };
-
-  std::queue<task_element_t> tasks_;
+  std::queue<std::function<void()>> tasks_;
   std::vector<std::thread> threads_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
@@ -82,23 +68,12 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
   void run(std::function<void()> func) override;
 
-  template <typename Task>
-  void runTaskWithID(Task task) {
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    // Set task and signal condition variable so that a worker thread will
-    // wake up and use the task.
-    tasks_.emplace(static_cast<std::function<void(std::size_t)>>(task));
-    complete_ = false;
-    condition_.notify_one();
-  }
-
   /// @brief Wait for queue to be empty
   void waitWorkComplete();
 
  private:
   // @brief Entry point for pool threads.
-  void main_loop(std::size_t index);
+  void main_loop();
 };
 
 class C10_API TaskThreadPool : public c10::ThreadPool {

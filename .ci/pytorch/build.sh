@@ -14,6 +14,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
   export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
+
+  if command -v sccache >/dev/null; then
+    SCCACHE_PATH="$(command -v sccache)"
+    export CMAKE_C_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export HIP_CLANG_LAUNCHER="${SCCACHE_PATH}"
+  fi
 fi
 
 echo "Python version:"
@@ -36,6 +44,15 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
   echo "NVCC version:"
   nvcc --version
+
+  # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+  # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header is
+  # actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so non-13.x
+  # / CPU builds, which have no such header, don't pull it in. Skip it too when LIBCLANG_PATH
+  # already points the codegen at a libclang.so (that env supplies the clang bindings itself).
+  if [ -z "${LIBCLANG_PATH:-}" ] && python -c "import sys; from tools.setup_helpers.cupti import find_cupti_header as f; sys.exit(0 if f() else 1)"; then
+    python -mpip install libclang
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
@@ -106,6 +123,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -171,18 +191,16 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
-# memory to build and will OOM
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  J=2  # default to 2 jobs
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      J=24
-      ;;
-  esac
-  echo "Building FlashAttention with job limit $J"
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  FLASH_ATTENTION_MAX_JOBS=2
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
+  export FLASH_ATTENTION_MAX_JOBS
+  echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
 fi
 
 # TODO: Removeme once all the wrappers are gone
@@ -240,16 +258,11 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUI
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
-
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
@@ -261,11 +274,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       python -mpip install numpy==2.0.2
     fi
 
-    WERROR=1 python setup.py clean
-
     WERROR=1 python -m build --wheel --no-isolation
   else
-    python setup.py clean
     if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
       source .ci/pytorch/install_cache_xla.sh
     fi
@@ -273,13 +283,39 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # native-AOT stage 2: export DSL kernels, relink torch_cuda with them embedded, and
+  # patch the library back into the wheel test jobs get (tools/native_aot/build_stage2.py).
+  #
+  # CUDA-only, as in .ci/manywheel/build.sh: --wheel makes stage 2 refuse a torch that
+  # does not import, and in the ASan and TSan images `import torch` cannot work.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    # Installed HERE, not in .ci/docker/requirements-ci.txt, which every image
+    # shares: that would put ~190 MB of CUDA-only tooling into the CPU/ROCm/XPU images.
+    #
+    # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
+    if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
+      install_cutlass_dsl
+    fi
+    # One wheel expected; a stale second would be glued into one argument. nullglob
+    # so an empty dist/ counts as zero.
+    naot_wheels=()
+    shopt -s nullglob
+    naot_wheels=(dist/*.whl)
+    shopt -u nullglob
+    if [[ ${#naot_wheels[@]} -ne 1 ]]; then
+      echo "native-AOT: expected exactly one wheel in dist/, found ${#naot_wheels[@]}" >&2
+      exit 1
+    fi
+    python tools/native_aot/build_stage2.py --wheel "${naot_wheels[0]}"
+  fi  # BUILD_ENVIRONMENT == *cuda*
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
@@ -339,26 +375,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-    sudo rm -f /opt/cache/bin/cc
-    sudo rm -f /opt/cache/bin/c++
-    sudo rm -f /opt/cache/bin/gcc
-    sudo rm -f /opt/cache/bin/g++
-    # Restore original clang compilers that were backed up during sccache wrapping.
-    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-    if [[ -d /opt/rocm/llvm/bin ]]; then
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
-
     # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
-    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
     build_rocm_ck_wheel dist/
   fi
 

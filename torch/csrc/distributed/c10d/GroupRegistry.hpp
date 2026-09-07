@@ -15,6 +15,8 @@ C10_EXPORT void register_process_group(
 C10_EXPORT c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
     const std::string& group_name);
 
+C10_EXPORT bool is_process_group_registered(const std::string& group_name);
+
 C10_EXPORT void unregister_process_group(const std::string& group_name);
 
 C10_EXPORT void unregister_all_process_groups();

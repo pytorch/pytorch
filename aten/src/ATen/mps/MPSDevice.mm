@@ -7,13 +7,6 @@
 
 namespace at::mps {
 
-static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
-  // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
-  TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
-  return MTLLanguageVersion3_0;
-}
-
 MPSDevice* MPSDevice::getInstance() {
   static MPSDevice mps_device;
   return &mps_device;
@@ -37,9 +30,6 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if ([device isLowPower]) { // exclude Intel GPUs
-      continue;
-    }
     if (![device supportsFamily:MTLGPUFamilyMac2]) {
       // Exclude devices that does not support Metal 2.0
       // Virtualised MPS device on MacOS 12.6 should fail this check
@@ -133,6 +123,11 @@ bool is_apple_family_or_newer(AppleGPUFamily family) {
   // some ops which are on MPSGraph behave differently between GPU families
   auto mtl_family = static_cast<MTLGPUFamily>(family);
   return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
+}
+
+bool has_mpp() {
+  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
 }
 
 } // namespace at::mps

@@ -12,6 +12,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -288,7 +289,7 @@ def _single_tensor_nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,
@@ -369,7 +370,9 @@ def _single_tensor_nadam(
             mu_product_next = _get_value(mu_product) * mu_next
             denom.add_(eps)
             param.addcdiv_(
-                grad, denom, value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product)))
+                grad,
+                denom,
+                value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product))),  # type: ignore[arg-type]
             )
             param.addcdiv_(
                 exp_avg,
@@ -388,7 +391,7 @@ def _multi_tensor_nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,
@@ -587,17 +590,17 @@ def _multi_tensor_nadam(
                 ]
             )
 
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 grouped_params,
                 grouped_grads,
                 exp_avg_sq_sqrt,
-                step_size_grads,  # type: ignore[arg-type]
+                step_size_grads,
             )
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 grouped_params,
                 grouped_exp_avgs,
                 exp_avg_sq_sqrt,
-                step_size_expavg,  # type: ignore[arg-type]
+                step_size_expavg,
             )
 
 
@@ -620,15 +623,11 @@ def nadam(
     *,
     beta1: float,
     beta2: float,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     momentum_decay: float,
     eps: float,
 ) -> None:
-    r"""Functional API that performs NAdam algorithm computation.
-
-    See :class:`~torch.optim.NAdam` for details.
-    """
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -671,3 +670,6 @@ def nadam(
         differentiable=differentiable,
         has_complex=has_complex,
     )
+
+
+nadam.__doc__ = _functional_api_doc.format(optimizer="NAdam")

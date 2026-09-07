@@ -1,11 +1,10 @@
-# mypy: ignore-errors
-
 from __future__ import annotations
 
 import builtins
 import math
 import operator
 from collections.abc import Sequence
+from typing import ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -16,6 +15,30 @@ from ._normalizations import (
     normalizer,
     NotImplementedType,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
+    from typing import ClassVar, Protocol, TypeAlias
+    from typing_extensions import CapsuleType
+
+    from ._normalizations import Scalar
+
+    _ScalarOrNestedList: TypeAlias = Scalar | list["_ScalarOrNestedList"]
+
+    class _SupportsDLPack(Protocol):
+        def __dlpack__(self, *, stream: int | None = None) -> CapsuleType: ...
+        def __dlpack_device__(self) -> tuple[int, int]: ...
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+# NB: `_funcs` and `_ufuncs` populate their module namespaces dynamically (via
+# `vars()[name] = ...` loops), so the type checker cannot see attributes such as
+# `_funcs.reshape` or `_ufuncs.equal`. Accesses of those attributes below carry a
+# `# pyrefly: ignore[missing-attribute]` for this reason.
 
 
 newaxis = None
@@ -48,19 +71,19 @@ SHORTHAND_TO_FLAGS = {
 
 
 class Flags:
-    def __init__(self, flag_to_value: dict):
+    def __init__(self, flag_to_value: dict[str, bool]) -> None:
         invalid_keys = [k for k in flag_to_value if k not in FLAGS]
         if invalid_keys:
             raise AssertionError(f"Invalid flag keys: {invalid_keys}")
         self._flag_to_value = flag_to_value
 
-    def __getattr__(self, attr: str):
+    def __getattr__(self, attr: str) -> bool:
         if attr.islower() and attr.upper() in FLAGS:
             return self[attr.upper()]
         else:
             raise AttributeError(f"No flag attribute '{attr}'")
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> bool:
         if key in SHORTHAND_TO_FLAGS:
             key = SHORTHAND_TO_FLAGS[key]
         if key in FLAGS:
@@ -71,23 +94,23 @@ class Flags:
         else:
             raise KeyError(f"No flag key '{key}'")
 
-    def __setattr__(self, attr, value):
+    def __setattr__(self, attr: str, value: object) -> None:
         if attr.islower() and attr.upper() in FLAGS:
             self[attr.upper()] = value
         else:
             super().__setattr__(attr, value)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: object) -> None:
         if key in FLAGS or key in SHORTHAND_TO_FLAGS:
             raise NotImplementedError("Modifying flags is not implemented")
         else:
             raise KeyError(f"No flag key '{key}'")
 
 
-def create_method(fn, name=None):
+def create_method(fn: Callable[_P, _R], name: str | None = None) -> Callable[_P, _R]:
     name = name or fn.__name__
 
-    def f(*args, **kwargs):
+    def f(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
     f.__name__ = name
@@ -97,7 +120,7 @@ def create_method(fn, name=None):
 
 # Map ndarray.name_method -> np.name_func
 # If name_func == None, it means that name_method == name_func
-methods = {
+methods: dict[str, str | None] = {
     "clip": None,
     "nonzero": None,
     "repeat": None,
@@ -133,7 +156,7 @@ methods = {
     "choose": None,
 }
 
-dunder = {
+dunder: dict[str, str | None] = {
     "abs": "absolute",
     "invert": None,
     "pos": "positive",
@@ -145,7 +168,7 @@ dunder = {
 }
 
 # dunder methods with right-looking and in-place variants
-ri_dunder = {
+ri_dunder: dict[str, str | None] = {
     "add": None,
     "sub": "subtract",
     "mul": "multiply",
@@ -162,7 +185,7 @@ ri_dunder = {
 }
 
 
-def _upcast_int_indices(index):
+def _upcast_int_indices(index: object) -> object:
     if isinstance(index, torch.Tensor):
         if index.dtype in (torch.int8, torch.int16, torch.int32, torch.uint8):
             return index.to(torch.int64)
@@ -171,7 +194,7 @@ def _upcast_int_indices(index):
     return index
 
 
-def _has_advanced_indexing(index):
+def _has_advanced_indexing(index: Iterable[object]) -> bool:
     """Check if there's any advanced indexing"""
     return any(
         isinstance(idx, (Sequence, bool))
@@ -180,7 +203,7 @@ def _has_advanced_indexing(index):
     )
 
 
-def _numpy_compatible_indexing(index):
+def _numpy_compatible_indexing(index: object) -> tuple[object, ...]:
     """Convert scalar indices to lists when advanced indexing is present for NumPy compatibility."""
     if not isinstance(index, tuple):
         index = (index,)
@@ -193,7 +216,7 @@ def _numpy_compatible_indexing(index):
 
     # Convert integer scalar indices to single-element lists when advanced indexing is present
     # Note: Do NOT convert boolean scalars (True/False) as they have special meaning in NumPy
-    converted = []
+    converted: list[object] = []
     for idx in index:
         if isinstance(idx, int) and not isinstance(idx, bool):
             # Integer scalars should be converted to lists
@@ -213,7 +236,7 @@ def _numpy_compatible_indexing(index):
     return tuple(converted)
 
 
-def _get_bool_depth(s):
+def _get_bool_depth(s: object) -> tuple[bool, int]:
     """Returns the depth of a boolean sequence/tensor"""
     if isinstance(s, bool):
         return True, 0
@@ -225,7 +248,13 @@ def _get_bool_depth(s):
     return is_bool, depth + 1
 
 
-def _numpy_empty_ellipsis_patch(index, tensor_ndim):
+def _numpy_empty_ellipsis_patch(
+    index: object, tensor_ndim: int
+) -> tuple[
+    tuple[object, ...],
+    Callable[[ndarray], ndarray],
+    Callable[[object], object],
+]:
     """
     Patch for NumPy-compatible ellipsis behavior when ellipsis doesn't match any dimensions.
 
@@ -278,10 +307,10 @@ def _numpy_empty_ellipsis_patch(index, tensor_ndim):
                 1 for idx in index[ellipsis_pos + 1 :] if isinstance(idx, slice)
             )
 
-            def squeeze_fn(x):
+            def squeeze_fn(x: ndarray) -> ndarray:
                 return x.squeeze(-end_ndims)
 
-            def unsqueeze_fn(x):
+            def unsqueeze_fn(x: object) -> object:
                 if isinstance(x, torch.Tensor) and x.ndim >= end_ndims:
                     return x.unsqueeze(-end_ndims)
                 return x
@@ -294,7 +323,7 @@ def _numpy_empty_ellipsis_patch(index, tensor_ndim):
 # Used to indicate that a parameter is unspecified (as opposed to explicitly
 # `None`)
 class _Unspecified:
-    pass
+    unspecified: ClassVar[_Unspecified]
 
 
 _Unspecified.unspecified = _Unspecified()
@@ -305,16 +334,24 @@ _Unspecified.unspecified = _Unspecified()
 
 
 class ndarray:
-    def __init__(self, t=None):
+    def __init__(self, t: torch.Tensor | None = None) -> None:
         if t is None:
             self.tensor = torch.Tensor()
         elif isinstance(t, torch.Tensor):
             self.tensor = t
         else:
             raise ValueError(
-                "ndarray constructor is not recommended; prefer"
+                "ndarray constructor is not recommended; prefer "
                 "either array(...) or zeros/empty(...)"
             )
+
+    if TYPE_CHECKING:
+        # These methods are created dynamically in the class body below (see the
+        # `methods`/`dunder` loops with vars() assignments). Declare the ones
+        # referenced within this module so the type checker can see them.
+        def ravel(self) -> ndarray: ...
+        def squeeze(self, axis: int | tuple[int, ...] | None = ...) -> ndarray: ...
+        def __invert__(self) -> ndarray: ...
 
     # Register NumPy functions as methods
     for method, name in methods.items():
@@ -322,7 +359,9 @@ class ndarray:
         vars()[method] = create_method(fn, method)
 
     # Regular methods but coming from ufuncs
+    # pyrefly: ignore[missing-attribute]
     conj = create_method(_ufuncs.conjugate, "conj")
+    # pyrefly: ignore[missing-attribute]
     conjugate = create_method(_ufuncs.conjugate)
 
     for method, name in dunder.items():
@@ -347,36 +386,38 @@ class ndarray:
         lambda self, other: _ufuncs.divmod(other, self), "__rdivmod__"
     )
 
-    # prevent loop variables leaking into the ndarray class namespace
-    del ivar, rvar, name, plain, fn, method
+    # prevent loop variables leaking into the ndarray class namespace.
+    # The loop variables are always bound because the dicts above are non-empty
+    # literals; pyrefly cannot prove that after the dict annotations.
+    del ivar, rvar, name, plain, fn, method  # pyrefly: ignore[unbound-name]
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, ...]:
         return tuple(self.tensor.shape)
 
     @property
-    def size(self):
+    def size(self) -> int:
         return self.tensor.numel()
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         return self.tensor.ndim
 
     @property
-    def dtype(self):
+    def dtype(self) -> _dtypes.DType:
         return _dtypes.dtype(self.tensor.dtype)
 
     @property
-    def strides(self):
+    def strides(self) -> tuple[int, ...]:
         elsize = self.tensor.element_size()
         return tuple(stride * elsize for stride in self.tensor.stride())
 
     @property
-    def itemsize(self):
+    def itemsize(self) -> int:
         return self.tensor.element_size()
 
     @property
-    def flags(self):
+    def flags(self) -> Flags:
         # Note contiguous in torch is assumed C-style
         return Flags(
             {
@@ -388,39 +429,46 @@ class ndarray:
         )
 
     @property
-    def data(self):
+    def data(self) -> int:
         return self.tensor.data_ptr()
 
     @property
-    def nbytes(self):
+    def nbytes(self) -> int:
         return self.tensor.storage().nbytes()
 
     @property
-    def T(self):
+    def T(self) -> ndarray:
         return self.transpose()
 
     @property
-    def real(self):
-        return _funcs.real(self)
+    def real(self) -> ndarray:
+        return _funcs.real(self)  # pyrefly: ignore[missing-attribute]
 
     @real.setter
-    def real(self, value):
+    def real(self, value: object) -> None:
         self.tensor.real = asarray(value).tensor
 
     @property
-    def imag(self):
-        return _funcs.imag(self)
+    def imag(self) -> ndarray:
+        return _funcs.imag(self)  # pyrefly: ignore[missing-attribute]
 
     @imag.setter
-    def imag(self, value):
+    def imag(self, value: object) -> None:
         self.tensor.imag = asarray(value).tensor
 
     @property
-    def flat(self):
+    def flat(self) -> ndarray:
         return self.ravel()
 
     # ctors
-    def astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
+    def astype(
+        self,
+        dtype: object,
+        order: str = "K",
+        casting: str = "unsafe",
+        subok: bool = True,
+        copy: bool = True,
+    ) -> ndarray:
         if order != "K":
             raise NotImplementedError(f"astype(..., order={order} is not implemented.")
         if casting != "unsafe":
@@ -436,14 +484,14 @@ class ndarray:
         return ndarray(t)
 
     @normalizer
-    def copy(self: ArrayLike, order: NotImplementedType = "C"):
+    def copy(self: ArrayLike, order: NotImplementedType = "C") -> torch.Tensor:
         return self.clone()
 
     @normalizer
-    def flatten(self: ArrayLike, order: NotImplementedType = "C"):
+    def flatten(self: ArrayLike, order: NotImplementedType = "C") -> torch.Tensor:
         return torch.flatten(self)
 
-    def resize(self, *new_shape, refcheck=False):
+    def resize(self, *new_shape: int | tuple[int, ...], refcheck: bool = False) -> None:
         # NB: differs from np.resize: fills with zeros instead of making repeated copies of input.
         if refcheck:
             raise NotImplementedError(
@@ -453,17 +501,25 @@ class ndarray:
             return
 
         # support both x.resize((2, 2)) and x.resize(2, 2)
-        if len(new_shape) == 1:
-            new_shape = new_shape[0]
-        if isinstance(new_shape, int):
-            new_shape = (new_shape,)
+        if len(new_shape) == 1 and isinstance(new_shape[0], (tuple, list)):
+            shape: tuple[int, ...] = tuple(new_shape[0])
+        else:
+            # varargs form: each dim must be an int (numpy raises TypeError otherwise)
+            dims: list[int] = []
+            for s in new_shape:
+                if not isinstance(s, int):
+                    raise TypeError(
+                        f"'{type(s).__name__}' object cannot be interpreted as an integer"
+                    )
+                dims.append(s)
+            shape = tuple(dims)
 
-        if builtins.any(x < 0 for x in new_shape):
+        if builtins.any(x < 0 for x in shape):
             raise ValueError("all elements of `new_shape` must be non-negative")
 
-        new_numel, old_numel = math.prod(new_shape), self.tensor.numel()
+        new_numel, old_numel = math.prod(shape), self.tensor.numel()
 
-        self.tensor.resize_(new_shape)
+        self.tensor.resize_(shape)
 
         if new_numel >= old_numel:
             # zero-fill new elements
@@ -472,7 +528,11 @@ class ndarray:
             b = self.tensor.flatten()  # does not copy
             b[old_numel:].zero_()
 
-    def view(self, dtype=_Unspecified.unspecified, type=_Unspecified.unspecified):
+    def view(
+        self,
+        dtype: object = _Unspecified.unspecified,
+        type: object = _Unspecified.unspecified,
+    ) -> ndarray:
         if dtype is _Unspecified.unspecified:
             dtype = self.dtype
         if type is not _Unspecified.unspecified:
@@ -482,58 +542,64 @@ class ndarray:
         return ndarray(tview)
 
     @normalizer
-    def fill(self, value: ArrayLike):
-        # Both Pytorch and NumPy accept 0D arrays/tensors and scalars, and
+    def fill(self, value: ArrayLike) -> None:
+        # Both PyTorch and NumPy accept 0D arrays/tensors and scalars, and
         # error out on D > 0 arrays
         self.tensor.fill_(value)
 
-    def tolist(self):
+    def tolist(self) -> _ScalarOrNestedList:
         return self.tensor.tolist()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[ndarray]:
         return (ndarray(x) for x in self.tensor.__iter__())
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             str(self.tensor)
             .replace("tensor", "torch.ndarray")
             .replace("dtype=torch.", "dtype=")
         )
 
-    __repr__ = create_method(__str__)
+    __repr__ = create_method(__str__)  # pyrefly: ignore[bad-override]
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> ndarray:  # pyrefly: ignore[bad-override]
         try:
-            return _ufuncs.equal(self, other)
+            return _ufuncs.equal(self, other)  # pyrefly: ignore[missing-attribute]
         except (RuntimeError, TypeError):
             # Failed to convert other to array: definitely not equal.
+            # torch.full accepts the python `bool` type as `dtype` at runtime;
+            # the stub is too strict.
+            # pyrefly: ignore[no-matching-overload]
             falsy = torch.full(self.shape, fill_value=False, dtype=bool)
             return asarray(falsy)
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> ndarray:  # pyrefly: ignore[bad-override]
         return ~(self == other)
 
-    def __index__(self):
+    def __index__(self) -> int:
         try:
+            # item() may return a float, in which case operator.index raises
+            # TypeError (caught below); this is the intended behavior.
+            # pyrefly: ignore[bad-argument-type]
             return operator.index(self.tensor.item())
         except Exception as exc:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
             ) from exc
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return bool(self.tensor)
 
-    def __int__(self):
+    def __int__(self) -> int:
         return int(self.tensor)
 
-    def __float__(self):
+    def __float__(self) -> float:
         return float(self.tensor)
 
-    def __complex__(self):
+    def __complex__(self) -> complex:
         return complex(self.tensor)
 
-    def is_integer(self):
+    def is_integer(self) -> bool:
         try:
             v = self.tensor.item()
             result = int(v) == v
@@ -541,25 +607,29 @@ class ndarray:
             result = False
         return result
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.tensor.shape[0]
 
-    def __contains__(self, x):
+    def __contains__(self, x: object) -> bool:
         return self.tensor.__contains__(x)
 
-    def transpose(self, *axes):
+    def transpose(self, *axes: int | tuple[int, ...]) -> ndarray:
         # np.transpose(arr, axis=None) but arr.transpose(*axes)
-        return _funcs.transpose(self, axes)
+        return _funcs.transpose(self, axes)  # pyrefly: ignore[missing-attribute]
 
-    def reshape(self, *shape, order="C"):
+    def reshape(self, *shape: int | tuple[int, ...], order: str = "C") -> ndarray:
         # arr.reshape(shape) and arr.reshape(*shape)
+        # pyrefly: ignore[missing-attribute]
         return _funcs.reshape(self, shape, order=order)
 
-    def sort(self, axis=-1, kind=None, order=None):
+    def sort(
+        self, axis: int = -1, kind: str | None = None, order: object = None
+    ) -> None:
         # ndarray.sort works in-place
+        # pyrefly: ignore[missing-attribute]
         _funcs.copyto(self, _funcs.sort(self, axis, kind, order))
 
-    def item(self, *args):
+    def item(self, *args: int) -> Scalar:
         # Mimic NumPy's implementation with three special cases (no arguments,
         # a flat index and a multi-index):
         # https://github.com/numpy/numpy/blob/main/numpy/_core/src/multiarray/methods.c#L702
@@ -567,14 +637,14 @@ class ndarray:
             return self.tensor.item()
         elif len(args) == 1:
             # int argument
-            return self.ravel()[args[0]]
+            return self.ravel()[args[0]].tensor.item()
         else:
-            return self.__getitem__(args)
+            return self.__getitem__(args).tensor.item()
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: object) -> ndarray:
         tensor = self.tensor
 
-        def neg_step(i, s):
+        def neg_step(i: int, s: object) -> object:
             if not (isinstance(s, slice) and s.step is not None and s.step < 0):
                 return s
 
@@ -596,6 +666,9 @@ class ndarray:
             return slice(start, stop, -s.step)
 
         if isinstance(index, Sequence):
+            # type(index) is a concrete list/tuple at runtime; pyrefly only sees
+            # the abstract Sequence base.
+            # pyrefly: ignore[bad-instantiation, bad-argument-count]
             index = type(index)(neg_step(i, s) for i, s in enumerate(index))
         else:
             index = neg_step(0, index)
@@ -605,9 +678,11 @@ class ndarray:
         index = _numpy_compatible_indexing(index)
         # Apply NumPy-compatible empty ellipsis behavior
         index, maybe_squeeze, _ = _numpy_empty_ellipsis_patch(index, tensor.ndim)
+        # index is an arbitrary normalized numpy-style index object.
+        # pyrefly: ignore[bad-argument-type]
         return maybe_squeeze(ndarray(tensor.__getitem__(index)))
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index: object, value: object) -> None:
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
         # Apply NumPy-compatible indexing conversion
@@ -619,21 +694,23 @@ class ndarray:
             value = normalize_array_like(value)
             value = _util.cast_if_needed(value, self.tensor.dtype)
 
+        # index/value are arbitrary normalized numpy-style objects.
+        # pyrefly: ignore[bad-argument-type]
         return self.tensor.__setitem__(index, maybe_unsqueeze(value))
 
-    take = _funcs.take
-    put = _funcs.put
+    take = _funcs.take  # pyrefly: ignore[missing-attribute]
+    put = _funcs.put  # pyrefly: ignore[missing-attribute]
 
-    def __dlpack__(self, *, stream=None):
+    def __dlpack__(self, *, stream: int | None = None) -> CapsuleType:
         return self.tensor.__dlpack__(stream=stream)
 
-    def __dlpack_device__(self):
+    def __dlpack_device__(self) -> tuple[int, int]:
         return self.tensor.__dlpack_device__()
 
 
-def _tolist(obj):
+def _tolist(obj: Iterable[object]) -> list[object]:
     """Recursively convert tensors into lists."""
-    a1 = []
+    a1: list[object] = []
     for elem in obj:
         if isinstance(elem, (list, tuple)):
             elem = _tolist(elem)
@@ -648,7 +725,16 @@ def _tolist(obj):
 # The rest goes through asarray (preferred) or array.
 
 
-def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=None):
+def array(
+    obj: object,
+    dtype: object = None,
+    *,
+    copy: bool = True,
+    order: str = "K",
+    subok: bool = False,
+    ndmin: int = 0,
+    like: object = None,
+) -> ndarray:
     if subok is not False:
         raise NotImplementedError("'subok' parameter is not supported.")
     if like is not None:
@@ -688,23 +774,27 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     return ndarray(tensor)
 
 
-def asarray(a, dtype=None, order="K", *, like=None):
+def asarray(
+    a: object, dtype: object = None, order: str = "K", *, like: object = None
+) -> ndarray:
     return array(a, dtype=dtype, order=order, like=like, copy=False, ndmin=0)
 
 
-def ascontiguousarray(a, dtype=None, *, like=None):
+def ascontiguousarray(
+    a: object, dtype: object = None, *, like: object = None
+) -> ndarray:
     arr = asarray(a, dtype=dtype, like=like)
     if not arr.tensor.is_contiguous():
         arr.tensor = arr.tensor.contiguous()
     return arr
 
 
-def from_dlpack(x, /):
+def from_dlpack(x: CapsuleType | _SupportsDLPack, /) -> ndarray:
     t = torch.from_dlpack(x)
     return ndarray(t)
 
 
-def _extract_dtype(entry):
+def _extract_dtype(entry: object) -> _dtypes.DType:
     try:
         dty = _dtypes.dtype(entry)
     except Exception:
@@ -712,15 +802,15 @@ def _extract_dtype(entry):
     return dty
 
 
-def can_cast(from_, to, casting="safe"):
+def can_cast(from_: object, to: object, casting: str = "safe") -> bool:
     from_ = _extract_dtype(from_)
     to_ = _extract_dtype(to)
 
     return _dtypes_impl.can_cast_impl(from_.torch_dtype, to_.torch_dtype, casting)
 
 
-def result_type(*arrays_and_dtypes):
-    tensors = []
+def result_type(*arrays_and_dtypes: object) -> _dtypes.DType:
+    tensors: list[torch.Tensor] = []
     for entry in arrays_and_dtypes:
         try:
             t = asarray(entry).tensor

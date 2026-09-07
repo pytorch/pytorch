@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 import torch
 import torch._appdirs
-from .file_baton import FileBaton
+from ._filelock import FileLock
 from ._cpp_extension_versioner import ExtensionVersioner
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
+from torch._utils_internal import get_file_path
 
 
 IS_WINDOWS = sys.platform == 'win32'
@@ -39,14 +40,18 @@ CLIB_PREFIX = '' if IS_WINDOWS else 'lib'
 CLIB_EXT = '.dll' if IS_WINDOWS else '.so'
 SHARED_FLAG = '/DLL' if IS_WINDOWS else '-shared'
 
-_HERE = os.path.abspath(__file__)
-_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+# Torch root used below to locate compiled artifacts (lib/, include/, bin/).
+# Editable installs using scikit-build-core redirect mode place these in the
+# installed package directory rather than the source tree this file loads
+# from, so resolve it the same way torch._utils_internal does instead of from
+# this file's location.
+_TORCH_PATH = get_file_path("torch")
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
 SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
-MINIMUM_MSVC_VERSION = (19, 0, 24215)
+MINIMUM_MSVC_VERSION = (19, 20, 0)
 
 VersionRange = tuple[tuple[int, ...], tuple[int, ...]]
 VersionMap = dict[str, VersionRange]
@@ -258,6 +263,28 @@ def _join_sycl_home(*paths) -> str:
     return os.path.join(SYCL_HOME, *paths)
 
 
+def _derive_rocm_version(version_module: types.ModuleType) -> tuple[int, ...] | None:
+    """
+    Return the ROCm release version as a (major, minor) tuple, or None off ROCm.
+
+    Prefer torch.version.rocm, which was added later than torch.version.hip and
+    so is absent or None on builds whose torch/version.py never recorded it.
+    Fall back to the HIP version rather than failing at import: ROCM_VERSION
+    must be set whenever torch.version.hip is, because consumers compare it
+    without a None guard.
+    """
+    hip_version = getattr(version_module, 'hip', None)
+    if not hip_version:
+        return None
+    rocm_version = getattr(version_module, 'rocm', None)
+    if not rocm_version:
+        logger.warning(
+            'torch.version.hip is set but torch.version.rocm is not; '
+            'deriving ROCM_VERSION from torch.version.hip'
+        )
+        rocm_version = hip_version
+    return tuple(int(v) for v in rocm_version.split('.')[:2])
+
 
 def _wrap_compiler(compiler: str | list[str]) -> list[str]:
     """Prepend a compiler wrapper (ccache/sccache) if available.
@@ -353,8 +380,10 @@ ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hi
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
+HIP_VERSION = None
 if torch.version.hip is not None:
-    ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+    HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+    ROCM_VERSION = _derive_rocm_version(torch.version)
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
@@ -470,9 +499,14 @@ JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 PLAT_TO_VCVARS = {
     'win32' : 'x86',
     'win-amd64' : 'x86_amd64',
+    'win-arm64' : 'arm64',
 }
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
+
+def _windows_cuda_lib_dir() -> str:
+    return os.path.join('lib', 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64')
+
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -1608,7 +1642,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
                               hipify_result[s_abs].hipified_path is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
-            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
+            try:
+                hip_path = os.path.relpath(hipified_s_abs, build_dir)
+            except ValueError:
+                # Cross-drive on Windows: no relative path exists; fall back to absolute (#91797).
+                hip_path = hipified_s_abs
+            hipified_sources.add(hip_path)
 
         sources = list(hipified_sources)
 
@@ -1788,7 +1827,7 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
             paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
             if IS_WINDOWS:
-                lib_dir = os.path.join('lib', 'x64')
+                lib_dir = _windows_cuda_lib_dir()
             else:
                 lib_dir = 'lib64'
                 if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -2342,62 +2381,64 @@ def _jit_compile(name,
             logger.info('Bumping to version %s and re-building as %s_v%s...', version, name, version)
         name = f'{name}_v{version}'
 
-    baton = FileBaton(os.path.join(build_directory, 'lock'))
-    if baton.try_acquire():
-        try:
-            if version != old_version:
+    # Hold an OS-level advisory lock (via filelock) rather than a lock file
+    # whose mere existence blocks: the kernel releases the lock if the holder
+    # is killed, so a builder terminated by SIGKILL/OOM/Slurm no longer leaves
+    # a stale lock that deadlocks every later run
+    # (https://github.com/pytorch/pytorch/issues/189245). Whoever acquires the
+    # lock rechecks the version and (re)builds, so a crashed build is retried
+    # by the next process instead of leaving waiters to load a partial module.
+    with FileLock(os.path.join(build_directory, 'lock')):
+        if version != old_version:
+            if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                from .hipify import hipify_python
+                from .hipify.hipify_python import GeneratedFileCleaner
+                clean_ctx_mgr = GeneratedFileCleaner(keep_intermediates=keep_intermediates)
+            else:
+                import contextlib
+                hipify_python = None  # type: ignore[assignment]
+                clean_ctx_mgr = contextlib.nullcontext()
+            with clean_ctx_mgr as clean_ctx:
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    from .hipify import hipify_python
-                    from .hipify.hipify_python import GeneratedFileCleaner
-                    clean_ctx_mgr = GeneratedFileCleaner(keep_intermediates=keep_intermediates)
-                else:
-                    import contextlib
-                    hipify_python = None  # type: ignore[assignment]
-                    clean_ctx_mgr = contextlib.nullcontext()
-                with clean_ctx_mgr as clean_ctx:
-                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                        assert hipify_python is not None  # noqa: S101
-                        hipify_result = hipify_python.hipify(
-                            project_directory=build_directory,
-                            output_directory=build_directory,
-                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                            extra_files=[os.path.abspath(s) for s in sources],
-                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
-                            show_detailed=verbose,
-                            show_progress=verbose,
-                            is_pytorch_extension=True,
-                            clean_ctx=clean_ctx
-                        )
+                    if hipify_python is None:
+                        raise AssertionError("expected hipify_python to be not None")
+                    hipify_result = hipify_python.hipify(
+                        project_directory=build_directory,
+                        output_directory=build_directory,
+                        header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
+                        extra_files=[os.path.abspath(s) for s in sources],
+                        ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
+                        show_detailed=verbose,
+                        show_progress=verbose,
+                        is_pytorch_extension=True,
+                        clean_ctx=clean_ctx
+                    )
 
-                        hipified_sources = set()
-                        for source in sources:
-                            s_abs = os.path.abspath(source)
-                            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
-                                hipified_s_abs = hipify_result[s_abs].hipified_path
-                            else:
-                                hipified_s_abs = s_abs
-                            hipified_sources.add(hipified_s_abs)
-                        sources = list(hipified_sources)
+                    hipified_sources = set()
+                    for source in sources:
+                        s_abs = os.path.abspath(source)
+                        if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                            hipified_s_abs = hipify_result[s_abs].hipified_path
+                        else:
+                            hipified_s_abs = s_abs
+                        hipified_sources.add(hipified_s_abs)
+                    sources = list(hipified_sources)
 
-                    _write_ninja_file_and_build_library(
-                        name=name,
-                        sources=sources,
-                        extra_cflags=extra_cflags or [],
-                        extra_cuda_cflags=extra_cuda_cflags or [],
-                        extra_sycl_cflags=extra_sycl_cflags or [],
-                        extra_ldflags=extra_ldflags or [],
-                        extra_include_paths=extra_include_paths or [],
-                        build_directory=build_directory,
-                        verbose=verbose,
-                        with_cuda=with_cuda,
-                        with_sycl=with_sycl,
-                        is_standalone=is_standalone)
-            elif verbose:
-                logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
-        finally:
-            baton.release()
-    else:
-        baton.wait()
+                _write_ninja_file_and_build_library(
+                    name=name,
+                    sources=sources,
+                    extra_cflags=extra_cflags or [],
+                    extra_cuda_cflags=extra_cuda_cflags or [],
+                    extra_sycl_cflags=extra_sycl_cflags or [],
+                    extra_ldflags=extra_ldflags or [],
+                    extra_include_paths=extra_include_paths or [],
+                    build_directory=build_directory,
+                    verbose=verbose,
+                    with_cuda=with_cuda,
+                    with_sycl=with_sycl,
+                    is_standalone=is_standalone)
+        elif verbose:
+            logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
 
     if verbose:
         logger.info('Loading extension module %s...', name)
@@ -2409,8 +2450,10 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        # mypy thinks ROCM_VERSION is None but it will never be None here
-        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
+        # This selects a HIP SDK layout, so it gates on the HIP version rather
+        # than the ROCm release version. Never None here: callers are behind
+        # IS_HIP_EXTENSION, which implies torch.version.hip is set.
+        hipcc_exe = 'hipcc.exe' if HIP_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
         return _join_rocm_home('bin', hipcc_exe)
     else:
         return _join_rocm_home('bin', 'hipcc')
@@ -2608,10 +2651,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
         if verbose:
             logger.info('Detected CUDA files, patching ldflags')
         if IS_WINDOWS and not IS_HIP_EXTENSION:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
+            cuda_lib_dir = _windows_cuda_lib_dir()
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home(cuda_lib_dir)}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, _windows_cuda_lib_dir())}')
         elif not IS_HIP_EXTENSION:
             extra_lib_dir = "lib64"
             if (not os.path.exists(_join_cuda_home(extra_lib_dir)) and
@@ -2678,12 +2722,13 @@ def _get_cuda_arch_flags(cflags: list[str] | None = None) -> list[str]:
         ('Hopper', '9.0+PTX'),
         ('Blackwell+Tegra', '11.0'),
         ('Blackwell', '10.0;10.3;12.0;12.1+PTX'),
+        ('Rubin', '10.7+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0', '10.0a', '11.0', '11.0a', '10.3', '10.3a', '12.0',
-                        '12.0a', '12.1', '12.1a']
+                        '10.0', '10.0a', '11.0', '11.0a', '10.3', '10.3a', '10.7', '10.7a',
+                        '12.0', '12.0a', '12.1', '12.1a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

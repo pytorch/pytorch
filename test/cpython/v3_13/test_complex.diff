@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_complex.py b/test/cpython/v3_13/test_complex.py
-index 6ff1a8ab29d..42a22815b20 100644
+index 6ff1a8ab29d0d66d062a54c8e08f9bda170aff03..9f0d704186c318f69ce90c0d60a4873f7ae18986 100644
 --- a/test/cpython/v3_13/test_complex.py
 +++ b/test/cpython/v3_13/test_complex.py
 @@ -1,16 +1,147 @@
@@ -246,7 +246,17 @@ index 6ff1a8ab29d..42a22815b20 100644
          self.assertTrue(not complex(0.0, 0.0))
          self.assertTrue(1j)
  
-@@ -855,4 +1045,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -725,7 +915,8 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+         for x in vals:
+             for y in vals:
+                 z = complex(x, y)
+-                roundtrip = eval(repr(z))
++                with torch._dynamo.error_on_graph_break(False):
++                    roundtrip = eval(repr(z))
+                 # adding 0.0 has no effect beside changing -0.0 to 0.0
+                 self.assertFloatsAreIdentical(0.0 + z.real,
+                                               0.0 + roundtrip.real)
+@@ -855,4 +1046,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
  
  
  if __name__ == "__main__":

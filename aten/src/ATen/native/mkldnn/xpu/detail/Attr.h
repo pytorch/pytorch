@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/dequantize.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
 

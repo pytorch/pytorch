@@ -67,8 +67,7 @@ LayoutPlanner::LayoutPlanner(
       // output storage ownership must be given to the caller.
       if (const auto& values_associated_with_output =
               alias_analyzer.values_associated_with_output_storage();
-          values_associated_with_output.find(output) !=
-          values_associated_with_output.end()) {
+          values_associated_with_output.contains(output)) {
         VLOG(1)
             << "not planning " << output->name()
             << " as its underlying storage may be associated with a graph output";
@@ -76,7 +75,7 @@ LayoutPlanner::LayoutPlanner(
       }
 
       // inputs are borrowed -- this is merely a sanity check
-      if (input_values_set_.find(output) != input_values_set_.end()) {
+      if (input_values_set_.contains(output)) {
         VLOG(1) << "not planning " << output->name()
                 << " as it is a graph input that is borrowed from the user";
         continue;

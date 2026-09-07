@@ -117,7 +117,7 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
 
     output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
     output_len = output_type.count("Tensor")
-    # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
+    # TODO(zpcore): Confirm if view op can be handled properly or not. Prevent
     # handling view ops until confirmed.
     if op_schema.op.is_view:
         raise RuntimeError(

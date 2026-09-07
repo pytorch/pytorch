@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
-    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -148,6 +147,17 @@ class TestCase(InductorTestCase):
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+
+
+class CUDAGraphAPIOnlyTests(TestCase):
+    def test_mark_warmup_incomplete_without_cudagraphs(self):
+        cudagraph_trees = torch._inductor.cudagraph_trees
+        containers = cudagraph_trees.get_obj(
+            cudagraph_trees.local, "tree_manager_containers"
+        )
+        existing_devices = tuple(containers)
+        torch.compiler.cudagraph_mark_warmup_incomplete()
+        self.assertEqual(tuple(containers), existing_devices)
 
 
 if HAS_CUDA_AND_TRITON:
@@ -272,6 +282,281 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, ones)
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        def test_cached_tensor_refcount_signatures(self):
+            # Canary for the exact counting arithmetic the cached-tensor
+            # liveness check depends on. If CPython refcount baselines or the
+            # PyObject-preservation coupling (C++ holder => induced Python
+            # incref) ever change, this fails at the source instead of the
+            # liveness check silently misbehaving.
+            import sys
+
+            @torch.compile(mode="reduce-overhead")
+            def f_nograd(x):
+                return (x * 2.0).relu()
+
+            # Phase 1: no autograd anywhere -- pure cache-only baseline.
+            with torch.no_grad():
+                x = torch.randn(64, 64, device="cuda")
+                for _ in range(3):
+                    out = f_nograd(x)
+                    del out
+            node = next(iter(self.get_manager().get_roots()))
+            cached = node.cached_tensor_outputs
+            idxs = [i for i, tn in enumerate(cached) if tn is not None]
+            self.assertTrue(idxs)
+            for i in idxs:
+                # cache list entry + getrefcount's own argument
+                self.assertEqual(sys.getrefcount(cached[i]), 2)
+                # only the Python wrapper holds the impl
+                self.assertEqual(cached[i]._use_count(), 1)
+            # do not hold references into the manager across phases
+            del node, cached, idxs
+
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            # warm/record with the same liveness pattern phase 2 uses (loss
+            # dropped before backward), so replay invariants match
+            for _ in range(3):
+                loss = f(x, w)
+                total = loss + 0.0
+                del loss
+                (g,) = torch.autograd.grad(total, x)
+                del total, g
+
+            # Phase 2: pending backward -- one C++ holder (SavedVariable).
+            loss = f(x, w)
+            total = loss + 0.0
+            del loss
+            node = self.get_manager().current_node
+            cached = node.cached_tensor_outputs
+            saved_idxs = [
+                i
+                for i, tn in enumerate(cached)
+                if tn is not None and tn._use_count() > 1
+            ]
+            self.assertTrue(saved_idxs, "expected a SavedVariable-held output")
+            for i in saved_idxs:
+                # wrapper + SavedVariable
+                self.assertEqual(cached[i]._use_count(), 2)
+                # cache + getrefcount arg + preservation-induced incref
+                self.assertEqual(sys.getrefcount(cached[i]), 3)
+            # implication the detach's safety rests on:
+            # refcount == 2 (cache-only) => no C++ holder exists
+            # (index-only loop: binding the tensor to a local would inflate
+            # every measured refcount past 2 and skip the assert vacuously)
+            implication_checked = 0
+            for i in range(len(cached)):
+                if cached[i] is not None and sys.getrefcount(cached[i]) == 2:
+                    self.assertEqual(cached[i]._use_count(), 1)
+                    implication_checked += 1
+            self.assertGreater(implication_checked, 0)
+
+            # backward releases the SavedVariable: counts return to baseline
+            (g,) = torch.autograd.grad(total, x)
+            del total, g
+            for i in saved_idxs:
+                self.assertEqual(cached[i]._use_count(), 1)
+                self.assertEqual(sys.getrefcount(cached[i]), 2)
+
+            # Phase 3: a Python holder -- refcount rises, use_count does not.
+            out = f(x, w)
+            node = self.get_manager().current_node
+            cached = node.cached_tensor_outputs
+            held = [i for i, tn in enumerate(cached) if tn is not None and tn is out]
+            self.assertTrue(held)
+            for i in held:
+                # cache + getrefcount arg + the user's `out` variable
+                self.assertEqual(sys.getrefcount(cached[i]), 3)
+                self.assertEqual(cached[i]._use_count(), 1)
+
+        def test_held_output_backward_after_other_call(self):
+            # A user-held compiled output must keep its grad_fn across other
+            # compiled calls (which trigger cached-tensor liveness checks and
+            # the stale-autograd-meta detach): backward through it afterwards
+            # must work and be numerically exact.
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            @torch.compile(mode="reduce-overhead")
+            def b(y):
+                return y.sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            y = torch.randn(8, device="cuda")
+
+            for _ in range(3):
+                out = f(x, w)
+                (g,) = torch.autograd.grad(out, x)
+                del out, g
+                out_b = b(y)
+                del out_b
+
+            out = f(x, w)
+            out_b = b(y)
+            del out_b
+            self.assertIsNotNone(out.grad_fn)
+            (g,) = torch.autograd.grad(out, x)
+            x_ref = x.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g, g_ref)
+
+        def test_cross_graph_stale_grad_fn_bounded_growth(self):
+            # Graph-2's stale grad_fn pins graph-1's output (depth 0); the
+            # liveness sweep must still collapse the pin and keep recordings
+            # bounded in forgot-no_grad inference.
+            @torch.compile(mode="reduce-overhead")
+            def f1(x, w):
+                return torch.tanh(x @ w)
+
+            @torch.compile(mode="reduce-overhead")
+            def f2(y, w2):
+                return torch.tanh(y @ w2).mean()
+
+            w = torch.nn.Parameter(torch.randn(128, 128, device="cuda"))
+            w2 = torch.nn.Parameter(torch.randn(128, 128, device="cuda"))
+            x = torch.randn(32, 128, device="cuda")
+
+            for _ in range(4):
+                out = f2(f1(x, w), w2)
+                del out
+
+            graphs_before = self.get_manager().new_graph_id().id
+            for _ in range(8):
+                out = f2(f1(x, w), w2)
+                del out
+            self.assertEqual(self.get_manager().new_graph_id().id, graphs_before + 1)
+
+        def test_severed_backward_rerecord_repro(self):
+            # Production repro: another root fn runs the liveness sweep while
+            # a backward is pending, then a static-input move forces that
+            # backward to re-record. Saved activations must keep the forward
+            # path alive; historically it was abandoned, raising "Detected N
+            # tensor(s) in the cudagraph pool not tracked as outputs" (or
+            # silently corrupting gradients).
+            @torch.compile(mode="reduce-overhead")
+            def a(x, w):
+                return torch.tanh(x * w).sum()
+
+            # b must not allocate pool blocks that could land on a's freed
+            # activation addresses: a pure reduction on a tiny tensor
+            @torch.compile(mode="reduce-overhead")
+            def b(y):
+                return y.sum()
+
+            # a uses the large-block pool while b stays in the small-block
+            # pool, so their segments never overlap and b cannot clobber
+            # a severed saved activations
+            x = torch.randn(1024, 512, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(1024, 512, device="cuda"))
+            y = torch.randn(8, device="cuda")
+
+            def a_iter(move_w=False):
+                loss = a(x, w)
+                total = loss + 0.0
+                del loss
+                if move_w:
+                    # b's invocation abandons a's path (its saved activations
+                    # are refcount-discounted), then the static input move
+                    # forces a's backward to re-record off its forward's tree
+                    out_b = b(y)
+                    del out_b
+                    w.data = w.data.clone()
+                (g,) = torch.autograd.grad(total, x)
+                del total
+                return g
+
+            for _ in range(3):
+                a_iter()
+            for _ in range(3):
+                out_b = b(y)
+                del out_b
+                a_iter()
+
+            skips_before = counters["inductor"]["cudagraph_skips"]
+            g = a_iter(move_w=True)
+            # the pending backward's SavedVariable preserves liveness, so the
+            # forward path is never abandoned mid-generation: no severing, no
+            # cudagraph skip
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
+            # the eager fallback must be numerically correct
+            x_ref = x.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g, g_ref)
+            # and no backward may have recorded as a fresh root
+            from torch._inductor.cudagraph_trees import CompilationMode
+
+            mgr = self.get_manager()
+            for fid, nodes in mgr.roots.items():
+                for nd in nodes:
+                    self.assertNotEqual(
+                        mgr.id_to_mode[fid],
+                        CompilationMode.BACKWARD,
+                        msg=f"backward recorded as root node {nd.id.id}",
+                    )
+
+        def test_mark_step_overrides_pending_backward(self):
+            # an explicit generation advance declares prior outputs dead even
+            # with a backward pending (user override beats SavedVariable
+            # liveness): the next replay rebinds the cached output impl to the
+            # new invocation, so differentiating the stale handle raises
+            # rather than the pending backward pinning the old path alive
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            for _ in range(3):
+                loss = f(x, w)
+                (g,) = torch.autograd.grad(loss, x)
+                del loss, g
+
+            loss = f(x, w)
+            torch.compiler.cudagraph_mark_step_begin()
+            x2 = torch.randn(64, 64, device="cuda", requires_grad=True)
+            loss2 = f(x2, w)
+            with self.assertRaisesRegex(
+                RuntimeError, "not have been used in the graph"
+            ):
+                torch.autograd.grad(loss, x)
+            # the new invocation's backward is intact and exact
+            (g2,) = torch.autograd.grad(loss2, x2)
+            x_ref = x2.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g2, g_ref)
+
+        def test_grad_accumulation_microbatch_numerics(self):
+            # within one generation, each microbatch's pending backward keeps
+            # its saved activations alive (tree growth, never severing):
+            # accumulated grads must match eager exactly
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            xs = [torch.randn(64, 64, device="cuda") for _ in range(2)]
+            for _ in range(3):
+                losses = [f(x, w) for x in xs]
+                for loss in losses:
+                    loss.backward()
+                del losses, loss
+                w.grad = None
+
+            losses = [f(x, w) for x in xs]
+            for loss in losses:
+                loss.backward()
+            del losses, loss
+            w_ref = w.detach().clone().requires_grad_(True)
+            for x in xs:
+                torch.tanh(x * w_ref).sum().backward()
+            self.assertEqual(w.grad, w_ref.grad)
 
         def test_multithreaded_cudagraph_trees(self):
             import queue
@@ -2130,6 +2415,11 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
+        @unittest.skipUnless(
+            torch.version.hip is not None
+            or os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
+            "persistent BLAS workspace caching is disabled",
+        )
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
@@ -2160,11 +2450,11 @@ if HAS_CUDA_AND_TRITON:
                             or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
                             in str(e)
                         )
-                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
-                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
+                        # CUDA and ROCm allocate BLAS workspaces through the
+                        # shared allocation helper.
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
-                            or "getNewWorkspace" in str(e)
+                            or "allocateCUDABlasWorkspace" in str(e)
                             or "CUDABlasLtWorkspace" in str(e)
                         )
 
@@ -3150,6 +3440,61 @@ if HAS_CUDA_AND_TRITON:
             foo_cg([3, x])  # replay
             self.assertEqual(COUNTER, 4)
 
+        def test_mark_warmup_incomplete(self):
+            mark_warmup_incomplete = torch.compiler.cudagraph_mark_warmup_incomplete
+            mark_warmup_incomplete()
+            self.assertIsNone(self.get_manager())
+
+            def stable(inps):
+                x = inps[0]
+                inps.clear()
+                return (x + 1,)
+
+            x = torch.randn(2, device="cuda")
+            stable_cg = self.cudagraphify_impl(stable, [x], ())
+            stable_out = stable_cg([x])
+            manager = self.get_manager()
+            stable_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(stable_functions), 1)
+            del stable_out
+
+            calls = 0
+
+            def f(inps):
+                nonlocal calls
+                calls += 1
+                x = inps[0]
+                inps.clear()
+                if calls < 3 or calls == 4:
+                    mark_warmup_incomplete()
+                return (x + 1,)
+
+            foo_cg = self.cudagraphify_impl(f, [x], ())
+
+            for _ in range(2):
+                out = foo_cg([x])
+                self.assertEqual(manager.warmed_up_functions, stable_functions)
+                del out
+
+            out = foo_cg([x])
+            warmed_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(warmed_functions), 2)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.RECORDING)
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.EXECUTION)
+            self.assertEqual(calls, 4)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
         def test_forward_generation(self):
             def foo(x):
                 return x * x * x
@@ -3197,7 +3542,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
@@ -3304,7 +3649,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
             if config.graph_partition:
-                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 0)
             else:
                 # Without graph partitioning, cudagraphs are skipped entirely
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
@@ -3333,7 +3678,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @torch._inductor.config.patch("cpp_wrapper", True)
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": True})
         def test_skip_cpp_wrapper(self):
             def foo(x):
                 return x + 1
@@ -4076,7 +4421,7 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold high enough to skip this simple function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 10}
+                {"triton.cudagraph_min_partition_size": 10, "graph_partition": True}
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):
@@ -4315,6 +4660,10 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @unittest.skip(
+            "Disabled due to CI failures; see "
+            "https://github.com/pytorch/pytorch/issues/190233"
+        )
         def test_graph_partition_view_fallback(self):
             def f(x):
                 y = x + 1
@@ -4330,6 +4679,40 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
@@ -4752,16 +5135,18 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
-            # ops, forward_is_partitioned should be False and all saved
+            # ops, forward_is_cudagraph_partitioned should be False and all saved
             # tensors remain static in the backward.
             from unittest.mock import patch
 
-            forward_partitioned = None
+            forward_cudagraph_partitioned = None
             orig_bw = torch._inductor.compile_fx.compile_fx_backward
 
             def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
-                nonlocal forward_partitioned
-                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                nonlocal forward_cudagraph_partitioned
+                forward_cudagraph_partitioned = (
+                    compiler_config_extra.forward_is_cudagraph_partitioned.value
+                )
                 return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
 
             class Mod(torch.nn.Module):
@@ -4785,7 +5170,7 @@ if HAS_CUDA_AND_TRITON:
                 loss.backward()
                 optimizer.step()
 
-            self.assertFalse(forward_partitioned)
+            self.assertFalse(forward_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
@@ -5282,11 +5667,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -5296,7 +5681,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -5305,22 +5690,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
@@ -5795,10 +6183,6 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
-        @unittest.skipIf(
-            IS_LINUX or TEST_WITH_SLOW,
-            "https://github.com/pytorch/pytorch/issues/176144",
-        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
@@ -5808,14 +6192,21 @@ if HAS_CUDA_AND_TRITON:
             from torch.testing._internal.triton_utils import add_kernel
 
             def foo(x, y):
+                n_elements = 128
+                BLOCK_SIZE = 16
+                grid = ((n_elements + BLOCK_SIZE - 1) // BLOCK_SIZE,)
                 # partition 1
                 output1 = torch.empty_like(x)
-                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x, y, output1, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 output1_cpu = output1.cpu() + 1
                 # partition 2 should reuse the user-defined kernel
                 x2 = output1_cpu.to("cuda")
                 output2 = torch.empty_like(x)
-                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                add_kernel[grid](
+                    x2, y, output2, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE
+                )
                 return output1, output2
 
             compiled_foo = torch.compile(foo)

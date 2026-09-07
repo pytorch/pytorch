@@ -189,13 +189,21 @@ Use the C++ or Python APIs instead.
 
 """
 
+import contextlib
 import glob
 import multiprocessing as mp
 import os
 import shutil
 import warnings
+from collections.abc import Iterator
 
 import torch
+
+
+_DYN_M_BIT = 1 << 0
+_DYN_N_BIT = 1 << 1
+_DYN_K_BIT = 1 << 2
+_DYN_BATCH_BIT = 1 << 3
 
 
 __all__ = [
@@ -205,12 +213,15 @@ __all__ = [
     "tuning_is_enabled",
     "record_untuned_enable",
     "record_untuned_is_enabled",
+    "wildcard_fallback_enable",
+    "wildcard_fallback_is_enabled",
     "set_max_tuning_duration",
     "get_max_tuning_duration",
     "set_max_tuning_iterations",
     "get_max_tuning_iterations",
     "set_cublaslt_requested_algo_count",
     "get_cublaslt_requested_algo_count",
+    "dynamic_dims_mask",
     "set_filename",
     "get_filename",
     "get_results",
@@ -261,6 +272,23 @@ def record_untuned_is_enabled() -> bool:
     return torch._C._cuda_record_untuned_is_enabled()  # type: ignore[attr-defined]
 
 
+def wildcard_fallback_enable(val: bool = True) -> None:
+    r"""Enable wildcard fallback for TunableOp runtime dispatch.
+
+    When enabled and a concrete signature misses, the runtime scans persisted
+    wildcard entries for a token-pattern match. When disabled (the default),
+    only exact concrete lookups are performed, matching pre-wildcard behavior.
+
+    Also settable via ``PYTORCH_TUNABLEOP_WILDCARD_FALLBACK=1``.
+    """
+    torch._C._cuda_tunableop_wildcard_fallback_enable(val)  # type: ignore[attr-defined]
+
+
+def wildcard_fallback_is_enabled() -> bool:
+    r"""Returns whether wildcard fallback is enabled for TunableOp dispatch."""
+    return torch._C._cuda_tunableop_wildcard_fallback_is_enabled()  # type: ignore[attr-defined]
+
+
 def set_max_tuning_duration(duration: int) -> None:
     r"""Set max time in milliseconds to spend tuning a given solution.
 
@@ -303,6 +331,75 @@ def get_cublaslt_requested_algo_count() -> int:
         torch._C._cuda_tunableop_get_cublaslt_requested_algo_count  # type: ignore[attr-defined]
     )
     return get_count()
+
+
+def _pack_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> int:
+    r"""Pack four per-dim flags into the single byte mask used by C++."""
+    bits = 0
+    if M:
+        bits |= _DYN_M_BIT
+    if N:
+        bits |= _DYN_N_BIT
+    if K:
+        bits |= _DYN_K_BIT
+    if BATCH:
+        bits |= _DYN_BATCH_BIT
+    return bits
+
+
+def _push_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> object:
+    r"""Push a per-call dynamic-dims mask onto the thread-local TunableOp stack.
+
+    Returns an opaque handle (PyCapsule) that must be passed to
+    :func:`pop_dynamic_dims_mask`. Handles must be popped in reverse push order,
+    and on the same thread that pushed them. The stack is thread-local and
+    unsynchronized, so neither is checked: an out-of-order pop drops whichever
+    entry is on top rather than this one, and a handle released on another
+    thread (e.g. by the garbage collector) warns and skips its pop, leaving the
+    owner's entry in place. Prefer the :func:`dynamic_dims_mask` context
+    manager, which keeps push and pop paired and on one thread, unless you need
+    raw push/pop semantics.
+
+    The mask wildcards the named GEMM dims when computing the TunableOp
+    DynamicSignature; tuned entries seeded under the wildcard key will be
+    reused by subsequent shapes that differ only in the dynamic dim(s).
+    """
+    bits = _pack_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    return torch._C._cuda_tunableop_push_dynamic_dims_mask(bits)
+
+
+def _pop_dynamic_dims_mask(handle: object) -> None:
+    torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+
+
+@contextlib.contextmanager
+def dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> Iterator[None]:
+    r"""Context manager that wraps a scope with a per-call dynamic-dims mask.
+
+    Each TunableOp GEMM call inside the scope uses the given mask when
+    computing its wildcard signature; outside the scope the legacy
+    concrete-only behavior applies.
+    """
+    handle = _push_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    try:
+        yield
+    finally:
+        _pop_dynamic_dims_mask(handle)
 
 
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
@@ -358,6 +455,12 @@ def set_numerical_check_tolerances(
 ) -> None:
     r"""Set the atol and rtol values in numeric check"""
     return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)  # type: ignore[attr-defined]
+
+
+def _clear_all() -> None:
+    r"""Drop all in-memory tuning results. Testing only: lets a test start from
+    an empty results manager instead of relying on globally disjoint shapes."""
+    torch._C._cuda_tunableop_clear_all()  # type: ignore[attr-defined]
 
 
 def tune_gemm_in_file(filename: str) -> None:
@@ -650,7 +753,16 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # Detect subMatrix case
-    if all(item in [n, m, k] for item in [lda, ldb, ldc]):
+    # A GEMM is "tight" (not a sub-matrix) only when each leading dimension
+    # equals its expected contiguous value for the given transpose layout.
+    # Checking mere membership in {n, m, k} is wrong: a padded leading
+    # dimension can coincidentally equal one of n/m/k (e.g. lda == n), which
+    # silently rewrites the requested shape and tunes the wrong GEMM.
+    # See https://github.com/ROCm/TheRock/issues/5553
+    lda_tight = m if transA else k
+    ldb_tight = k if transB else n
+    ldc_tight = n
+    if lda == lda_tight and ldb == ldb_tight and ldc == ldc_tight:
         subMatrix = False
     else:
         subMatrix = True

@@ -114,7 +114,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMPS,
-    expectedFailureMPSPre15,
     instantiate_device_type_tests,
     skipMPS,
 )
@@ -1406,7 +1405,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.sample()
                 self.assertFalse(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
                 )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -1421,7 +1420,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.rsample()
                 self.assertTrue(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
                 )
 
     @expectedFailureMPS
@@ -1432,10 +1431,13 @@ class TestDistributions(DistributionsTestCase):
                 try:
                     self.assertTrue(
                         type(dist.sample()) is type(dist.enumerate_support()),
-                        msg=(
-                            "{} example {}/{}, return type mismatch between "
-                            + "sample and enumerate_support."
-                        ).format(Dist.__name__, i + 1, len(params)),
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            (
+                                "{} example {}/{}, return type mismatch between "
+                                + "sample and enumerate_support."
+                            ).format(Dist.__name__, i + 1, len(params))
+                        ),
                     )
                 except NotImplementedError:
                     pass
@@ -1477,7 +1479,7 @@ class TestDistributions(DistributionsTestCase):
                 self.assertIn(
                     Dist,
                     distributions_with_examples,
-                    f"Please add {Dist.__name__} to the _get_examples list in test_distributions.py",
+                    lambda msg: f"{msg}\nPlease add {Dist.__name__} to the _get_examples list in test_distributions.py",
                 )
 
     def test_support_attributes(self):
@@ -3334,7 +3336,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPSPre15
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3515,7 +3516,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
         loc_1d = torch.randn(1, requires_grad=True)
-        scale_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1).abs().requires_grad_()
         loc_delta = torch.tensor([1.0, 0.0])
         scale_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
@@ -3613,6 +3614,31 @@ class TestDistributions(DistributionsTestCase):
                 f"Gamma(alpha={alpha}, beta={beta})",
                 failure_rate=1e-4,
             )
+
+    def test_gamma_sample_generator(self):
+        gamma = Gamma(torch.tensor(2.0), torch.tensor(1.0))
+        device = gamma.concentration.device
+        # sampling with a generator honors the requested shape
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(gamma.sample((5,), generator=gen).size(), (5,))
+        self.assertEqual(gamma.sample((5, 3), generator=gen).size(), (5, 3))
+        # sampling without a generator still works
+        self.assertEqual(gamma.sample((5,)).size(), (5,))
+        # same seed produces identical samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(
+            gamma.sample((5,), generator=gen1), gamma.sample((5,), generator=gen2)
+        )
+        # different seeds produce different samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(99)
+        self.assertFalse(
+            torch.allclose(
+                gamma.sample((5,), generator=gen1),
+                gamma.sample((5,), generator=gen2),
+            )
+        )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
@@ -3804,7 +3830,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
             )
             expected = samples.var(0)
             actual = m.variance
@@ -3813,7 +3839,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -4049,7 +4075,10 @@ class TestDistributions(DistributionsTestCase):
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
-            self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
+            self.assertTrue(
+                np.isfinite(x) and x > 0,
+                lambda msg: f"{msg}\nInvalid Beta.sample(): {x}",
+            )
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
@@ -4690,7 +4719,7 @@ class TestDistributionsGPU(DistributionsTestCase):
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
-        device = "cuda"
+        device = device_type
 
         for count_dtype in dtypes:
             total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
@@ -6002,6 +6031,29 @@ class TestKL(DistributionsTestCase):
         )
         self.assertEqual(expected_kl, actual_kl)
 
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        set_rng_seed(0)
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
+
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -6112,7 +6164,7 @@ class TestKL(DistributionsTestCase):
         for p, q in self.infinite_examples:
             self.assertTrue(
                 (kl_divergence(p, q) == inf).all(),
-                f"Incorrect KL({type(p).__name__}, {type(q).__name__})",
+                lambda msg: f"{msg}\nIncorrect KL({type(p).__name__}, {type(q).__name__})",
             )
 
     def test_kl_edgecases(self):

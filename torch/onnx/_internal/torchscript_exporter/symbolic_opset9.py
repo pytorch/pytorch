@@ -2154,6 +2154,31 @@ def logical_not(g: jit_utils.GraphContext, input):
     return g.op("Not", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL))
 
 
+def _arithmetic_rshift(g: jit_utils.GraphContext, self, two_pow, self_scalar_type):
+    is_narrow = self_scalar_type in (
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+    )
+    compute_scalar_type = (
+        _type_utils.JitScalarType.INT if is_narrow else self_scalar_type
+    )
+    if is_narrow:
+        self = g.op("Cast", self, to_i=compute_scalar_type.onnx_type())
+    two_pow = g.op("Cast", two_pow, to_i=compute_scalar_type.onnx_type())
+
+    zero = g.op("Constant", value_t=torch.tensor(0, dtype=compute_scalar_type.dtype()))
+    negative = g.op(
+        "Cast",
+        symbolic_helper._lt_helper(g, self, zero),
+        to_i=compute_scalar_type.onnx_type(),
+    )
+    rshift = g.op("Sub", g.op("Div", g.op("Add", self, negative), two_pow), negative)
+
+    if is_narrow:
+        rshift = g.op("Cast", rshift, to_i=self_scalar_type.onnx_type())
+    return rshift
+
+
 @_onnx_symbolic("aten::__rshift_")
 def __rshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
@@ -2174,6 +2199,15 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     if not symbolic_helper._is_fp(self):
         other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     two_pow = g.op("Pow", two, other)
+
+    if self_scalar_type in (
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    ):
+        return _arithmetic_rshift(g, self, two_pow, self_scalar_type)
+
     two_pow = g.op(
         "Cast",
         two_pow,

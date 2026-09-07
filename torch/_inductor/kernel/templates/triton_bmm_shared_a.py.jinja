@@ -1,0 +1,84 @@
+{{def_kernel("A", "B")}}
+    M = {{size("A", -2)}}
+    N = {{size("B", -1)}}
+    K = {{size("A", -1)}}
+    BATCH = {{size("B", 0)}}
+
+    stride_am = {{stride("A", 1)}}
+    stride_ak = {{stride("A", 2)}}
+
+    stride_bq = {{stride("B", 0)}}
+    stride_bk = {{stride("B", 1)}}
+    stride_bn = {{stride("B", 2)}}
+
+    # A is shared across the batch (its batch stride is zero), so one A tile is
+    # reused by BLOCK_Q batches instead of being re-fetched per batch. The right
+    # operand is loaded as [BLOCK_K, BLOCK_Q, BLOCK_N] -- three separate index
+    # vectors, so the innermost dimension stays unit-stride and the load still
+    # vectorises -- and flattened into a single [BLOCK_K, BLOCK_Q*BLOCK_N] dot.
+    # Writing the same gather as one div/mod index vector instead scalarises the
+    # load and is ~4x slower.
+    pid = tl.program_id(0).to(INDEX_DTYPE)
+    qid = tl.program_id(1).to(INDEX_DTYPE)
+    grid_m = (M + BLOCK_M - 1) // BLOCK_M
+    grid_n = (N + BLOCK_N - 1) // BLOCK_N
+
+    # re-order program ID for better L2 performance
+    width = GROUP_M * grid_n
+    group_id = pid // width
+    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
+    pid_m = group_id * GROUP_M + (pid % group_size)
+    pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
+
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
+    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
+
+    rk = tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
+    rq = qid * BLOCK_Q + tl.arange(0, BLOCK_Q).to(INDEX_DTYPE)
+    # Clamp so a partial trailing batch block still forms legal addresses; those
+    # lanes are masked off at the store.
+    rq_safe = tl.minimum(rq, BATCH - 1)
+
+    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
+    B = B + (rk[:, None, None] * stride_bk + rq_safe[None, :, None] * stride_bq + rbn[None, None, :] * stride_bn)
+
+    acc = tl.zeros((BLOCK_M, BLOCK_Q * BLOCK_N), dtype=ACC_TYPE)
+    # Peel the K remainder so the main loop loads unmasked. The stock bmm
+    # template guards every iteration whenever K % BLOCK_K != 0, which for these
+    # shapes is every one of them.
+    k_full = (K // BLOCK_K) * BLOCK_K
+    for _k in range(0, k_full, BLOCK_K):
+        a = tl.load(A)
+        b = tl.reshape(tl.load(B), (BLOCK_K, BLOCK_Q * BLOCK_N))
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        A += BLOCK_K * stride_ak
+        B += BLOCK_K * stride_bk
+    if k_full < K:
+        k_mask = rk < (K - k_full)
+        a = tl.load(A, mask=k_mask[None, :], other=0.)
+        b = tl.reshape(tl.load(B, mask=k_mask[:, None, None], other=0.), (BLOCK_K, BLOCK_Q * BLOCK_N))
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+
+    # rematerialize rm to save registers
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    rj = tl.arange(0, BLOCK_Q * BLOCK_N).to(INDEX_DTYPE)
+    # The accumulator is [BLOCK_M, BLOCK_Q*BLOCK_N]; column j is batch
+    # qid*BLOCK_Q + j // BLOCK_N, output column pid_n*BLOCK_N + j % BLOCK_N. The
+    # div/mod is paid once per program here rather than inside the K loop.
+    idx_m = rm[:, None]
+    idx_q = (qid * BLOCK_Q + rj // BLOCK_N)[None, :]
+    idx_n = (pid_n * BLOCK_N + rj % BLOCK_N)[None, :]
+    mask = (idx_m < M) & (idx_n < N) & (idx_q < BATCH)
+
+    # inductor generates a suffix
+    {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_Q * BLOCK_N"))}}

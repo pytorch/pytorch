@@ -173,12 +173,12 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel.render_hooks[placeholder] = hook
         return placeholder
 
-    def get_default_reindexers(self, epilogue_nodes):
+    def get_default_reindexers(self, epilogues):
         def reindexer(args):
             # if epilogue nodes exist, they have 3D ranges but args are 2D, so add 0 index
             return [self.b_index] + args
 
-        return [reindexer] * len(epilogue_nodes)
+        return [reindexer] * len(epilogues)
 
     def get_options(
         self,

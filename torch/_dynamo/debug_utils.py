@@ -44,6 +44,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._config_module import ConfigModule
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
@@ -81,7 +82,18 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
     cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
-    extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
+    # Preload common fbcode custom-op libraries so repros that use those ops
+    # work out of the box. Best-effort: a repro whose graph doesn't use these
+    # ops (or that is run outside a buck target linking them) must not fail
+    # just because the library isn't present.
+    _extra_deps_list = "\n".join(f'    "{x}",' for x in extra_deps)
+    extra_imports = (
+        f"for _extra_dep in [\n{_extra_deps_list}\n]:\n"
+        "    try:\n"
+        "        torch.ops.load_library(_extra_dep)\n"
+        "    except OSError:\n"
+        "        pass\n"
+    )
 
 
 BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
@@ -517,11 +529,24 @@ import os
 def generate_config_string(*, stable_output: bool = False) -> str:
     import torch._functorch.config
     import torch._inductor.config
+    from torch._inductor.codegen import common
 
     if stable_output:
         return "# config omitted due to stable_output=True"
 
+    # Third-party Inductor backends can register their own ConfigModule.
+    # Repros need to replay non-default values from those modules, and
+    # ConfigModule.codegen_config() emits assignments but not the module import.
+    extra_codegen_configs = []
+    for c in common.custom_backend_codegen_configs.values():
+        if isinstance(c, ConfigModule):
+            codegen_config = c.codegen_config()
+            if codegen_config:
+                extra_codegen_configs.append(f"import {c.__name__}\n{codegen_config}")
+    extra_codegen_configs_str = "\n".join(extra_codegen_configs)
+
     experimental_config = torch.fx.experimental._config.codegen_config()  # type: ignore[attr-defined]
+
     return f"""\
 import torch._dynamo.config
 import torch._inductor.config
@@ -531,6 +556,7 @@ import torch.fx.experimental._config
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
 {experimental_config}
+{extra_codegen_configs_str}
 """
 
 
@@ -921,6 +947,24 @@ class InputReader:
 #     works too" but this is delicate so we don't do it
 
 
+def _serialize_sym_expr(val: int | torch.SymInt) -> str:
+    # str()/repr() of a SymInt gives the sympy repr (e.g. CeilToInt(IntTrueDiv(s0, 32))),
+    # which is not valid Python.  SymExprPrinter emits evaluable Python instead; the
+    # repro preamble imports math so math.ceil/math.floor etc. are in scope.
+    if isinstance(val, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import SymExprPrinter
+
+        return SymExprPrinter().doprint(val.node.expr)
+    return repr(val)
+
+
+def _serialize_sym_tuple(vals: Sequence[int | torch.SymInt]) -> str:
+    inner = ", ".join(_serialize_sym_expr(v) for v in vals)
+    if len(vals) == 1:
+        inner += ","
+    return f"({inner})"
+
+
 class InputWriter:
     def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
         self._lines: list[str] = []
@@ -977,11 +1021,12 @@ class InputWriter:
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
+        nbytes_source = _serialize_sym_expr(nbytes)
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
         self._lines.append(
-            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+            f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )
         self.seen_storages[ws] = v
         return v
@@ -997,13 +1042,13 @@ class InputWriter:
         if not statically_known_true(
             sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
         ):
-            args.append(str(tuple(t.stride())))
+            args.append(_serialize_sym_tuple(t.stride()))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
         if not statically_known_true(
             _storage_offset_or_default(None) == t.storage_offset()
         ):
-            args.append(f"storage_offset={t.storage_offset()!r}")
+            args.append(f"storage_offset={_serialize_sym_expr(t.storage_offset())}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
             args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
@@ -1014,11 +1059,11 @@ class InputWriter:
             args.append(f"is_leaf={is_leaf!r}")
         self._lines.append(
             "reader.tensor("
-            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + ", ".join([storage, _serialize_sym_tuple(t.shape), *args])
             + f")  # {name}"
         )
 
-    def unsupported(self, name: str, arg: Any) -> None:
+    def unsupported(self, name: str, arg: object) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(
             f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
@@ -1044,7 +1089,7 @@ class InputWriter:
         )
 
     # TODO: this doesn't actually symint atm
-    def symint(self, name: str, val: Any) -> None:
+    def symint(self, name: str, val: object) -> None:
         if isinstance(val, torch.SymInt):
             expr_str = str(val.node.expr)
             hint = val.node.hint

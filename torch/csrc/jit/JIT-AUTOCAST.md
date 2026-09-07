@@ -25,7 +25,7 @@
 ## Overview
 
 [Autocast][2] (aka Automatic Mixed Precision) is an optimization which helps
-taking advantage of the storage and performance benefits of narrow types
+take advantage of the storage and performance benefits of narrow types
 (float16) while preserving the additional range and numerical precision of
 float32.
 

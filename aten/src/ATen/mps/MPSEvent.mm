@@ -143,15 +143,22 @@ void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
 };
 
 //-----------------------------------------------------------------
+//  MPSEventPtrTarget
+//-----------------------------------------------------------------
+
+MPSEventPtrTarget::~MPSEventPtrTarget() {
+  m_pool->returnEventToPool(m_event);
+}
+
+//-----------------------------------------------------------------
 //  MPSEventPool
 //-----------------------------------------------------------------
 
-MPSEventPool::MPSEventPool(MPSStream* default_stream) : m_default_stream(default_stream) {
-  // default deleter to return the event back to pool after it gets released
-  m_default_deleter = [&](MPSEvent* event) {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    m_pool.push(std::unique_ptr<MPSEvent>(event));
-  };
+MPSEventPool::MPSEventPool(MPSStream* default_stream) : m_default_stream(default_stream) {}
+
+void MPSEventPool::returnEventToPool(MPSEvent* event) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_pool.push(std::unique_ptr<MPSEvent>(event));
 }
 
 MPSEventPool::~MPSEventPool() {
@@ -168,11 +175,11 @@ MPSEventPtr MPSEventPool::acquireEvent(bool enable_timing, MPSStream* stream) {
       auto event = m_pool.top().release();
       m_pool.pop();
       event->reset(stream, enable_timing);
-      return MPSEventPtr(event, m_default_deleter);
+      return c10::make_intrusive<MPSEventPtrTarget>(event, this);
     }
   }
   auto new_event = std::make_unique<MPSEvent>(++m_event_counter, stream, enable_timing);
-  return MPSEventPtr(new_event.release(), m_default_deleter);
+  return c10::make_intrusive<MPSEventPtrTarget>(new_event.release(), this);
 }
 
 void MPSEventPool::emptyCache() {
@@ -242,7 +249,7 @@ MPSEvent* MPSEventPool::getInUseEvent(id_t event_id, bool locked) {
     m_mutex.lock();
   }
   TORCH_CHECK(m_in_use_events.count(event_id) > 0, "Invalid Event ID: ", event_id);
-  MPSEvent* event = m_in_use_events[event_id].get();
+  MPSEvent* event = m_in_use_events[event_id]->get();
   if (locked) {
     m_mutex.unlock();
   }

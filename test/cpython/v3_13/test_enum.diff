@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_enum.py b/test/cpython/v3_13/test_enum.py
-index c5ec56bf609..b99b508f043 100644
+index 73ae53a3694dcaaacb27ba31f5df90c565be1d0b..ffb9a74fd02d2f8d5dd32afde1486176b642eb4e 100644
 --- a/test/cpython/v3_13/test_enum.py
 +++ b/test/cpython/v3_13/test_enum.py
 @@ -1,3 +1,20 @@
@@ -10,7 +10,7 @@ index c5ec56bf609..b99b508f043 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.12/Lib/test/test_enum.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_enum.py
 +
 +import torch
 +import torch._dynamo.test_case
@@ -38,7 +38,7 @@ index c5ec56bf609..b99b508f043 100644
 -                optionflags=doctest.ELLIPSIS|doctest.NORMALIZE_WHITESPACE,
 -                ))
 -    howto_tests = os.path.join(REPO_ROOT, 'Doc/howto/enum.rst')
--    if os.path.exists(howto_tests) and sys.float_repr_style == 'short':
+-    if os.path.exists(howto_tests):
 -        tests.addTests(doctest.DocFileSuite(
 -                howto_tests,
 -                module_relative=False,
@@ -268,7 +268,22 @@ index c5ec56bf609..b99b508f043 100644
          #
          class Class1:
              def __init__(self):
-@@ -3513,7 +3516,7 @@ class TestSpecial(unittest.TestCase):
+@@ -2981,10 +2984,12 @@ class TestSpecial(unittest.TestCase):
+         # bpo-35717: sys._getframe(2).f_globals['__name__'] fails with KeyError
+         # when using compile and exec because f_globals is empty
+         code = "from enum import Enum; Enum('Animal', 'ANT BEE CAT DOG')"
+-        code = compile(code, "<string>", "exec")
++        with torch._dynamo.error_on_graph_break(False):
++            code = compile(code, "<string>", "exec")
+         global_ns = {}
+         local_ls = {}
+-        exec(code, global_ns, local_ls)
++        with torch._dynamo.error_on_graph_break(False):
++            exec(code, global_ns, local_ls)
+ 
+     def test_strenum(self):
+         class GoodStrEnum(StrEnum):
+@@ -3513,7 +3518,7 @@ class TestSpecial(unittest.TestCase):
          self.assertIs(Directions({"sc"}), Directions.DOWN_ONLY)
  
  
@@ -277,7 +292,7 @@ index c5ec56bf609..b99b508f043 100644
      "test usage of the `_order_` attribute"
  
      def test_same_members(self):
-@@ -3576,7 +3579,7 @@ class TestOrder(unittest.TestCase):
+@@ -3576,7 +3581,7 @@ class TestOrder(unittest.TestCase):
                  verde = green
  
  
@@ -286,7 +301,7 @@ index c5ec56bf609..b99b508f043 100644
      """Tests of the Flags."""
  
      class Perm(Flag):
-@@ -4059,7 +4062,7 @@ class OldTestFlag(unittest.TestCase):
+@@ -4059,7 +4064,7 @@ class OldTestFlag(unittest.TestCase):
          self.assertFalse(NeverEnum.__dict__.get('_test2', False))
  
  
@@ -295,7 +310,7 @@ index c5ec56bf609..b99b508f043 100644
      """Tests of the IntFlags."""
  
      class Perm(IntFlag):
-@@ -4135,6 +4138,7 @@ class OldTestIntFlag(unittest.TestCase):
+@@ -4135,6 +4140,7 @@ class OldTestIntFlag(unittest.TestCase):
                  )
  
      @reraise_if_not_enum(NoName)
@@ -303,7 +318,7 @@ index c5ec56bf609..b99b508f043 100644
      def test_global_enum_str(self):
          self.assertEqual(repr(NoName.ONE), 'test_enum.ONE')
          self.assertEqual(repr(NoName(0)), 'test_enum.NoName(0)')
-@@ -4543,7 +4547,7 @@ class OldTestIntFlag(unittest.TestCase):
+@@ -4543,7 +4549,7 @@ class OldTestIntFlag(unittest.TestCase):
          self.assertEqual(256, len(seen), 'too many composite members created')
  
  
@@ -312,7 +327,7 @@ index c5ec56bf609..b99b508f043 100644
  
      def test_empty_string(self):
          with self.assertRaises(ValueError):
-@@ -4560,7 +4564,7 @@ class TestEmptyAndNonLatinStrings(unittest.TestCase):
+@@ -4560,7 +4566,7 @@ class TestEmptyAndNonLatinStrings(unittest.TestCase):
          self.assertEqual(item.value, 1)
  
  
@@ -321,7 +336,7 @@ index c5ec56bf609..b99b508f043 100644
  
      def test_unique_clean(self):
          @unique
-@@ -4607,7 +4611,7 @@ class TestUnique(unittest.TestCase):
+@@ -4607,7 +4613,7 @@ class TestUnique(unittest.TestCase):
              triple = 3
              value = 4
  
@@ -330,7 +345,7 @@ index c5ec56bf609..b99b508f043 100644
  
      def test_continuous(self):
          @verify(CONTINUOUS)
-@@ -4742,7 +4746,7 @@ class TestVerify(unittest.TestCase):
+@@ -4742,7 +4748,7 @@ class TestVerify(unittest.TestCase):
          # no error means success
  
  
@@ -339,7 +354,7 @@ index c5ec56bf609..b99b508f043 100644
  
      sunder_names = '_bad_', '_good_', '_what_ho_'
      dunder_names = '__mal__', '__bien__', '__que_que__'
-@@ -5042,7 +5046,7 @@ class Color(enum.Enum)
+@@ -5042,7 +5048,7 @@ class Color(enum.Enum)
   |
   |  __members__"""
  
@@ -348,7 +363,7 @@ index c5ec56bf609..b99b508f043 100644
  
      maxDiff = None
  
-@@ -5297,7 +5301,7 @@ class TestStdLib(unittest.TestCase):
+@@ -5297,7 +5303,7 @@ class TestStdLib(unittest.TestCase):
          _test_simple_enum(CheckedComplexFlag, ComplexFlag)
  
  
@@ -357,7 +372,7 @@ index c5ec56bf609..b99b508f043 100644
  
      def test__all__(self):
          support.check__all__(self, enum, not_exported={'bin', 'show_flag_values'})
-@@ -5358,7 +5362,7 @@ COMPLEX_C = 1j
+@@ -5358,7 +5364,7 @@ COMPLEX_C = 1j
  COMPLEX_A = 2j
  COMPLEX_B = 3j
  
@@ -366,7 +381,7 @@ index c5ec56bf609..b99b508f043 100644
      def tearDown(self):
          # Reset the module-level test variables to their original integer
          # values, otherwise the already created enum values get converted
-@@ -5467,7 +5471,7 @@ class TestConvert(unittest.TestCase):
+@@ -5467,7 +5473,7 @@ class TestConvert(unittest.TestCase):
          self.assertEqual(format(test_type.CONVERT_STRING_TEST_NAME_A), '5')
  
  
@@ -375,7 +390,7 @@ index c5ec56bf609..b99b508f043 100644
      def test_enum_dict_in_metaclass(self):
          """Test that EnumDict is usable as a class namespace"""
          class Meta(type):
-@@ -5538,4 +5542,4 @@ def member_dir(member):
+@@ -5538,4 +5544,4 @@ def member_dir(member):
  
  
  if __name__ == '__main__':

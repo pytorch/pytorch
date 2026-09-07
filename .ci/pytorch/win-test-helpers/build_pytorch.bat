@@ -110,7 +110,8 @@ sccache --zero-stats
 set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
-set CMAKE_GENERATOR=Ninja
+:: CMAKE_GENERATOR=Ninja is now forced via cmake.define.CMAKE_GENERATOR in
+:: pyproject.toml (single source of truth), so it is not set here.
 
 if "%USE_CUDA%"=="1" (
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
@@ -119,9 +120,15 @@ if "%USE_CUDA%"=="1" (
   ::
   :: CMake requires a single command as CUDA_NVCC_EXECUTABLE, so we push the wrappers
   :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
-  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  curl --retry 3 --retry-all-errors --fail -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   if errorlevel 1 goto fail
   if not errorlevel 0 goto fail
+  for %%I in ("%TMP_DIR_WIN%\bin\randomtemp.exe") do (
+    if %%~zI LSS 100000 (
+      echo randomtemp.exe is %%~zI bytes, expected ~310KB - download was truncated
+      goto fail
+    )
+  )
   echo @"%TMP_DIR_WIN%\bin\randomtemp.exe" "%TMP_DIR_WIN%\bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%TMP_DIR%/bin/nvcc.bat"
   cat %TMP_DIR%/bin/nvcc.bat
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat

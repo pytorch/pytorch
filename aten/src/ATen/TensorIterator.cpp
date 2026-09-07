@@ -10,13 +10,13 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -24,7 +24,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
-#include <algorithm>
 #include <cmath>
 
 namespace at {
@@ -184,10 +183,6 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
     (*static_shape_)[squash_dim] = 1;
   }
   return *this;
-}
-
-bool TensorIteratorConfig::is_tensor_const(size_t idx) {
-  return std::find(const_tensor_indices_.begin(), const_tensor_indices_.end(), idx) != const_tensor_indices_.end();
 }
 
 // NOTE: [Computing output strides]
@@ -1139,7 +1134,10 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
-    operands_[idx].is_const = config.is_tensor_const(idx);
+  }
+  // const_tensor_indices_ are indices into operands_.
+  for (const auto idx : config.const_tensor_indices_) {
+    operands_[idx].is_const = true;
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1413,18 +1411,26 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
 
   bool is_contiguous = true;
-  bool is_channels_last = true;
-  bool is_non_overlapping_and_dense = true;
   for (const auto& op : operands_) {
     if (op.tensor_base().defined() && !op.will_resize) {
       is_contiguous &= op.tensor_base().is_contiguous(at::MemoryFormat::Contiguous);
-      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
-      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+      if (!is_contiguous) {
+        break;
+      }
     }
   }
   // TODO this leads to ambiguous cases (NC11) to be always treated as contiguous
   if (is_contiguous) {
     return FastSetupType::CONTIGUOUS;
+  }
+
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
+    if (op.tensor_base().defined() && !op.will_resize) {
+      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+    }
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;
@@ -1491,13 +1497,14 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  auto has_storage = true;
-  for (auto& op : operands_) {
-    has_storage &= op.tensor_base().has_storage();
+  bool privateuse1_without_storage = false;
+  if (common_device_.type() == DeviceType::PrivateUse1) {
+    bool has_storage = true;
+    for (auto& op : operands_) {
+      has_storage &= op.tensor_base().has_storage();
+    }
+    privateuse1_without_storage = !has_storage;
   }
-  auto privateuse1_without_storage =
-     common_device_.type() == DeviceType::PrivateUse1 &&
-     !has_storage;
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
@@ -1524,7 +1531,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // So index translations in reduction can access
   // a valid value for the offset
   int64_t ndim_offsets = (ndim() ? ndim() : 1);
-  view_offsets_ = DimVector(ndim_offsets, 0);
+  view_offsets_.assign(ndim_offsets, 0);
 }
 
 // This is the structured kernels' implementation of set_output.  It is

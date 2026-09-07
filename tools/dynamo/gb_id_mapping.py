@@ -103,7 +103,38 @@ def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
     return expanded_hints
 
 
-def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
+def extract_info_from_value(
+    source: str, value_node: ast.AST, substitutions: dict[str, str] | None = None
+) -> Any:
+    substitutions = substitutions or {}
+
+    if isinstance(value_node, ast.Constant):
+        return value_node.value
+    elif isinstance(value_node, ast.JoinedStr):
+        evaluated_context = []
+        for value in value_node.values:
+            if isinstance(value, ast.FormattedValue):
+                if (
+                    isinstance(value.value, ast.Name)
+                    and value.value.id in substitutions
+                ):
+                    evaluated_context.append(substitutions[value.value.id])
+                else:
+                    evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
+            elif isinstance(value, ast.Constant):
+                # pyrefly: ignore [bad-argument-type]
+                evaluated_context.append(value.value)
+        return "".join(evaluated_context)
+    else:
+        # Only call get_source_segment when actually needed (avoids expensive
+        # _splitlines_no_ff call for every keyword argument)
+        param_source = get_source_segment(source, value_node)
+        return clean_string(param_source)
+
+
+def extract_info_from_keyword(
+    source: str, kw: ast.keyword, substitutions: dict[str, str] | None = None
+) -> Any:
     """
     Extracts and returns the value of a keyword argument from an AST node.
 
@@ -114,22 +145,94 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
     - For other types, it cleans the source segment to remove formatting artifacts.
 
     """
-    if isinstance(kw.value, ast.Constant):
-        return kw.value.value
-    elif isinstance(kw.value, ast.JoinedStr):
-        evaluated_context = []
-        for value in kw.value.values:
-            if isinstance(value, ast.FormattedValue):
-                evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
-            elif isinstance(value, ast.Constant):
-                # pyrefly: ignore [bad-argument-type]
-                evaluated_context.append(value.value)
-        return "".join(evaluated_context)
-    else:
-        # Only call get_source_segment when actually needed (avoids expensive
-        # _splitlines_no_ff call for every keyword argument)
-        param_source = get_source_segment(source, kw.value)
-        return clean_string(param_source)
+    return extract_info_from_value(source, kw.value, substitutions)
+
+
+def extract_hint_list(
+    source: str,
+    value_node: ast.AST,
+    substitutions: dict[str, str],
+    dynamo_dir: str | None,
+) -> list[str]:
+    if not isinstance(value_node, ast.List):
+        hints = extract_info_from_value(source, value_node, substitutions)
+        if not isinstance(hints, str):
+            return []
+
+        expanded_hints = []
+        items = re.findall(r'"([^"]*)"', hints)
+        if items:
+            expanded_hints.extend(items)
+        if "*graph_break_hints." in hints:
+            expanded_hints.extend(expand_hints([hints], dynamo_dir))
+        return expanded_hints
+
+    expanded_hints = []
+    for elt in value_node.elts:
+        if isinstance(elt, ast.Starred):
+            hint_source = get_source_segment(source, elt) or ""
+            if "*graph_break_hints." in hint_source:
+                expanded_hints.extend(expand_hints([hint_source], dynamo_dir))
+            continue
+
+        hint = extract_info_from_value(source, elt, substitutions)
+        if isinstance(hint, str):
+            expanded_hints.append(hint)
+
+    return expanded_hints
+
+
+def extract_constant_str_arg(node: ast.Call, name: str, index: int) -> str | None:
+    if len(node.args) > index:
+        arg = node.args[index]
+        if isinstance(arg, ast.Constant):
+            value = arg.value
+            if isinstance(value, str):
+                return value
+
+    for kw in node.keywords:
+        if kw.arg == name and isinstance(kw.value, ast.Constant):
+            value = kw.value.value
+            if isinstance(value, str):
+                return value
+
+    return None
+
+
+def find_helper_unimplemented_call(helper: ast.FunctionDef) -> ast.Call | None:
+    for node in ast.walk(helper):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("unimplemented", "_unimplemented")
+        ):
+            return node
+
+    return None
+
+
+def extract_call_info(
+    source: str,
+    node: ast.Call,
+    substitutions: dict[str, str],
+    dynamo_dir: str | None,
+) -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "gb_type": None,
+        "context": None,
+        "explanation": None,
+        "hints": [],
+    }
+
+    for kw in node.keywords:
+        if kw.arg == "hints":
+            info["hints"] = extract_hint_list(
+                source, kw.value, substitutions, dynamo_dir
+            )
+        elif kw.arg in info:
+            info[kw.arg] = extract_info_from_keyword(source, kw, substitutions)
+
+    return info
 
 
 def find_unimplemented_calls(
@@ -148,6 +251,14 @@ def find_unimplemented_calls(
             source = f.read()
             try:
                 tree = ast.parse(source)
+                helper_calls = {
+                    node.name: helper_call
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.FunctionDef)
+                    and node.name == "unimplemented_direct_disable_call"
+                    and (helper_call := find_helper_unimplemented_call(node))
+                    is not None
+                }
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
@@ -189,6 +300,21 @@ def find_unimplemented_calls(
                             info["hints"] = expanded_hints
 
                         results.append(info)
+                    elif (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id in helper_calls
+                    ):
+                        api_name = extract_constant_str_arg(node, "api_name", 0)
+                        if api_name is not None:
+                            info = extract_call_info(
+                                source,
+                                helper_calls[node.func.id],
+                                {"api_name": api_name},
+                                dynamo_dir,
+                            )
+                            if info["gb_type"] is not None:
+                                results.append(info)
             except SyntaxError:
                 print(f"Syntax error in {file_path}")
 

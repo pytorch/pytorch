@@ -992,20 +992,10 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
         _type_utils.JitScalarType.from_value(self, _type_utils.JitScalarType.UNDEFINED)
         == _type_utils.JitScalarType.UINT8
     ):
+        # shifting an unsigned integer right is a logical shift
         return g.op("BitShift", self, other, direction_s="RIGHT")
 
-    two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
-    # exponent (same type as self) has to be float or double in onnx::Pow
-    if not symbolic_helper._is_fp(self):
-        other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-    two_pow = g.op("Pow", two, other)
-    two_pow = g.op(
-        "Cast",
-        two_pow,
-        to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
-    )
-    rshift = g.op("Div", self, two_pow)
-    return rshift
+    return opset9.__rshift_(g, self, other)
 
 
 @_onnx_symbolic("aten::bitwise_left_shift")
@@ -1072,7 +1062,7 @@ def _get_im2col_indices_along_dim(
     kernel_grid = torch.arange(0, kernel_size_d * dilation_d, dilation_d)
     kernel_grid = g.op("Constant", value_t=kernel_grid.unsqueeze(0))
 
-    # Broadcast and add kernel staring positions (indices) with
+    # Broadcast and add kernel starting positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     blocks_d_indices = symbolic_helper._unsqueeze_helper(
         g, blocks_d_indices, [0]

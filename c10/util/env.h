@@ -12,6 +12,9 @@ C10_API void set_env(
     const char* value,
     bool overwrite = true);
 
+// Remove an environment variable.
+C10_API void unset_env(const char* name);
+
 // Checks an environment variable is set.
 C10_API bool has_env(const char* name) noexcept;
 

@@ -172,8 +172,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
   float* lr_ptr = nullptr;
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      params.vec(), grads.vec(), momentum_buffer_list.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(
+      params.vec(), grads.vec(), momentum_buffer_list.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -246,8 +246,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{
-      params.vec(), grads.vec(), momentum_buffer_list.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(
+      params.vec(), grads.vec(), momentum_buffer_list.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -313,7 +313,7 @@ void _fused_sgd_kernel_cuda_(
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
   float* lr_ptr = nullptr;
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{params.vec(), grads.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -405,7 +405,7 @@ void _fused_sgd_kernel_cuda_(
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
 
-  std::vector<std::vector<at::Tensor>> tensor_lists{params.vec(), grads.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
       kBFloat16,

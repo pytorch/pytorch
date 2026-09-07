@@ -109,7 +109,7 @@ def bias_correction(
 
     Args:
         float_model: a trained model that serves as a reference to what bias correction should aim for
-        quantized_model: quantized form of float_model that bias correction is to applied to
+        quantized_model: quantized form of float_model that bias correction is to be applied to
         img_data: calibration data to estimate the expected output (used to find quantization error)
         target_modules: specifies what submodules in quantized_model need bias correction (can be extended to
                 unquantized submodules)

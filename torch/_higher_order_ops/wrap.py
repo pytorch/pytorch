@@ -131,7 +131,8 @@ class InductorCodeSideTable:
 
     def get_callable(self, idx: int) -> InductorCompiledCallable:
         """Get the callable at the given index."""
-        assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
+        if idx not in self.id_to_callable:
+            raise AssertionError(f"Invalid inductor code index: {idx}")
         return self.id_to_callable[idx]
 
     def __getstate__(self):
@@ -160,9 +161,8 @@ def _resolve_inductor_callable(
     """
     if isinstance(func, int):
         return inductor_code_side_table.get_callable(func)
-    assert isinstance(func, InductorCompiledCallable), (  # noqa: S101
-        f"Unexpected func type: {type(func)}"
-    )
+    if not isinstance(func, InductorCompiledCallable):
+        raise AssertionError(f"Unexpected func type: {type(func)}")
     return func
 
 

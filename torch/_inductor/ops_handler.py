@@ -44,6 +44,7 @@ ReductionType = Literal[
     "welford_reduce",
     "welford_combine",
     "any",
+    "fmax",
     "max",
     "min",
     "prod",
@@ -52,6 +53,12 @@ ReductionType = Literal[
     "xor_sum",
     "online_softmax_reduce",
 ]
+registered_pointwise_ops: OrderedSet[str] = OrderedSet()
+
+
+def register_pointwise_op(name: str) -> None:
+    """Record a deterministic scalar operation that commutes with broadcasting."""
+    registered_pointwise_ops.add(name)
 
 
 def _arg_str(a: object) -> str:
@@ -359,6 +366,9 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def maximum(self, x0: T, x1: T) -> T:
+        raise NotImplementedError
+
+    def fmaximum(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
     def cos(self, x0: T) -> T:
@@ -758,7 +768,15 @@ class OpsHandler(Generic[T]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> T:
+        """Emit one inline-asm output.
+
+        ``output_dtypes`` describes all outputs from the same asm invocation;
+        ``dtype`` and ``output_index`` select the output represented by this
+        pointwise IR node. Codegen may share the invocation across those nodes.
+        """
         raise NotImplementedError
 
     def output(self, *args: T) -> None:

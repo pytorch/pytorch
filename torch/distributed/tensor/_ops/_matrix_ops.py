@@ -352,7 +352,7 @@ def _scaled_dot_product_flash_attention_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 3 valid tensor outputs and 3 tensor inputs
+    # in the sdpa case, we have 3 valid tensor outputs and 3 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),
@@ -487,7 +487,7 @@ def _scaled_dot_product_flash_attention_backward_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
+    # in the sdpa backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [Replicate()] * (3 + num_tensor_inputs)
 
@@ -641,7 +641,7 @@ def _scaled_dot_product_efficient_attention_base_strategies(
     single_mesh_dim_strategies: list[PlacementList] = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
+    # in the sdpa case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),
@@ -764,7 +764,7 @@ def _scaled_dot_product_efficient_attention_backward_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda backward case, we have 4 tensor outputs and 8 or 9 tensor inputs
+    # in the sdpa backward case, we have 4 tensor outputs and 8 or 9 tensor inputs
     # NOTE: Output sharding of grad_bias on heads dim if attn_bias is present;
     #       otherwise grad_bias will be empty and its DTensorSpec will be removed.
     # first we can always accept full replication for both inputs and outputs
@@ -907,7 +907,7 @@ def _scaled_dot_product_cudnn_attention_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 2 valid tensor outputs and 3 tensor inputs
+    # in the sdpa case, we have 2 valid tensor outputs and 3 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),  # output

@@ -168,6 +168,8 @@ class _CommModeModuleTracker(ModTracker):
             self.parent_dict[parent].append(self.name)
             self.parent_list.append(self.name)
 
+            if self.name in self.register_forward_hook_handles:
+                self.register_forward_hook_handles[self.name].remove()
             self.register_forward_hook_handles[self.name] = mod.register_forward_hook(
                 self._fw_set_module_hook
             )

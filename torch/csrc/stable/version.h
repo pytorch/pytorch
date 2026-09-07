@@ -19,8 +19,16 @@
 //   including any header files:
 //     #define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
 //     #include <torch/csrc/stable/library.h>
+//
+// TORCH_TARGET_VERSION must be <= TORCH_ABI_VERSION of the libtorch headers on
+// the include path. A larger value is a compile error.
 
 #ifdef TORCH_TARGET_VERSION
+#if TORCH_TARGET_VERSION > TORCH_ABI_VERSION
+#error \
+    "TORCH_TARGET_VERSION is newer than the libtorch headers this build is compiling against. " \
+    "Lower TORCH_TARGET_VERSION to <= TORCH_ABI_VERSION (see torch/headeronly/version.h), or compile against a newer PyTorch."
+#endif
 #define TORCH_FEATURE_VERSION TORCH_TARGET_VERSION
 #else
 #define TORCH_FEATURE_VERSION TORCH_ABI_VERSION
@@ -30,3 +38,4 @@
 #define TORCH_VERSION_2_11_0 (((0ULL + 2) << 56) | ((0ULL + 11) << 48))
 #define TORCH_VERSION_2_12_0 (((0ULL + 2) << 56) | ((0ULL + 12) << 48))
 #define TORCH_VERSION_2_13_0 (((0ULL + 2) << 56) | ((0ULL + 13) << 48))
+#define TORCH_VERSION_2_14_0 (((0ULL + 2) << 56) | ((0ULL + 14) << 48))

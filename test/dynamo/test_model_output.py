@@ -7,6 +7,7 @@ import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -30,6 +31,8 @@ def maybe_skip(fn):
 
 
 class TestHFPretrained(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
@@ -63,6 +66,8 @@ class TestHFPretrained(TestCase):
 
 
 class TestModelOutput(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @maybe_skip
     def test_mo_create(self):
         def fn(a, b):
@@ -280,6 +285,8 @@ class TestModelOutput(TestCase):
 
 
 class TestModelOutputBert(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @maybe_skip
     def test_HF_bert_model_output(self, device):
         class BertPooler(torch.nn.Module):

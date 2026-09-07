@@ -19,13 +19,13 @@ class FakeScriptObject:
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
 
-        from torch._library.opaque_object import is_opaque_type
+        from torch._library.opaque_object import is_custom_class
 
         # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)
         # then we want it to be recorded on the real object
         real_obj = x
-        if not is_opaque_type(type(x)):
+        if not is_custom_class(type(x)):
             try:
                 with _disable_current_modes():
                     real_obj = copy.deepcopy(x)
@@ -243,12 +243,12 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_type,
+        is_custom_class,
         OpaqueTypeStr,
     )
 
     x_type = type(x)
-    if is_opaque_type(x_type):
+    if is_custom_class(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
@@ -406,11 +406,11 @@ def register_fake_class(qualname, fake_class: HasStaticMethodFromReal | None = N
             def size(self):
                 return len(self.queue)
 
-    In this example, the original TensorQeue need to add a __obj_flatten__ method
+    In this example, the original TensorQueue need to add a __obj_flatten__ method
     to the class TensorQueue and the flattened result is passed into FakeTensorQueue's
     __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
     at the contents of the script object and properly handle them in the subsystems
-    like dynamo, aot_aotugrad or more.
+    like dynamo, aot_autograd or more.
     """
 
     def inner(fake_class: HasStaticMethodFromReal):

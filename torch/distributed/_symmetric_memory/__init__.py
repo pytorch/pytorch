@@ -8,7 +8,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from functools import partial
 from typing import Any, Literal
 from typing_extensions import deprecated
 
@@ -16,7 +15,13 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
+from torch._prims_common import make_contiguous_strides_for
+from torch.utils._triton import has_triton
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -80,14 +85,22 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
@@ -443,6 +456,78 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
+def reduce_partials(
+    partials: torch.Tensor,
+    *,
+    dim: int,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor:
+    if output_dtype in (torch.float16, torch.bfloat16):
+        normalized_dim = dim if dim >= 0 else dim + partials.dim()
+        # The common RS layout is [rank, local_M, N]. Fuse the final rank
+        # reduction into one kernel so low-precision partials accumulate in fp32
+        # and round only once when written to the output dtype.
+        if normalized_dim == 0:
+            reduced = triton_reduce_partials_first_dim(
+                partials,
+                reduce_op=reduce_op,
+                output_dtype=output_dtype,
+                group_size=group_size,
+            )
+            if reduced is not None:
+                return reduced
+        if reduce_op == "sum":
+            return torch.sum(partials, dim=dim)
+        if reduce_op == "avg":
+            return torch.mean(partials, dim=dim)
+    if reduce_op == "sum":
+        return torch.sum(partials, dim=dim)
+    if reduce_op == "avg":
+        return torch.mean(partials, dim=dim)
+    raise ValueError("reduce_op must be sum or avg")
+
+
+def triton_reduce_partials_first_dim(
+    partials: torch.Tensor,
+    *,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor | None:
+    if (
+        partials.device.type != "cuda"
+        or not has_triton()
+        or not partials.is_contiguous()
+        or partials.dim() < 2
+        or partials.shape[0] != group_size
+        or output_dtype not in (torch.float16, torch.bfloat16)
+        or partials.dtype not in (torch.float16, torch.bfloat16)
+    ):
+        return None
+
+    out = partials.new_empty(partials.shape[1:], dtype=output_dtype)
+    shard_elems = out.numel()
+    block = 1024
+    import triton
+
+    from torch.distributed._symmetric_memory._triton_kernels import (
+        reduce_partials_first_dim_kernel,
+    )
+
+    grid = (triton.cdiv(shard_elems, block),)
+    reduce_partials_first_dim_kernel[grid](
+        partials,
+        out,
+        shard_elems,
+        group_size,
+        reduce_op == "avg",
+        BLOCK=block,
+    )
+    return out
+
+
 lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
@@ -476,6 +561,15 @@ lib.define(
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
+)
+# Copy-engine multicast low-contention all-gather that allocates symm_mem output.
+lib.define(
+    "_low_contention_all_gather_ce_multicast(Tensor tensor, str group_name) -> Tensor"
+)
+# Out variant for preallocated symm_mem output, including CUDA graph capture.
+lib.define(
+    "_low_contention_all_gather_ce_multicast_out("
+    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
 )
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
@@ -1276,15 +1370,12 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("Invalid gather_dim")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+    output_dtype = out_dtype or A.dtype
 
     if scatter_dim == A.ndim - 1:
         B_shards = B.chunk(group.size(), dim=B.ndim - 1)
@@ -1311,9 +1402,12 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return reduce_fn(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
+            reduce_op=reduce_op,
+            output_dtype=output_dtype,
+            group_size=group.size(),
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
@@ -1327,7 +1421,7 @@ def _fused_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=output_dtype)
 
     _pipelined_produce_and_all2all(
         chunk_producer,
@@ -1337,11 +1431,14 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
 
@@ -1475,12 +1572,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
+    output_dtype = out_dtype or A.dtype
 
     group = c10d._resolve_process_group(group_name)
 
@@ -1535,7 +1629,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=output_dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1567,7 +1661,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = reduce_fn(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
@@ -1576,6 +1670,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
     # Output shape must be scattered along original scatter dim as well.
@@ -1737,6 +1834,153 @@ def _low_contention_all_gather(
         symm_mem.barrier()
         torch._C._distributed_c10d._register_work(output, Work())
         return output
+
+
+def _require_multicast(device_index: int, op_name: str) -> None:
+    if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
+        raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
+
+
+# Use one dedicated signal-pad channel for CE multicast, separate from existing
+# low-contention collectives. Its two barriers are ordered on the same stream;
+# if a peer has not consumed the first signal yet, the second barrier's CAS put
+# spins until that peer slot is cleared.
+_CE_MULTICAST_BARRIER_CHANNEL = 3
+
+
+def _lc_ag_out_shape(tensor: torch.Tensor, world_size: int) -> tuple[int, ...]:
+    if tensor.dim() == 0:
+        return (world_size,)
+    return (tensor.shape[0] * world_size, *tensor.shape[1:])
+
+
+def _check_lc_ag_out(
+    tensor: torch.Tensor,
+    output: torch.Tensor,
+    world_size: int,
+    op_name: str,
+) -> None:
+    expected_shape = _lc_ag_out_shape(tensor, world_size)
+    if tuple(output.shape) != expected_shape:
+        raise RuntimeError(
+            f"{op_name}: expected out shape {expected_shape}, "
+            f"but got {tuple(output.shape)}."
+        )
+    if output.dtype != tensor.dtype:
+        raise RuntimeError(
+            f"{op_name}: expected out dtype {tensor.dtype}, but got {output.dtype}."
+        )
+    if output.device != tensor.device:
+        raise RuntimeError(
+            f"{op_name}: expected out device {tensor.device}, but got {output.device}."
+        )
+    if not output.is_contiguous():
+        raise RuntimeError(f"{op_name}: out must be contiguous.")
+
+
+def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
+    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
+    actual_bytes = _SymmetricMemory.signal_pad_size
+    if actual_bytes < required_bytes:
+        raise RuntimeError(
+            f"low_contention all-gather requires signal_pad_size >= "
+            f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
+            f"the current size is {actual_bytes} bytes."
+        )
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "Meta")
+def _low_contention_all_gather_ce_multicast_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(_lc_ag_out_shape(tensor, world_size))
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "CUDA")
+def _low_contention_all_gather_ce_multicast(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into a fresh output."""
+    device_index = (
+        tensor.device.index
+        if tensor.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    world_size = c10d._get_group_size_by_name(group_name)
+    out_shape = _lc_ag_out_shape(tensor, world_size)
+    if torch.cuda.is_current_stream_capturing():
+        raise RuntimeError(
+            "_low_contention_all_gather_ce_multicast cannot allocate its output "
+            "during CUDA graph capture. Use "
+            "_low_contention_all_gather_ce_multicast_out with a preallocated "
+            "symmetric-memory output."
+        )
+    device = torch.device("cuda", device_index)
+    with torch.cuda.use_mem_pool(get_mem_pool(device)):
+        output = torch.empty_strided(
+            out_shape,
+            make_contiguous_strides_for(out_shape),
+            dtype=tensor.dtype,
+            device=device,
+        )
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, output)
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "Meta")
+def _low_contention_all_gather_ce_multicast_out_meta(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
+    return out
+
+
+@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "CUDA")
+def _low_contention_all_gather_ce_multicast_out(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    """Direct-input copy-engine multicast all-gather into caller-provided output."""
+    world_size = c10d._get_group_size_by_name(group_name)
+    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
+    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, out)
+
+
+def _low_contention_all_gather_ce_multicast_impl(
+    tensor: torch.Tensor,
+    group_name: c10d.GroupName,
+    output: torch.Tensor,
+) -> torch.Tensor:
+    device_index = (
+        output.device.index
+        if output.device.index is not None
+        else torch.cuda.current_device()
+    )
+    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
+    symm_mem = rendezvous(output, group_name)
+    if symm_mem is None:
+        raise RuntimeError(
+            "ce_multicast output must be allocated from symmetric memory"
+        )
+    _check_lc_signal_pad_capacity(symm_mem)
+
+    rank = symm_mem.rank
+    shard_bytes = tensor.numel() * tensor.element_size()
+
+    ag_input = tensor if tensor.is_contiguous() else tensor.contiguous()
+    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
+    torch.ops.symm_mem.memcpy_to_multicast_(
+        output, ag_input, rank * shard_bytes, group_name
+    )
+    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
+    return output
 
 
 @torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")
@@ -1948,6 +2192,12 @@ def empty(  # type: ignore[misc]
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
 
+    .. note::
+        This is a host-synchronous allocation. Together with
+        :func:`rendezvous`, it is intended as an initialization-time
+        operation: allocate a symmetric memory tensor once and reuse it,
+        rather than allocating in hot code paths.
+
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
             Can be a variable number of arguments or a collection like a list or tuple.
@@ -1958,7 +2208,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -2004,6 +2255,14 @@ def rendezvous(
 
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
+
+    .. note::
+        This is a host-blocking initialization operation: the first rendezvous
+        of a tensor performs handle exchange and mapping across processes, and
+        synchronizes the host with the device. It cannot be ordered onto a
+        CUDA stream or captured in a CUDA graph. Rendezvous a buffer once and
+        reuse the returned handle rather than calling this in hot code paths;
+        subsequent calls on the same tensor return the cached handle.
 
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
@@ -2372,6 +2631,54 @@ def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     return _SymmetricMemory.is_symm_mem_tensor(tensor)
 
 
+def all_to_all_nd(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    scatter_dim: int,
+    gather_dim: int,
+    *,
+    group: str,
+) -> None:
+    r"""
+    all_to_all_nd(input, out, scatter_dim, gather_dim, *, group) -> None
+
+    Permute-free all-to-all: shards along ``scatter_dim`` of ``input`` are exchanged
+    so each rank receives one shard per peer; results are laid out along ``gather_dim``
+    of ``out``. Supported pairs are ``(scatter_dim=1, gather_dim=0)`` and
+    ``(scatter_dim=0, gather_dim=1)``.
+
+    For ``scatter_dim=1``, ``gather_dim=0`` (let ``G`` be the group size): ``input`` is
+    ``[rows, G * local_cols]`` or equivalently ``[rows, G, local_cols]``;
+    each rank ``r`` reads column block ``r`` from every peer and writes peer ``j`` into
+    ``out[j]``. ``out`` must be contiguous with shape ``[G, rows, local_cols]`` or the
+    flattened equivalent ``[G * rows, local_cols]``.
+
+    For ``scatter_dim=0``, ``gather_dim=1`` (``G`` is the group size): ``input`` is
+    ``[G * local_rows, cols]`` or equivalently ``[G, local_rows, cols]``;
+    each rank ``r`` reads row block ``r`` from every peer; peer ``j`` is stored in
+    ``out[:, j, :]``. ``out`` must be contiguous with shape ``[local_rows, G, cols]`` or
+    ``[local_rows, G * cols]`` (flattened gather and inner dims).
+
+    Args:
+        input (Tensor): For ``(scatter_dim=1, gather_dim=0)``, 2-D ``[rows, G*local_cols]`` or
+            3-D ``[rows, G, local_cols]`` in symmetric memory (innermost dimension contiguous).
+            For ``(scatter_dim=0, gather_dim=1)``, 2-D ``[G*local_rows, cols]`` or 3-D
+            ``[G, local_rows, cols]`` (same layout).
+        out (Tensor): Contiguous buffer (see shapes above; 2-D allowed where noted).
+        scatter_dim (int): ``0`` or ``1`` — dimension along which the input is partitioned.
+        gather_dim (int): ``0`` or ``1`` — dimension along which peer chunks are
+            concatenated in ``out``.
+        group (str): The name of the ``ProcessGroup`` to perform the operation on.
+    """
+    backend = get_backend(input.device)
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_all_to_all_nd(
+            input, out, scatter_dim, gather_dim, group
+        )
+    else:
+        raise NotImplementedError(f"all_to_all_nd: unsupported backend: {backend}")
+
+
 __all__ = [
     "empty",
     "is_symm_mem_tensor",
@@ -2384,4 +2691,5 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "all_to_all_nd",
 ]

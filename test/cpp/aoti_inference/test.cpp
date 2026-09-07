@@ -1,5 +1,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
@@ -12,7 +13,9 @@
 #include <thread>
 #include <vector>
 
+#include <ATen/record_function.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_observer.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -141,7 +144,7 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   auto actual_output_tensors =
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
@@ -287,7 +290,7 @@ void test_aoti_constants_update(
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   // By default, buffer #1 get loaded with burned in weights. Correct results.
   auto actual_output_tensors = runner->run(input_tensors);
@@ -384,7 +387,7 @@ void test_aoti_extract_constants_map(const std::string& device) {
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
 
   // By default, buffer #1 get loaded with burned in weights. Correct results.
@@ -465,7 +468,7 @@ void test_aoti_double_buffering(
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   // By default, buffer #1 get loaded with burned in weights. Correct results.
   auto actual_output_tensors = runner->run(input_tensors);
@@ -606,7 +609,7 @@ void test_aoti_user_managed_buffer() {
   size_t initTorchReserved = stats.reserved_bytes[0].current;
   size_t torchReserved = stats.reserved_bytes[0].current;
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
@@ -614,7 +617,7 @@ void test_aoti_user_managed_buffer() {
   size_t preFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&preFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // At this point, no memory should be consumed since we freed them all.
   runner->swap_constant_buffer();
@@ -622,7 +625,7 @@ void test_aoti_user_managed_buffer() {
   runner->swap_constant_buffer();
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
 
@@ -636,7 +639,7 @@ void test_aoti_user_managed_buffer() {
   size_t updateMemory = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory, updateMemory);
 
@@ -649,7 +652,7 @@ void test_aoti_user_managed_buffer() {
   // consumption.
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   runner->update_constant_buffer(
       rand_map,
@@ -658,7 +661,7 @@ void test_aoti_user_managed_buffer() {
       /*user_managed = */ false);
   cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory);
 
@@ -776,7 +779,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
   c10::cuda::CUDACachingAllocator::DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
@@ -789,7 +792,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   // We update inactive buffer, this should create one copy (128MB) at buffer #2
@@ -797,7 +800,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory2 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory2, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
@@ -811,7 +814,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
     size_t constFoldMemory = 0;
     cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
     if (cudaStatus != cudaSuccess) {
-      throw std::runtime_error("cudaMemGetInfo failed!");
+      TORCH_CHECK(false, "cudaMemGetInfo failed!");
     }
     ASSERT_EQ(
         initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -832,7 +835,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t postFreeMemory = 0;
   cudaStatus = cudaMemGetInfo(&postFreeMemory, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   // We should only have one set of buffer (#2), available memory should equal
   // initial memory minus the folded constants.
@@ -850,7 +853,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(
       initMemory - DATASIZE - (torchReserved1 - initTorchReserved),
@@ -865,7 +868,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   torchActive2 = stats.active_bytes[0].current;
@@ -881,7 +884,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchActive2 = stats.active_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
   ASSERT_EQ(initMemory - (torchReserved2 - initTorchReserved), updateMemory1);
   ASSERT_EQ(torchActive1 - torchActive2, 0);
@@ -899,7 +902,7 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torchReserved2 = stats.reserved_bytes[0].current;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
-    throw std::runtime_error("cudaMemGetInfo failed!");
+    TORCH_CHECK(false, "cudaMemGetInfo failed!");
   }
 
   ASSERT_EQ(
@@ -937,7 +940,7 @@ void test_cuda_alloc_test() {
   cudaError_t cudaStatus;
   cudaStatus = cudaGetDevice(&device_idx);
   if (cudaStatus != cudaSuccess || device_idx == -1) {
-    throw std::runtime_error("cudaGetDevice failed!");
+    TORCH_CHECK(false, "cudaGetDevice failed!");
   }
 
   c10::cuda::CUDACachingAllocator::emptyCache();
@@ -1223,6 +1226,209 @@ void test_aoti_const_fold_separate_stream() {
   }
 }
 #endif // USE_CUDA || USE_ROCM
+
+// RECORD_USER_SCOPE callbacks are raw function pointers and cannot capture, so
+// the names they see are collected here.
+std::vector<std::string>& recordedScopeNames() {
+  static std::vector<std::string> names;
+  return names;
+}
+
+// Records the (event, ctx, succeeded) sequence an observer is handed, so a test
+// can assert begin/end pairing and the failure signal.
+class RecordingObserver : public torch::inductor::AOTIModelContainerObserver {
+ public:
+  struct Record {
+    torch::inductor::AOTIContainerEvent event;
+    size_t num_constants;
+    bool use_inactive;
+    bool succeeded;
+  };
+
+  void on_begin(
+      torch::inductor::AOTIContainerEvent event,
+      const torch::inductor::AOTIObserverContext& ctx) override {
+    begins.push_back({event, ctx.num_constants, ctx.use_inactive, true});
+    ++depth;
+  }
+
+  void on_end(
+      torch::inductor::AOTIContainerEvent event,
+      const torch::inductor::AOTIObserverContext& ctx,
+      bool succeeded) override {
+    ends.push_back({event, ctx.num_constants, ctx.use_inactive, succeeded});
+    --depth;
+  }
+
+  std::vector<Record> begins;
+  std::vector<Record> ends;
+  int depth = 0;
+};
+
+void test_aoti_observer(const std::string& device) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+
+  std::string path_attr = "model_so_path_" + device;
+  std::string inputs_attr = "inputs_" + device;
+  std::string weights_attr = "w_pre_" + device;
+  std::string add_attr = "w_add_" + device;
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  if (device == "cpu") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
+        model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
+  } else {
+    FAIL() << "unsupported device: " << device;
+  }
+
+  // A null observer is accepted and never consumes the attach-once slot.
+  runner->set_observer(nullptr);
+
+  auto observer = std::make_shared<RecordingObserver>();
+  runner->set_observer(observer);
+  // Attaching a second observer is a usage error, not a silent swap: the
+  // lifetime argument for the raw pointer on the hot path depends on the
+  // owning shared_ptr never being replaced.
+  EXPECT_THROW(
+      runner->set_observer(std::make_shared<RecordingObserver>()), c10::Error);
+
+  // Inference reports exactly one begin/end pair, and does not nest.
+  runner->run(input_tensors);
+  ASSERT_EQ(observer->begins.size(), 1);
+  ASSERT_EQ(observer->ends.size(), 1);
+  EXPECT_EQ(
+      observer->begins[0].event,
+      torch::inductor::AOTIContainerEvent::kInference);
+  EXPECT_EQ(
+      observer->ends[0].event, torch::inductor::AOTIContainerEvent::kInference);
+  EXPECT_TRUE(observer->ends[0].succeeded);
+  EXPECT_EQ(observer->depth, 0);
+
+  // A successful constants update reports how many constants moved and which
+  // buffer they went to.
+  torch::inductor::TensorConstantMap real_map;
+  real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
+  real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
+  runner->update_constant_buffer(
+      real_map, /* use_inactive = */ false, /* check_full_update = */ false);
+  ASSERT_FALSE(observer->ends.empty());
+  EXPECT_EQ(
+      observer->ends.back().event,
+      torch::inductor::AOTIContainerEvent::kUpdateConstantBuffer);
+  EXPECT_EQ(observer->ends.back().num_constants, real_map.size());
+  EXPECT_FALSE(observer->ends.back().use_inactive);
+  EXPECT_TRUE(observer->ends.back().succeeded);
+
+  // A failing operation still reports on_end, with succeeded == false. Without
+  // that flag a failed call would land in the observer's latency distribution
+  // as if it had completed normally.
+  const size_t ends_before = observer->ends.size();
+  torch::inductor::TensorConstantMap missing_map;
+  missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
+  try {
+    runner->update_constant_buffer(
+        missing_map,
+        /* use_inactive = */ false,
+        /* check_full_update = */ true);
+    ADD_FAILURE() << "expected an incomplete constants update to throw";
+  } catch (const std::exception&) {
+  }
+  ASSERT_EQ(observer->ends.size(), ends_before + 1);
+  EXPECT_EQ(
+      observer->ends.back().event,
+      torch::inductor::AOTIContainerEvent::kUpdateConstantBuffer);
+  EXPECT_FALSE(observer->ends.back().succeeded);
+
+  // Every begin was paired with an end, including the one that threw.
+  EXPECT_EQ(observer->begins.size(), observer->ends.size());
+  EXPECT_EQ(observer->depth, 0);
+
+  for (auto& pair : real_map) {
+    delete pair.second;
+  }
+  for (auto& pair : missing_map) {
+    delete pair.second;
+  }
+}
+
+// The observer is not the only way to see these events: the same call sites are
+// bracketed with RECORD_USER_SCOPE, so a profiler (or any RecordFunction
+// callback) picks them up without attaching an observer at all.
+void test_aoti_record_function(const std::string& device) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+
+  std::string path_attr = "model_so_path_" + device;
+  std::string inputs_attr = "inputs_" + device;
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  if (device == "cpu") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
+        model_so_path);
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device == "cuda") {
+    runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_so_path);
+#endif
+  } else {
+    FAIL() << "unsupported device: " << device;
+  }
+
+  recordedScopeNames().clear();
+  auto handle = at::addThreadLocalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            recordedScopeNames().emplace_back(fn.name());
+            return nullptr;
+          })
+          .scopes({at::RecordScope::USER_SCOPE}));
+
+  // No observer attached: RecordFunction is the only consumer here.
+  runner->run(input_tensors);
+  runner->swap_constant_buffer();
+
+  at::removeCallback(handle);
+
+  // Deliberately not EXPECT_THAT/IsSupersetOf: test_aoti_inference links
+  // gtest_main but not gmock, and the unordered-container matchers are not
+  // header-only (HasSubstr, used elsewhere in this file, is).
+  const auto& names = recordedScopeNames();
+  const auto sawScope = [&names](const char* name) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+  };
+  EXPECT_TRUE(sawScope("AOTIModelContainerRunner::run"));
+  EXPECT_TRUE(sawScope("AOTIModelContainerRunner::swap_constant_buffer"));
+
+  // Callbacks are torn down again, so later tests are unaffected.
+  const size_t recorded = recordedScopeNames().size();
+  runner->run(input_tensors);
+  EXPECT_EQ(recordedScopeNames().size(), recorded);
+}
+
 } // namespace
 
 namespace torch::aot_inductor {
@@ -1324,6 +1530,24 @@ TEST_F(AotInductorTest, ConcurrentRunConstFoldCuda) {
 #if defined(USE_CUDA) || defined(USE_ROCM)
 TEST_F(AotInductorTest, ConstFoldSeparateStreamCuda) {
   test_aoti_const_fold_separate_stream();
+}
+#endif // USE_CUDA || USE_ROCM
+
+TEST_F(AotInductorTest, ObserverCpu) {
+  test_aoti_observer("cpu");
+}
+
+TEST_F(AotInductorTest, RecordFunctionCpu) {
+  test_aoti_record_function("cpu");
+}
+
+#if defined(USE_CUDA) || defined(USE_ROCM)
+TEST_F(AotInductorTest, ObserverCuda) {
+  test_aoti_observer("cuda");
+}
+
+TEST_F(AotInductorTest, RecordFunctionCuda) {
+  test_aoti_record_function("cuda");
 }
 #endif // USE_CUDA || USE_ROCM
 

@@ -482,7 +482,6 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
   }
 
   grad_input.resize_as_(self);
-  grad_input.zero_();
 
   int64_t count = self.numel();
   if (count == 0) {
@@ -568,7 +567,6 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
   }
 
   grad_input.resize_as_(self);
-  grad_input.zero_();
 
   // Collapse batch and feature dimensions if needed
   auto grad_input_reshaped = grad_input;

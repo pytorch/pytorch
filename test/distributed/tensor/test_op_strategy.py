@@ -227,12 +227,20 @@ class TestCostModel(DTensorOpTestBase):
         # reaching the shard_order check
         self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
-    def test_redistribute_cost_latency(self):
+    def test_addmm_partial_redistribute(self):
         mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-        torch.manual_seed(0)
-        bias = torch.randn(8)
-        mat1 = torch.randn(50, 6)
-        mat2 = torch.randn(6, 8)
+        # bias/mat1/mat2 are the GLOBAL (unsharded) tensors, distributed below;
+        # the final assert checks full_tensor() against the global addmm. Every
+        # rank must therefore draw identical values: distribute_tensor broadcasts
+        # from rank 0, and the Partial() mat1 reconstruction sums mat1/world_size
+        # across ranks, which only recovers the global mat1 if all ranks match.
+        # This class is a MultiThreadedTestCase, so ranks are threads sharing the
+        # process-global default generator; a per-thread local Generator gives
+        # each rank its own state seeded identically, avoiding interleaved draws.
+        gen = torch.Generator().manual_seed(0)
+        bias = torch.randn(8, generator=gen)
+        mat1 = torch.randn(50, 6, generator=gen)
+        mat2 = torch.randn(6, 8, generator=gen)
 
         dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
         dist_mat1 = DTensor.from_local(

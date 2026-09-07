@@ -155,7 +155,7 @@ def get_element(
     path: OBJ_PATH,
     default_value: T | None = None,
 ) -> T | None:
-    """Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found."""
+    """Retrieve the value at ``path`` from ``root_dict``, returning ``default_value`` if not found."""
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
         if type(part) is int:

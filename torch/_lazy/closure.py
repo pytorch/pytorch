@@ -1,16 +1,21 @@
-# mypy: allow-untyped-defs
 import os
 import threading
+from collections.abc import Callable, Iterable
 from queue import Empty as EmptyQueue, Queue
+from typing import overload
+from typing_extensions import TypeVarTuple, Unpack
 
-from torch._lazy.device_context import get_device_context
+from torch._lazy.device_context import DeviceContext, get_device_context
+
+
+_Ts = TypeVarTuple("_Ts")
 
 
 class ClosureHandler:
     def __init__(self) -> None:
         pass
 
-    def run(self, closure):
+    def run(self, closure: Callable[[], object]) -> None:
         """Run closure function
 
         Args:
@@ -18,7 +23,7 @@ class ClosureHandler:
         """
         closure()
 
-    def __call__(self, closures):
+    def __call__(self, closures: Iterable[Callable[[], object]]) -> None:
         for closure in closures:
             self.run(closure)
 
@@ -33,21 +38,21 @@ class AsyncClosureHandler(ClosureHandler):
         variable.
     """
 
-    def __init__(self, max_queue_size=100):
+    def __init__(self, max_queue_size: int = 100) -> None:
         super().__init__()
-        self._closure_queue: Queue = Queue(
+        self._closure_queue: Queue[Callable[[], object]] = Queue(
             int(os.environ.get("LTC_MAX_ASYNC_QUEUE", max_queue_size))
         )
-        self._closure_exception: Queue = Queue()
+        self._closure_exception: Queue[Exception] = Queue()
         self._closure_lock = threading.Lock()
         self._closure_event_loop_finished = threading.Event()
-        self._closure_event_loop = None
+        self._closure_event_loop: threading.Thread | None = None
 
-    def start_event_loop(self):
+    def start_event_loop(self) -> None:
         """Start closure event loop if not started"""
         if self._closure_event_loop is None:
 
-            def event_loop():
+            def event_loop() -> None:
                 # Run loop until closure event is set and closure queue is empty
                 while True:
                     try:
@@ -63,13 +68,10 @@ class AsyncClosureHandler(ClosureHandler):
                         self._closure_exception.put(e)
                         return
 
-            # pyrefly: ignore [bad-assignment]
-            self._closure_event_loop = threading.Thread(
-                target=event_loop
-            )  # pyrefly: ignore [bad-assignment]
-            self._closure_event_loop.start()  # pyrefly: ignore [missing-attribute]
+            self._closure_event_loop = threading.Thread(target=event_loop)
+            self._closure_event_loop.start()
 
-    def run(self, closure):
+    def run(self, closure: Callable[[], object]) -> None:
         with self._closure_lock:
             self._closure_queue.put(closure, block=True)
             if (
@@ -86,10 +88,26 @@ class AsyncClosureHandler(ClosureHandler):
                     self.start_event_loop()
 
 
-def add_step_closure(closure, args=(), run_async=False):
+@overload
+def add_step_closure(
+    closure: Callable[[], object],
+    args: tuple[()] = (),
+    run_async: bool = False,
+) -> None: ...
+@overload
+def add_step_closure(
+    closure: Callable[[Unpack[_Ts]], object],
+    args: tuple[Unpack[_Ts]],
+    run_async: bool = False,
+) -> None: ...
+def add_step_closure(
+    closure: Callable[..., object],
+    args: tuple[object, ...] = (),
+    run_async: bool = False,
+) -> None:
     """Adds a closure to the list of the ones to be run at the end of the step.
     Many times during model training there is the need to print/report (print to
-    console, post to tensorboard, etc...) information which require the content of
+    console, post to tensorboard, etc...) information which requires the content of
     intermediary tensors to be inspected.
     Inspecting different tensors content in different points of the model code
     requires many executions and typically causes performance issues.
@@ -109,14 +127,16 @@ def add_step_closure(closure, args=(), run_async=False):
     """
     devctx = get_device_context()
     closures_type = "async_step_closures" if run_async else "step_closures"
-    step_closures = getattr(devctx, closures_type, None)
+    step_closures: list[Callable[[], object]] | None = getattr(
+        devctx, closures_type, None
+    )
     if step_closures is None:
         step_closures = []
         setattr(devctx, closures_type, step_closures)
     step_closures.append(lambda a=args: closure(*a))
 
 
-def run_step_closures():
+def run_step_closures() -> DeviceContext:
     devctx = get_device_context()
     async_step_closures = getattr(devctx, "async_step_closures", None)
     if async_step_closures is not None:

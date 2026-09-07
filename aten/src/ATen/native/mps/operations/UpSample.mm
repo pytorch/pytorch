@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_upsample_bicubic2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bicubic2d_aa_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
@@ -291,6 +292,11 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
+
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
   dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
                     grad_input,
@@ -437,6 +443,30 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
   upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& grad_input) {
+  upsample_kernel_backward_out_template<4>(
+      grad_input, grad_output, output_size, align_corners, {scales_w, scales_h}, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& grad_input) {
+  upsample_kernel_backward_out_template<4>(
+      grad_input, grad_output, output_size, align_corners, {scales_w, scales_h}, "bicubic2d_aa");
 }
 
 TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)

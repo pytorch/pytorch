@@ -27,11 +27,13 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
+    skipCUDAIf,
     skipOps,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_CI,
     IS_LINUX,
     IS_MACOS,
@@ -50,11 +52,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
     has_triton,
     HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_leaves, tree_map
@@ -199,6 +201,9 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    # torch._C._linalg.linalg_polar graph-breaks on some CPU runners but
+    # succeeds on others, so a strict xfail causes XPASS failures.
+    "linalg.polar": {f32, f64},
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
@@ -235,8 +240,6 @@ inductor_skips["xpu"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
-# torch-xpu-ops: #2956
-inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
@@ -248,12 +251,22 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
+    # Same reason as "complex"/"view_as_complex" above: check_model runs the
+    # reference with reference_in_float=True, and reference_to_expect only
+    # casts the reference back when y.dtype.is_floating_point -- which is
+    # False for complex, so the f16 reference stays complex64 while the actual
+    # is complex32 and the dtype comparison fails.
+    "polar": {f16},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
+        b8,
+        f16,
         f32,
         f64,
-    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
+        i32,
+        i64,
+    },  # Sparse tensor outputs are not supported by torch.compile fullgraph.
     "view_as_complex": {f16},
 }
 
@@ -327,6 +340,35 @@ inductor_should_fail_with_exception["cpu"] = {}
 inductor_should_fail_with_exception["cuda"] = {}
 inductor_should_fail_with_exception["xpu"] = {}
 
+if IS_MACOS:
+    inductor_should_fail_with_exception["cpu"]["remainder"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+    inductor_should_fail_with_exception["cpu"]["__rmod__"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+
+if IS_LINUX and IS_ARM64:
+    inductor_should_fail_with_exception["cpu"]["remainder"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+    inductor_should_fail_with_exception["cpu"]["__rmod__"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+    # GCC 15 SVE ICE while compiling fp16 n=0 polygamma kernels.
+    inductor_should_fail_with_exception["cpu"]["polygamma.polygamma_n_0"] = {
+        f16: "internal compiler error: in convert_mode_scalar",
+    }
+    inductor_should_fail_with_exception["cpu"][
+        "special.polygamma.special_polygamma_n_0"
+    ] = {
+        f16: "internal compiler error: in convert_mode_scalar",
+    }
+
 
 def get_skips_and_xfails(from_dict, xfails=True):
     retval = set()
@@ -373,6 +415,7 @@ inductor_override_kwargs["cpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
@@ -393,13 +436,28 @@ inductor_override_kwargs["cpu"] = {
         "rtol": 1e-4,
     },
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("addbmm", f16): {"reference_in_float": False},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
     # High atol due to precision loss
     ("nn.functional.interpolate.bicubic", f32): {"atol": 5e-3, "rtol": 0},
+    ("add", f16): {"atol": 2e-3, "rtol": 0.002},
+    ("_softmax_backward_data", f16): {
+        "reference_in_float": False,
+        "atol": 0.008,
+        "rtol": 0.002,
+    },
 }
+
+if IS_LINUX and IS_ARM64:
+    inductor_override_kwargs["cpu"].update(
+        {
+            ("nn.functional.conv1d", f16): {"atol": 0.012, "rtol": 0.008},
+            ("nn.functional.conv2d", f16): {"atol": 0.13, "rtol": 0.002},
+        }
+    )
 
 inductor_override_kwargs["cuda"] = {
     # the return value of empty is undefined
@@ -410,10 +468,15 @@ inductor_override_kwargs["cuda"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("cross", f16): {"reference_in_float": True},
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("atanh", f16): {"reference_in_float": True},
@@ -514,9 +577,12 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -528,10 +594,19 @@ inductor_override_kwargs["xpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     # XPU
+    # Mirrors the CUDA override from #189872; the fp16 backward gap is the
+    # same eager-vs-inductor intermediate-precision difference on XPU.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
@@ -683,13 +758,21 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
-    # The eager gradient for native_group_norm appears to be numerically unstable at low
-    # precisions; more investigation is needed.
-    ("native_group_norm", f16): {"check_gradient": False},
+    # fp16 backward accumulates ~1e-3 rounding across the aten kernel and
+    # inductor decomposition; loosen tolerances to match the CUDA override
+    # added in pytorch/pytorch#190245.
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
+            # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
+            ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+        }
     )
 
 
@@ -728,6 +811,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.gaussian_nll_loss": {f16},
     "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
+    "nn.functional.max_unpool3d": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
     "put": {f16, f32, f64},
@@ -1001,6 +1085,13 @@ inductor_skip_exact_stride = {
     "tensordot",
 }
 
+# On CPU, Inductor may choose a different valid layout for these ops.
+inductor_skip_exact_stride_cpu = {
+    "einsum",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+}
+
 # On XPU, Inductor may apply additional layout optimizations that can change
 # tensor strides compared to eager mode, so exact stride checks are relaxed
 # for certain ops.
@@ -1227,11 +1318,12 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @requires_gpu_and_triton
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
@@ -1354,7 +1446,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
+                kwargs = kwargs or {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 
@@ -1473,6 +1565,8 @@ class TestInductorOpInfo(TestCase):
 
                         # Call the appropriate check method based on device type
                         exact_stride = op_name not in inductor_skip_exact_stride
+                        if exact_stride and device_type == "cpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_cpu
                         # XPU has additional layout optimizations that change strides differently from eager mode.
                         if exact_stride and GPU_TYPE == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu

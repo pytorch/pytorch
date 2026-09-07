@@ -1,7 +1,12 @@
-#include <ATen/ATen.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/zeros.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 

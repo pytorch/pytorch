@@ -340,6 +340,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"hl.max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         if hasattr(b, "name"):
             c = f"hl.cast({b.name}.type(), {c})"
@@ -1659,7 +1664,7 @@ class HalideKernel(SIMDKernel):
             }
             cuda_device = max(0, current_device.index)
 
-        # strict_float is requires for correctness
+        # strict_float is required for correctness
         target.append("strict_float")
 
         # without this we will initialize cuda once per kernel and hit errors

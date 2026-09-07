@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <functional>
 #include <iostream>
 #include <regex>
 
@@ -185,7 +186,7 @@ StringCordView::IteratorImpl& StringCordView::IteratorImpl::operator+=(
 
 size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
   return (
-      std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(key.source().get())) ^
+      std::hash<const void*>()(key.source().get()) ^
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 

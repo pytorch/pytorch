@@ -1,6 +1,45 @@
 from __future__ import annotations
 
-from typing import Protocol
+import logging
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Protocol, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from torch._functorch.fx_minifier import MinifierSanityCheckFailed
+
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class _MinifierSanityResult:
+    error: MinifierSanityCheckFailed | None = None
+
+    def raise_if_failed(self, original_failure: Exception | None = None) -> None:
+        if self.error is None:
+            return
+        if original_failure is not None:
+            raise original_failure
+        raise self.error
+
+
+@contextmanager
+def _minifier_sanity_guard() -> Generator[_MinifierSanityResult, None, None]:
+    from torch._functorch.fx_minifier import MinifierSanityCheckFailed
+
+    result = _MinifierSanityResult()
+    try:
+        yield result
+    except MinifierSanityCheckFailed as error:
+        log.warning(
+            "Minifier could not reproduce the original failure. This can happen "
+            "when the failure is nondeterministic or the error filter no longer matches."
+        )
+        result.error = error
 
 
 class ReproOptions(Protocol):

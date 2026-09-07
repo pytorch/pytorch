@@ -667,7 +667,7 @@ def linetable_writer(
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
     Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    See https://github.com/python/cpython/blob/3.10/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
     if sys.version_info[:2] != (3, 10):
@@ -1295,7 +1295,7 @@ def strip_extended_args(instructions: list[Instruction]) -> None:
 def overwrite_instruction(
     old_inst: Instruction, new_insts: list[Instruction]
 ) -> list[Instruction]:
-    # update old_inst.exnt_tab_entry.end if necessary
+    # update old_inst.exn_tab_entry.end if necessary
     if (
         old_inst.exn_tab_entry
         and old_inst.exn_tab_entry.end is old_inst
@@ -1380,6 +1380,27 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
             inst.arg = 2
             inst.argval = 2
             new_insts.append(subscr_inst)
+    instructions[:] = new_insts
+
+
+def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
+    """On 3.12+, LOAD_ATTR with arg%2==1 is the method variant that pushes 2
+    values (NULL/self + method).  Normalize it to a non-method LOAD_ATTR
+    (1 value) followed by PUSH_NULL (+ SWAP on 3.12 where NULL goes below
+    the callable).  This lets break_graph_if_unsupported handle LOAD_ATTR
+    uniformly as a single-output instruction."""
+    new_insts: list[Instruction] = []
+    for inst in instructions:
+        if inst.opname == "LOAD_ATTR" and inst.arg is not None and inst.arg % 2:
+            replace_insts = [
+                create_instruction("LOAD_ATTR", arg=inst.arg & ~1, argval=inst.argval),
+                create_instruction("PUSH_NULL"),
+            ]
+            if sys.version_info < (3, 13):
+                replace_insts.append(create_instruction("SWAP", arg=2))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
     instructions[:] = new_insts
 
 
@@ -1585,16 +1606,18 @@ HAS_FREE = set(dis.hasfree)
 HAS_CONST = set(dis.hasconst)
 
 
-def get_const_index(code_options: dict[str, Any], val: Any) -> int:
-    for i, v in enumerate(code_options["co_consts"]):
-        # NOTE: stronger comparison is required, since we have
-        # examples where two values compare equal but have
-        # different semantic meaning in some cases, e.g.
-        # 0.0 == -0.0 but have different effects in torch.copysign.
-        if val is v:
-            return i
+def get_const_index(
+    code_options: dict[str, Any], val: Any, const_indices: dict[int, int]
+) -> int:
+    # Identity is required because equal constants can have different semantics,
+    # such as 0.0 and -0.0 in torch.copysign.
+    index = const_indices.get(id(val))
+    if index is not None:
+        return index
     code_options["co_consts"] += (val,)
-    return len(code_options["co_consts"]) - 1
+    index = len(code_options["co_consts"]) - 1
+    const_indices[id(val)] = index
+    return index
 
 
 def fix_vars(
@@ -1604,6 +1627,9 @@ def fix_vars(
 ) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    const_indices: dict[int, int] = {}
+    for idx, value in enumerate(code_options["co_consts"]):
+        const_indices.setdefault(id(value), idx)
 
     def get_name_index(name: str) -> int:
         try:
@@ -1737,8 +1763,9 @@ def fix_vars(
             # NOTE: only update argval if arg is not provided. This assumes
             # that any additions to co_consts are appended.
             if instructions[i].arg is None:
-                # cannot use a dictionary since consts may not be hashable
-                idx = get_const_index(code_options, instructions[i].argval)
+                idx = get_const_index(
+                    code_options, instructions[i].argval, const_indices
+                )
                 if idx < 0:
                     raise AssertionError(
                         f"failed to find constant index for {instructions[i].argval}"
@@ -1942,6 +1969,7 @@ def _cached_cleaned_instructions(
             remove_jump_if_none(instructions)
             if sys.version_info >= (3, 12):
                 remove_binary_store_slice(instructions)
+                remove_load_attr_method_variant(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
         if config.debug_force_graph_break_on_leaf_return:

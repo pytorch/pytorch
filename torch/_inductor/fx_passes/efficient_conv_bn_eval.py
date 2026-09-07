@@ -65,7 +65,7 @@ def efficient_conv_bn_eval(
     # shape of [C_out, 1, 1, 1] in Conv2d
     target_shape = [-1] + [1] * (conv.weight.ndim - 1)
     if isinstance(conv, nn.modules.conv._ConvTransposeNd):
-        # for transposed conv, the C_out dimension should at index 1.
+        # for transposed conv, the C_out dimension should be at index 1.
         target_shape[:2] = [target_shape[1], target_shape[0]]
     weight_coeff = torch.rsqrt(bn.running_var + bn.eps).reshape(target_shape)
     # shape of [C_out, 1, 1, 1] in Conv2d
@@ -127,7 +127,7 @@ def efficient_conv_bn_eval_decomposed(
     # shape of [C_out, 1, 1, 1] in Conv2d
     target_shape = [-1] + [1] * (conv_weight.ndim - 1)
     if "conv_transpose" in conv.__str__():
-        # for transposed conv, the C_out dimension should at index 1.
+        # for transposed conv, the C_out dimension should be at index 1.
         target_shape[:2] = [target_shape[1], target_shape[0]]
     weight_coeff = torch.rsqrt(bn_running_var + bn_eps).reshape(target_shape)
     # shape of [C_out, 1, 1, 1] in Conv2d

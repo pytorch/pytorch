@@ -272,7 +272,7 @@ def lambda_auto_wrap_policy(
 ) -> bool:
     """
     A convenient auto wrap policy to wrap submodules based on an arbitrary user
-    function. If `lambda_fn(submodule) == True``, the submodule will be wrapped as
+    function. If ``lambda_fn(submodule) == True``, the submodule will be wrapped as
     a `wrapper_cls` unit.
 
     Return if a module should be wrapped during auto wrapping.

@@ -47,6 +47,19 @@ struct Indexer {
     }
     return offset;
   }
+
+  // Single index-tensor fast path: same result as get() when num_indexers == 1.
+  int64_t get_1(int64_t idx) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(num_indexers == 1);
+    int64_t value = *(int64_t*)&indexers[0][idx * indexer_strides[0]];
+    int64_t size = original_sizes[0];
+    TORCH_CHECK_INDEX(value >= -size && value < size,
+                      "index ", value, " is out of bounds for dimension 0 with size ", size);
+    if (value < 0) {
+      value += size;
+    }
+    return value * original_strides[0];
+  }
 };
 
 template <typename scalar_t, typename func_t>
@@ -66,6 +79,12 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
       // specialization for when every element uses the same index
       int64_t offset = indexer.get(0);
       for (const auto i : c10::irange(n)) {
+        f(dst + strides[0] * i, src + strides[1] * i, offset);
+      }
+    } else if (indexer.num_indexers == 1) {
+      // specialization for a single index tensor
+      for (const auto i : c10::irange(n)) {
+        int64_t offset = indexer.get_1(i);
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
     } else {

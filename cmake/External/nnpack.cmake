@@ -72,6 +72,12 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
       unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
+    # NNPACK custom commands use PYTHONPATH=... shell env var assignment
+    # syntax, which fails when ctest --instrument wraps them. This can be
+    # removed if https://github.com/Maratyszcza/NNPACK/pull/224 is merged
+    if(USE_CMAKE_INSTRUMENTATION)
+      set_property(DIRECTORY "${NNPACK_SOURCE_DIR}" PROPERTY RULE_LAUNCH_CUSTOM "")
+    endif()
     # We build static versions of nnpack and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)

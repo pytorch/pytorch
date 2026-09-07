@@ -1,12 +1,18 @@
 # Owner(s): ["oncall: mobile"]
 
+import io
+import unittest
+
 import torch
 from torch.nn import functional as F
 
-from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing import FileCheck
-import io
+from torch.testing._internal.common_utils import TestCase, run_tests
 
+@unittest.skipUnless(
+    hasattr(torch.ops.metal_prepack, "conv2d_prepack"),
+    "requires Metal prepack support",
+)
 class TestMetalRewritePass(TestCase):
     @staticmethod
     def validate_transformed_module(

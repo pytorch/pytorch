@@ -1,33 +1,31 @@
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/custom_function.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
-#include <torch/custom_class_detail.h>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <utility>
 
 namespace {
 
-const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
-    {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
-    {"avg", c10d::ReduceOp(c10d::ReduceOp::RedOpType::AVG)},
-    {"product", c10d::ReduceOp(c10d::ReduceOp::RedOpType::PRODUCT)},
-    {"min", c10d::ReduceOp(c10d::ReduceOp::RedOpType::MIN)},
-    {"max", c10d::ReduceOp(c10d::ReduceOp::RedOpType::MAX)},
-    {"band", c10d::ReduceOp(c10d::ReduceOp::RedOpType::BAND)},
-    {"bor", c10d::ReduceOp(c10d::ReduceOp::RedOpType::BOR)},
-    {"bxor", c10d::ReduceOp(c10d::ReduceOp::RedOpType::BXOR)},
-    // TODO: support premul_sum
-    // {"premul_sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::PREMUL_SUM)},
-    {"unused", c10d::ReduceOp(c10d::ReduceOp::RedOpType::UNUSED)}};
+const std::unordered_map<std::string, c10d::ReduceOp::RedOpType>
+    str_to_reduce_op = {
+        {"sum", c10d::ReduceOp::RedOpType::SUM},
+        {"avg", c10d::ReduceOp::RedOpType::AVG},
+        {"product", c10d::ReduceOp::RedOpType::PRODUCT},
+        {"min", c10d::ReduceOp::RedOpType::MIN},
+        {"max", c10d::ReduceOp::RedOpType::MAX},
+        {"band", c10d::ReduceOp::RedOpType::BAND},
+        {"bor", c10d::ReduceOp::RedOpType::BOR},
+        {"bxor", c10d::ReduceOp::RedOpType::BXOR},
+        {"premul_sum", c10d::ReduceOp::RedOpType::PREMUL_SUM},
+        {"unused", c10d::ReduceOp::RedOpType::UNUSED}};
 
-c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
+c10::intrusive_ptr<c10d::ReduceOp> to_reduce_op(const std::string& reduce_op) {
   auto it = str_to_reduce_op.find(reduce_op);
   TORCH_CHECK(
       it != str_to_reduce_op.end(), "Unrecognized reduce_op: ", reduce_op);
-  return it->second;
+  return c10::make_intrusive<c10d::ReduceOp>(it->second);
 }
 
 at::Tensor allocate_all_gather_output(
@@ -66,10 +64,10 @@ namespace c10d {
 at::Tensor& all_reduce_(
     at::Tensor& input,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string reduce_op,
+    c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
     c10::intrusive_ptr<c10d::ProcessGroup> group) {
   c10d::AllreduceOptions opts;
-  opts.reduceOp = to_reduce_op(reduce_op);
+  opts.reduceOp = *reduce_op;
 
   std::vector<at::Tensor> inputs{input};
   auto work = group->allreduce(inputs, opts);
@@ -79,17 +77,15 @@ at::Tensor& all_reduce_(
 
 at::Tensor all_reduce(
     const at::Tensor& input,
-    std::string reduce_op,
+    c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
     c10::intrusive_ptr<c10d::ProcessGroup> group) {
   if (input.is_complex()) {
     TORCH_CHECK(
-        // TODO - ideally use 'to_reduce_op' helper but it currently errors on
-        // premul_sum
-        reduce_op == "sum" || reduce_op == "avg" || reduce_op == "premul_sum" ||
-            reduce_op == "unused",
-        "all_reduce: reduce_op ",
-        reduce_op,
-        " does not support complex tensors");
+        *reduce_op == c10d::ReduceOp::SUM ||
+            *reduce_op == c10d::ReduceOp::AVG ||
+            *reduce_op == c10d::ReduceOp::PREMUL_SUM ||
+            *reduce_op == c10d::ReduceOp::UNUSED,
+        "all_reduce: reduce_op does not support complex tensors");
   }
   auto input_real = input.is_complex() ? at::view_as_real(input) : input;
   auto output = input_real.clone(at::MemoryFormat::Contiguous);
@@ -102,7 +98,7 @@ at::Tensor& all_reduce_(
     std::string reduce_op,
     std::string group_name) {
   auto group = c10d::resolve_process_group(std::move(group_name));
-  return all_reduce_(input, std::move(reduce_op), std::move(group));
+  return all_reduce_(input, to_reduce_op(reduce_op), std::move(group));
 }
 
 at::Tensor all_reduce(
@@ -110,7 +106,7 @@ at::Tensor all_reduce(
     std::string reduce_op,
     std::string group_name) {
   auto group = c10d::resolve_process_group(std::move(group_name));
-  return all_reduce(input, std::move(reduce_op), std::move(group));
+  return all_reduce(input, to_reduce_op(reduce_op), std::move(group));
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
@@ -120,16 +116,17 @@ std::vector<at::Tensor> all_reduce_coalesced_(
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   auto group = c10d::resolve_process_group(std::move(group_name));
-  return all_reduce_coalesced_(inputs, std::move(reduce_op), std::move(group));
+  return all_reduce_coalesced_(
+      inputs, to_reduce_op(reduce_op), std::move(group));
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string reduce_op,
+    c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
     c10::intrusive_ptr<c10d::ProcessGroup> group) {
   c10d::AllreduceCoalescedOptions opts;
-  opts.reduceOp = to_reduce_op(reduce_op);
+  opts.reduceOp = *reduce_op;
 
   auto work = group->allreduce_coalesced(inputs, opts);
   for (const auto& tensor : inputs) {
@@ -144,12 +141,13 @@ std::vector<at::Tensor> all_reduce_coalesced(
     std::string reduce_op,
     std::string group_name) {
   auto group = c10d::resolve_process_group(std::move(group_name));
-  return all_reduce_coalesced(inputs, std::move(reduce_op), std::move(group));
+  return all_reduce_coalesced(
+      inputs, to_reduce_op(reduce_op), std::move(group));
 }
 
 std::vector<at::Tensor> all_reduce_coalesced(
     std::vector<at::Tensor> inputs,
-    std::string reduce_op,
+    c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
     c10::intrusive_ptr<c10d::ProcessGroup> group) {
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
@@ -246,7 +244,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     int64_t group_size,
     c10::intrusive_ptr<c10d::ProcessGroup> group) {
   c10d::ReduceScatterOptions opts;
-  opts.reduceOp = to_reduce_op(reduce_op);
+  opts.reduceOp = *to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (auto& tensor : inputs) {
@@ -269,7 +267,7 @@ static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
     c10::intrusive_ptr<c10d::ProcessGroup> group,
     std::vector<at::Tensor>& outputs) {
   c10d::ReduceScatterOptions opts;
-  opts.reduceOp = to_reduce_op(reduce_op);
+  opts.reduceOp = *to_reduce_op(reduce_op);
 
   auto work = group->reduce_scatter_single_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
@@ -465,9 +463,7 @@ std::vector<at::Tensor> batch_p2p_ops(
   if (should_coalesce) {
     group->startCoalescing(device);
   }
-  std::vector<c10::intrusive_ptr<c10d::Work>> works;
   std::vector<at::Tensor> result_tensors;
-  works.reserve(N);
   result_tensors.reserve(N);
   for (uint32_t i = 0; i < N; ++i) {
     c10::intrusive_ptr<c10d::Work> work;
@@ -479,10 +475,8 @@ std::vector<at::Tensor> batch_p2p_ops(
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
       auto placeholder = at::empty({0}, t.options());
-      if (work) {
-        c10d::register_work(t, work);
+      if (!should_coalesce && work) {
         c10d::register_work(placeholder, work);
-        works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(placeholder));
     } else if (op_list[i] == "irecv") {
@@ -490,9 +484,8 @@ std::vector<at::Tensor> batch_p2p_ops(
           tt,
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
-      if (work) {
+      if (!should_coalesce && work) {
         c10d::register_work(t, work);
-        works.push_back(std::move(work));
       }
       result_tensors.push_back(std::move(t));
     } else {
@@ -534,6 +527,24 @@ c10::intrusive_ptr<c10d::ProcessGroup> get_process_group(
   }
 }
 
+c10::intrusive_ptr<c10d::ReduceOp> get_reduce_op(
+    const c10::IValue& op_name,
+    const char* func_name) {
+  if (op_name.isString()) {
+    return to_reduce_op(op_name.toStringRef());
+  } else if (op_name.isCapsule()) {
+    return c10::static_intrusive_pointer_cast<c10d::ReduceOp>(
+        op_name.toCapsule());
+  } else {
+    TORCH_CHECK(
+        false,
+        func_name,
+        "(): argument 'reduce_op' must be either a string (op name) "
+        "or a ReduceOp object, but got ",
+        op_name.type()->str());
+  }
+}
+
 // all_to_all_single_dispatch is kept as a named function because it is
 // referenced via decltype inside the AllToAllSingle autograd class.
 at::Tensor all_to_all_single_dispatch(
@@ -552,56 +563,57 @@ at::Tensor all_to_all_single_dispatch(
 
 TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
-      "all_reduce(Tensor input, str reduce_op, Any group_name) -> Tensor",
+      "all_reduce(Tensor input, Any reduce_op, Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](const at::Tensor& input,
-             std::string reduce_op,
+             const c10::IValue& reduce_op,
              const c10::IValue& group) {
             return c10d::all_reduce(
                 input,
-                std::move(reduce_op),
+                get_reduce_op(reduce_op, "all_reduce"),
                 get_process_group(group, "all_reduce"));
           }),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_reduce_(Tensor(a!) input, str reduce_op, Any group_name) -> Tensor(a!)",
+      "all_reduce_(Tensor(a!) input, Any reduce_op, Any group_name) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          [](at::Tensor& input, std::string reduce_op, const c10::IValue& group)
-              -> at::Tensor& {
+          [](at::Tensor& input,
+             const c10::IValue& reduce_op,
+             const c10::IValue& group) -> at::Tensor& {
             return c10d::all_reduce_(
                 input,
-                std::move(reduce_op),
+                get_reduce_op(reduce_op, "all_reduce_"),
                 get_process_group(group, "all_reduce_"));
           }),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_reduce_coalesced(Tensor[] inputs, str reduce_op, Any group_name) -> Tensor[]",
+      "all_reduce_coalesced(Tensor[] inputs, Any reduce_op, Any group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
-             std::string reduce_op,
+             const c10::IValue& reduce_op,
              const c10::IValue& group) {
             return c10d::all_reduce_coalesced(
                 inputs,
-                std::move(reduce_op),
+                get_reduce_op(reduce_op, "all_reduce_coalesced"),
                 get_process_group(group, "all_reduce_coalesced"));
           }),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, Any group_name) -> Tensor[](a!)",
+      "all_reduce_coalesced_(Tensor[](a!) inputs, Any reduce_op, Any group_name) -> Tensor[](a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
-             std::string reduce_op,
+             const c10::IValue& reduce_op,
              const c10::IValue& group) {
             return c10d::all_reduce_coalesced_(
                 inputs,
-                std::move(reduce_op),
+                get_reduce_op(reduce_op, "all_reduce_coalesced_"),
                 get_process_group(group, "all_reduce_coalesced_"));
           }),
       {at::Tag::pt2_compliant_tag});
@@ -741,6 +753,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensor),
       {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "wait_tensors(Tensor[] tensors) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensors),
+      {at::Tag::pt2_compliant_tag});
+
   m.def(
       "isend(Tensor tensor, int dst, int tag, str group_name) -> Tensor",
       torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, c10d::isend),

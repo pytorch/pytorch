@@ -31,7 +31,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
       opt_out_experiments: lf
 
   inductor-build:
@@ -52,7 +51,6 @@ jobs:
           { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
@@ -68,10 +66,47 @@ jobs:
       build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+    secrets: inherit
+
+  inductor-build-cuda132:
+    name: inductor-build-cuda132
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '8.6'
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  inductor-test-cuda132:
+    name: inductor-test-cuda132
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - inductor-build-cuda132
+      - get-label-type
+    with:
+      build-environment: ${{ needs.inductor-build-cuda132.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-build-cuda132.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build-cuda132.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit
 
   inductor-halide-build:
@@ -87,7 +122,6 @@ jobs:
         { include: [
           { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
     secrets: inherit
@@ -102,7 +136,6 @@ jobs:
       build-environment: ${{ needs.inductor-halide-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
     secrets: inherit
@@ -120,7 +153,6 @@ jobs:
         { include: [
           { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
         ]}
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
     secrets: inherit
@@ -135,7 +167,6 @@ jobs:
       build-environment: ${{ needs.inductor-triton-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.12"
       compiler: gcc11
     secrets: inherit
@@ -151,10 +182,14 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_amx", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -169,7 +204,6 @@ jobs:
       build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -183,17 +217,16 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
-      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "inductor_core", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
           { config: "inductor_core", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
-      use-arc: true
       python-version: "${{ matrix.python-version }}"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
   inductor-cpu-core-test:
@@ -204,10 +237,9 @@ jobs:
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     with:
-      build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
-      docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21-${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.inductor-cpu-core-build.outputs.test-matrix }}
-      use-arc: true
       python-version: "${{ matrix.python-version }}"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit

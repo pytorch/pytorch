@@ -185,7 +185,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms()
+    @with_comms(backend="nccl-legacy")
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
@@ -685,7 +685,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -731,7 +731,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -1096,20 +1096,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         spmd_pg = mesh_2d["spmd"].get_group()
         self.assertEqual(spmd_pg._get_backend_name(), "nccl")
         w = spmd_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            spmd_pg._get_backend(
-                torch.device(f"cuda:{self.rank}")
-            )._verify_work_timeout(w, timedelta(seconds=30))
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=30))
         w.wait()
         tp_pg = mesh_4d["tp"].get_group()
         self.assertEqual(tp_pg._get_backend_name(), "nccl")
         w = tp_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            tp_pg._get_backend(torch.device(f"cuda:{self.rank}"))._verify_work_timeout(
-                w, timedelta(seconds=60)
-            )
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=60))
         w.wait()
 
     @with_comms
@@ -1610,9 +1602,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         # This API directly calls the pybind API, so we need to manually track the comm for finalization.
         _world.comms.append(
-            split_group_2._get_backend(
-                torch.device(f"{self.device_type}:{self.rank}")
-            ).get_comm()
+            split_group_2._get_backend(torch.device(self.device_type)).get_comm()
         )
         gpu_tensor = torch.ones(3, 3, device=self.device_type)
         dist.all_reduce(gpu_tensor, group=split_group_2)
@@ -1708,7 +1698,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         fake_pg_name = mesh._dim_group_names[0]
         self.assertFalse(
             fake_pg_name.isdigit(),
-            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            lambda msg: f"{msg}\nFake-backend PG name '{fake_pg_name}' is a sequential integer; "
             f"expected a hash-based name for torchcomms compatibility.",
         )
 
@@ -2052,13 +2042,13 @@ class ProcessGroupOpaqueTypeTest(TestCase):
         for member_name in registered_members:
             self.assertIsNotNone(
                 get_member_type(ProcessGroup, member_name),
-                f"'{member_name}' is not registered as a ProcessGroup opaque "
+                lambda msg: f"{msg}\n'{member_name}' is not registered as a ProcessGroup opaque "
                 f"type member. Add it to _register_process_group_opaque_type() "
                 f"in torch/distributed/distributed_c10d.py",
             )
             self.assertTrue(
                 hasattr(ProcessGroup, member_name),
-                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                lambda msg: f"{msg}\n'{member_name}' is registered as a ProcessGroup opaque type "
                 f"member but does not exist on the ProcessGroup class. "
                 f"Was it renamed or removed?",
             )

@@ -3,8 +3,13 @@
 import contextlib
 import enum
 import gc
+import os
 import random
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -39,8 +44,8 @@ from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
     MemberType,
     register_custom_class,
 )
@@ -51,7 +56,9 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_LINUX,
+    IS_SANDCASTLE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1512,10 +1519,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-    eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
-    add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
-    return (getitem_6, add_4)""",
+    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
+    add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
+    return (getitem_6, add)""",
         )
 
     def test_compile_global(self):
@@ -1767,8 +1774,8 @@ def forward(self, primals, tangents):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",
+    mul = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul, None], self._out_spec)""",
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
@@ -1958,6 +1965,60 @@ def forward(self, primals, tangents):
         res = gm(x)
         self.assertEqual(res[1], ValueConfig("square"))
 
+    def test_value_type_graph_output_subclass_metadata_side_effect(self):
+        class TensorWithValueMetadata(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config):
+                t = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    strides=data.stride(),
+                    dtype=data.dtype,
+                    device=data.device,
+                    layout=data.layout,
+                    requires_grad=data.requires_grad,
+                )
+                t._data = data
+                t._config = config
+                return t
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"config": self._config}
+
+            def __repr__(self):
+                return "TensorWithValueMetadata(...)"
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                return TensorWithValueMetadata(inner_tensors["_data"], meta["config"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(x):
+                    if isinstance(x, TensorWithValueMetadata):
+                        return x._data
+                    return x
+
+                return func(
+                    *pytree.tree_map(unwrap, args),
+                    **pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        store = {}
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            config = ValueConfig("square")
+            store["config"] = config
+            return TensorWithValueMetadata(x + 1, config)
+
+        out = fn(torch.zeros(2))
+
+        self.assertIs(type(out._config), ValueConfig)
+        self.assertEqual(out._config.mode, "square")
+        self.assertIs(type(store["config"]), ValueConfig)
+        self.assertEqual(store["config"].mode, "square")
+
     def test_value_type_graph_input(self):
         # Even though cfg is an input, it should not be an input to the dynamo
         # graph. Instead it should directly put in the graph argument as a
@@ -2098,8 +2159,8 @@ def forward(self, arg0_1):
 
             register_custom_class(TmpClass, typ="constant")
 
-            self.assertTrue(is_opaque_type(TmpClass))
-            self.assertTrue(is_opaque_value_type(TmpClass))
+            self.assertTrue(is_custom_class(TmpClass))
+            self.assertTrue(is_opaque_constant_type(TmpClass))
             self.assertIn(TmpClass, _OPAQUE_TYPES)
 
             return get_opaque_type_name(TmpClass)
@@ -2235,11 +2296,11 @@ class GraphModule(torch.nn.Module):
         mul: "TensorWithCounter(f32[4, 4])" = l_x_ * 2;  l_x_ = None
         add: "TensorWithCounter(f32[4, 4])" = mul + 1;  mul = None
 
+        getattr_1 = add._counter;  getattr_1 = None
+
         get_counter = add.get_counter();  get_counter = None
 
         get_size_store = add.get_size_store();  get_size_store = None
-
-        getattr_1 = add._counter;  getattr_1 = None
 
         mul_1: "TensorWithCounter(f32[4, 4])" = add * 3;  add = None
         add_1: "TensorWithCounter(f32[4, 4])" = mul_1 + 3;  mul_1 = None
@@ -2267,6 +2328,94 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since SizeStore has changed
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_tensor_subclass_with_callable_opaque_attr(self):
+        """Callable value-opaque objects on a tensor subclass should allow method access."""
+
+        class CallableConfig(CustomClassBase):
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+            def get_scale(self):
+                return self.scale
+
+            def __eq__(self, other):
+                return isinstance(other, CallableConfig) and self.scale == other.scale
+
+            def __hash__(self):
+                return hash(self.scale)
+
+            def __fx_repr__(self):
+                return (
+                    f"CallableConfig(scale={self.scale!r})",
+                    {"CallableConfig": CallableConfig},
+                )
+
+        register_custom_class(CallableConfig, typ="constant")
+
+        class TensorWithCallableOpaque(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    device=data.device,
+                    dtype=data.dtype,
+                )
+
+            def __init__(self, data, config):
+                self._data = data
+                self._config = config
+
+            def __tensor_flatten__(self):
+                return ["_data"], (self._config,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                return TensorWithCallableOpaque(inner_tensors["_data"], ctx[0])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._data if isinstance(x, TensorWithCallableOpaque) else x
+
+                config = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    if isinstance(arg, TensorWithCallableOpaque):
+                        config = arg._config
+                        break
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs),
+                )
+                return torch.utils._pytree.tree_map(
+                    lambda x: TensorWithCallableOpaque(x, config)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out,
+                )
+
+        def fn(x):
+            y = x * 2
+            scale = y._config.get_scale()
+            return y + scale
+
+        config = CallableConfig(scale=5)
+        x = TensorWithCallableOpaque(torch.randn(4), config)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        result = opt_fn(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_tensor_subclass_with_opaque_attr_backward(self):
         """Test opaque objects in tensor subclass are correctly remapped through backward."""
@@ -2386,6 +2535,134 @@ class GraphModule(torch.nn.Module):
         self.assertIsNotNone(x.grad)
         expected_grad = torch.ones_like(x) * 2.5
         self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_opaque_constant_output_with_subclass_output(self, backend):
+        """Constant-type opaque created inside a compiled region must not be
+        corrupted when the same graph also produces a tensor-subclass output.
+        """
+        a = torch.randn(3, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        counter = Counter(start=1, end=5)
+        size = SizeStore(3)
+        x = TensorWithCounter(a, b, counter, size)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x):
+                cfg = ValueConfig("square")
+                return x * self.w, cfg
+
+        m = M()
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        result, cfg = opt_m(x)
+
+        # Without the fix: type(cfg) is FakeScriptObject
+        self.assertIs(type(cfg), ValueConfig)
+        self.assertIsInstance(result, TensorWithCounter)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_opaque_constant_output_with_subclass_output_cache_hit(self):
+        """Cross-process FX graph cache hit must not lose opaque constants
+        when the graph also produces a tensor-subclass output.
+        """
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._library.opaque_object import register_custom_class
+            from torch._inductor import config
+            from torch._dynamo.utils import counters
+
+            config.fx_graph_cache = True
+            config.fx_graph_remote_cache = False
+
+            class Q:
+                def __init__(self, scale):
+                    self.scale = scale
+                def __eq__(self, other):
+                    return type(other) is Q and other.scale == self.scale
+                def __hash__(self):
+                    return hash(self.scale)
+                def __fx_repr__(self):
+                    return (f"Q({self.scale!r})", {"Q": Q})
+
+            register_custom_class(Q, typ="constant")
+
+            class WS(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, q):
+                    return torch.Tensor._make_wrapper_subclass(
+                        cls, data.shape, dtype=data.dtype, device=data.device
+                    )
+                def __init__(self, data, q):
+                    self._data, self._q = data, q
+                def __tensor_flatten__(self):
+                    return ["_data"], {"q": self._q}
+                @staticmethod
+                def __tensor_unflatten__(inner, ctx, size, stride):
+                    return WS(inner["_data"], ctx["q"])
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                    from torch.utils._pytree import tree_map
+                    def unwrap(t):
+                        return t._data if isinstance(t, WS) else t
+                    return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qs = []
+                    self.ws = None
+                    self.w = torch.nn.Parameter(torch.randn(8, 8))
+                def forward(self, x):
+                    if not self.qs:
+                        q = Q(0.5)
+                        self.qs.append(q)
+                    else:
+                        q = self.qs[0]
+                    out = x @ self.w
+                    self.ws = WS(out, q)
+                    return out
+
+            m = M()
+            c = torch.compile(m, fullgraph=True)
+            with torch.no_grad():
+                c(torch.randn(4, 8))
+            hit = counters["inductor"]["fxgraph_cache_hit"]
+            miss = counters["inductor"]["fxgraph_cache_miss"]
+            cfg_type = type(m.qs[0]).__name__ if m.qs else "empty"
+            print(f"RESULT hit={hit} miss={miss} cfg_type={cfg_type}")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+            env["PYTHONPATH"] = os.pathsep.join(
+                x for x in (os.getcwd(), env.get("PYTHONPATH", "")) if x
+            )
+
+            def run_and_parse():
+                out = subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    stderr=subprocess.STDOUT,
+                ).decode()
+                for line in out.splitlines():
+                    if line.startswith("RESULT "):
+                        return line
+                self.fail(f"No RESULT line in subprocess output:\n{out}")
+
+            # Run 1: populate cache (cold compile)
+            line1 = run_and_parse()
+            self.assertEqual(line1, "RESULT hit=0 miss=1 cfg_type=Q")
+
+            # Run 2: cache hit in a fresh process, opaque must survive
+            line2 = run_and_parse()
+            self.assertEqual(line2, "RESULT hit=1 miss=0 cfg_type=Q")
 
     def test_tensor_subclass_opaque_backward_compiled_autograd(self):
         """Test opaque objects work with compiled autograd backward."""
@@ -3015,14 +3292,14 @@ def forward(self, primals_1, tangents_1):
         """Test that opaque class attribute access works correctly.
 
         This tests the code path where:
-        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
-        2. Attribute access (Color.RED) goes through getattro_impl with static getattr
+        1. An opaque class (like Color) is accessed via CustomClassVariable
+        2. Attribute access (Color.RED) goes through tp_getattro_impl with static getattr
         3. The opaque object is correctly lifted as a graph input
         """
-        from torch._library.opaque_object import is_opaque_reference_type
+        from torch._library.opaque_object import is_opaque_symbolic_type
 
-        self.assertTrue(is_opaque_reference_type(Color))
-        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+        self.assertTrue(is_opaque_symbolic_type(Color))
+        self.assertTrue(is_opaque_symbolic_type(type(Color.RED)))
 
         captured = {"graph": None, "example_inputs": None}
 
@@ -3205,7 +3482,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_staticmethod(self):
         """Test that accessing a staticmethod on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         staticmethod descriptors (instead of raising 'Unsupported descriptor').
         """
         captured = {"graph": None}
@@ -3228,7 +3505,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_opaque_class_property(self):
         """Test that accessing a property descriptor on an opaque class works correctly.
 
-        This verifies that OpaqueObjectClassVariable.getattro_impl properly handles
+        This verifies that CustomClassVariable.tp_getattro_impl properly handles
         property descriptors. When accessing a property on the class (not instance),
         you get the property object back.
         """
@@ -3357,8 +3634,8 @@ class GraphModule(torch.nn.Module):
                     {"ExtendedConfig": ExtendedConfig},
                 )
 
-        self.assertTrue(is_opaque_type(ExtendedConfig))
-        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+        self.assertTrue(is_custom_class(ExtendedConfig))
+        self.assertTrue(is_opaque_constant_type(ExtendedConfig))
 
         cfg = ExtendedConfig("square", 2.0)
 
@@ -3418,9 +3695,9 @@ class GraphModule(torch.nn.Module):
             ep.graph_module.code.strip(),
             """\
 def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
-    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    return (linear,)""",
+    noisy_inject_default = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject_default = None
+    linear_default = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear_default,)""",
         )
 
     def test_hoist_no_recompile_on_different_string(self):
@@ -3521,8 +3798,8 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[4, 4]", d):
-        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
-        return (add,)
+        add_tensor: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
+        return (add_tensor,)
 """,
         )
 
@@ -3726,7 +4003,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_script_object_intermediate_exposed_from_checkpoint(self):
-        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # A CustomClassObjectVariable created inside an AC region and accessed
         # outside via a list side effect must be exposed as a subgraph output.
         import torch.utils.checkpoint
 
@@ -3935,13 +4212,13 @@ class GraphModule(torch.nn.Module):
                 self.assertIn(
                     "val",
                     node.meta,
-                    f"Node {node.name} created via reconstruct_fn is missing "
+                    lambda msg: f"{msg}\nNode {node.name} created via reconstruct_fn is missing "
                     f"meta['val']. This would cause the partitioner to fail "
                     f"with 'Expected {node.name} to be a tensor'.",
                 )
                 self.assertTrue(
                     is_opaque_node(node),
-                    f"Node {node.name} should be classified as opaque",
+                    lambda msg: f"{msg}\nNode {node.name} should be classified as opaque",
                 )
         finally:
             _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = original_reconstruct_fn
