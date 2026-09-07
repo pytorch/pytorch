@@ -299,6 +299,32 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             lambda msg: f"{msg}\nno node should bake a concrete indexed cuda device; found: {baked}",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_factory_device_not_baked(self):
+        # The same factory pattern as test_factory_device_replaced_with_current_device,
+        # but reached through Dynamo instead of calling make_fx directly.
+        #
+        # Dynamo constant-folds x.device to a concrete torch.device and bakes it into
+        # its output graph. The current_device() substitution runs later, during
+        # make_fx, so it cannot undo what Dynamo already froze. This is the graph
+        # tlparse records as dynamo_output_graph, and in a real CooR job it differs
+        # across ranks (index=0 vs index=7), which keeps it from being shareable.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        torch._dynamo.reset()
+        backend = EagerAndRecordGraphs()
+        torch.compile(_factory_from_input_device, backend=backend, fullgraph=True)(
+            torch.randn(2, 8, device="cuda:0")
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        baked = _indexed_cuda_device_nodes(backend.graphs[0])
+        self.assertEqual(
+            baked,
+            [],
+            f"dynamo baked a rank-specific device into its output graph: {baked}",
+        )
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_runtime_follows_current_device_not_input(self):
@@ -479,6 +505,29 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         code0, code1 = code_on(0), code_on(1)
         self.assertEqual(code0, code1)
         self.assertNotIn("cuda:", code0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_dynamo_output_graph_identical_across_devices(self):
+        # The Dynamo counterpart of test_graph_code_identical_across_devices, and the
+        # form the divergence actually takes in a real job: the same factory traces to
+        # device(type='cuda', index=0) on one rank and index=N on another, so the two
+        # ranks' dynamo_output_graph artifacts are not the same text and the graph
+        # cannot be shared between them.
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        def graph_on(dev):
+            with torch.cuda.device(dev):
+                torch._dynamo.reset()
+                backend = EagerAndRecordGraphs()
+                torch.compile(
+                    _factory_from_input_device, backend=backend, fullgraph=True
+                )(torch.randn(2, 8, device=f"cuda:{dev}"))
+                return backend.graphs[0].print_readable(print_output=False)
+
+        graph0, graph1 = graph_on(0), graph_on(1)
+        self.assertEqual(graph0, graph1)
+        self.assertNotIn("index=0", graph0)
 
     # ---- tensor guards must be rank-invariant without losing their teeth ----
     # A TENSOR_MATCH guard records the device as two independent pieces: the type
