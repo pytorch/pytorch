@@ -13233,6 +13233,37 @@ class TestAutogradForwardMode(TestCase):
             dual_input = fwAD.make_dual(a, b)
             dual_input[1:]
 
+    def test_pow_abs_complex_forward_ad(self):
+        x = torch.tensor(
+            [1.0 + 1.0j],
+            dtype=torch.complex128,
+        )
+
+        def fn(x):
+            exponent = torch.tensor(
+                1.0 + 1.0j,
+                dtype=x.dtype,
+                device=x.device,
+            )
+            return torch.pow(torch.abs(x), exponent)
+
+        def complex_to_real(x):
+            return torch.cat((x.real, x.imag))
+
+        def real_to_complex(x):
+            n = x.numel() // 2
+            return x[:n] + 1j * x[n:]
+
+        def real_fn(x):
+            return complex_to_real(fn(real_to_complex(x)))
+
+        real_x = complex_to_real(x)
+
+        jac_fwd = torch.func.jacfwd(real_fn)(real_x)
+        jac_rev = torch.func.jacrev(real_fn)(real_x)
+
+        self.assertEqual(jac_fwd, jac_rev)
+        
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
