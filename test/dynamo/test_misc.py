@@ -9202,10 +9202,39 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 1 if check(o) else x - 1
 
         x = torch.ones(3)
-        for o in (Obj(), Other(), None, 3):
+        for o in (Obj(), Other(), None, 3, [1, 2]):
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_isinstance_protocol_with_unspecialized_int(self):
+        # An unspecialized int is a SymNodeVariable with no wrapped object, but
+        # attribute lookup on an int cannot depend on its value, so the Protocol
+        # answer is fixed by the type and needs no graph break.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def matches(x, n):
+            return x + 1 if isinstance(n, HasPorts | HasReal) else x - 1
+
+        def misses(x, n):
+            return x + 1 if isinstance(n, HasPorts) else x - 1
+
+        x = torch.ones(3)
+        for fn in (matches, misses):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            for n in (3, 5):
+                self.assertEqual(opt_fn(x, n), fn(x, n), msg=repr(n))
+            # The int stayed symbolic, so the two values share one graph.
+            self.assertEqual(cnt.frame_count, 1)
 
     def test_isinstance_protocol_member_order_effects(self):
         @typing.runtime_checkable
@@ -9250,9 +9279,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             ports: tuple[int, ...]
 
         def fn(x):
-            # The list is built during tracing, so Dynamo has no Python object
-            # to run the Protocol's __instancecheck__ on and must fall back.
-            return x + 1 if isinstance([x], HasPorts) else x - 1
+            def inner():
+                return x
+
+            # A function is built during tracing, so Dynamo has no Python object
+            # to run the Protocol's __instancecheck__ on, and unlike a list a
+            # function carries a __dict__, so its type does not answer either.
+            return x + 1 if isinstance(inner, HasPorts) else x - 1
 
         x = torch.ones(3)
         with self.assertRaisesRegex(Unsupported, "does not support issubclass"):

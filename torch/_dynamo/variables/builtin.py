@@ -524,6 +524,31 @@ class BaseBuiltinVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
+# Instances of these types cannot carry per-instance attributes, so whether an
+# attribute based __instancecheck__ (a runtime_checkable Protocol with data
+# members) matches is fixed by the type alone. Dynamo often has no wrapped object
+# for them -- a symbolic scalar, a container built while tracing -- and can still
+# answer with a representative value. Exact types only: a subclass may add a
+# __dict__ or a __getattr__, and classes themselves always have one.
+_VALUE_INDEPENDENT_TYPES = frozenset(
+    {
+        int,
+        float,
+        bool,
+        complex,
+        str,
+        bytes,
+        bytearray,
+        list,
+        tuple,
+        dict,
+        set,
+        frozenset,
+        type(None),
+    }
+)
+
+
 def _uses_custom_classinfo_check(
     type_info: Any,
     *,
@@ -2705,16 +2730,22 @@ class BuiltinVariable(BaseBuiltinVariable):
                     val = issubclass(arg_type, member)
                 except TypeError as e:
                     # issubclass() rejecting the classinfo (e.g. a runtime_checkable
-                    # Protocol with data members) says nothing about isinstance();
-                    # without the wrapped Python object Dynamo cannot evaluate it.
-                    unimplemented(
-                        gb_type="builtin isinstance() with classinfo that does not support issubclass()",
-                        context=f"isinstance({arg}, {isinstance_type})",
-                        explanation=f"issubclass({arg_type}, {member}) raised "
-                        f"TypeError: {e}. Dynamo emulates isinstance() with "
-                        "issubclass() for this argument and cannot determine the result.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
+                    # Protocol with data members) says nothing about isinstance().
+                    if arg_type not in _VALUE_INDEPENDENT_TYPES:
+                        unimplemented(
+                            gb_type="builtin isinstance() with classinfo that does not support issubclass()",
+                            context=f"isinstance({arg}, {isinstance_type})",
+                            explanation=f"issubclass({arg_type}, {member}) raised "
+                            f"TypeError: {e}. Dynamo emulates isinstance() with "
+                            "issubclass() for this argument and cannot determine the result.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                    try:
+                        val = isinstance(arg_type(), member)
+                    except TypeError as probe_error:
+                        raise_observed_exception(
+                            TypeError, tx, args=list(probe_error.args)
+                        )
             if val:
                 return VariableTracker.build(tx, True)
         return VariableTracker.build(tx, False)
