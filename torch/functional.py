@@ -495,6 +495,8 @@ def _meshgrid(*tensors, indexing: str | None):
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
+    if len(tensors) == 0:
+        return ()
 
     # Continue allowing call of old method that takes no indexing
     # kwarg for forward compatibility reasons.
