@@ -1955,6 +1955,59 @@ class PrecompileSession:
             self._dropped_guard_code,
         )
 
+    def rendered_backends(
+        self, backend_ids: Sequence[str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Compiled subgraphs as READABLE source, and the reason each of the rest
+        stayed pickled, both keyed by backend id.
+
+        The pickled bundle is the fallback, not the goal: a subgraph is Inductor
+        output, which has a source form (the make_fx tracer emits exactly this),
+        unlike the guard trees and transformed bytecode beside it. Anything that
+        fails to render -- an effectful op, a graph with no compute, a training
+        shape the composer refuses -- stays pickled, and its reason is warned
+        here and written into the artifact header so the fallback is visible.
+
+        Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
+        a second lowering, paid once per subgraph that reaches the artifact.
+        """
+        from torch._functorch import aot_autograd
+
+        if self._backend_obj is None or self._backend == "eager":
+            return {}, {}
+        rendered: dict[str, str] = {}
+        refused: dict[str, str] = {}
+        for backend_id in backend_ids:
+            held = self._backend_obj.graphs.get(str(backend_id))
+            if held is None:
+                continue
+            gm, fakes = held
+            try:
+                # grad_enabled is what makes AOTAutograd emit the joint
+                # forward+backward for a training capture; without it the
+                # backward is silently absent and the served output loses its
+                # grad_fn.
+                source, _ = aot_autograd.compile_to_python(
+                    gm, fakes, grad_enabled=self._training
+                )
+            except Exception as e:
+                reason = " ".join(f"{type(e).__name__}: {e}".split())
+                log.warning(
+                    "precompile: subgraph %s stays pickled, not rendered as source: %s",
+                    backend_id,
+                    reason,
+                )
+                refused[str(backend_id)] = reason
+                continue
+            rendered[str(backend_id)] = source
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        keys = list(rendered)
+        namespaced = namespace_module_names([rendered[k] for k in keys])
+        return dict(zip(keys, namespaced)), refused
+
     def _collect_backends(self) -> dict[str, Any]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
         from torch._dynamo.precompile_context import (

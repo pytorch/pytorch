@@ -3356,10 +3356,14 @@ def _codegen_compiled_forward(
         args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
-    buf.bind(torch=torch, BackwardState=BackwardState)
+    buf.bind(torch=torch)
 
     with buf.indent():
         if backward_state_indices:
+            # Binding it unconditionally makes every generated forward import
+            # BackwardState even when this branch is not emitted; bind it here so
+            # the import appears only when it is actually used.
+            buf.bind(BackwardState=BackwardState)
             idx = backward_state_indices[0]
             buf.writeline(f"_bw_state = args[{idx}]")
             buf.writeline("if not isinstance(_bw_state, BackwardState):")
