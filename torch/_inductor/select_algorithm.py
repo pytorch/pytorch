@@ -56,6 +56,8 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
+    ArgName,
+    ConstexprArg,
     CSEVariable,
     IndentedBuffer,
     KernelTemplate,
@@ -895,12 +897,23 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def extra_signature_constexprs(self) -> list[str]:
+        """Extra ``tl.constexpr`` params to add to the kernel signature.
+
+        Empty by default. Subclasses that override this should strip the same
+        names from :meth:`gen_defines`, or they will be declared twice.
+        """
+        return []
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
+        for _name in self.extra_signature_constexprs():
+            argdefs.append(ArgName(_name, is_constexpr=True))
+            signature.append(ConstexprArg(_name))
         triton_meta: TritonMeta = {
             "signature": signature_to_meta(
                 signature,
@@ -1095,6 +1108,8 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
+            for _name in self.extra_signature_constexprs():
+                arg_defs.append(ArgName(_name, is_constexpr=True))
             code = IndentedBuffer()
             code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
@@ -1102,7 +1117,7 @@ class TritonTemplateKernel(TritonKernel):
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
             )
             with code.indent():
-                code.splice(self.defines)
+                code.splice(self.gen_defines())
                 code.splice(renames.getvalue())
                 self.codegen_prologue(code)
             return code.getvalue()
