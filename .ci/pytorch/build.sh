@@ -64,6 +64,11 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # Build for z15 to enable full ZVECTOR support
+  export CFLAGS="$CFLAGS -march=z15"
+  export CXXFLAGS="$CXXFLAGS -march=z15"
+fi
 
 # mkl-static/mkl-include are pip-installed into the active Python environment
 # (a conda env or a venv), not provided by conda. Detect MKL directly rather
