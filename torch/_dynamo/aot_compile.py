@@ -95,6 +95,9 @@ class AOTCompilePickler(FunctionPicklerBase):
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
+        # Memoize _dumps_cleanly by object id so probing nested functions is not
+        # exponential in nesting depth; shared into probe picklers below.
+        self._dumps_cleanly_cache: dict[int, bool] = {}
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -145,17 +148,29 @@ class AOTCompilePickler(FunctionPicklerBase):
         # pickler of this exact class keeps external_data/persistent_id behaviour
         # identical to the real dump. RecursionError is re-raised, not treated as
         # unpicklable, to match the guard side's deliberate carve-out.
+        cached = self._dumps_cleanly_cache.get(id(value))
+        if cached is not None:
+            return cached
         probe = type(self)(self.external_data, io.BytesIO())
+        # Share one cache across the probe tree: probing a nested function
+        # re-probes its own annotations, so without this the probe count is
+        # exponential in nesting depth. The probed values stay alive for the
+        # whole dump, so id reuse within a pass is not a concern.
+        probe._dumps_cleanly_cache = self._dumps_cleanly_cache
         try:
             probe.dump(value)
         except RecursionError:
             raise
         except Exception:
-            return False
-        # persistent_id records nn.Module instances rather than raising, so such
-        # a value dumps here but would poison the real serialize(); treat it as
-        # unpicklable so it is pruned now instead of failing the whole dump later.
-        return not probe.errors
+            result = False
+        else:
+            # persistent_id records nn.Module instances rather than raising, so
+            # such a value dumps here but would poison the real serialize();
+            # treat it as unpicklable so it is pruned now instead of failing the
+            # whole dump later.
+            result = not probe.errors
+        self._dumps_cleanly_cache[id(value)] = result
+        return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
         # resolve=True first turns a 3.14 FORWARDREF proxy into a real value (or
@@ -339,7 +354,15 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
         pickler = AOTCompilePickler(external_data or {}, buf)
-        pickler.dump(state)
+        try:
+            pickler.dump(state)
+        except (pickle.PicklingError, TypeError) as e:
+            raise RuntimeError(
+                f"Failed to serialize the AOT compiled function: {e}\n"
+                "Some value reached by the artifact is not picklable (a nested "
+                "function's __dict__ rides verbatim, a common source). Mark it "
+                "as external data by using `external_data={'key': ...}`."
+            ) from e
         if pickler.errors:
             raise RuntimeError(
                 f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"

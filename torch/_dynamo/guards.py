@@ -4442,13 +4442,19 @@ class GuardsStatePickler(FunctionPicklerBase):
             closure = tuple(self._prune_cell(cell) for cell in closure)
         # An unregistered __dict__ drops its unguarded keys outright: unlike a
         # signature, it holds whatever a decorator happened to stash, and no
-        # guard can read a structure nothing registered.
-        keep_attributes = self._keep(obj.__dict__)
-        attributes = {
-            name: self._prune(value, "unguarded function attribute")
-            for name, value in obj.__dict__.items()
-            if keep_attributes or self._keep(value)
-        }
+        # guard can read a structure nothing registered. A __dict__ a guard IS
+        # rooted at (a TYPE_MATCH on a dict subclass assigned to it) takes the
+        # same _keep(container) escape as __annotations__/__defaults__: carry it
+        # verbatim so its type and identity survive, rather than rebuild a plain
+        # dict the guard would reject.
+        if self._keep(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+                if self._keep(value)
+            }
         # An annotation or type param nothing guards can be an unpicklable local
         # class; prune it rather than let it fail the whole dump. __annotations__
         # takes the same _keep(container) escape as __defaults__/__kwdefaults__:
