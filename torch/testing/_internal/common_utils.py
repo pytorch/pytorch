@@ -2999,6 +2999,26 @@ def set_rng_seed(seed=None):
         np.random.seed(seed)
 
 
+def device_rng_seed(default=0, **per_device):
+    """Decorator that sets RNG seed per device type.
+
+    Different devices can have different RNG implementations, so the same seed
+    may not be equally stable across all backends.
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(test_self, *args, **kwargs):
+            device_type = getattr(test_self, "device_type", None)
+            seed = per_device.get(device_type, default)
+            set_rng_seed(seed)
+            return fn(test_self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 @contextlib.contextmanager
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
