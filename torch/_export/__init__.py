@@ -176,25 +176,26 @@ def aot_load(so_path: str, device: str) -> Callable:
         private_backend = torch._C._get_privateuse1_backend_name()
         if private_backend != "privateuseone":
             from torch.utils.backend_registration import _get_custom_mod_func
-            try :
+            try:
                 runner = _get_custom_mod_func("AOTIModelContainerRunner")
                 if runner is not None:
                     _AOTI_RUNNER_REGISTER[private_backend] = runner
             except RuntimeError:
                 pass
 
-    def _get_aoti_runner(device_type: str, so_path: str)
+    def _get_aoti_runner(*args):
         _init_aoti_runner_registry()
+        device_type = args[2]
         runner_cls = _AOTI_RUNNER_REGISTER.get(device_type)
         if runner_cls is None:
             raise RuntimeError(
                 f"AOTI runner not registered for device type '{device_type}'. "
                 f"Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}. "
-                f"Use register_aoti_runner() to register a custom runner."
+                f"Use register_aoti_runner to register a custom runner."
             )
-        return runner_cls(so_path, 1, device_type)
+        return runner_cls(*args)
 
-    runner = _get_aoti_runner(device, so_path)
+    runner = _get_aoti_runner(so_path, 1, device)
 
     def optimized(*args, **kwargs):
         call_spec = runner.get_call_spec()
