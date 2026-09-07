@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import hashlib
 import importlib
 import importlib.abc
 import importlib.util
@@ -2458,6 +2459,26 @@ def _get_hipcc_path():
     else:
         return _join_rocm_home('bin', 'hipcc')
 
+
+def _ninja_build_directory(build_directory: str, objects: list[str]) -> str:
+    r"""Return the subdirectory of ``build_directory`` that ninja should run in.
+
+    ``setuptools`` hands the same ``output_dir`` (e.g. ``build/temp.linux-x86_64-cpython-312``)
+    to every extension of a project. Emitting ``build.ninja`` straight into that shared
+    directory -- and letting ninja keep its ``.ninja_log`` and ``.ninja_deps`` next to it --
+    means that compiling several extensions concurrently (``build_ext -j N``) makes them
+    overwrite each other's build files. Giving each invocation its own subdirectory keeps
+    them independent. Object files are absolute paths, so where they are written is
+    unaffected.
+
+    The name is derived from the objects this invocation produces, so it is stable across
+    runs (ninja's incremental rebuilds keep working) and two invocations only share a
+    directory when they already write the same object files.
+    """
+    digest = hashlib.sha256("\n".join(sorted(objects)).encode("utf-8")).hexdigest()
+    return os.path.join(build_directory, f".ninja-{digest[:16]}")
+
+
 def _write_ninja_file_and_compile_objects(
         sources: list[str],
         objects,
@@ -2486,16 +2507,20 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
-    build_file_path = os.path.join(build_directory, 'build.ninja')
+    # Compile in a subdirectory unique to these objects. setuptools reuses one
+    # output_dir for every extension of a project, so sharing it would let concurrent
+    # builds clobber each other's build.ninja and ninja bookkeeping files.
+    ninja_directory = _ninja_build_directory(build_directory, objects)
+    build_file_path = os.path.join(ninja_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
 
-    # Create build_directory if it does not exist
-    if not os.path.exists(build_directory):
+    # Create ninja_directory (and with it build_directory) if it does not exist
+    if not os.path.exists(ninja_directory):
         if verbose:
-            logger.debug('Creating directory %s...', build_directory)
+            logger.debug('Creating directory %s...', ninja_directory)
         # This is like mkdir -p, i.e. will also create parent directories.
-        os.makedirs(build_directory, exist_ok=True)
+        os.makedirs(ninja_directory, exist_ok=True)
 
     _write_ninja_file(
         path=build_file_path,
@@ -2516,7 +2541,7 @@ def _write_ninja_file_and_compile_objects(
     if verbose:
         logger.info('Compiling objects...')
     _run_ninja_build(
-        build_directory,
+        ninja_directory,
         verbose,
         # It would be better if we could tell users the name of the extension
         # that failed to build but there isn't a good way to get it here.
