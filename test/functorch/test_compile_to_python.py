@@ -18,14 +18,19 @@ from torch._higher_order_ops.effects import _get_effect, hop_print
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
     TestCase,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 def _capture(m, x, tracing_mode="real"):
@@ -173,6 +178,7 @@ class TestAOTCompileToPython(TestCase):
     # End-to-end coverage of the functorch composition layer: compile_to_python composes
     # AOTAutograd's codegen'd runtime wrappers (prelude/epilogue) around the inner Inductor
     # call into one standalone module, and the emitted module must match eager. All CPU.
+    hw_classification = HardwareClassification.GENERIC
 
     def test_pointwise_runs_like_eager(self):
         m = _Pointwise().eval()
@@ -695,6 +701,7 @@ class TestComposerHelpers(TestCase):
     # Unit coverage of the composer's own helpers: the _known_helper_table stable-import
     # contract, _module_level_names (inner-binding collision seeding), and the recursive
     # _find_effectful_op scan. (Source-emission helper tests live in test_source_emit.py.)
+    hw_classification = HardwareClassification.GENERIC
 
     def test_known_helper_table_imports_are_stable_surface(self):
         # Stability contract: every runtime helper the composer recognizes must emit an
@@ -775,24 +782,28 @@ class TestComposerHelpers(TestCase):
         self.assertIsNone(_find_effectful_op(gm, _get_effect))
 
 
-@requires_cuda_and_triton
-class TestAOTCompileToPythonCuda(TestCase):
+@requires_triton()
+class TestAOTCompileToPythonDevice(TestCase):
     # The composition is device-agnostic source manipulation, but its wrappers must also
-    # compose correctly around Inductor's @triton.jit kernels and on CUDA tensors. Mirror
-    # the key e2e cases on CUDA; the inner-kernel codegen itself is covered by
-    # test/inductor/test_compile_to_python.py's CUDA class.
-    def test_pointwise_runs_like_eager(self):
-        m = _Pointwise().eval().cuda()
-        x = torch.randn(8, 4, device="cuda")
+    # compose correctly around Inductor's @triton.jit kernels and on accelerator tensors.
+    # Mirror the key e2e cases on the accelerator; the inner-kernel codegen itself is
+    # covered by test/inductor/test_compile_to_python.py's CUDA class.
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_pointwise_runs_like_eager(self, device):
+        m = _Pointwise().eval().to(device)
+        x = torch.randn(8, 4, device=device)
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
         self.assertIn("@triton.jit", src)
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
-    def test_output_alias_regen_runs_like_eager(self):
-        m = _ViewAlias().eval().cuda()
-        x = torch.randn(4, 4, device="cuda")
+    @onlyAccelerator
+    def test_output_alias_regen_runs_like_eager(self, device):
+        m = _ViewAlias().eval().to(device)
+        x = torch.randn(4, 4, device=device)
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
         self.assertIn("gen_alias_from_base", src)
@@ -804,14 +815,15 @@ class TestAOTCompileToPythonCuda(TestCase):
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
         )
 
-    def test_tensor_subclass_wrap_unwrap_runs_like_eager(self):
+    @onlyAccelerator
+    def test_tensor_subclass_wrap_unwrap_runs_like_eager(self, device):
         from torch.testing._internal.two_tensor import TwoTensor
 
         def f(x):
             return x * 2.0 + 1.0
 
         tt = TwoTensor(
-            torch.randn(4, 4, device="cuda"), torch.randn(4, 4, device="cuda")
+            torch.randn(4, 4, device=device), torch.randn(4, 4, device=device)
         )
         gm = make_fx(f, tracing_mode="real")(tt)
         src, _cache = compile_to_python(gm, [tt])
@@ -823,19 +835,21 @@ class TestAOTCompileToPythonCuda(TestCase):
         self.assertEqual(out.a, eager.a)
         self.assertEqual(out.b, eager.b)
 
-    def test_input_mutation_copy_back_runs_like_eager(self):
+    @onlyAccelerator
+    def test_input_mutation_copy_back_runs_like_eager(self, device):
         # The mutation epilogue's copy-back is the most plausibly device-sensitive wrapper
-        # path (it writes updated values back onto the passed-in CUDA tensors), so mirror
-        # the CPU mutation case on CUDA in addition to the pointwise/alias/subclass cases.
-        m = _BufferMutate().eval().cuda()
-        x = torch.randn(4, device="cuda")
+        # path (it writes updated values back onto the passed-in accelerator tensors), so
+        # mirror the CPU mutation case here in addition to the pointwise/alias/subclass
+        # cases.
+        m = _BufferMutate().eval().to(device)
+        x = torch.randn(4, device=device)
         src, _cache = _compose(m, x)
         _assert_composed(self, src)
 
-        eager = _BufferMutate().eval().cuda()
+        eager = _BufferMutate().eval().to(device)
         eager_out = eager(x)
 
-        buf = torch.zeros(4, device="cuda")
+        buf = torch.zeros(4, device=device)
         with torch.no_grad():
             composed_out = _exec(src)([buf, x])[0]
         self.assertEqual(composed_out, eager_out)
@@ -846,6 +860,7 @@ class TestAOTComposeGuards(TestCase):
     # The composer's defensive guards (which reject rather than emit a subtly-wrong module)
     # only fire if AOTAutograd's codegen drifts, so drive them directly with hand-built
     # GeneratedSource objects rather than waiting for an upstream regression.
+    hw_classification = HardwareClassification.GENERIC
     _ORCH_SRC = (
         "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):\n"
         "    return _compiled_fn_(args)\n"
@@ -1146,6 +1161,11 @@ call = runner.call
         # confirm the spliced ``_inner_call = call`` actually resolves at runtime.
         self.assertIn("call = runner.call", src)
         self.assertEqual(_exec(src)([7]), [7])
+
+
+instantiate_device_type_tests(
+    TestAOTCompileToPythonDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
