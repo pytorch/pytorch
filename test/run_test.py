@@ -233,7 +233,6 @@ if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
-    "inductor/test_cpu_repro",
     "lazy/test_meta_kernel",
     "profiler/test_profiler",
     "test_jit",
@@ -291,8 +290,6 @@ S390X_BLOCKLIST = [
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
-    # needs fixes in s390x vectorization code
-    "inductor/test_compile_subprocess",
 ]
 
 XPU_BLOCKLIST = [
