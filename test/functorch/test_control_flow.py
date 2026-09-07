@@ -25,6 +25,7 @@ from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
+from torch._higher_order_ops.utils import materialize_bdim_at_front
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -176,6 +177,24 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+class TestBdimMaterialization(TestCase):
+    def test_materialize_bdim_at_front_strides(self):
+        cases = (
+            ("canonical", torch.randn(3, 5), 0, 3),
+            ("size_one", torch.randn(3, 1, 5), 1, 1),
+            ("broadcast", torch.randn(3, 5), None, 3),
+        )
+        for name, tensor, bdim, batch_size in cases:
+            with self.subTest(name=name):
+                result = materialize_bdim_at_front(tensor, bdim, batch_size)
+                self.assertEqual(
+                    result.stride(),
+                    torch._prims_common.make_contiguous_strides_for(result.shape),
+                )
+                if name == "canonical":
+                    self.assertEqual(result.data_ptr(), tensor.data_ptr())
 
 
 def compile_mode_helper(fct, compile_mode):
@@ -11223,26 +11242,37 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     @parametrize("case", ["input", "nested_input", "output_int", "output_bool"])
     def test_while_loop_vmap_non_tensor_carry_error(self, case):
         if case == "input":
-            fn = lambda it, x: torch.ops.higher_order.while_loop(
-                lambda i, c: i < 3, lambda i, c: (i + 1, c + 1), (it, x), ()
-            )
+
+            def fn(it, x):
+                return torch.ops.higher_order.while_loop(
+                    lambda i, c: i < 3, lambda i, c: (i + 1, c + 1), (it, x), ()
+                )
+
             args, in_dims = (0, torch.rand(4, 3)), (None, 0)
             error = r"carried_inputs.*\[\(0, 'int'\)\]"
         elif case == "nested_input":
-            fn = lambda it, x: torch.while_loop(
-                lambda i, c: i["it"] < 3,
-                lambda i, c: ({"it": i["it"] + 1}, c + 1),
-                ({"it": it}, x),
-            )
+
+            def fn(it, x):
+                return torch.while_loop(
+                    lambda i, c: i["it"] < 3,
+                    lambda i, c: ({"it": i["it"] + 1}, c + 1),
+                    ({"it": it}, x),
+                )
+
             args, in_dims = (0, torch.rand(4, 3)), (None, 0)
             error = r"carried_inputs.*\[\(0, 'int'\)\]"
         else:
             output = 0 if case == "output_int" else False
-            fn = lambda x: torch.ops.higher_order.while_loop(
-                lambda c: c.sum() < 1, lambda c: (output,), (x,), ()
-            )
+
+            def fn(x):
+                return torch.ops.higher_order.while_loop(
+                    lambda c: c.sum() < 1, lambda c: (output,), (x,), ()
+                )
+
             args, in_dims = (torch.zeros(4, 3),), (0,)
-            error = rf"body_fn returned non-tensor.*\[\(0, '{type(output).__name__}'\)\]"
+            error = (
+                rf"body_fn returned non-tensor.*\[\(0, '{type(output).__name__}'\)\]"
+            )
 
         with self.assertRaisesRegex(RuntimeError, error):
             torch.vmap(fn, in_dims=in_dims)(*args)

@@ -1082,9 +1082,11 @@ def move_bdim_to_front(
 def materialize_bdim_at_front(
     t: torch.Tensor, bdim: int | None, batch_size: int
 ) -> torch.Tensor:
-    return move_bdim_to_front(t, bdim, batch_size).clone(
-        memory_format=torch.contiguous_format
-    )
+    result = move_bdim_to_front(t, bdim, batch_size)
+    # Fast-path, in case strides indicate contiguous tensor already
+    if result.stride() == torch._prims_common.make_contiguous_strides_for(result.shape):
+        return result
+    return result.clone(memory_format=torch.contiguous_format)
 
 
 # Returns a mask whether a list element is a tensor or not
