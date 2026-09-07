@@ -162,12 +162,10 @@ if HAS_TRITON:
 
 
 class _TritonDeviceTestCase(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
+    def setUp(self):
         if not HAS_TRITON:
-            raise unittest.SkipTest(f"triton is required for {device}")
+            self.skipTest("triton is required")
+        device = self.get_primary_device()
         try:
             device_interface = get_interface_for_device(torch.device(device).type)
         except NotImplementedError as exc:
@@ -178,6 +176,7 @@ class _TritonDeviceTestCase(TestCase):
             device_interface.raise_if_triton_unavailable(device)
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
+        super().setUp()
 
 
 class ExclusiveScanDecoupledLookback64Test(_TritonDeviceTestCase):
