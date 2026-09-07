@@ -7429,9 +7429,7 @@ def forward(self, primals_1, tangents_1):
         )
         torch._dynamo.reset()
         model = M().cuda()
-        x = torch.randn(
-            64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
         with torch.compiler.config.patch(compile_on_one_rank=True):
             torch.compile(model, backend=backend, fullgraph=True)(x).backward()
         self.assertIsNotNone(x.grad)
