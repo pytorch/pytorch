@@ -59,21 +59,25 @@ def requires_nvls():
     )
 
 
+# So that tests are written in device-agnostic way
+device_type = "cuda"
+device_module = torch.get_device_module(device_type)
+
+
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     def _init_device(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        torch.get_device_module(self.device.type).set_device(self.device)
+        device_module.set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     def test_alloc(self, device) -> None:
         self._init_device(device)
@@ -93,7 +97,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     def test_alloc_without_device_context(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
         group_name = dist.group.WORLD.group_name
@@ -555,15 +558,14 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     def _init_device(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        torch.get_device_module(self.device.type).set_device(self.device)
+        device_module.set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     def test_nvshmem_all_to_all(self, device) -> None:
         self._init_device(device)
@@ -958,15 +960,14 @@ class DispatchCombineTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     def _init_device(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        torch.get_device_module(self.device.type).set_device(self.device)
+        device_module.set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, device, align: int) -> None:
@@ -984,15 +985,14 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     def _init_device(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        torch.get_device_module(self.device.type).set_device(self.device)
+        device_module.set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 4,
@@ -1008,7 +1008,7 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         ngroups = 2
         subgroup_size = self.world_size // ngroups
         dm = init_device_mesh(
-            device, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
+            device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
         )
         subgroup = dm.get_group("ep")
         dispatch_then_combine(self.device, align=8, group=subgroup)
@@ -1020,15 +1020,14 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     def _init_device(self, device) -> None:
-        self._dev = torch.device(torch.device(device).type, self.rank)
         # TODO: relieve this (seems to hang if without)
-        torch.get_device_module(self.device.type).set_device(self.device)
+        device_module.set_device(self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
