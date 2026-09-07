@@ -304,6 +304,11 @@ pattern_matcher = True
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 
+# reorder chains of 3 or more matmuls into the cheapest parenthesization.
+# Off by default: it is a strict FLOP win but changes the floating point
+# accumulation order, so opt in when the result tolerance allows it.
+reassociate_matmul = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
