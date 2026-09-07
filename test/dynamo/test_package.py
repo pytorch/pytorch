@@ -207,9 +207,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with patch(
             "torch._dynamo.package._current_cpu_codegen_target",
             side_effect=AssertionError("toolchain probe ran for an eager backend"),
-        ):
+        ) as probe:
             torch.compile(fn, backend="eager")(torch.randn(3))
             (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        # side_effect fails at the call site, but Dynamo swallows exceptions on
+        # the compile path, so assert not-called outside the patch too.
+        probe.assert_not_called()
         self.assertFalse(entry.requires_native_backend_compatibility)
         self.assertIsNone(entry.system_info.cpu_codegen_target)
 
@@ -229,7 +232,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with patch(
             "torch._dynamo.package._current_cpu_codegen_target",
             side_effect=AssertionError("toolchain probe ran for an eager backend"),
-        ):
+        ) as probe:
             entry = package.cache_entry()
             self.assertFalse(entry.requires_native_backend_compatibility)
             self.assertIsNone(entry.system_info.cpu_codegen_target)
@@ -240,6 +243,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 fn, entry, requires_native_backend_compatibility=False
             )
             resaved = reloaded.cache_entry()
+        probe.assert_not_called()
         self.assertFalse(resaved.requires_native_backend_compatibility)
         self.assertIsNone(resaved.system_info.cpu_codegen_target)
 
