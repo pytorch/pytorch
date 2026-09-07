@@ -1002,17 +1002,9 @@ def _guard_device_index_is_current(value: torch.Tensor) -> bool:
     and its index is not a rank identity. Outside CooR several accelerator devices
     can legitimately be live at once, so there the index stays pinned.
     """
-    from torch.fx.experimental.proxy_tensor import _coor_enabled
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
-    if not _coor_enabled():
-        return False
-    device = value.device
-    if device.index is None:
-        return False
-    acc = torch.accelerator.current_accelerator()
-    if acc is None or device.type != acc.type:
-        return False
-    return device.index == torch.accelerator.current_device_index()
+    return _coor_device_index_is_current(value.device)
 
 
 def get_tensor_guard_code_part(
