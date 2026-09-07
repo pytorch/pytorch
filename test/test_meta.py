@@ -1533,7 +1533,6 @@ class TestMeta(TestCase):
         skip('sparse.sampled_addmm'),
         xfail('nn.functional.binary_cross_entropy'),
         xfail('narrow_copy'),
-        xfail('view_copy'),
         xfail('view'),
         xfail('view_as'),
         xfail('empty_strided'),

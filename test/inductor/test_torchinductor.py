@@ -3881,6 +3881,47 @@ class CommonTemplate:
         x = torch.randint(2, 32, (8, 16), dtype=torch.int32, device=self.device)
         self.common(fn, (x, torch.int64))
 
+    def test_view_copy_expanded_zero_stride(self):
+        # view_copy on an expanded (zero-stride) tensor should work under
+        # torch.compile, matching eager. See:
+        # https://github.com/pytorch/pytorch/issues/191136
+        def fn(x):
+            return torch.view_copy(x, (8,))
+
+        x = torch.arange(2, dtype=torch.float32, device=self.device).expand(4, 2)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(expected, compiled)
+        self.assertTrue(compiled.is_contiguous())
+
+    def test_view_copy_expanded_zero_stride_out(self):
+        # Same as above but exercising the out= variant.
+        def fn(x, out):
+            return torch.view_copy(x, (8,), out=out)
+
+        x = torch.arange(2, dtype=torch.float32, device=self.device).expand(4, 2)
+        out = torch.empty(8, device=self.device)
+        expected = torch.view_copy(x, (8,))
+        torch.compile(fn, backend="inductor", fullgraph=True)(x, out)
+        self.assertEqual(expected, out)
+
+    def test_view_copy_expanded_zero_stride_grad(self):
+        # The expanded view_copy must also produce correct gradients.
+        def fn(x):
+            return torch.view_copy(x, (8,)).sum()
+
+        x = torch.arange(2, dtype=torch.float32, device=self.device).requires_grad_(True)
+        x_expanded = x.expand(4, 2)
+        loss = fn(x_expanded)
+        loss.backward()
+        grad_eager = x.grad.clone()
+
+        x2 = torch.arange(2, dtype=torch.float32, device=self.device).requires_grad_(True)
+        x2_expanded = x2.expand(4, 2)
+        compiled_loss = torch.compile(fn, backend="inductor", fullgraph=True)(x2_expanded)
+        compiled_loss.backward()
+        self.assertEqual(grad_eager, x2.grad)
+
     def test_torch_device_split(self):
         def fn(x):
             return x.split(2)
