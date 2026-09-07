@@ -366,18 +366,11 @@ void List<T>::unsafeSetElementType(TypePtr t) {
 
 }
 
-// ListElementReference converts to T (or const T&), but the two are
-// otherwise-unrelated types, so std::common_reference's "simple common
-// reference" rule (same type up to cv/ref-qualification) never applies to
-// the pair, and indirectly_readable requires
-// common_reference_with<ListElementReference&&, T&> (among others) to hold.
-// Some standard libraries' fallback for that case tries the proxy's
-// conversion operator through a conditional-expression-like check and
-// succeeds; others don't. basic_common_reference is the standard's sanctioned
-// extension point for exactly this situation, and is checked before that
-// fallback, so it makes the outcome the same everywhere: a value common
-// reference is always obtainable (the proxy can materialize a T), just not a
-// real reference to one, so T is what this resolves to.
+// ListElementReference and T are unrelated types, so common_reference's
+// "simple common reference" rule never applies; indirectly_readable needs
+// common_reference_with<ListElementReference&&, T&>, which some standard
+// libraries' fallback satisfies via the proxy's conversion operator and
+// others don't. This specialization makes the outcome the same everywhere.
 namespace std {
 template <
     class T,
