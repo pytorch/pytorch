@@ -1018,6 +1018,17 @@ class InputWriter:
                     "device_hint must be provided when storage device is 'meta'"
                 )
             device = device_hint  # type: ignore[assignment]
+        # compile-on-one-rank: drop the index when it is the current accelerator's.
+        # Every rank's inputs sit there by invariant, so an index-less device replays
+        # the same compile while making the repro identical across ranks -- and
+        # runnable on a box with fewer GPUs than the rank that produced it.
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        # device may have been replaced by device_hint above, which is a
+        # DeviceLikeType and so can be an int or str; only a real torch.device
+        # carries the index this is about.
+        if isinstance(device, torch.device) and _coor_device_index_is_current(device):
+            device = torch.device(device.type)
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
