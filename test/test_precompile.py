@@ -1136,17 +1136,17 @@ def _precompile_recursive_step(x):
     return _precompile_reenter(x * 2)
 
 
-_PRECOMPILE_CLOSING_CAPTURE: list = []
+_PRECOMPILE_SAVING_CAPTURE: list = []
 
 
 @torch._dynamo.disable
-def _precompile_close_from_inside(x):
-    _PRECOMPILE_CLOSING_CAPTURE[0].close()
+def _precompile_save_from_inside(x):
+    _PRECOMPILE_SAVING_CAPTURE[0].save()
     return x
 
 
-def _precompile_closing_step(x):
-    return _precompile_close_from_inside(x * 2)
+def _precompile_saving_step(x):
+    return _precompile_save_from_inside(x * 2)
 
 
 class _PrecompileAttrCfg:
@@ -2005,10 +2005,10 @@ class TestPrecompile(TestCase):
         # removal of the top-level entry point too (re-adding the re-export without
         # touching __all__ would silently resurrect torch.precompile).
         self.assertFalse(hasattr(torch, "precompile"))
-        # precompile is a module, not a callable; capture/accumulate/load are its
-        # public verbs.
+        # precompile is a module, not a callable; capture/load are its public
+        # verbs.
         self.assertFalse(callable(torch.compiler.precompile))
-        for name in ("capture", "accumulate", "load"):
+        for name in ("capture", "load"):
             self.assertTrue(callable(getattr(torch.compiler.precompile, name)))
         self.assertIs(torch.compiler.precompile.PrecompileError, PrecompileError)
         # Driving a capture by hand is not public: the session type is internal.
@@ -2086,7 +2086,7 @@ class TestPrecompile(TestCase):
             typing.get_type_hints(torch.compiler.precompile.capture)["return"],
             torch.compiler.precompile.Capture,
         )
-        # The guard/variant knobs live on the tracer, not on capture/accumulate.
+        # The guard/variant knobs live on the tracer, not on capture.
         self.assertIn(
             "guard_filter_fn", inspect.getdoc(torch.compiler.precompile.DynamoTracer)
         )
@@ -2331,10 +2331,14 @@ class TestPrecompile(TestCase):
             relaxed.result()
 
     def test_sessions_restore_the_capture_config(self):
-        # Entering a session flips two config flags; leaving it must restore
-        # them whether sessions nest on one thread, overlap across threads, or
-        # fail in __enter__ (an invalid backend).
+        # The capture's config flip is per call, not block-level: the flags are
+        # ambient before the block, between calls and after it, and up only
+        # while a call runs. The flip is thread-scoped, so a call in flight on
+        # a worker thread raises them in that thread only. A session that fails
+        # in __enter__ never raises them.
         import torch._functorch.config as functorch_config
+        from torch._dynamo.backends.registry import register_backend
+        from torch._dynamo.exc import InvalidBackend, PackageError
         from torch._dynamo.precompile_package import precompile_capture
 
         def flags():
@@ -2343,44 +2347,61 @@ class TestPrecompile(TestCase):
                 torch._dynamo.config.allow_empty_graphs,
             )
 
+        entered, release, in_call = threading.Event(), threading.Event(), []
+
+        def probe_backend(gm, example_inputs):
+            in_call.append(flags())
+            entered.set()
+            self.assertTrue(release.wait(10))
+            return gm.forward
+
+        name = f"precompile_cfg_probe_{id(in_call)}"
+        register_backend(probe_backend, name=name)
+
         with (
             functorch_config.patch("bundled_autograd_cache", False),
             torch._dynamo.config.patch(allow_empty_graphs=False),
         ):
-            first = precompile_capture(_precompile_multi_graph, backend="eager")
-            second = precompile_capture(_precompile_multi_graph, backend="eager")
-            first.__enter__()
-            second.__enter__()
-            first.__exit__(None, None, None)
-            self.assertEqual(flags(), (True, True))
-            second.__exit__(None, None, None)
+            release.set()
+            session = precompile_capture(
+                _precompile_single_graph, backend=name, dynamic=False
+            )
+            with session as run:
+                # Entering the block does not flip the flags; the call does,
+                # and they are restored the moment it returns.
+                self.assertEqual(flags(), (False, False))
+                run(torch.randn(2))
+                self.assertEqual(flags(), (False, False))
             self.assertEqual(flags(), (False, False))
+            self.assertEqual(in_call[-1], (True, True))
 
-            entered, release, errors = threading.Event(), threading.Event(), []
+            # The flip is thread-scoped: a call parked on a worker thread
+            # raises the flags in its own thread only. The main thread stays
+            # ambient throughout, and the worker's flags drop once it returns.
+            in_call.clear()
+            entered.clear()
+            release.clear()
+            errors: list = []
 
             def hold():
                 try:
-                    held = precompile_capture(_precompile_single_graph, backend="eager")
-                    held.__enter__()
-                    entered.set()
-                    self.assertTrue(release.wait(10))
-                    held.__exit__(None, None, None)
+                    held = precompile_capture(
+                        _precompile_single_graph, backend=name, dynamic=False
+                    )
+                    with held as run_held:
+                        run_held(torch.randn(2))
                 except BaseException as error:
                     errors.append(error)
 
             holder = threading.Thread(target=hold)
             holder.start()
             self.assertTrue(entered.wait(10))
-            session = precompile_capture(_precompile_single_graph, backend="eager")
-            session.__enter__()
-            self.assertEqual(flags(), (True, True))
+            self.assertEqual(flags(), (False, False))
             release.set()
             holder.join(10)
             self.assertFalse(holder.is_alive())
             self.assertEqual(errors, [])
-            # The earlier session left on its own thread while this one is open.
-            self.assertEqual(flags(), (True, True))
-            session.__exit__(None, None, None)
+            self.assertEqual(in_call[-1], (True, True))
             self.assertEqual(flags(), (False, False))
 
             session = precompile_capture(
@@ -2388,16 +2409,12 @@ class TestPrecompile(TestCase):
                 backend="definitely_missing_backend",
                 dynamic=False,
             )
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.InvalidBackend, "Invalid backend"
-            ):
+            with self.assertRaisesRegex(InvalidBackend, "Invalid backend"):
                 with session:
                     pass
             self.assertEqual(flags(), (False, False))
             self.assertFalse(session.summary().complete)
             self.assertIn("InvalidBackend", session.summary().capture_errors[0])
-            from torch._dynamo.exc import PackageError
-
             with self.assertRaises(PackageError):
                 session.artifact()
 
@@ -6487,8 +6504,8 @@ class TestPrecompile(TestCase):
             with torch.no_grad():
                 self.assertEqual(loaded(model, x), model(x))
 
-    def _accumulate(self, fn, d, *, backend="eager", training=False, **tracer_kwargs):
-        """accumulate() into d/m.py and d/m.cache: eager, static, gates off unless given."""
+    def _save_capture(self, fn, d, *, backend="eager", training=False, **tracer_kwargs):
+        """capture() into d/m.py and d/m.cache: eager, static, gates off unless given."""
         tracer = DynamoTracer(
             **{
                 "dynamic": False,
@@ -6497,7 +6514,7 @@ class TestPrecompile(TestCase):
                 **tracer_kwargs,
             }
         )
-        return torch.compiler.precompile.accumulate(
+        return torch.compiler.precompile.capture(
             fn,
             artifact_path=os.path.join(d, "m.py"),
             cache_path=os.path.join(d, "m.cache"),
@@ -6506,10 +6523,11 @@ class TestPrecompile(TestCase):
             tracer=tracer,
         )
 
-    def test_precompile_accumulate_folds_in_each_call(self):
-        # accumulate() rewrites the on-disk artifact after every call the caller
-        # makes, so a pipelined training step -- which cannot be replayed back to
-        # back -- folds into the artifact as the caller's own loop runs it.
+    def test_precompile_save_checkpoints_each_call(self):
+        # cap.save() rewrites the on-disk artifact whenever the caller calls it,
+        # so a pipelined training step -- which cannot be replayed back to back
+        # -- is checkpointed into the artifact as the caller's own loop runs it,
+        # and a job that dies between saves leaves the last checkpoint loadable.
         model = _PrecompileAccumModel()
         eager = _PrecompileAccumModel()
         eager.load_state_dict(model.state_dict())
@@ -6519,7 +6537,7 @@ class TestPrecompile(TestCase):
         with tempfile.TemporaryDirectory() as d:
             artifact_path = os.path.join(d, "m.py")
             cache_path = os.path.join(d, "m.cache")
-            with self._accumulate(
+            with self._save_capture(
                 _precompile_accum_step,
                 d,
                 training=True,
@@ -6527,12 +6545,13 @@ class TestPrecompile(TestCase):
                 for x, mode in zip(xs, modes):
                     model.zero_grad(set_to_none=True)
                     got = capture(model, x, mode)
+                    capture.save()
                     eager.zero_grad(set_to_none=True)
                     want = _precompile_accum_step(eager, x, mode)
                     # Each call runs for real and hands back its own result.
                     self.assertEqual(got, want)
-                    # And its gradients: accumulate() makes no call of its own,
-                    # so there is nothing to snapshot and nothing to restore.
+                    # And its gradients: capture makes no call of its own, so
+                    # there is nothing to snapshot and nothing to restore.
                     self.assertEqual(model.l.weight.grad, eager.l.weight.grad)
                     codes.append(capture.summary().guarded_codes)
                 self.assertEqual(capture.calls(), len(modes))
@@ -6552,19 +6571,20 @@ class TestPrecompile(TestCase):
                         _precompile_accum_step(eager, x, mode),
                     )
 
-    def test_precompile_accumulate_close_waits_for_inflight_call(self):
-        # close() used to tear the region down by reaching into session
-        # privates with no drain, so a capture call on another thread could be
-        # left compiling against a destroyed cache entry. It now retires
-        # through the session's own drain handshake, like __exit__; the worker
-        # thread inherits the capture behaviour the same way.
+    def test_precompile_exit_waits_for_inflight_call(self):
+        # A call holds the capture's reentrant lock for its whole duration, and
+        # the session drains in-flight calls before tearing the region down, so
+        # exiting the block parks until a call still running on another thread
+        # finishes rather than rendering against a destroyed cache entry.
         started = threading.Event()
         release = threading.Event()
+        exited = threading.Event()
 
         model = _PrecompileAccumModel().l
         x = torch.randn(3, 8)
         with tempfile.TemporaryDirectory() as d:
-            capture = self._accumulate(_precompile_slow_step, d)
+            capture = self._save_capture(_precompile_slow_step, d)
+            capture.__enter__()
             try:
                 caller = threading.Thread(
                     target=lambda: capture(model, x, started, release), daemon=True
@@ -6572,26 +6592,35 @@ class TestPrecompile(TestCase):
                 with torch.no_grad():
                     caller.start()
                     self.assertTrue(started.wait(timeout=60))
-                    closer = threading.Thread(target=capture.close, daemon=True)
+
+                    def _exit():
+                        try:
+                            capture.__exit__(None, None, None)
+                        finally:
+                            exited.set()
+
+                    closer = threading.Thread(target=_exit, daemon=True)
                     closer.start()
-                    # The call is still in flight, so close() must be parked in
-                    # the drain, not done.
+                    # The call is still in flight, so __exit__ must be parked on
+                    # the lock/drain, not done.
                     closer.join(timeout=1.0)
                     self.assertTrue(closer.is_alive())
+                    self.assertFalse(exited.is_set())
                     release.set()
                     caller.join(timeout=60)
                     closer.join(timeout=60)
                     self.assertFalse(closer.is_alive())
+                    self.assertTrue(exited.is_set())
             finally:
                 release.set()
-                capture.close()
+                if not exited.is_set():
+                    capture.__exit__(None, None, None)
 
-    def test_precompile_accumulate_keeps_the_last_artifact_when_the_rewrite_fails(self):
-        # There is no finalize step, so a job that dies partway through must
-        # leave a working artifact for the batches it did reach. And when a
-        # step ran and folded in but only the rewrite failed, the result rides
-        # on the error with the OSError as its cause, the capture stays open,
-        # and the files on disk are still the previous call's loadable pair.
+    def test_precompile_save_keeps_the_last_artifact_when_the_rewrite_fails(self):
+        # save() rewrites both files, and when the step ran but only the on-disk
+        # rewrite failed, the files on disk are still the previous save's
+        # loadable pair, the error carries the OSError as its cause, and the
+        # capture stays open so a transient failure can be retried.
         model = _PrecompileAccumModel()
         eager = _PrecompileAccumModel()
         eager.load_state_dict(model.state_dict())
@@ -6599,8 +6628,11 @@ class TestPrecompile(TestCase):
         with tempfile.TemporaryDirectory() as d:
             artifact_path = os.path.join(d, "m.py")
             cache_path = os.path.join(d, "m.cache")
-            with self._accumulate(_precompile_accum_step, d, training=True) as capture:
+            with self._save_capture(
+                _precompile_accum_step, d, training=True
+            ) as capture:
                 capture(model, xs["a"], "a")
+                capture.save()
                 with open(artifact_path) as f:
                     first_code = f.read()
                 with open(cache_path, "rb") as f:
@@ -6616,16 +6648,14 @@ class TestPrecompile(TestCase):
                     return real_replace(src, dst)
 
                 model.zero_grad(set_to_none=True)
-                eager.zero_grad(set_to_none=True)
+                capture(model, xs["b"], "b")
                 with mock.patch.object(os, "replace", flaky):
                     with self.assertRaisesRegex(
                         PrecompileError, "could not write the artifact: disk full"
                     ) as ctx:
-                        capture(model, xs["b"], "b")
+                        capture.save()
                 self.assertIsInstance(ctx.exception.__cause__, OSError)
-                self.assertEqual(
-                    ctx.exception.result, _precompile_accum_step(eager, xs["b"], "b")
-                )
+                # The failed save left the previous pair intact.
                 self.assertEqual(capture.calls(), 2)
                 self.assertEqual(sorted(os.listdir(d)), ["m.cache", "m.py"])
                 with open(artifact_path) as f:
@@ -6642,14 +6672,14 @@ class TestPrecompile(TestCase):
                     _precompile_accum_step(eager, xs["a"], "a"),
                 )
 
-    def test_precompile_accumulate_serves_a_slot_only_a_later_call_makes_vary(self):
+    def test_precompile_save_serves_a_slot_only_a_later_call_makes_vary(self):
         # The shape that breaks the obvious implementation. On call 1 the frame
         # has ONE variant, and a slot cannot disagree with itself, so the
         # invariant policy sees every slot as constant. If the policy were
         # applied to the capture itself, HASATTR would be stripped from that
         # variant permanently -- and when call 2 makes it discriminate, the
         # first variant would go on matching the second call and return the
-        # first call's numbers. Rendering from filtered copies is what keeps it.
+        # first call's numbers. save() rendering from filtered copies keeps it.
         cfg_with, cfg_without = _PrecompileAttrCfg(), _PrecompileAttrCfg()
         cfg_with.scale = 2.0
         x = torch.randn(2, 4)
@@ -6660,9 +6690,11 @@ class TestPrecompile(TestCase):
         with tempfile.TemporaryDirectory() as d:
             artifact_path = os.path.join(d, "m.py")
             cache_path = os.path.join(d, "m.cache")
-            with self._accumulate(_precompile_attr_branch, d) as capture:
+            with self._save_capture(_precompile_attr_branch, d) as capture:
                 self.assertEqual(capture(cfg_with, x), want_with)
+                capture.save()  # renders while the frame has one variant
                 self.assertEqual(capture(cfg_without, x), want_without)
+                capture.save()
 
             torch._dynamo.reset()
             loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
@@ -6670,117 +6702,122 @@ class TestPrecompile(TestCase):
                 self.assertEqual(loaded(cfg_with, x), want_with)
                 self.assertEqual(loaded(cfg_without, x), want_without)
 
-    def test_precompile_accumulate_reports_the_drops_its_artifact_made(self):
-        # The accumulating render filters COPIES, so the drops it made have to
-        # be read back off that pass -- otherwise summary() and the artifact's
-        # own POLICY_DROPPED_GUARDS section describe a policy that never ran,
-        # and the file silently claims to carry guards it dropped. And the
-        # gates read policy_dropped_guards, which the policy is what fills, so
-        # gating first judged the PREVIOUS render's numbers: a capture that
-        # rendered exactly once wrote POLICY_DROPPED_GUARDS = [] while that same
-        # pass had dropped every invariant slot.
+    def test_precompile_save_reports_the_drops_its_artifact_made(self):
+        # The render filters COPIES, so the drops it made have to be read back
+        # off that pass -- otherwise summary() and the artifact's own
+        # POLICY_DROPPED_GUARDS section describe a policy that never ran, and the
+        # file silently claims to carry guards it dropped. And the gates read
+        # policy_dropped_guards, which the policy is what fills, so gating first
+        # judged the PREVIOUS render's numbers: a capture that rendered exactly
+        # once wrote POLICY_DROPPED_GUARDS = [] while that same pass had dropped
+        # every invariant slot.
         model = _PrecompileAccumModel()
         x = torch.randn(3, 8)
         with tempfile.TemporaryDirectory() as d:
             artifact_path = os.path.join(d, "m.py")
-            with self._accumulate(_precompile_accum_step, d, training=True) as capture:
-                capture(model, x, "a")  # exactly ONE render
+            with self._save_capture(
+                _precompile_accum_step, d, training=True
+            ) as capture:
+                capture(model, x, "a")
+                capture.save()  # exactly ONE render
                 with open(artifact_path) as f:
                     self.assertNotIn("POLICY_DROPPED_GUARDS = []", f.read())
                 capture(model, x, "b")
+                capture.save()
                 dropped = capture.summary().policy_dropped_guards
             self.assertTrue(dropped)
             with open(artifact_path) as f:
                 self.assertNotIn("POLICY_DROPPED_GUARDS = []", f.read())
 
-    def test_precompile_accumulate_call_state(self):
-        # A call that raises has already told the caller. Refusing every LATER
-        # render over it would freeze the artifact at the last good call for the
-        # rest of the loop -- and the refusal lands after the region has run, so
-        # a training step's gradients move and its result is never returned. A
-        # call made from inside fn holds the capture's reentrant lock already,
-        # so nothing else can be running: this is recursion, and the message
-        # says so rather than talking about concurrent entries. close() is
-        # idempotent, and a closed capture refuses to run at all.
+    def test_precompile_save_call_state(self):
+        # A call whose fn raises propagates that error and leaves the capture
+        # open and usable: the next good call runs and returns, and calls()
+        # counts only the calls that folded in. A call made from inside fn holds
+        # the capture's reentrant lock already, so nothing else can be running:
+        # this is recursion, and the message says so rather than talking about
+        # concurrent entries.
         model = _PrecompileAccumModel()
         x = torch.randn(3, 8)
         _PRECOMPILE_ACCUM_RAN.clear()
         with tempfile.TemporaryDirectory() as d:
-            capture = self._accumulate(
-                _precompile_accum_flaky_step, d, training=True, require_complete=True
-            )
-            capture(model, x, "a")
-            with self.assertRaisesRegex(ValueError, "boom"):
-                capture(model, x, "boom")
-            # The next good call must render and return, not inherit it.
-            self.assertIsNotNone(capture(model, x, "b"))
-            self.assertEqual(_PRECOMPILE_ACCUM_RAN, ["a", "b"])
-            capture.close()
-            capture.close()  # idempotent
-            with self.assertRaisesRegex(PrecompileError, "closed"):
-                capture(model, x, "c")
+            with self._save_capture(
+                _precompile_accum_flaky_step, d, training=True
+            ) as capture:
+                capture(model, x, "a")
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    capture(model, x, "boom")
+                # The next good call must run and return, not inherit it.
+                self.assertIsNotNone(capture(model, x, "b"))
+                self.assertEqual(_PRECOMPILE_ACCUM_RAN, ["a", "b"])
+                self.assertEqual(capture.calls(), 2)
+                capture.save()
 
-            capture = self._accumulate(_precompile_recursive_step, d)
-            _PRECOMPILE_RECURSIVE_CAPTURE.append(capture)
+            cap_ref = self._save_capture(_precompile_recursive_step, d)
+            _PRECOMPILE_RECURSIVE_CAPTURE.append(cap_ref)
             try:
                 with self.assertRaisesRegex(PrecompileError, "re-entered recursively"):
-                    with torch.no_grad():
-                        capture(torch.randn(3))
-                # fn raised, so the capture is still open.
-                self.assertEqual(capture.calls(), 0)
+                    with cap_ref as capture:
+                        with torch.no_grad():
+                            capture(torch.randn(3))
+                # fn raised, so nothing folded in.
+                self.assertEqual(cap_ref.calls(), 0)
             finally:
                 _PRECOMPILE_RECURSIVE_CAPTURE.clear()
-                capture.close()
 
-    def test_precompile_accumulate_refuses_close_from_inside_fn(self):
-        # close() from inside fn used to park retire() on the caller's own
-        # in-flight call forever; it is refused like a recursive call.
+    def test_precompile_refuses_save_from_inside_fn(self):
+        # save() from inside fn would try to snapshot the capture mid-call; it
+        # holds the reentrant lock already, so it is refused like a recursive
+        # call rather than deadlocking or snapshotting a half-run compile.
         with tempfile.TemporaryDirectory() as d:
-            capture = self._accumulate(_precompile_closing_step, d)
-            _PRECOMPILE_CLOSING_CAPTURE.append(capture)
+            cap_ref = self._save_capture(_precompile_saving_step, d)
+            _PRECOMPILE_SAVING_CAPTURE.append(cap_ref)
             try:
                 with self.assertRaisesRegex(PrecompileError, "from inside fn"):
-                    with torch.no_grad():
-                        capture(torch.randn(3))
-                # fn raised, so the capture is still open and closes normally.
-                self.assertEqual(capture.calls(), 0)
+                    with cap_ref as capture:
+                        with torch.no_grad():
+                            capture(torch.randn(3))
+                # fn raised, so nothing folded in.
+                self.assertEqual(cap_ref.calls(), 0)
             finally:
-                _PRECOMPILE_CLOSING_CAPTURE.clear()
-                capture.close()
+                _PRECOMPILE_SAVING_CAPTURE.clear()
 
-    def test_precompile_accumulate_gate_refusal_closes_the_capture(self):
-        # The gate runs AFTER the step: its gradients have moved and its result
-        # exists by the time snapshot_artifact refuses. The refusal is about the
-        # accumulated capture, so every later call would train and raise again;
-        # instead the result rides on the error, the capture closes, and the
-        # next call fails fast without running.
+    def test_precompile_save_gate_refusal_keeps_the_capture_open(self):
+        # save() gates the artifact after the calls have run. A refusal raises
+        # but writes nothing partial: the previous files (here, none yet) stay
+        # as they were and the capture stays open, so relaxing the gate and
+        # saving again works and the run is not lost.
         x = torch.linspace(-1, 1, 4)
         with tempfile.TemporaryDirectory() as d:
-            capture = self._accumulate(
+            artifact_path = os.path.join(d, "m.py")
+            cache_path = os.path.join(d, "m.cache")
+            with self._save_capture(
                 _precompile_multi_graph_callable,
                 d,
                 require_complete=True,
                 require_no_risky_drops=True,
-            )
-            # A local holding a function is a risky identity drop, refused at
-            # the default gates.
-            with (
-                self.assertRaisesRegex(PrecompileError, "can affect dispatch") as ctx,
-                torch.no_grad(),
-            ):
-                capture(x, torch.sin)
-            self.assertEqual(ctx.exception.result, torch.sin(x + 1))
-            self.assertEqual(capture.calls(), 1)
-            with self.assertRaisesRegex(PrecompileError, "closed"), torch.no_grad():
-                capture(x, torch.cos)
-            # Nothing passed a gate, so nothing was written.
-            self.assertEqual(os.listdir(d), [])
-            capture.close()  # already closed by the refusal: a no-op
+            ) as capture:
+                with torch.no_grad():
+                    self.assertEqual(capture(x, torch.sin), torch.sin(x + 1))
+                    # A local holding a function is a risky identity drop,
+                    # refused at the default gates.
+                    with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+                        capture.save()
+                    # Nothing passed the gate, so nothing was written.
+                    self.assertEqual(os.listdir(d), [])
+                    self.assertEqual(capture.calls(), 1)
+                    # The capture is still open; relaxing the gate saves it.
+                    capture._require_no_risky_drops = False
+                    capture.save()
+                    self.assertEqual(sorted(os.listdir(d)), ["m.cache", "m.py"])
+            torch._dynamo.reset()
+            loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x, torch.sin), torch.sin(x + 1))
 
-    def test_precompile_accumulate_serializes_concurrent_calls(self):
-        # Two threads calling one capture: each call runs, renders and rewrites
-        # under the capture's lock, so neither sees the other mid-render; the
-        # matched-pair atomicity of the rewrite itself is _write_artifact's.
+    def test_precompile_save_serializes_concurrent_calls(self):
+        # Two threads calling one capture: each call runs under the capture's
+        # lock, so neither sees the other mid-call, and a save() cannot snapshot
+        # while a call is in flight.
         model = _PrecompileAccumModel()
         eager = _PrecompileAccumModel()
         eager.load_state_dict(model.state_dict())
@@ -6798,7 +6835,7 @@ class TestPrecompile(TestCase):
         with tempfile.TemporaryDirectory() as d:
             artifact_path = os.path.join(d, "m.py")
             cache_path = os.path.join(d, "m.cache")
-            with self._accumulate(_precompile_accum_forward, d) as capture:
+            with self._save_capture(_precompile_accum_forward, d) as capture:
                 threads = [
                     threading.Thread(target=run, args=(capture, mode)) for mode in xs
                 ]
@@ -6824,10 +6861,6 @@ class TestPrecompile(TestCase):
         # this module's __all__ to), so pickle resolves them there.
         Capture = torch.compiler.precompile.Capture
         self.assertEqual(Capture.__module__, "torch.compiler.precompile")
-        self.assertEqual(
-            torch.compiler.precompile.AccumulatingCapture.__module__,
-            "torch.compiler.precompile",
-        )
         error = pickle.loads(pickle.dumps(torch.compiler.PrecompileError("boom")))
         self.assertIsInstance(error, torch.compiler.PrecompileError)
         self.assertEqual(str(error), "boom")
@@ -6848,9 +6881,9 @@ class TestPrecompile(TestCase):
         # Half an artifact can never be loaded: the cache carries a sha256 of
         # exactly the python_code it was emitted with. One file for both halves
         # is refused too: the second rename overwrote the source with cache
-        # bytes and load died on a raw UnicodeDecodeError. capture() and
-        # accumulate() refuse a lone or aliased path at construction, before fn
-        # ever runs -- the on-disk pair is all-or-nothing.
+        # bytes and load died on a raw UnicodeDecodeError. capture() refuses a
+        # lone or aliased path at construction, before fn ever runs -- the
+        # on-disk pair is all-or-nothing.
         ran = []
 
         def entry(model, t):
@@ -6865,7 +6898,6 @@ class TestPrecompile(TestCase):
             same = "same file for artifact_path"
             builders = [
                 lambda **kw: precompile.capture(entry, backend="eager", **kw),
-                lambda **kw: precompile.accumulate(entry, backend="eager", **kw),
             ]
             for build in builders:
                 cases = [
