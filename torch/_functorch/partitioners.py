@@ -1881,6 +1881,13 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, torch.device):
+            # A device is metadata, not data: it holds no activation memory. Nodes
+            # carrying one show up as operands to factory ops (e.g. the
+            # current_device() node compile-on-one-rank substitutes for a baked
+            # device), and the partitioner sizes a node's fx.Node args, so this is
+            # reached during a normal partition.
+            return 0
         elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
             # A (Fake)ScriptObject may hold tensors internally, so we cannot
             # soundly compute its size here. Only treat it as zero size when the
@@ -2580,6 +2587,16 @@ def solve_min_cut(
         if config.recompute_views and op_types.is_view(node):
             return None
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return None
+        if isinstance(node.meta.get("val"), torch.device):
+            # A device-valued node (e.g. the coor::current_device() node
+            # compile_on_one_rank substitutes for a baked device) has no tensor to
+            # save, so get_node_weight would give it infinite weight as a non-tensor
+            # output and the allowlist check below would ban it as unrecomputable --
+            # leaving min-cut unable to place it at all once a backward op needs it.
+            # Recomputing is both free and correct: the op only reads the current
+            # accelerator, and doing so on the backward side is what makes the graph
+            # follow each rank's own device.
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
