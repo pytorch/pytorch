@@ -1481,7 +1481,9 @@ calc_i0(T _x) {
     return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
   auto [B, len] = chebyshev_coefficients_i0e_B<T>();
-  return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
+  T i0e_val = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
+  T half_exp = std::exp(x / T{2.0});
+  return (half_exp * i0e_val) * half_exp;
 }
 
 // Upcast bfloat16/half input to float for numerical accuracy purposes
