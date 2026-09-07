@@ -1632,7 +1632,11 @@ Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
 // for ops like sum, max, and min.
 // --------------------------------------------------------------------
 Tensor _sparse_sum(const SparseTensor& input) {
-  return input.coalesce().values().sum();
+  // Pass the input's own dtype explicitly: the no-dtype-arg overload of
+  // Tensor::sum() promotes sub-int64 integral types to int64, but
+  // torch.sparse.sum()'s documented default output dtype is the dtype of
+  // the input (see gh-65392).
+  return input.coalesce().values().sum(input.scalar_type());
 }
 
 Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
@@ -1641,11 +1645,13 @@ Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
   return input.coalesce().values().sum(dtype);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
-  return at::_sparse_sum(input.to(dtype), dims_to_sum);
-}
-
-Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
+static Tensor _sparse_sum_dim_impl(const SparseTensor& input, IntArrayRef dims_to_sum, std::optional<ScalarType> dtype_opt) {
+  // out_dtype is threaded through every values().sum() call below instead
+  // of relying on their default int64 promotion, so the result dtype is
+  // always exactly the requested (or input's) dtype -- see gh-65392, where
+  // reducing over all sparse dims silently promoted to int64 and an
+  // explicit dtype= was ignored once dims_to_sum was also given.
+  const ScalarType out_dtype = dtype_opt.value_or(input.scalar_type());
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
@@ -1673,15 +1679,15 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   // new values
   Tensor new_values;
   if (sum_dense_dim) {
-    new_values = values.sum(dense_dims_to_sum_v);
+    new_values = values.sum(dense_dims_to_sum_v, /*keepdim=*/false, out_dtype);
   }
   else {
-    new_values = values.clone(at::MemoryFormat::Contiguous);
+    new_values = values.to(out_dtype).clone(at::MemoryFormat::Contiguous);
   }
 
   if (sum_all_sparse_dim) {
     // return a dense tensor if sum over all sparse dims
-    new_values = new_values.sum(0);
+    new_values = new_values.sum(0, /*keepdim=*/false, out_dtype);
     return new_values;
   }
   else { // !sum_all_sparse_dim
@@ -1709,11 +1715,19 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
 
     // use coalesce() to do sum reduction
     bool is_coalesced = false;  // TODO: can we use input.is_coalesced()?
-    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options(), is_coalesced);
+    SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options().dtype(out_dtype), is_coalesced);
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
 
+}
+
+Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
+  return _sparse_sum_dim_impl(input, dims_to_sum, dtype);
+}
+
+Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
+  return _sparse_sum_dim_impl(input, dims_to_sum, std::nullopt);
 }
 // --------------------------------------------------------------------
 // NOTE [ sparse.sum() backward ]
