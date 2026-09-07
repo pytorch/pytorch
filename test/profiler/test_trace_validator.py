@@ -558,7 +558,7 @@ class TestTraceValidatorRules(TestCase):
 # kineto's CPU/GPU timestamp clock-skew issue is fixed.
 @unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
-class TestTraceValidatorE2EAgnostic(_TraceValidatorE2EMixin, TestCase):
+class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     """E2E tests for validation rules that are not tied to any specific accelerator.
 
     Category: Accelerator-AGNOSTIC
@@ -603,7 +603,7 @@ class TestTraceValidatorE2EAgnostic(_TraceValidatorE2EMixin, TestCase):
 
 
 instantiate_device_type_tests(
-    TestTraceValidatorE2EAgnostic, globals(), except_for=("cpu",)
+    TestTraceValidatorE2EAgnosticDevice, globals(), except_for=("cpu",)
 )
 
 
