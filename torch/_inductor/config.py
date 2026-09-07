@@ -773,6 +773,8 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+# Search every tile the vendored FlyDSL kernels implement instead of taking
+# the kernel's own analytic pick.
 flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # DEPRECATED. This setting is ignored.

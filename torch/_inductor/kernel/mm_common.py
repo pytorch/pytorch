@@ -224,6 +224,24 @@ def _use_small_mm_pointwise(
     return skt(m >= 64) and skt(k < 5) and skt(n < 5)
 
 
+def _fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    """Whether a 2-D span addresses within one AMD buffer descriptor.
+
+    Descriptor fields are signed int32, but the AMD buffer voffset is an
+    unsigned 32-bit byte offset, so the span itself has to stay under 4 GiB.
+    """
+    int32_max = (1 << 31) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
+    )
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.

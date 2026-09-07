@@ -24,8 +24,20 @@ def run_cached_flydsl(
     constexpr_param: Any,
     compiler: Callable[..., Any],
     dispatch_args: tuple[Any, ...],
+    compile_args_factory: Callable[[], tuple[Any, ...]] | None = None,
 ) -> Any:
-    """Cache a layout-dynamic FlyDSL dispatcher by constexpr param."""
+    """Cache a layout-dynamic FlyDSL dispatcher by constexpr param.
+
+    `compile_args` are only read on the compile path -- a cache hit dispatches
+    straight through `dispatch_args`. Building them eagerly therefore wastes
+    work on every call after the first for a given param: the FlyDSL argument
+    descriptors (`from_torch_tensor(...).mark_layout_dynamic()`) are
+    constructed and immediately discarded. Callers that can defer the work
+    should pass `compile_args_factory` instead, a zero-argument callable
+    invoked only when a compile is actually needed.
+    """
+    if compile_args_factory is not None and compile_args:
+        raise TypeError("pass compile_args or compile_args_factory, not both")
     device = getattr(dispatch_args[0], "device", None)
     cache_key = (
         os.getpid(),
@@ -49,7 +61,12 @@ def run_cached_flydsl(
         compiled = compiled_cache.get(cache_key)
         if compiled is None:
             # compile() executes this invocation; dispatching again would double-run.
-            compiled = compiler(jit_func, *compile_args)
+            args = (
+                compile_args_factory()
+                if compile_args_factory is not None
+                else compile_args
+            )
+            compiled = compiler(jit_func, *args)
             compiled_cache[cache_key] = compiled
         else:
             dispatch_after_wait = True
