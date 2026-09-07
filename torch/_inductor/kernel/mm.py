@@ -65,6 +65,7 @@ from ..utils import (
     use_triton_tma_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
     load_kernel_template,
@@ -137,10 +138,10 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
-    name="blackwell_ws_persistent_device_tma",
+blackwell_ws_persistent_tma_mm_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
 
@@ -216,21 +217,6 @@ def check_supported_striding(mat_a, mat_b) -> None:
     torch._check(
         is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
         lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
-    )
-
-
-def _fits_int32_buffer_span(
-    rows: int, row_stride: int | None, cols: int, itemsize: int
-) -> bool:
-    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
-    # 32-bit byte offset.
-    int32_max = (1 << 31) - 1
-    return (
-        0 < rows <= int32_max
-        and 0 < cols <= int32_max
-        and row_stride is not None
-        and 0 <= row_stride <= int32_max
-        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
     )
 
 
@@ -601,7 +587,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
-                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
             elif use_triton_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
@@ -897,7 +883,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_triton_blackwell_tma_template(
             mat1, mat2, output_layout=layout, add_guards=True
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             if torch.version.hip is None:
                 templates_to_use.append(persistent_tma_mm_template)
@@ -1293,10 +1279,8 @@ def tuned_scaled_mm_v2(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
@@ -1470,10 +1454,8 @@ def tuned_scaled_mm(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types

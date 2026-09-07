@@ -468,6 +468,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
 
+    def aten_device_type(self) -> str:
+        return "at::kCUDA"
+
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
     ) -> tuple[list[str], str] | None:

@@ -1,13 +1,13 @@
-"""Generate ``torch/profiler/_cupti/_cupti_stubs.py`` from the CUPTI ABI.
+"""Generate ``torch/profiler/_cuspy/_cupti_stubs.py`` from the CUPTI ABI.
 
 The v2 / user-defined-record CUPTI path selects activity records by *field id*
 (``CUpti_Activity*FieldIds``) and is configured via *attribute* selectors
-(``CUpti_ActivityAttribute``). cupti-python exposes neither enum, so the monitor
+(``CUpti_ActivityAttribute``). cupti-python exposes neither enum, so Cuspy
 previously hard-coded the integer ids/attrs by hand. This script parses them straight
 out of ``cupti_activity.h`` (shipped by the ``nvidia-cuda-cupti`` build dependency) and
 emits a Python module of the same constants -- the per-kind ``Field`` catalogs plus
 ``ActivityAttr`` -- so they can never drift from the header. ``records.py`` curates
-*which* fields the monitor selects; this module is only the ABI source of truth.
+*which* fields Cuspy selects; this module is only the ABI source of truth.
 
 Parsing uses libclang (the ``clang`` python bindings) so the C frontend -- not a
 fragile regex -- computes every enumerator value. The ``libclang`` wheel (a build
@@ -18,7 +18,7 @@ of the C type.
 
 Run standalone for debugging:
 
-    python tools/gen_cupti_stubs.py --output torch/profiler/_cupti/_cupti_stubs.py
+    python tools/gen_cupti_stubs.py --output torch/profiler/_cuspy/_cupti_stubs.py
 """
 
 from __future__ import annotations
@@ -192,11 +192,11 @@ def render(
         "",
         "One class per activity kind: each attribute is a :class:`Field` (its",
         "``CUpti_Activity*FieldIds`` id plus its :class:`Ctype` for decode); ``records``",
-        "curates which of these the monitor selects per kind. ``ActivityAttr`` holds the",
+        "curates which of these Cuspy selects per kind. ``ActivityAttr`` holds the",
         "``CUpti_ActivityAttribute`` selectors (cuptiActivitySetAttribute_v2).",
         '"""',
         "",
-        "from torch.profiler._cupti._records_base import Ctype, Field",
+        "from torch.profiler._cuspy._records_base import Ctype, Field",
         "",
         "",
     ]
@@ -247,7 +247,7 @@ def main() -> None:
     print(f"Generated {args.output} from {header}")
     # Machine-readable (own stdout line) so the build can track the resolved header as a
     # configure dependency and regenerate when it changes.
-    print(f"CUPTI_MONITOR_STUBS_HEADER={header}")
+    print(f"CUSPY_STUBS_HEADER={header}")
 
 
 if __name__ == "__main__":

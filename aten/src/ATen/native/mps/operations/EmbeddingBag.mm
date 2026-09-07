@@ -198,6 +198,10 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("_embedding_bag_dense_backward_mps");
+
   int64_t feature_size = output_grad.size(1);
   auto weight_grad = at::zeros({num_weights, feature_size}, output_grad.options());
   EmbeddingBagBackwardParams<uint32_t> params;
@@ -258,6 +262,11 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                       int64_t mode,
                                                       int64_t padding_idx) {
   TORCH_INTERNAL_ASSERT(static_cast<EmbeddingBagMode>(mode) == EmbeddingBagMode::SUM);
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("_embedding_bag_per_sample_weights_backward_mps");
+
   int64_t num_indices = indices.size(0);
   int64_t feature_size = output_grad.size(1);
   auto per_sample_weights_grad = at::zeros({num_indices}, output_grad.options());
