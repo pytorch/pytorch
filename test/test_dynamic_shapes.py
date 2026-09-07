@@ -5610,7 +5610,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             return torch.narrow(x, 0, start, end)
 
         x = torch.tensor(
-            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
+            [False],
+            device=f"{torch.accelerator.current_accelerator().type}:0"
+            if torch.accelerator.is_available()
+            else "cpu",
         )
         start = torch.tensor(0)
         res = f(x, start, 0)
