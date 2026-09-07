@@ -1239,7 +1239,8 @@ def _run_mxfp_tile(
     import flydsl.compiler as flyc
 
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-        make_mxfp_scaled_mm_gfx950,
+        gemm_mxfp_gfx950,
+        make_mxfp_param_and_validate,
     )
 
     m, n, k = shape
@@ -1250,30 +1251,34 @@ def _run_mxfp_tile(
     b_u8 = b.view(torch.uint8)
     scale_a_u8 = scale_a.view(torch.uint8)
     scale_b_u8 = scale_b.view(torch.uint8)
-    launcher = make_mxfp_scaled_mm_gfx950(
-        mxfp_format=mxfp_format,
-        m=m,
-        n=n,
-        k=k,
-        out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
-        block_m=block_m,
-        block_n=block_n,
-        block_k=block_k,
-        stages=stages,
-        m_waves=m_waves,
-        n_waves=n_waves,
-        group_m=group_m,
-        lds_scale=lds_scale,
+    param = make_mxfp_param_and_validate(
+        mxfp_format,
+        m,
+        n,
+        k,
+        "bfloat16" if out_dtype == torch.bfloat16 else "float16",
+        {
+            "TILE_M": block_m,
+            "TILE_N": block_n,
+            "TILE_K": block_k,
+            "STAGES": stages,
+            "M_WAVES": m_waves,
+            "N_WAVES": n_waves,
+            "GROUP_M": group_m,
+            "LDS_SCALE": lds_scale,
+        },
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
     )
-    runtime_args = (a_u8, b_u8, scale_a_u8, scale_b_u8, out, 0)
+    assert param is not None
+    runtime_args = (out, a_u8, b_u8, scale_a_u8, scale_b_u8, param, 0)
     compiled = flyc.compile(
-        launcher,
+        gemm_mxfp_gfx950,
         *[
             flyc.from_torch_tensor(t).mark_layout_dynamic()
-            for t in (a_u8, b_u8, scale_a_u8, scale_b_u8, out)
+            for t in (out, a_u8, b_u8, scale_a_u8, scale_b_u8)
         ],
+        param,
         0,
     )
     compiled(*runtime_args)
@@ -1378,55 +1383,6 @@ class TestFlyDSLMXFPMetadata(TestCase):
         self.assertEqual(mxfp8.a_stage_bytes, 64 * 256)
         self.assertEqual(mxfp4.k_halves, mxfp8.k_halves)
         self.assertTrue(mxfp8_lds_scale.lds_scale)
-
-    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
-    def test_cache_signature_includes_lds_scale(self):
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            MXFPGemmParams,
-        )
-
-        global_scale = MXFPGemmParams(
-            mxfp_format="mxfp4",
-            m=256,
-            n=256,
-            k=512,
-            out_dtype="bfloat16",
-            lds_scale=0,
-        )
-        lds_scale = MXFPGemmParams(
-            mxfp_format="mxfp4",
-            m=256,
-            n=256,
-            k=512,
-            out_dtype="bfloat16",
-            lds_scale=1,
-        )
-        mxfp8 = MXFPGemmParams(
-            mxfp_format="mxfp8",
-            m=256,
-            n=256,
-            k=512,
-            out_dtype="bfloat16",
-            lds_scale=0,
-        )
-        transposed_a = MXFPGemmParams(
-            mxfp_format="mxfp4",
-            m=256,
-            n=256,
-            k=512,
-            out_dtype="bfloat16",
-            lds_scale=0,
-            a_is_transposed=True,
-        )
-        self.assertNotEqual(
-            global_scale.__cache_signature__(), lds_scale.__cache_signature__()
-        )
-        self.assertNotEqual(
-            global_scale.__cache_signature__(), mxfp8.__cache_signature__()
-        )
-        self.assertNotEqual(
-            global_scale.__cache_signature__(), transposed_a.__cache_signature__()
-        )
 
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
     def test_unsupported_tile_k_is_rejected(self):
@@ -1661,7 +1617,7 @@ class TestFlyDSLMXFP8Device(_MXFPDeviceTest):
 
         self.assertEqual(actual, reference, rtol=2e-2, atol=5e-1)
         self.assertIn("async_compile.flydsl", code)
-        self.assertIn("make_mxfp_scaled_mm_gfx950", code)
+        self.assertIn("gemm_mxfp_gfx950", code)
         self.assertIn("mat2.transpose(0, 1)", code)
         self.assertIn(
             f"A_IS_TRANSPOSED: fx.Constexpr = {a_is_transposed}", code
@@ -1756,7 +1712,7 @@ class TestFlyDSLMXFP8Device(_MXFPDeviceTest):
                 torch.bfloat16,
             ),  # asymmetric waves
             (
-                (1024, 256, 512),
+                (2048, 2048, 256),
                 (128, 128, 128, 2, 2, 2, 4),
                 torch.bfloat16,
             ),  # GROUP_M swizzle
@@ -1940,7 +1896,7 @@ class TestFlyDSLMXFP4Device(_MXFPDeviceTest):
             compiled = torch.compile(scaled_mm_mxfp4, dynamic=False)
             out, code = run_and_get_code(compiled, a, b_t, scale_a, scale_b, out_dtype)
 
-        self.assertIn("make_mxfp_scaled_mm_gfx950", "\n".join(code))
+        self.assertIn("gemm_mxfp_gfx950", "\n".join(code))
         # The tolerance covers FP32 accumulation-order and output-rounding
         # differences relative to the reference matmul.
         reference = a_ref @ b_ref.t()
@@ -1980,7 +1936,7 @@ class TestFlyDSLMXFP4Device(_MXFPDeviceTest):
             )
 
         generated = "\n".join(code)
-        self.assertIn("make_mxfp_scaled_mm_gfx950", generated)
+        self.assertIn("gemm_mxfp_gfx950", generated)
         self.assertIn(
             f"A_IS_TRANSPOSED: fx.Constexpr = {a_is_transposed}", generated
         )
@@ -2019,7 +1975,7 @@ class TestFlyDSLMXFP4Device(_MXFPDeviceTest):
             _, code = run_and_get_code(
                 torch.compile(tensorwise, dynamic=False), a, b, scale_a, scale_b
             )
-        self.assertNotIn("make_mxfp_scaled_mm_gfx950", "\n".join(code))
+        self.assertNotIn("gemm_mxfp_gfx950", "\n".join(code))
 
 
 instantiate_parametrized_tests(TestFlyDSLMXFPMetadata)

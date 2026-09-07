@@ -3,9 +3,11 @@ import contextlib
 import os
 import threading
 
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    make_mxfp_param_and_validate,
+)
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
-    make_mxfp_scaled_mm_gfx950,
-    MXFPGemmParams,
+    gemm_mxfp_gfx950,
 )
 from torch._inductor.runtime.flydsl_cache import (
     configure_flydsl_cache_dir,
@@ -15,42 +17,8 @@ from torch._inductor.runtime.flydsl_cache import (
 {{gen_defines()}}
 
 
-_mxfp_param = MXFPGemmParams(
-    mxfp_format=MXFP_FORMAT,
-    m=GEMM_M,
-    n=GEMM_N,
-    k=GEMM_K,
-    out_dtype=OUT_DTYPE,
-    block_m=TILE_M,
-    block_n=TILE_N,
-    block_k=TILE_K,
-    stages=STAGES,
-    m_waves=M_WAVES,
-    n_waves=N_WAVES,
-    group_m=GROUP_M,
-    lds_scale=LDS_SCALE,
-    a_is_transposed=A_IS_TRANSPOSED,
-    b_is_transposed=B_IS_TRANSPOSED,
-)
-_mxfp_launcher = make_mxfp_scaled_mm_gfx950(
-    mxfp_format=MXFP_FORMAT,
-    m=GEMM_M,
-    n=GEMM_N,
-    k=GEMM_K,
-    out_dtype=OUT_DTYPE,
-    block_m=TILE_M,
-    block_n=TILE_N,
-    block_k=TILE_K,
-    stages=STAGES,
-    m_waves=M_WAVES,
-    n_waves=N_WAVES,
-    group_m=GROUP_M,
-    lds_scale=LDS_SCALE,
-    a_is_transposed=A_IS_TRANSPOSED,
-    b_is_transposed=B_IS_TRANSPOSED,
-)
-_mxfp_executor = None
-_mxfp_init_lock = threading.Lock()
+_mxfp_param = None
+_mxfp_param_lock = threading.Lock()
 
 
 def _inductor_tensor_arg(tensor):
@@ -83,54 +51,75 @@ def _temporary_env(updates):
     scale_a_u8 = scale_a.view(torch.uint8)
     scale_b_u8 = scale_b.view(torch.uint8)
 
-    global _mxfp_executor
-    executor = _mxfp_executor
-    if executor is not None:
-        executor(mat1_u8, mat2_nk_u8, scale_a_u8, scale_b_u8, output, stream)
-        return output
-
-    with _mxfp_init_lock:
-        executor = _mxfp_executor
-        if executor is None:
-            configure_flydsl_cache_dir()
-            compile_args = (
-                _inductor_tensor_arg(mat1_u8),
-                _inductor_tensor_arg(mat2_nk_u8),
-                _inductor_tensor_arg(scale_a_u8),
-                _inductor_tensor_arg(scale_b_u8),
-                _inductor_tensor_arg(output),
+    global _mxfp_param
+    param = _mxfp_param
+    if param is None:
+        with _mxfp_param_lock:
+            param = _mxfp_param
+            if param is None:
+                param = make_mxfp_param_and_validate(
+                    MXFP_FORMAT,
+                    GEMM_M,
+                    GEMM_N,
+                    GEMM_K,
+                    OUT_DTYPE,
+                    {
+                        "TILE_M": TILE_M,
+                        "TILE_N": TILE_N,
+                        "TILE_K": TILE_K,
+                        "STAGES": STAGES,
+                        "M_WAVES": M_WAVES,
+                        "N_WAVES": N_WAVES,
+                        "GROUP_M": GROUP_M,
+                        "LDS_SCALE": LDS_SCALE,
+                    },
+                    a_is_transposed=A_IS_TRANSPOSED,
+                    b_is_transposed=B_IS_TRANSPOSED,
+                )
+                if param is None:
+                    raise RuntimeError(
+                        f"unsupported FlyDSL MXFP GEMM shape/config: M={GEMM_M}, "
+                        f"N={GEMM_N}, K={GEMM_K}, "
+                        f"tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
+                    )
+                _mxfp_param = param
+    configure_flydsl_cache_dir()
+    compile_args = (
+        _inductor_tensor_arg(output),
+        _inductor_tensor_arg(mat1_u8),
+        _inductor_tensor_arg(mat2_nk_u8),
+        _inductor_tensor_arg(scale_a_u8),
+        _inductor_tensor_arg(scale_b_u8),
+        param,
+        stream,
+    )
+    flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
+    compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if compile_only != flydsl_compile_only:
+        raise RuntimeError(
+            "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
+            "by the FlyDSL precompile path"
+        )
+    if flydsl_compile_only:
+        flyc.compile(gemm_mxfp_gfx950, *compile_args)
+    else:
+        run_cached_flydsl(
+            gemm_mxfp_gfx950,
+            *compile_args,
+            constexpr_param=param,
+            compiler=flyc.compile,
+            dispatch_args=(
+                output,
+                mat1_u8,
+                mat2_nk_u8,
+                scale_a_u8,
+                scale_b_u8,
+                param,
                 stream,
-            )
-            flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
-            compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
-                "1", "true", "yes", "on"
-            )
-            if compile_only != flydsl_compile_only:
-                raise RuntimeError(
-                    "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
-                    "by the FlyDSL precompile path"
-                )
-            if flydsl_compile_only:
-                flyc.compile(_mxfp_launcher, *compile_args)
-            else:
-                executor = run_cached_flydsl(
-                    _mxfp_launcher,
-                    *compile_args,
-                    constexpr_param=_mxfp_param,
-                    compiler=flyc.compile,
-                    dispatch_args=(
-                        mat1_u8,
-                        mat2_nk_u8,
-                        scale_a_u8,
-                        scale_b_u8,
-                        output,
-                        stream,
-                    ),
-                )
-                _mxfp_executor = executor
-            return output
-
-    executor(mat1_u8, mat2_nk_u8, scale_a_u8, scale_b_u8, output, stream)
+            ),
+        )
     return output
 
 
@@ -168,19 +157,14 @@ def {{kernel_name}}_precompile(
             scale_b = _fake_proxy("scale_b")
             output = _fake_proxy("output")
 
-            try:
-                {{kernel_name}}_main(
-                    mat1,
-                    mat2,
-                    scale_a,
-                    scale_b,
-                    output,
-                    stream=0,
-                )
-            finally:
-                global _mxfp_executor
-                with _mxfp_init_lock:
-                    _mxfp_executor = None
+            {{kernel_name}}_main(
+                mat1,
+                mat2,
+                scale_a,
+                scale_b,
+                output,
+                stream=0,
+            )
 {% else %}
 import os
 import threading

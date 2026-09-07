@@ -49,11 +49,20 @@ class GemmGfx950Param:
 
 
 @dataclass(slots=True, kw_only=True, eq=False)
-class GemmABLoadContext:
+class AsyncLoadContext:
     wave_offset: Any
     tid: Any
-    k: Any
-    param: GemmGfx950Param
+    inner_bound: Any
+    block_threads: Any
+    async_load_bytes: Any
+    in_data_bytes: Any
+    ldg_x_threads: Any
+    block_k: Any
+    has_k_tail: Any
+
+
+@dataclass(slots=True, kw_only=True, eq=False)
+class GemmABLoadContext(AsyncLoadContext):
     uni_copy_atom: Any
     buffer_copy_atom: Any
     a_s2r_copy_atom: Any
@@ -64,7 +73,7 @@ class GemmABLoadContext:
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class AsyncLoadOperand:
-    context: GemmABLoadContext
+    context: AsyncLoadContext
     rsrc: Any
     lds_layout: Any
     outer_tile_size: Any
@@ -72,6 +81,7 @@ class AsyncLoadOperand:
     leading_stride: Any
     load_iters: Any
     is_k_major: Any
+    has_outer_tail: Any
 
 
 def make_gemm_gfx950_param(
@@ -409,8 +419,13 @@ def make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param: GemmGfx950Pa
     return GemmABLoadContext(
         wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
         tid=tid,
-        k=k,
-        param=param,
+        inner_bound=k,
+        block_threads=param.block_threads,
+        async_load_bytes=param.async_load_bytes,
+        in_data_bytes=param.in_data_bytes,
+        ldg_x_threads=param.ldg_x_threads,
+        block_k=param.block_k,
+        has_k_tail=param.has_k_tail,
         uni_copy_atom=uni_copy_atom,
         buffer_copy_atom=buffer_copy_atom,
         a_s2r_copy_atom=a_s2r_copy_atom,
@@ -427,14 +442,13 @@ def async_load_operand(
     k_tile,
 ):
     context = operand.context
-    param = context.param
     tid = context.tid
-    block_threads = param.block_threads
-    async_load_bytes = param.async_load_bytes
-    async_load_vec_size = async_load_bytes // param.in_data_bytes
-    ldg_x_threads = param.ldg_x_threads
-    block_k = param.block_k
-    k = context.k
+    block_threads = context.block_threads
+    async_load_bytes = context.async_load_bytes
+    async_load_vec_size = async_load_bytes // context.in_data_bytes
+    ldg_x_threads = context.ldg_x_threads
+    block_k = context.block_k
+    inner_bound = context.inner_bound
     lds_ptr = make_wave_lds_ptr(lds_base, context.wave_offset)
     for i in range_constexpr(operand.load_iters):
         global_tid = block_threads * i + tid
@@ -458,22 +472,25 @@ def async_load_operand(
                 operand.lds_layout,
                 block_k,
             )
-        if const_expr(param.has_k_tail):
-            safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
+        if const_expr(context.has_k_tail):
+            safe_global_k_idx = (global_k_idx < inner_bound).select(global_k_idx, 0)
         else:
             safe_global_k_idx = global_k_idx
         global_outer_idx = global_outer_offset + outer_local_idx
-        safe_global_outer_idx = (global_outer_idx < operand.outer_bound).select(
-            global_outer_idx, 0
-        )
+        if const_expr(operand.has_outer_tail):
+            safe_global_outer_idx = (global_outer_idx < operand.outer_bound).select(
+                global_outer_idx, 0
+            )
+        else:
+            safe_global_outer_idx = global_outer_idx
         if const_expr(operand.is_k_major):
             global_offset = (
                 safe_global_k_idx * operand.leading_stride + safe_global_outer_idx
-            ) * param.in_data_bytes
+            ) * context.in_data_bytes
         else:
             global_offset = (
                 safe_global_outer_idx * operand.leading_stride + safe_global_k_idx
-            ) * param.in_data_bytes
+            ) * context.in_data_bytes
         buffer_load_lds_inline(operand.rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < operand.load_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
@@ -586,6 +603,7 @@ def gemm_gfx950_kernel(
         leading_stride=a_leading_stride,
         load_iters=ldg_a_iters,
         is_k_major=param.a_is_transposed,
+        has_outer_tail=True,
     )
     b_load_operand = AsyncLoadOperand(
         context=ab_load_context,
@@ -596,6 +614,7 @@ def gemm_gfx950_kernel(
         leading_stride=b_leading_stride,
         load_iters=ldg_b_iters,
         is_k_major=not param.b_is_transposed,
+        has_outer_tail=True,
     )
     c_lds_layout = fx.make_layout((block_m, block_n), (block_n, 1))
 
@@ -832,6 +851,7 @@ def gemm_hti_gfx950_kernel(
         leading_stride=a_leading_stride,
         load_iters=half_ldg_a_iters,
         is_k_major=param.a_is_transposed,
+        has_outer_tail=True,
     )
     b_load_operand = AsyncLoadOperand(
         context=ab_load_context,
@@ -842,6 +862,7 @@ def gemm_hti_gfx950_kernel(
         leading_stride=b_leading_stride,
         load_iters=half_ldg_b_iters,
         is_k_major=not param.b_is_transposed,
+        has_outer_tail=True,
     )
     c_lds_layout = fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
 
