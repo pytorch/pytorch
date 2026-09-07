@@ -779,6 +779,46 @@ class TestConvolutionNN(NNTestCase):
             torch.Size([2, 6, 1, 1]),
         )
 
+    def test_conv_transpose_meta_invalid_output_padding(self):
+        """Meta and eager both raise when output_padding >= stride and >= dilation.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178125
+        """
+        input_t = torch.randn(20, 16, 50)
+        weight_t = torch.randn(16, 33, 5)
+        error_re = "output padding must be smaller than either stride or dilation"
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(input_t, weight_t, stride=2, output_padding=2)
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(
+                input_t.to("meta"), weight_t.to("meta"), stride=2, output_padding=2
+            )
+
+    def test_conv_transpose_meta_invalid_bias_shape(self):
+        """Meta raises when bias size doesn't match out_channels for a grouped transposed conv.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178128
+        """
+        input_t = torch.randn(20, 16, 50, 10, 20)
+        weight_t = torch.randn(16, 33, 3, 3, 3)
+        # groups=2 means expected bias size is weight.shape[1] * groups = 66, not 33
+        wrong_bias = torch.randn(33)
+
+        with self.assertRaises(RuntimeError):
+            F.conv_transpose3d(input_t, weight_t, bias=wrong_bias, groups=2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "expected bias to be 1-dimensional with 66 elements"
+        ):
+            F.conv_transpose3d(
+                input_t.to("meta"),
+                weight_t.to("meta"),
+                bias=wrong_bias.to("meta"),
+                groups=2,
+            )
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = torch.randn(2, 3, 6, 6)
