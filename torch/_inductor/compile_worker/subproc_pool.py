@@ -14,7 +14,7 @@ import time
 import traceback
 import typing
 from collections.abc import Callable
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from enum import Enum, IntEnum
@@ -933,7 +933,7 @@ class SubprocMain:
             watchdog.clear_current_job()
 
 
-AnyPool = ProcessPoolExecutor | SubprocPool
+AnyPool = ProcessPoolExecutor | SubprocPool | ThreadPoolExecutor
 
 
 def _get_process_pool_processes(pool: ProcessPoolExecutor) -> list[Any]:
