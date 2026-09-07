@@ -1822,7 +1822,8 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
     @parametrize(
-        "attr", [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"]
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
     )
     def test_exception_attr_write_survives_escape(self, attr):
         def fn(x):
@@ -1843,13 +1844,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception_attr_write_survives_escape_suppress_context(self):
         def fn(x):
             e = CustomException("x")
-            setattr(e, "__suppress_context__", exception_attr_value("__suppress_context__"))
+            e.__suppress_context__ = exception_attr_value("__suppress_context__")
             return e
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        got = getattr(opt_fn(x), "__suppress_context__")
-        expected = getattr(fn(x), "__suppress_context__")
+        got = opt_fn(x).__suppress_context__
+        expected = fn(x).__suppress_context__
         self.assertEqual(comparable(got), comparable(expected))
 
     @unittest.expectedFailure

@@ -475,16 +475,16 @@ class BaseBuiltinVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
         if isinstance(fn, type) and name not in ("__get__", "__set__", "__delete__"):
-            if isinstance(
-                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
-            ):
+            if isinstance(attr, types.WrapperDescriptorType):
                 owner = resolve_descriptor_owner(tx, attr, self, fn)
-                descriptor_vt_cls = (
-                    variables.WrapperDescriptorVariable
-                    if isinstance(attr, types.WrapperDescriptorType)
-                    else variables.MethodDescriptorVariable
+                return variables.WrapperDescriptorVariable(
+                    attr, owner=owner, source=source
                 )
-                return descriptor_vt_cls(attr, owner=owner, source=source)
+            if isinstance(attr, types.MethodDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, fn)
+                return variables.MethodDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
 
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
@@ -1914,9 +1914,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if isinstance(self.fn, type) and isinstance(
-            inspect.getattr_static(self.fn, name, None),
-            (types.WrapperDescriptorType, types.MethodDescriptorType),
+        if (
+            isinstance(self.fn, type)
+            and args
+            and isinstance(
+                inspect.getattr_static(self.fn, name, None),
+                (types.WrapperDescriptorType, types.MethodDescriptorType),
+            )
         ):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
                 return args[0].call_base_method(tx, name, args[1:], kwargs)
@@ -2836,20 +2840,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         # type-check instead of being blindly forwarded.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
-        if (
-            isinstance(self.fn, type)
-            and name not in ("__get__", "__set__", "__delete__")
-            and isinstance(
-                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
-            )
+        if isinstance(self.fn, type) and name not in (
+            "__get__",
+            "__set__",
+            "__delete__",
         ):
-            owner = resolve_descriptor_owner(tx, attr, self, self.fn)
-            descriptor_vt_cls = (
-                variables.WrapperDescriptorVariable
-                if isinstance(attr, types.WrapperDescriptorType)
-                else variables.MethodDescriptorVariable
-            )
-            return descriptor_vt_cls(attr, owner=owner, source=source)
+            if isinstance(attr, types.WrapperDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, self.fn)
+                return variables.WrapperDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
+            if isinstance(attr, types.MethodDescriptorType):
+                owner = resolve_descriptor_owner(tx, attr, self, self.fn)
+                return variables.MethodDescriptorVariable(
+                    attr, owner=owner, source=source
+                )
 
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source

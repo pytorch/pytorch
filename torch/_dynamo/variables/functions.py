@@ -4416,6 +4416,17 @@ class WrapperDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        # Unlike method_descriptor, wrapper_descriptor defines its own
+        # tp_richcompare (wrapperdescr_richcompare), comparing by the
+        # underlying slot rather than falling back to identity.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L60-L83
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
 
 class MethodWrapperVariable(VariableTracker):
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
@@ -4611,6 +4622,20 @@ class MethodDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
+        # Unlike wrapper_descriptor, method_descriptor does not define its own
+        # tp_richcompare -- it inherits object's identity-based comparison.
+        # python_constant_richcompare_impl still gets this right: it delegates
+        # to the real descriptor's own __eq__/etc, so it's correct whether that
+        # comparison is inherited or overridden. Two accesses of the same
+        # method (e.g. list.append) return the same cached descriptor object,
+        # so identity -- and thus this comparison -- holds.
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
 
 class BoundBuiltinMethodVariable(VariableTracker):

@@ -1249,9 +1249,7 @@ class TestMarkKernels(TestCase):
             ):
                 with mark_kernels("region"):
                     y = x + 1
-                    stream = cuda_runtime.cudaStream_t(
-                        init_value=torch.cuda.current_stream().cuda_stream
-                    )
+                    stream = torch.cuda.current_stream().cuda_stream
                     _s, _i, cap_graph, deps, _e, num = _check_cuda_bindings(
                         cuda_runtime.cudaStreamGetCaptureInfo(stream)
                     )
@@ -1333,16 +1331,52 @@ class TestGetGraphData(TestCase):
             self.assertIn("graph_id", node)
             self.assertIn("node_id", node)
             self.assertIn("kernel_name", node)
+            self.assertIn("grid_dim", node)
+            self.assertIn("block_dim", node)
             self.assertIn("dependencies", node)
             self.assertIn("dependents", node)
             self.assertEqual(node["graph_id"], exec_graph_id)
             self.assertEqual(node["tools_id"], (exec_graph_id << 32) | node["node_id"])
+            if node["node_type"] == "kernel":
+                for dims in (node["grid_dim"], node["block_dim"]):
+                    self.assertIsInstance(dims, tuple)
+                    self.assertEqual(len(dims), 3)
+                    for d in dims:
+                        self.assertIsInstance(d, int)
+                        self.assertGreater(d, 0)
+            else:
+                self.assertIsNone(node["grid_dim"])
+                self.assertIsNone(node["block_dim"])
 
         kernel_nodes = [n for n in data["nodes"] if n["node_type"] == "kernel"]
         self.assertGreater(len(kernel_nodes), 0)
         for kn in kernel_nodes:
             self.assertIsNotNone(kn["kernel_name"])
             self.assertIsInstance(kn["kernel_name"], str)
+
+        self.assertIn("edges", data)
+        n_nodes = len(data["nodes"])
+        for edge in data["edges"]:
+            for key in ("from", "to", "from_port", "to_port", "type"):
+                self.assertIn(key, edge)
+                self.assertIsInstance(edge[key], int)
+            self.assertGreaterEqual(edge["from"], 0)
+            self.assertLess(edge["from"], n_nodes)
+            self.assertGreaterEqual(edge["to"], 0)
+            self.assertLess(edge["to"], n_nodes)
+            # A plain capture only produces ordinary full-serialization edges.
+            self.assertEqual(edge["from_port"], 0)
+            self.assertEqual(edge["to_port"], 0)
+            self.assertEqual(edge["type"], 0)
+        # The edge list and the per-node lists describe the same relation.
+        self.assertEqual(
+            {(e["from"], e["to"]) for e in data["edges"]},
+            {
+                (dep, node["index"])
+                for node in data["nodes"]
+                for dep in node["dependencies"]
+            },
+        )
 
     def test_export_graph_data_hook(self):
         import os
