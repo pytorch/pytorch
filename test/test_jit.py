@@ -6441,6 +6441,26 @@ a")
             # type: (float, int) -> Tuple[float, float]
             return divmod(a, b)
 
+        def func_tensor_tensor(a, b):
+            # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+            return divmod(a, b)
+
+        def func_tensor_int(a, b):
+            # type: (Tensor, int) -> Tuple[Tensor, Tensor]
+            return divmod(a, b)
+
+        def func_tensor_float(a, b):
+            # type: (Tensor, float) -> Tuple[Tensor, Tensor]
+            return divmod(a, b)
+
+        def func_float_tensor(a, b):
+            # type: (float, Tensor) -> Tuple[Tensor, Tensor]
+            return divmod(a, b)
+
+        def func_int_tensor(a, b):
+            # type: (int, Tensor) -> Tuple[Tensor, Tensor]
+            return divmod(a, b)
+
         def divmod_test_iterator(func, num, den):
             for i in num:
                 for j in den:
@@ -6450,10 +6470,16 @@ a")
         den_int = [10, -10]
         num_float = [5.3, -5.3]
         den_float = [2.0, -2.0]
+        tensor = torch.ones((10, 10))
         divmod_test_iterator(func_int, num_int, den_int)
         divmod_test_iterator(func_float, num_float, den_float)
         divmod_test_iterator(func_int_float, num_int, den_float)
         divmod_test_iterator(func_float_int, num_float, den_int)
+        divmod_test_iterator(func_tensor_tensor, (tensor,), (tensor,))
+        divmod_test_iterator(func_tensor_float, (tensor,), num_float)
+        divmod_test_iterator(func_tensor_int, (tensor,), num_int)
+        divmod_test_iterator(func_float_tensor, num_float, (tensor,))
+        divmod_test_iterator(func_int_tensor, num_int, (tensor,))
 
         with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: integer division or modulo by zero"):
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))

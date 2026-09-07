@@ -594,6 +594,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, rounding_mode=None, out=None: -1,
         torch.divide: lambda input, other, rounding_mode=None, out=None: -1,
+        torch.divmod: lambda input, other: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2, out_dtype=None: -1,

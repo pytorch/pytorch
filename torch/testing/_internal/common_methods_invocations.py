@@ -961,6 +961,31 @@ def sample_inputs_exponential(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(rate,))
 
 
+def sample_inputs_divmod(op, device, dtype, requires_grad, **kwargs):
+    make_args = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+    non_zero_make_args = partial(make_args, exclude_zero=True)
+
+    samples = [
+        (make_args(S, S), non_zero_make_args(S, S)),
+        (make_args(S, S), non_zero_make_args(S, 1)),
+        (make_args(S, S), 2),
+        (make_args(), 2),
+    ]
+
+    for s1, s2 in samples:
+        yield SampleInput(
+            s1,
+            args=(s2,),
+            output_process_fn_grad=lambda out: out[1],
+        )
+
+
 def error_inputs_exponential(op, device, **kwargs):
     t = torch.zeros([10], device=device)
     invalid_rate = 0
@@ -13352,6 +13377,16 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
                # RuntimeError: view size is not compatible with input tensor's size and stride
            )),
+    OpInfo(
+        "divmod",
+        ref=np.divmod,
+        supports_out=False,
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        dtypes=all_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_divmod,
+    ),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),
                     supports_forward_ad=True,

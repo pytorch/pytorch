@@ -1964,6 +1964,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.dist",
         "torch.div",
         "torch.divide",
+        "torch.divmod",
         "torch.dot",
         "torch.dropout_",
         "torch.dropout",

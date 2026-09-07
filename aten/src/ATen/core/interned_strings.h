@@ -137,7 +137,6 @@ namespace c10 {
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
-  _(aten, divmod)                    \
   _(prim, zip)                       \
   _(prim, enumerate)                 \
   _(prim, range)                     \

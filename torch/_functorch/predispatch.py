@@ -160,6 +160,7 @@ def lazy_load_decompositions() -> None:
             else:
                 raise RuntimeError(f"could not find decomposition for {decomp}")
 
+        _register_python_decomposition_vmap(torch.ops.aten.divmod.Tensor)
         _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
         _register_python_decomposition_vmap(
             torch.ops.aten.smooth_l1_loss_backward.default
