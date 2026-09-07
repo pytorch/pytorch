@@ -525,8 +525,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """lookup() takes the ExtraState cache lock to snapshot the cache
         entries and drain any pending evictions and invalidations -- brief,
         but it touches Python objects, so the GIL can drop under it -- then
-        releases the lock before evaluating guards. A
-        thread that blocks on that lock while HOLDING the GIL wedges the
+        releases the lock before evaluating guards. A thread that blocks on
+        that lock while HOLDING the GIL wedges the
         owner, who needs the GIL to finish. The lock therefore has to release
         the GIL before it waits. A short switch interval makes the handoff
         frequent.
@@ -638,9 +638,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         entries on its code object. lookup() snapshots precompile_entries
         under the cache lock and raises cache_python_depth, then releases the
         lock and runs their guards -- Python, so the GIL can drop. An
-        installer takes the same lock to append to or splice the list; the
-        raised depth parks any destroy until the readers holding the snapshot
-        finish, so a reader never touches a freed node. The threads are joined
+        installer takes the same lock to append to the list; an owner-scoped
+        reset does not splice under contention -- it parks (on a failed
+        try-lock or the raised depth), so the raised depth keeps any destroy
+        deferred until the readers holding the snapshot finish, and a reader
+        never touches a freed node. The threads are joined
         under a shared deadline and asserted not alive, so a wedge fails this
         test. Stress test; not a deterministic reproduction, and it passes on
         the lock-free parent as well: it guards the locking against
@@ -723,8 +725,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(
             any(t.is_alive() for t in callers + installers), "a call wedged"
         )
-        # A reset that arrived while a lookup held the lock was parked; the
-        # entry reader applies whatever is still parked, and nothing survives.
+        # A reset that raced an in-flight lookup was parked (on the raised
+        # cache_python_depth, or a failed try-lock during the snapshot window);
+        # the entry reader applies whatever is still parked, nothing survives.
         for owner in owners:
             _reset_precompile_entries_for_owner(code, -1, owner)
         self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
@@ -813,9 +816,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     def test_invalidation_racing_an_in_flight_lookup_parks_and_drains(self):
         """invalidate() reached from weakref.finalize must never block behind
-        an in-flight lookup (GC can fire it while another thread is deep in a
-        lock-free backend comparison with cache_python_depth raised; blocking
-        there risks a same-thread reset deadlock). This pins the contended
+        an in-flight lookup (GC can fire it during another thread's guard
+        evaluation while a second ExtraState's cache_mutex is held; two threads
+        doing that against each other's states would deadlock ABBA-style, so
+        invalidate() must never block on cache_mutex). This pins the contended
         path itself: the very call finalize runs, arriving while a lookup is
         mid-comparison at raised depth, must return promptly (parked on
         cache_python_depth > 0 -- the cache lock is free here, so it is the
