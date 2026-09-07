@@ -715,6 +715,16 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_get_lr(self):
+        scheduler = ReduceLROnPlateau(self.opt, factor=0.5, patience=0)
+        with self.assertWarnsRegex(UserWarning, r"please use `get_last_lr\(\)`"):
+            self.assertEqual(scheduler.get_lr(), scheduler.get_last_lr())
+
+        scheduler.step(1.0)
+        scheduler.step(2.0)
+        with self.assertWarnsRegex(UserWarning, r"please use `get_last_lr\(\)`"):
+            self.assertEqual(scheduler.get_lr(), scheduler.get_last_lr())
+
     def test_reduce_lr_on_plateau_preserves_lr_type(self):
         # Ensures that tensor lrs are preserved, preventing recompilations.
         types = [type(group["lr"]) for group in self.opt.param_groups]
@@ -723,6 +733,19 @@ class TestLRScheduler(TestCase):
         scheduler.step(2.0)  # Triggers scheduler._reduce_lr
         for group, type_ in zip(self.opt.param_groups, types):
             self.assertEqual(type(group["lr"]), type_)
+
+    def test_reduce_lr_on_plateau_requires_metrics(self):
+        scheduler = ReduceLROnPlateau(self.opt)
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            scheduler.step()
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            scheduler.step(None)
+
+    def test_reduce_lr_on_plateau_initial_step(self):
+        scheduler = ReduceLROnPlateau(self.opt)
+        self.assertEqual(scheduler.last_epoch, 0)
+        scheduler.step(1.0)
+        self.assertEqual(scheduler.last_epoch, 1)
 
     def test_sequentiallr1(self):
         epochs = 19
@@ -870,6 +893,195 @@ class TestLRScheduler(TestCase):
         targets = [[0.3, 0.4]]
         self._test(scheduler, targets, epochs=2)
         self.opt = old_opt
+
+    def test_sequentiallr_with_reduce_lr_on_plateau(self):
+        """Warm up with a fixed schedule, then hand off to ReduceLROnPlateau."""
+        epochs = 8
+        # The metric never improves after the first epoch it is seen, so with
+        # `patience=0` the plateau scheduler reduces on every epoch but its
+        # first one, which always counts as an improvement over `inf`.
+        metrics = [1.0] * epochs
+        warmup_targets = [0.5, 0.625, 0.75, 0.875]
+        # The step at the milestone only hands over, as it does for any other
+        # scheduler: `ReduceLROnPlateau` applies its epoch 0 lrs, which are the
+        # ones the warmup left behind, and starts watching the metric after it.
+        plateau_targets = [0.875, 0.875, 0.4375, 0.21875]
+        single_targets = warmup_targets + plateau_targets
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.5, total_iters=4),
+            ReduceLROnPlateau(
+                self.opt, mode="min", factor=0.5, patience=0, threshold=0
+            ),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[4])
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[1].get_last_lr())
+
+    def test_sequentiallr_with_reduce_lr_on_plateau_first(self):
+        """ReduceLROnPlateau as the scheduler a SequentialLR starts with."""
+        epochs = 8
+        metrics = [1.0] * epochs
+        # ReduceLROnPlateau leaves the lr alone until it is given a metric, so
+        # there is no initial step to perform for it. At the milestone StepLR
+        # takes over from its own epoch 0, i.e. from `initial_lr` again.
+        plateau_targets = [1.0, 1.0, 0.5]
+        step_targets = [1.0, 1.0, 0.1, 0.1, 0.01]
+        single_targets = plateau_targets + step_targets
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        schedulers = [
+            ReduceLROnPlateau(
+                self.opt, mode="min", factor=0.5, patience=0, threshold=0
+            ),
+            StepLR(self.opt, step_size=2, gamma=0.1),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[3])
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+
+    def test_sequentiallr_with_only_reduce_lr_on_plateau(self):
+        """SequentialLR initializes the optimizer from a plateau scheduler."""
+        epochs = 5
+        metrics = [1.0] * epochs
+        targets = [
+            [0.05, 0.05, 0.05, 0.05, 0.025],
+            [0.5, 0.5, 0.5, 0.5, 0.25],
+        ]
+        schedulers = [
+            ReduceLROnPlateau(
+                self.opt, mode="min", factor=0.5, patience=0, threshold=0
+            ),
+            ReduceLROnPlateau(
+                self.opt, mode="min", factor=0.5, patience=0, threshold=0
+            ),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[2])
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+
+    def test_sequentiallr_forwards_metrics_to_nested_chained_scheduler(self):
+        """A metric reaches a ReduceLROnPlateau nested two containers deep."""
+        epochs = 6
+        metrics = [1.0] * epochs
+        single_targets = [1.0, 1.0, 0.5] + [1.0, 1.0, 0.5]
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        plateau = ReduceLROnPlateau(
+            self.opt, mode="min", factor=0.5, patience=0, threshold=0
+        )
+        schedulers = [
+            ChainedScheduler([plateau], optimizer=self.opt),
+            StepLR(self.opt, step_size=2, gamma=0.5),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[3])
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+
+    def test_chained_scheduler_with_reduce_lr_on_plateau(self):
+        """A chained ReduceLROnPlateau composes with the other schedulers."""
+        epochs = 5
+        metrics = [1.0] * epochs
+        # Both schedulers scale the lr they find on the optimizer: the plateau
+        # scheduler halves it from epoch 1 on, StepLR halves it every 2 epochs.
+        single_targets = [1.0, 1.0, 0.25, 0.125, 0.03125]
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        schedulers = [
+            ReduceLROnPlateau(
+                self.opt, mode="min", factor=0.5, patience=0, threshold=0
+            ),
+            StepLR(self.opt, step_size=2, gamma=0.5),
+        ]
+        scheduler = ChainedScheduler(schedulers, optimizer=self.opt)
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
+    def test_composed_reduce_lr_on_plateau_without_metrics(self):
+        """Stepping a ReduceLROnPlateau without a metric is an error."""
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[
+                LinearLR(self.opt, total_iters=2),
+                ReduceLROnPlateau(self.opt),
+            ],
+            milestones=[2],
+        )
+        # No metric is needed while the plateau scheduler is not the active
+        # one, nor for the step at the milestone, which only hands over to it.
+        for _ in range(2):
+            self.opt.step()
+            scheduler.step()
+        self.opt.step()
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            scheduler.step()
+
+        chained = ChainedScheduler(
+            [ConstantLR(self.opt), ReduceLROnPlateau(self.opt)], optimizer=self.opt
+        )
+        self.opt.step()
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            chained.step()
+
+    def test_sequentiallr_with_reduce_lr_on_plateau_state_dict(self):
+        """Resuming from a checkpoint taken while the plateau stage is active."""
+        base_lr = 0.1
+        milestone = 2
+        total_steps = 8
+        resume_step = 5
+        metrics = [1.0] * total_steps
+
+        def make_scheduler(optim):
+            return SequentialLR(
+                optim,
+                [
+                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
+                    ReduceLROnPlateau(optim, factor=0.5, patience=1, threshold=0),
+                ],
+                milestones=[milestone],
+            )
+
+        model = torch.nn.Linear(1, 1)
+        optim = SGD(model.parameters(), lr=base_lr)
+        sched = make_scheduler(optim)
+
+        reference_lrs = []
+        for step in range(total_steps):
+            optim.step()
+            sched.step(metrics[step])
+            reference_lrs.append(sched.get_last_lr()[0])
+
+        model2 = torch.nn.Linear(1, 1)
+        optim2 = SGD(model2.parameters(), lr=base_lr)
+        sched2 = make_scheduler(optim2)
+        for step in range(resume_step):
+            optim2.step()
+            sched2.step(metrics[step])
+
+        optim_state = optim2.state_dict()
+        sched_state = sched2.state_dict()
+
+        model3 = torch.nn.Linear(1, 1)
+        optim3 = SGD(model3.parameters(), lr=base_lr)
+        # Building the scheduler overwrites the optimizer's lrs, so it has to
+        # come before restoring the optimizer, as `LRScheduler` documents.
+        sched3 = make_scheduler(optim3)
+        optim3.load_state_dict(optim_state)
+        sched3.load_state_dict(sched_state)
+
+        resumed_lrs = []
+        for step in range(resume_step, total_steps):
+            optim3.step()
+            sched3.step(metrics[step])
+            resumed_lrs.append(sched3.get_last_lr()[0])
+
+        self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
@@ -2267,6 +2479,25 @@ class TestLRScheduler(TestCase):
                     rtol=0,
                 )
             [scheduler.step() for scheduler in schedulers]
+
+    def _test_with_metrics(self, scheduler, targets, metrics, epochs=10):
+        """Like `_test`, but for a scheduler whose `step` takes a metric."""
+        for epoch in range(epochs):
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(
+                    target[epoch],
+                    param_group["lr"],
+                    msg=lambda msg: f"{msg}\n"
+                    + (
+                        "LR is wrong in epoch {}: expected {}, got {}".format(
+                            epoch, target[epoch], param_group["lr"]
+                        )
+                    ),
+                    atol=1e-8,
+                    rtol=1e-5,
+                )
+            self.opt.step()
+            scheduler.step(metrics[epoch])
 
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
         for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):

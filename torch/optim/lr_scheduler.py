@@ -1133,12 +1133,6 @@ class SequentialLR(LRScheduler):
                 raise TypeError(
                     f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
                 )
-            if isinstance(scheduler, ReduceLROnPlateau):
-                raise ValueError(
-                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
-                    "requires additional kwargs to be specified when calling `step`, "
-                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
-                )
             if optimizer != scheduler.optimizer:
                 raise ValueError(
                     f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
@@ -1165,10 +1159,13 @@ class SequentialLR(LRScheduler):
         self.recursive_undo()
 
         # Perform the initial step for only the scheduler meant to run at step 0.
+        self._initial_step()
+
+    def _initial_step(self) -> None:
         idx = bisect_right(self._milestones, 0)
         self._schedulers[idx]._initial_step()
 
-        self._last_lr = schedulers[idx].get_last_lr()
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
@@ -1183,15 +1180,25 @@ class SequentialLR(LRScheduler):
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
 
-    def step(self) -> None:  # type: ignore[override]
-        """Perform a step."""
+    def step(self, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
+        """Perform a step.
+
+        Args:
+            metrics (SupportsFloat, optional): The metric to pass on to the
+                currently active scheduler. :class:`ReduceLROnPlateau` makes use of it.
+        """
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
             scheduler._update_lr(0)
         else:
-            scheduler.step()
+            if isinstance(
+                scheduler, (ReduceLROnPlateau, SequentialLR, ChainedScheduler)
+            ):
+                scheduler.step(metrics)
+            else:
+                scheduler.step()
 
         self._last_lr = scheduler.get_last_lr()
 
@@ -1520,12 +1527,6 @@ class ChainedScheduler(LRScheduler):
                 raise TypeError(
                     f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
                 )
-            if isinstance(scheduler, ReduceLROnPlateau):
-                raise ValueError(
-                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
-                    "requires additional kwargs to be specified when calling `step`, "
-                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
-                )
             if optimizer != scheduler.optimizer:
                 raise ValueError(
                     f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
@@ -1536,10 +1537,25 @@ class ChainedScheduler(LRScheduler):
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
-    def step(self) -> None:  # type: ignore[override]
-        """Perform a step."""
+    def _initial_step(self) -> None:
         for scheduler in self._schedulers:
-            scheduler.step()
+            scheduler._initial_step()
+        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
+
+    def step(self, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
+        """Perform a step.
+
+        Args:
+            metrics (SupportsFloat, optional): The metric to pass on to the
+                currently active scheduler. :class:`ReduceLROnPlateau` makes use of it.
+        """
+        for scheduler in self._schedulers:
+            if isinstance(
+                scheduler, (ReduceLROnPlateau, SequentialLR, ChainedScheduler)
+            ):
+                scheduler.step(metrics)
+            else:
+                scheduler.step()
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     @override
@@ -1665,6 +1681,11 @@ class ReduceLROnPlateau(LRScheduler):
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
+        for group in optimizer.param_groups:
+            initial_lr = group["lr"]
+            if isinstance(initial_lr, Tensor):
+                initial_lr = initial_lr.clone()
+            group.setdefault("initial_lr", initial_lr)
 
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
@@ -1680,12 +1701,17 @@ class ReduceLROnPlateau(LRScheduler):
         self.patience = patience
         self.cooldown = cooldown
         self.eps = eps
-        self.last_epoch = 0
+        self.last_epoch = -1
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
         self._init_is_better(
             mode=mode, threshold=threshold, threshold_mode=threshold_mode
         )
         self._reset()
+        self._initial_step()
+
+    def _initial_step(self) -> None:
+        self.last_epoch += 1
+        self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
     def _reset(self) -> None:
         """Reset num_bad_epochs counter and cooldown counter."""
@@ -1693,8 +1719,22 @@ class ReduceLROnPlateau(LRScheduler):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    def step(self, metrics: SupportsFloat, epoch=None) -> None:  # type: ignore[override]
-        """Perform a step."""
+    def step(self, metrics: SupportsFloat | None = None, epoch=None) -> None:  # type: ignore[override]
+        """Perform a step.
+
+        Args:
+            metrics (SupportsFloat): The current value of the quantity being
+                monitored, such as a validation loss. This is actually required.
+        """
+        if metrics is None:
+            raise ValueError(
+                "`ReduceLROnPlateau` requires the metric it monitors to be passed "
+                "to `step`, but got `metrics=None`. Pass the quantity you are "
+                "monitoring, e.g. `scheduler.step(val_loss)`. When this scheduler "
+                "is held by a `SequentialLR` or a `ChainedScheduler`, pass the "
+                "metric to that scheduler's `step` instead and it reaches this one "
+                "from there."
+            )
         # convert `metrics` to float, in case it's a zero-dim Tensor
         current = float(metrics)
         if epoch is None:
@@ -1719,6 +1759,19 @@ class ReduceLROnPlateau(LRScheduler):
             self.num_bad_epochs = 0
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
+
+    def get_lr(self) -> list[float | Tensor]:
+        r""":class:`ReduceLROnPlateau` needs a metric to decide whether to adjust
+        the learning rate, so without a new metric its next learning rate is
+        the current one.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+        """
+        _warn_get_lr_called_within_step(self)
+        return _param_groups_val_list(self.optimizer, "lr")
 
     def _reduce_lr(self, epoch) -> None:
         if len(self.optimizer.param_groups) != len(self.min_lrs):
