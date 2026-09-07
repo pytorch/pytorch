@@ -63,7 +63,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
-
+from torch.testing._internal.common_utils import HardwareClassification
 
 hu.assert_deadline_disabled()
 
@@ -72,6 +72,8 @@ import numpy as np
 
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     def _test_reference_module_impl(
         self,
@@ -334,6 +336,8 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
 
 class TestQuantizeEagerPTQStatic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -1233,6 +1237,8 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
         make sure it is swapped to nnqd.Linear which is the quantized version of
