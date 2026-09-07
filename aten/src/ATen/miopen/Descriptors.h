@@ -157,12 +157,14 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     // miopenMathPedantic keeps strict IEEE fp32. Only meaningful for fp32 input.
     // The math-type knob (miopenMathType_t) first exists in MIOpen >= 3.5.2; on
     // older MIOpen there is no math-type attribute, so TF32 conv is never enabled.
-    // TEMPORARY WORKAROUND: force strict fp32 when deterministic is requested.
-    // MIOpen has no deterministic TF32 backward solver, and enabling TF32 makes
-    // the benchmark (find) path hang inside ConvHipImplicitGemmGroupBwdXdlops
-    // auto-tuning. Drop the !deterministic guard once MIOpen fixes this.
+    // MIOpen < 3.6.1 has no deterministic TF32 backward solver; enabling TF32
+    // there hangs the find path in ConvHipImplicitGemmGroupBwdXdlops auto-tuning.
     if (dataType == miopenFloat) {
+#if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && (MIOPEN_VERSION_MINOR > 6 || (MIOPEN_VERSION_MINOR == 6 && MIOPEN_VERSION_PATCH >= 1)))
+      bool use_tf32 = allow_tf32;
+#else
       bool use_tf32 = allow_tf32 && !deterministic;
+#endif
       MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, use_tf32 ? miopenMathDefault : miopenMathPedantic));
     }
 #else
