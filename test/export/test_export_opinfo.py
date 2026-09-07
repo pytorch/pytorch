@@ -3,6 +3,7 @@
 # flake8: noqa
 
 import itertools
+import os
 import subprocess
 import sys
 import unittest
@@ -14,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     ops,
     skipOps,
+    skipXPUIf,
     xfail,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -21,7 +23,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     TestCase,
 )
@@ -41,7 +42,7 @@ export_failures = {
     xfail("tensor_split"),
 }
 
-# following are failing fake export on cuda device
+# following are failing fake export on gpu device
 fake_export_failures = {
     xfail("histogram"),
     xfail("masked.amax"),
@@ -57,17 +58,38 @@ fake_export_failures = {
     xfail("masked.var"),
 }
 
-# These pass with CUDA enabled but still fail fake CUDA export on CPU-only builds.
+# following are failing fake export with no gpu device available
+fake_export_no_gpu_failures = {
+    xfail("geqrf"),
+    xfail("sparse.sampled_addmm"),
+    xfail("to_sparse"),
+    xfail("__getitem__"),
+    xfail("nn.functional.batch_norm"),
+    xfail("nn.functional.grid_sample"),
+    xfail("nn.functional.instance_norm"),
+    xfail("nn.functional.multi_margin_loss"),
+    xfail("nonzero"),
+}
+
+fake_export_failures_cuda = fake_export_failures.copy()
+fake_export_failures_xpu = fake_export_failures.copy()
+
 if not torch.backends.cuda.is_built():
-    fake_export_failures.add(xfail("geqrf"))
-    fake_export_failures.add(xfail("sparse.sampled_addmm"))
-    fake_export_failures.add(xfail("to_sparse"))
-    fake_export_failures.add(xfail("__getitem__"))
-    fake_export_failures.add(xfail("nn.functional.batch_norm"))
-    fake_export_failures.add(xfail("nn.functional.grid_sample"))
-    fake_export_failures.add(xfail("nn.functional.instance_norm"))
-    fake_export_failures.add(xfail("nn.functional.multi_margin_loss"))
-    fake_export_failures.add(xfail("nonzero"))
+    fake_export_failures_cuda |= fake_export_no_gpu_failures
+
+if not torch.xpu._is_compiled():
+    fake_export_failures_xpu |= fake_export_no_gpu_failures
+    fake_export_failures_xpu |= {
+        # https://github.com/intel/torch-xpu-ops/issues/5256
+        xfail("nn.functional.max_unpool2d"),
+        xfail("nn.functional.max_unpool2d", "grad"),
+        # https://github.com/intel/torch-xpu-ops/issues/5277
+        xfail("nn.functional.scaled_dot_product_attention"),
+    }
+
+if torch.xpu.is_available():
+    # https://github.com/intel/torch-xpu-ops/issues/5283
+    fake_export_failures_xpu -= {xfail("histogram")}
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
@@ -125,10 +147,17 @@ class TestExportOpInfo(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps(export_failures | fake_export_failures)
+    @skipOps(export_failures | fake_export_failures_cuda)
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
-    @parametrize("target_device", ["cuda:0"])
-    def test_fake_export(self, target_device, dtype, op):
+    def test_fake_export_cuda(self, dtype, op):
+        target_device = "cuda:0"
+        _test_export_helper(self, target_device, dtype, op)
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps(export_failures | fake_export_failures_xpu)
+    @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
+    def test_fake_export_xpu(self, dtype, op):
+        target_device = "xpu:0"
         _test_export_helper(self, target_device, dtype, op)
 
 
@@ -152,7 +181,9 @@ def _get_env_by_device(device):
     device_type = torch.device(device).type
     if device_type == "cuda":
         env = {"CUDA_VISIBLE_DEVICES": ""}
-    # elif other device
+    elif device_type == "xpu":
+        env = os.environ.copy()
+        env["ONEAPI_DEVICE_SELECTOR"] = "*:cpu"
     return env
 
 
@@ -163,6 +194,7 @@ class TestExportOnFakeDevice(TestCase):
     # We set device-specific env variable to simulate a CPU machine with gpu build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5157")
     @unittest.skipIf(
         IS_WINDOWS,
         "Subprocess with simulated CPU machine imports op_db which triggers "
@@ -301,7 +333,9 @@ accelerator_calls_behavior_unchanged()
         self.assertEqual(r, "")
 
 
-instantiate_device_type_tests(TestExportOnFakeDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestExportOnFakeDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
