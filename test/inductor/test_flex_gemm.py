@@ -706,6 +706,157 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 if shape_env is not None:
                     self.assertEqual(shape_env.guards, [])
 
+    @parametrize("chunked", (False, True))
+    def test_nested_tensorssa_contraction_reduction_analysis(self, chunked):
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmGroupedMainOutputTransform,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            acc = torch.mm(a, b)
+            if chunked:
+                gate, up = acc.chunk(2, dim=-1)
+            else:
+                pairs = acc.view(4, 64, 2)
+                gate, up = pairs.select(-1, 0), pairs.select(-1, 1)
+            hidden = (torch.sigmoid(gate) * gate) * up
+            grouped = hidden.view(4, -1, 32)
+            scale = grouped.abs().amax(-1, keepdim=True)
+            return (grouped / scale).view(4, 64)
+
+        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 128))
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        local_reduce = analysis.outputs.local_reduce
+        self.assertIsNotNone(local_reduce)
+        self.assertEqual(local_reduce.match.physical_span, 2)
+        self.assertEqual(local_reduce.match.geometry.group, 32)
+        self.assertEqual(
+            analysis.outputs.main_transform,
+            FlexGemmGroupedMainOutputTransform(group=2, chunked=chunked),
+        )
+        output_fact = analysis.local_reduce.tensorssa_facts[analysis.outputs.output]
+        self.assertTrue(output_fact.complete)
+        self.assertTrue(output_fact.reduced)
+
+    def test_nested_tensorssa_nvfp4_storage_analysis(self):
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmGroupedMainOutputTransform,
+        )
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            gate, up = torch.mm(a, b).chunk(2, dim=-1)
+            hidden = torch.nn.functional.silu(gate) * up
+            grouped = hidden.view(4, -1, 16)
+            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            packed = nvfp4_pack(normalized.view(4, -1, 2))
+            return packed, to_blocked(scale.squeeze(-1))
+
+        with FakeTensorMode() as mode:
+            graph_module = make_fx(body, tracing_mode="fake")(
+                mode.from_tensor(torch.randn(4, 8)),
+                mode.from_tensor(torch.randn(8, 128)),
+            )
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        self.assertEqual(
+            analysis.outputs.main_transform,
+            FlexGemmGroupedMainOutputTransform(group=4, chunked=True),
+        )
+        local_reduce = analysis.outputs.local_reduce
+        self.assertIsNotNone(local_reduce)
+        self.assertEqual(local_reduce.match.physical_span, 2)
+        output = analysis.outputs.output_storage
+        self.assertIsNotNone(output)
+        output_fact = analysis.local_reduce.tensorssa_facts[output]
+        self.assertEqual(output_fact.storage_span, 2)
+        self.assertTrue(output_fact.complete)
+
+    @parametrize("case", ("capture", "partial_lane", "unknown_transform"))
+    def test_nested_tensorssa_composition_fails_closed(self, case):
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b, capture):
+            gate, up = torch.mm(a, b).chunk(2, dim=-1)
+            if case == "capture":
+                hidden = (torch.sigmoid(gate) * gate) * up + capture
+            elif case == "partial_lane":
+                hidden = torch.sigmoid(gate) * gate
+            else:
+                hidden = torch.flip(gate, (-1,)) * up
+            grouped = hidden.view(4, -1, 32)
+            scale = grouped.abs().amax(-1, keepdim=True)
+            return (grouped / scale).view(4, 64)
+
+        graph_module = make_fx(body)(
+            torch.randn(4, 8), torch.randn(8, 128), torch.randn(64)
+        )
+        error = (
+            "captured tensors"
+            if case == "capture"
+            else "complete physical lane coverage"
+        )
+        with self.assertRaisesRegex(NotImplementedError, error):
+            analyze_flex_gemm_epilogue(
+                graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+            )
+
+    @parametrize("case", ("storage_reduce", "span4_reduce", "store_only"))
+    def test_nested_tensorssa_reduction_domain_fails_closed(self, case):
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(a, b):
+            acc = torch.mm(a, b)
+            if case == "span4_reduce":
+                lanes = acc.view(4, 64, 4)
+                hidden = sum(lanes.select(-1, index) for index in range(4))
+            else:
+                gate, up = acc.chunk(2, dim=-1)
+                hidden = torch.nn.functional.silu(gate) * up
+            if case == "storage_reduce":
+                slots = hidden.view(4, 32, 2)
+                hidden = slots.select(-1, 0) + slots.select(-1, 1)
+            grouped = hidden.view(4, -1, 32)
+            scale = grouped.abs().amax(-1)
+            if case == "store_only":
+                return acc, scale
+            return (grouped / scale.unsqueeze(-1)).view(4, -1)
+
+        n = 256 if case == "span4_reduce" else 128
+        graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, n))
+        error = (
+            "must feed the main output"
+            if case == "store_only"
+            else "complete physical lane coverage"
+        )
+        with self.assertRaisesRegex(NotImplementedError, error):
+            analyze_flex_gemm_epilogue(
+                graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+            )
+
     def test_rejected_grouped_select_does_not_install_index_guard(self):
         from torch._dynamo.source import ConstantSource
         from torch._inductor.kernel.flex_gemm.epilogue import (
@@ -1571,6 +1722,18 @@ class TestFlexGemmAnalysis(TestCase):
             combine="add",
             prepass=lambda acc: {"local_reduce0": acc},
             prepass_combine="add",
+        )
+        # Physical geometry of a paired feed exceeds the fragment width; only a
+        # fragment-reduced callback (GroupedMainStore min_fragment_n) may feed it.
+        with self.assertRaisesRegex(NotImplementedError, "supports only axis 0"):
+            FlexGemmEpiModLocalReducePlan(
+                FlexGemmLocalReduceGeometry(64, 1), feeds_main=True, combine="add"
+            )
+        FlexGemmEpiModLocalReducePlan(
+            FlexGemmLocalReduceGeometry(64, 1),
+            feeds_main=True,
+            combine="add",
+            fragment_reduced=True,
         )
         FlexGemmEpiModLocalReducePlan(axis0, out=torch.empty(1), combine="max")
 
@@ -8758,6 +8921,403 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             self.assertMxScaleCode(code)
         else:
             self.assertNvfp4ScaleCode(code)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    @parametrize(
+        "case",
+        tuple(
+            (format_name, chunked)
+            for format_name in ("mx", "nvfp4")
+            for chunked in (False, True)
+        ),
+        name_fn=lambda case: "_".join(
+            (case[0], "chunked" if case[1] else "interleaved")
+        ),
+    )
+    def test_mm_nested_tensorssa_quant_scale_matches_gated_codec(self, device, case):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.blockscaled.quantize import (
+            dequant_operand,
+            unpack_scale_blocked_to_2d,
+        )
+        from torch._vendor.quack.epilogue.library import gated_quant_mod
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        format_name, chunked = case
+        m, hidden, k = 129, 160, 128
+        group = 32 if format_name == "mx" else 16
+        scale_fn = mx_e8m0_scale if format_name == "mx" else nvfp4_e4m3_scale
+
+        def activation(gate, up):
+            return F.silu(gate) * up
+
+        def epilogue_fn(acc):
+            if chunked:
+                gate, up = acc.chunk(2, dim=-1)
+            else:
+                pairs = acc.view(m, hidden, 2)
+                gate, up = pairs.select(-1, 0), pairs.select(-1, 1)
+            value = activation(gate.float(), up.float())
+            grouped = value.view(m, -1, group)
+            scale = scale_fn(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            if format_name == "mx":
+                payload = (
+                    normalized.view_as(value)
+                    .clamp(-448.0, 448.0)
+                    .to(torch.float8_e4m3fn)
+                )
+            else:
+                payload = nvfp4_pack(normalized.view(m, -1, 2))
+            return payload, to_blocked(scale.squeeze(-1))
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=128,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=True,
+                cluster_m=1,
+                cluster_n=1,
+                swap_ab=False,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        torch.manual_seed(0)
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16) / k**0.25
+        gate_weight = (
+            torch.randn(hidden, k, device=device, dtype=torch.bfloat16) / k**0.25
+        )
+        up_weight = (
+            torch.randn(hidden, k, device=device, dtype=torch.bfloat16) / k**0.25
+        )
+        weight = (
+            torch.cat((gate_weight, up_weight), dim=0)
+            if chunked
+            else torch.stack((gate_weight, up_weight), dim=1).reshape(2 * hidden, k)
+        )
+        (payload, scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, weight.t()
+        )
+
+        sf_dtype = torch.float8_e8m0fnu if format_name == "mx" else torch.float8_e4m3fn
+        payload_dtype = (
+            torch.float8_e4m3fn if format_name == "mx" else torch.float4_e2m1fn_x2
+        )
+        payload_cols = hidden if format_name == "mx" else hidden // 2
+        oracle_payload = torch.empty(
+            1, m, payload_cols, device=device, dtype=payload_dtype
+        )
+        oracle_scale = torch.empty(
+            1,
+            (m + 127) // 128,
+            (hidden + 4 * group - 1) // (4 * group),
+            32,
+            4,
+            4,
+            device=device,
+            dtype=sf_dtype,
+        )
+        gated_quant_mod("swiglu").gemm(
+            a.unsqueeze(0),
+            weight.unsqueeze(0),
+            None,
+            epi_args={"postact": oracle_payload, "postact_sf": oracle_scale},
+            tile_M=128,
+            tile_N=256,
+            cluster_M=1,
+            cluster_N=1,
+            is_dynamic_persistent=True,
+            concat_layout=("B",) if chunked else None,
+        )
+        self.assertEqual(scale.shape, (oracle_scale.numel(),))
+        self.assertEqual(
+            scale.view(torch.uint8), oracle_scale.flatten().view(torch.uint8)
+        )
+
+        acc = a.float() @ weight.float().t()
+        if chunked:
+            gate, up = acc.chunk(2, dim=-1)
+        else:
+            pairs = acc.view(m, hidden, 2)
+            gate, up = pairs[..., 0], pairs[..., 1]
+        reference = activation(gate, up)
+        dense_scale = unpack_scale_blocked_to_2d(
+            scale.view(oracle_scale.shape), m, (hidden + group - 1) // group
+        )[0].float()
+        self.assertEqual(dense_scale.shape, (m, (hidden + group - 1) // group))
+        repeated_scale = dense_scale.repeat_interleave(group, -1)[:, :hidden]
+        values = payload.float() if format_name == "mx" else dequant_operand(payload)
+        oracle_values = (
+            oracle_payload[0].float()
+            if format_name == "mx"
+            else dequant_operand(oracle_payload[0])
+        )
+        error = (values * repeated_scale - reference).abs()
+        oracle_error = (oracle_values * repeated_scale - reference).abs()
+        half_gap = 16.0 if format_name == "mx" else 1.0
+        bound = repeated_scale * half_gap * 1.05 + 1e-2
+        if format_name == "nvfp4":
+            bound = bound + 6.0 * 2.0**-10
+        self.assertEqual((error <= bound).all(), True)
+        self.assertEqual((oracle_error <= bound).all(), True)
+
+        self.assertEqual(code.count("flex_gemm_runtime("), 1)
+        self.assertIn(
+            f"FlexGemmGroupedMainOutputTransform(group={2 if format_name == 'mx' else 4}",
+            code,
+        )
+        self.assertNotIn(
+            f"empty_strided_cuda(({m}, {hidden}), ({hidden}, 1), torch.bfloat16)",
+            code,
+        )
+        self.assertNotIn(
+            f"empty_strided_cuda(({m}, {2 * hidden}), ({2 * hidden}, 1), torch.bfloat16)",
+            code,
+        )
+        self.assertNotIn("_local_reduce_prepass", code)
+        self.assertNotIn("@triton.jit", code)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    def test_mm_nested_tensorssa_quant_dynamic_m(self, device):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        hidden, k, group = 160, 128, 32
+
+        def epilogue_fn(acc):
+            gate, up = acc.chunk(2, dim=-1)
+            value = F.silu(gate.float()) * up.float()
+            grouped = value.view(value.shape[0], -1, group)
+            scale = inline_asm_elementwise(
+                grouped.abs().amax(-1, keepdim=True) / 448.0,
+                asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+                constraints="=h,r",
+                dtype=torch.float8_e8m0fnu,
+            )
+            payload = (grouped * scale.float().reciprocal()).view_as(value)
+            return (
+                payload.clamp(-448.0, 448.0).to(torch.float8_e4m3fn),
+                to_blocked(scale.squeeze(-1)),
+            )
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=128,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=True,
+                cluster_m=1,
+                cluster_n=1,
+                swap_ab=False,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        torch.manual_seed(0)
+        weight = torch.randn(2 * hidden, k, device=device, dtype=torch.bfloat16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for m in (128, 129):
+            with self.subTest(m=m):
+                a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+                torch._dynamo.mark_dynamic(a, 0, min=1, max=256)
+                if m == 128:
+                    (payload, scale), (code,) = run_and_get_code(
+                        compiled, a, weight.t()
+                    )
+                    self.assertEqual(code.count("flex_gemm_runtime("), 1)
+                else:
+                    payload, scale = compiled(a, weight.t())
+                acc = a.float() @ weight.float().t()
+                gate, up = acc.chunk(2, dim=-1)
+                value = F.silu(gate) * up
+                grouped = value.view(m, -1, group)
+                dense_scale = mx_e8m0_scale(grouped.abs().amax(-1, keepdim=True))
+                expected_scale = to_blocked(dense_scale.squeeze(-1))
+                expected_payload = (
+                    (grouped * dense_scale.float().reciprocal())
+                    .view_as(value)
+                    .clamp(-448.0, 448.0)
+                    .to(torch.float8_e4m3fn)
+                )
+                self.assertEqual(payload.shape, (m, hidden))
+                self.assertEqual(
+                    payload.float(), expected_payload.float(), atol=0.5, rtol=0
+                )
+                self.assertEqual(
+                    scale.view(torch.uint8), expected_scale.view(torch.uint8)
+                )
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    @parametrize(
+        "case",
+        (
+            (
+                {"swap_ab": True},
+                "nested TensorSSA reductions do not support swap_ab=True",
+            ),
+            ({"tile_n": 64}, "no .*GemmConfig.*config_constraints"),
+            ({"tile_n": 160}, "no .*GemmConfig.*config_constraints"),
+        ),
+        name_fn=lambda case: str(case[0]),
+    )
+    def test_mm_nested_tensorssa_quant_rejects_unsafe_config(self, device, case):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+
+        config, error = case
+        m = hidden = k = 128
+
+        def epilogue_fn(acc):
+            gate, up = acc.chunk(2, dim=-1)
+            value = F.silu(gate.float()) * up.float()
+            grouped = value.view(m, -1, 16)
+            scale = nvfp4_e4m3_scale(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            return (
+                nvfp4_pack(normalized.view(m, -1, 2)),
+                to_blocked(scale.squeeze(-1)),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+        weight = torch.randn(2 * hidden, k, device=device, dtype=torch.bfloat16)
+        b = weight.t()
+        with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @unittest.skipIf(SM120OrLater, "SM100 config required")
+    @parametrize("format_name", ("mx", "nvfp4"))
+    def test_mm_nested_tensorssa_quant_feeds_scaled_mm(self, device, format_name):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        m = output = 256
+        hidden = k = 128
+        group = 32 if format_name == "mx" else 16
+        scale_fn = mx_e8m0_scale if format_name == "mx" else nvfp4_e4m3_scale
+        recipe = (
+            F.ScalingType.BlockWise1x32
+            if format_name == "mx"
+            else F.ScalingType.BlockWise1x16
+        )
+
+        def quantize(x):
+            grouped = x.float().view(x.shape[0], -1, group)
+            scale = scale_fn(grouped.abs().amax(-1, keepdim=True))
+            normalized = grouped * scale.float().reciprocal()
+            if format_name == "mx":
+                payload = (
+                    normalized.view_as(x).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
+                )
+            else:
+                payload = nvfp4_pack(normalized.view(x.shape[0], -1, 2))
+            return payload, to_blocked(scale.squeeze(-1))
+
+        def epilogue_fn(acc):
+            gate, up = acc.chunk(2, dim=-1)
+            return quantize(F.silu(gate.float()) * up.float())
+
+        config = dataclasses.asdict(
+            GemmConfig(
+                tile_m=256,
+                tile_n=256,
+                pingpong=False,
+                is_dynamic_persistent=True,
+                cluster_m=2,
+                cluster_n=1,
+                swap_ab=False,
+                device_capacity=10,
+            )
+        )
+
+        def fn(a, b, weight, weight_scale):
+            activation, activation_scale = flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+            return F.scaled_mm(
+                activation,
+                weight.t(),
+                scale_a=activation_scale,
+                scale_recipe_a=recipe,
+                scale_b=weight_scale,
+                scale_recipe_b=recipe,
+                swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        torch.manual_seed(0)
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+        first_weight = (
+            torch.randn(2 * hidden, k, device=device, dtype=torch.bfloat16) / k**0.5
+        )
+        second_weight_hp = (
+            torch.randn(output, hidden, device=device, dtype=torch.bfloat16)
+            / hidden**0.5
+        )
+        second_weight, second_weight_scale = quantize(second_weight_hp)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            first_weight.t(),
+            second_weight,
+            second_weight_scale,
+        )
+        activation, activation_scale = epilogue_fn(a.float() @ first_weight.float().t())
+        expected = F.scaled_mm(
+            activation,
+            second_weight.t(),
+            scale_a=activation_scale,
+            scale_recipe_a=recipe,
+            scale_b=second_weight_scale,
+            scale_recipe_b=recipe,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(code.count("flex_gemm_runtime("), 1)
+        self.assertIn("_scaled_mm", code)
+        self.assertNotIn("@triton.jit", code)
+        self.assertIn("torch.ops.aten._scaled_mm_v2.default(buf1,", code)
+        self.assertNotIn(
+            f"empty_strided_cuda(({m}, {hidden}), ({hidden}, 1), torch.bfloat16)",
+            code,
+        )
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_mx_quant_blocked_output_feeds_scaled_mm(self, device):

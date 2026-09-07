@@ -515,26 +515,31 @@ class GemmSm100(GemmTmaBase):
                 (epi_tile_n // warp_n, warp_n), stride=(1, self.cta_tile_shape_mnk[1] // warp_n)
             )
             self.epi_tile = (self.epi_tile[0], cute.coalesce(epi_tile_n_layout))
-        # Quantized-output SF vectors must be produced within one epi subtile.
-        # Widen the epi tile N when an active BlockScaleFactorStore needs a
-        # larger run (e.g. fp4 D with a small tile may default to epi N below
-        # the SF vector); column-direction vectors run along M and put no
-        # requirement on the epi tile N. The stage computation below
-        # re-budgets smem. Shared scan with GemmSm120._setup_attributes.
+        # Quantized-output SF vectors and contracted narrow stores may require
+        # a wider N run than the default epi subtile. The stage computation
+        # below re-budgets smem after any widening.
         _, sfd_min_n = active_row_sfd_reqs(getattr(self, "_epi_ops", ()), epilogue_args)
-        if sfd_min_n:
-            epi_tile_n = self.epi_tile[1]
+        store_min_n = 0
+        for op in getattr(self, "_epi_ops", ()):
+            if not op.is_tile_store():
+                continue
+            required_n = op.min_epi_tile_n(getattr(epilogue_args, op.name, None))
+            if required_n is not None:
+                store_min_n = max(store_min_n, required_n)
+        min_epi_n = max(sfd_min_n or 0, store_min_n)
+        epi_tile_n = self.epi_tile[1]
+        if cute.size(epi_tile_n) < min_epi_n:
             # Only widen a contiguous N tile (an int or a trivial n:1 layout);
             # the strided non-pow2 fixup layout can't be widened.
             contiguous = not isinstance(epi_tile_n, cute.Layout) or (
                 cute.coalesce(epi_tile_n).stride == 1
             )
-            if (
-                contiguous
-                and cute.size(epi_tile_n) < sfd_min_n
-                and self.cta_tile_shape_mnk[1] % sfd_min_n == 0
-            ):
-                self.epi_tile = (self.epi_tile[0], cute.make_layout(sfd_min_n))
+            if contiguous and self.cta_tile_shape_mnk[1] % min_epi_n == 0:
+                self.epi_tile = (self.epi_tile[0], cute.make_layout(min_epi_n))
+            elif cute.size(epi_tile_n) < store_min_n:
+                if not contiguous or self.cta_tile_shape_mnk[1] % store_min_n:
+                    raise ValueError(f"epilogue N tile cannot satisfy required width {store_min_n}")
+                self.epi_tile = (self.epi_tile[0], cute.make_layout(store_min_n))
 
         # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
         prefetch_A_idx = (

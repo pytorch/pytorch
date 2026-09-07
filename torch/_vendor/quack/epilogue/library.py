@@ -373,6 +373,7 @@ def qknorm_epi(acc, qk, w):
     },
     prepass=_sq_prepass,
     prepass_outs=("qk",),
+    prepass_mode="element",
     mode="acc_pair",
 )
 def qk_rope_epi(acc, cs, qk, w):
@@ -393,6 +394,7 @@ def qk_rope_epi(acc, cs, qk, w):
     },
     prepass=_sq_prepass,
     prepass_outs=("qk",),
+    prepass_mode="element",
     mode="acc_pair",
 )
 def qk_rope_ldg_epi(acc, cs, qk, w):

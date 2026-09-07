@@ -39,7 +39,7 @@ class FlexGemmEpilogueIndexedOutputConfig:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce metadata for output and/or feed-main consumers."""
+    """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
@@ -71,7 +71,7 @@ class FlexGemmEpilogueLocalReduceConfig:
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry,
+            local_reduce.match.physical_geometry,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,

@@ -53,6 +53,32 @@ class FlexGemmStructuralInt:
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmTensorSSAFact:
+    """Track logical values derived from fixed physical accumulator lanes."""
+
+    root: torch.fx.Node
+    physical_span: int
+    chunked: bool
+    lane_offsets: frozenset[int]
+    storage_span: int = 1
+    storage_offsets: frozenset[int] = frozenset((0,))
+    reduced: bool = False
+    external_tensor_inputs: frozenset[torch.fx.Node] = frozenset()
+
+    @property
+    def complete(self) -> bool:
+        """Whether all physical lanes and stored logical slots are represented."""
+        return self.lane_offsets == frozenset(
+            range(self.physical_span)
+        ) and self.storage_offsets == frozenset(range(self.storage_span))
+
+    @property
+    def output_span(self) -> int:
+        """Physical accumulator columns represented by one stored output element."""
+        return self.physical_span * self.storage_span
+
+
+@dataclasses.dataclass(frozen=True)
 class GroupedTensorSSALayout:
     """Describe a grouped M/N TensorSSA view inside the generated epilogue.
 
