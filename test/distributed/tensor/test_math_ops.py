@@ -819,6 +819,32 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(sharded_out.full_tensor(), out)
 
     @with_comms
+    def test_foreach_norm_dtype(self):
+        # _foreach_norm.Scalar's schema is (self, ord, *, dtype): position 2 is dtype, not dim.
+        # The sharding strategy must not read it as a reduction dim.
+        device_mesh = self.build_device_mesh()
+
+        grads = [
+            torch.randn(12, 8, dtype=torch.bfloat16) * scale
+            for scale in (1.0, 1e-2, 3.0)
+        ]
+        sharded_grads = [
+            distribute_tensor(grad, device_mesh, [Shard(0)]) for grad in grads
+        ]
+
+        out = torch._foreach_norm(grads, 2, dtype=torch.float32)
+        sharded_out = torch._foreach_norm(sharded_grads, 2, dtype=torch.float32)
+        for expected, got in zip(out, sharded_out):
+            self.assertEqual(got.dtype, torch.float32)
+            self.assertEqual(got.full_tensor(), expected)
+
+        out_bf16 = torch._foreach_norm(grads, 2)
+        sharded_out_bf16 = torch._foreach_norm(sharded_grads, 2)
+        for expected, got in zip(out_bf16, sharded_out_bf16):
+            self.assertEqual(got.dtype, torch.bfloat16)
+            self.assertEqual(got.full_tensor(), expected)
+
+    @with_comms
     def test_vector_norm_partial(self):
         device_mesh = self.build_device_mesh()
 
