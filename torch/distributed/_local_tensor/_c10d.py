@@ -93,7 +93,7 @@ def _resolve_pg_or_name(
 
 def _prepare_collective_groups(
     process_group_so: ScriptObject | ProcessGroup,
-) -> tuple[list[int], list[int], int]:
+) -> tuple[list[int], list[int]]:
     process_group = (
         ProcessGroup.unbox(process_group_so)
         if isinstance(process_group_so, ScriptObject)
@@ -111,8 +111,10 @@ def _prepare_collective_groups(
 
     global_pg = _get_default_group()
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
+    if offset not in group_offsets:
+        raise AssertionError((ranks, group_offsets, offset))
 
-    return [r - offset for r in ranks], group_offsets, offset
+    return [r - offset for r in ranks], group_offsets
 
 
 # NB: There are two flavors of the collectives: regular and functional. Regular collectives
@@ -127,9 +129,7 @@ def _local_functional_all_gather_into_tensor(
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
 
-    ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
-    )
+    ranks, group_offsets = _prepare_collective_groups(_resolve_pg_or_name(group_name))
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -165,9 +165,7 @@ def _local_functional_reduce_scatter_tensor(
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
-    ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
-    )
+    ranks, group_offsets = _prepare_collective_groups(_resolve_pg_or_name(group_name))
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -212,9 +210,7 @@ def _local_functional_shard_dim_alltoall(
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
-    ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
-    )
+    ranks, group_offsets = _prepare_collective_groups(_resolve_pg_or_name(group_name))
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -261,9 +257,7 @@ def _local_functional_all_to_all_single(
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor
 
-    ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
-    )
+    ranks, group_offsets = _prepare_collective_groups(_resolve_pg_or_name(group_name))
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -326,7 +320,7 @@ def _local_broadcast_(
         raise AssertionError
     tensor = tensors[0]
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -402,7 +396,7 @@ def _local_all_reduce_(
     tensor = tensors[0]
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -443,7 +437,7 @@ def _local_allreduce_coalesced_(
     from . import LocalTensor
 
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -489,7 +483,7 @@ def _local_reduce_scatter_tensor_coalesced_(
     from . import LocalTensor
 
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -539,7 +533,7 @@ def _local_allgather_base_(
     # process_group, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
     from . import LocalTensor
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(output_tensor, LocalTensor):
         raise AssertionError("Output tensor must be a LocalTensor")
@@ -583,7 +577,7 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
     from . import LocalTensor
 
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(output_tensor, LocalTensor):
         raise AssertionError("Output tensor must be a LocalTensor")
@@ -639,7 +633,7 @@ def _local_all_gather_(
     # pyrefly: ignore [bad-assignment]
     output_tensors = output_tensors[0]
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     for i in range(len(output_tensors)):
         if not isinstance(output_tensors[i], LocalTensor):
@@ -676,7 +670,7 @@ def _local_allgather_into_tensor_coalesced_(
     # "-> __torch__.torch.classes.c10d.Work"
     from . import LocalTensor
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     # Each output tensor should be sized to hold all gathered inputs
     # outputs[i] will contain all inputs[i] from all ranks
@@ -759,7 +753,7 @@ def _local_scatter_(
     # pyrefly: ignore [bad-assignment]
     input_tensors = input_tensors[0]
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(output_tensor, LocalTensor):
         raise AssertionError("Output tensor must be a LocalTensor")
@@ -800,7 +794,7 @@ def _local_alltoall_(
 
     from . import LocalTensor
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not (len(input_tensors) == len(output_tensors) == len(ranks)):
         raise AssertionError(
@@ -853,7 +847,7 @@ def _local_alltoall_base_(
 
     from . import LocalTensor
 
-    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+    ranks, group_offsets = _prepare_collective_groups(process_group_so)
 
     if not isinstance(input_tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")

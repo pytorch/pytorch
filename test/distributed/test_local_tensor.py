@@ -998,6 +998,51 @@ class TestLocalTensorWorld12(LocalTensorWorldTest):
             for r, i in zip((8, 11, 9, 10), range(4)):
                 self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
 
+    def test_broadcast_nonzero_offset_group(self):
+        # Caller rank must be in the group; rank 0 cannot create [4,5,6,7].
+        dist.destroy_process_group()
+        dist.init_process_group("fake", rank=4, world_size=self.world_size)
+        sub_pg = dist.new_group(ranks=[4, 5, 6, 7])
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(
+                {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+            )
+            dist.broadcast(lt, src=5, group=sub_pg)
+            for fiber in ((0, 1, 2, 3), (4, 5, 6, 7), (8, 9, 10, 11)):
+                for r in fiber:
+                    self.assertEqual(lt._local_tensors[r].item(), float(fiber[1]))
+
+    def test_scatter_nonzero_offset_group(self):
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", rank=4, world_size=self.world_size)
+        sub_pg = dist.new_group(ranks=[4, 5, 6, 7])
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(4)
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for fiber in ((0, 1, 2, 3), (4, 5, 6, 7), (8, 9, 10, 11)):
+                for i, r in enumerate(fiber):
+                    self.assertEqual(out._local_tensors[r].item(), 100.0 * fiber[1] + i)
+
+    def test_prepare_collective_groups_rejects_misaligned_group(self):
+        from torch.distributed._local_tensor._c10d import _prepare_collective_groups
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", rank=1, world_size=self.world_size)
+        sub_pg = dist.new_group(ranks=[1, 2, 3, 4])
+        with self.assertRaises(AssertionError):
+            _prepare_collective_groups(sub_pg)
+
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
     world_size = 8
