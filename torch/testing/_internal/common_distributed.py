@@ -1995,8 +1995,10 @@ class MultiProcContinuousTest(TestCase):
         # Calling destroy_process_group when workers have exceptions
         # while others are doing collectives will cause a deadlock since
         # it waits for enqueued collectives to finish.
-        # Only call this on a clean exit path
-        if not raised_exception:
+        # Only call this on a clean exit path where a process group was
+        # actually initialized (a skipped/failed init leaves no default group
+        # to destroy).
+        if not raised_exception and c10d.is_initialized():
             c10d.destroy_process_group()
 
     @classmethod
@@ -2130,6 +2132,15 @@ class MultiProcContinuousTest(TestCase):
         # Wait for all workers to exit
         for process in cls.processes:
             process.join()
+
+        # Assert each worker exited cleanly so a teardown-time crash (e.g. a
+        # SIGSEGV raised from an atexit handler after the tests themselves
+        # passed) surfaces as a failure instead of being silently ignored.
+        for i, process in enumerate(cls.processes):
+            if process.exitcode != 0:
+                raise RuntimeError(
+                    f"Worker {i} exited with code {process.exitcode} during teardown"
+                )
 
         # Clear up the rendezvous file
         try:
