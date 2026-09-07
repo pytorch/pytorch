@@ -2044,6 +2044,9 @@ def _compile(
 
         # bypass_package clears output.package when this entry's guards could
         # not be serialized; the local still holds what was passed in.
+        # add_guarded_code/add_inlined_source no-op on a bypassed entry;
+        # update_device_type records a package-global property (the graph's
+        # accelerator), independent of any single entry, so it runs regardless.
         if record and output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
