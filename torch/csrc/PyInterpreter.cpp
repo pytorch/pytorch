@@ -302,8 +302,8 @@ void ConcretePyInterpreterVTable::dispatch(
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto& ivalue = arguments[idx];
+  for (auto& argument : arguments) {
+    const auto& ivalue = argument;
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {

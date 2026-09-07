@@ -80,8 +80,10 @@ inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
 inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_meta(t_list[i]));
+  // Named explicitly: auto would deduce the iterator's proxy type, which
+  // converts to any of to_meta's overloads and makes the call ambiguous.
+  for (const Tensor& t_list_elem : t_list) {
+    outputs.push_back(to_meta(t_list_elem));
   }
   return outputs;
 }
@@ -89,8 +91,8 @@ inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
 inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optional<Tensor>>& t_list) {
   c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_meta(t_list[i]));
+  for (const ::std::optional<Tensor>& t_list_elem : t_list) {
+    outputs.push_back(to_meta(t_list_elem));
   }
   return outputs;
 }

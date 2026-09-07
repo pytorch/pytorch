@@ -86,8 +86,8 @@ inline int64_t get_num_splits(
 
 inline bool have_same_ndims(TensorList tensors) {
   auto ndim = tensors[0].dim();
-  for (const auto tensor_idx : c10::irange(tensors.size())) {
-    if (tensors[tensor_idx].dim() != ndim) {
+  for (const auto& tensor : tensors) {
+    if (tensor.dim() != ndim) {
       return false;
     }
   }
@@ -98,8 +98,8 @@ inline void leading_dimension_matches(TensorList tensors, int64_t dim) {
   auto tensor_zero_size = tensors[0].sizes();
   std::vector<c10::SymInt> leading_dim_sizes(
       tensor_zero_size.begin(), tensor_zero_size.begin() + dim);
-  for (const auto i : c10::irange(tensors.size())) {
-    at::Tensor tensor = tensors[i];
+  for (const auto& tensors_elem : tensors) {
+    at::Tensor tensor = tensors_elem;
     for (const auto j : c10::irange(dim)) {
       TORCH_CHECK(
           tensor.size(j) == leading_dim_sizes[j],
@@ -117,13 +117,14 @@ inline int64_t preprocess_chunk_cat_inputs(
       !tensors.empty(), "_chunk_cat expects a non-empty input tensor list");
   auto expected_dtype = tensors[0].dtype();
   auto expected_device = tensors[0].device();
-  for (const auto i : c10::irange(tensors.size())) {
-    TORCH_CHECK(tensors[i].numel() > 0, "_chunk_cat expects non-empty tensor");
+  for (const auto& tensors_elem : tensors) {
     TORCH_CHECK(
-        tensors[i].dtype() == expected_dtype,
+        tensors_elem.numel() > 0, "_chunk_cat expects non-empty tensor");
+    TORCH_CHECK(
+        tensors_elem.dtype() == expected_dtype,
         "_chunk_cat expects all input tensors with the same dtype");
     TORCH_CHECK(
-        tensors[i].device() == expected_device,
+        tensors_elem.device() == expected_device,
         "_chunk_cat expects all inputs tensors on the same device");
   }
   if (have_same_ndims(tensors)) {
@@ -132,9 +133,9 @@ inline int64_t preprocess_chunk_cat_inputs(
     TORCH_CHECK(
         dim >= 0,
         "_chunk_cat expects non-negative dim when input tensors have different ndims")
-    for (const auto i : c10::irange(tensors.size())) {
+    for (const auto& tensor : tensors) {
       TORCH_CHECK(
-          dim < tensors[i].ndimension(),
+          dim < tensor.ndimension(),
           "_chunk_cat expects dim < ndim for all input tensors");
     }
   }

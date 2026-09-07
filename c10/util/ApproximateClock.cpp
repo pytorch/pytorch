@@ -32,8 +32,8 @@ ApproximateClockToUnixTimeConverter::measurePairs() {
   }
 
   time_pairs out;
-  for (const auto i : c10::irange(out.size())) {
-    out[i] = measurePair();
+  for (auto& out_elem : out) {
+    out_elem = measurePair();
   }
   return out;
 }
