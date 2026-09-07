@@ -625,6 +625,7 @@ def _unlift_graph(
         mutated_outputs,
         pytree.treespec_leaf(),
         None,
+        is_args_kwargs=False,
     )
     # After unlifting, the buffer mutation information is lost. Pass the information
     # so that Inductor can do optimizations correctly.
