@@ -14,7 +14,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -38,10 +39,12 @@ class UnevenShardedModel(torch.nn.Module):
 
 
 class TestTpCheckpoint(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_tp_checkpoint(self):
+    def test_tp_checkpoint(self, device):
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
@@ -88,7 +91,7 @@ class TestTpCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_tp_checkpoint_load_on_meta_device(self):
+    def test_tp_checkpoint_load_on_meta_device(self, device):
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
@@ -146,6 +149,10 @@ class TestTpCheckpoint(DTensorTestBase):
             self.assertEqual(param.to_local(), param_to_load.to_local())
             self.assertEqual(param.to_local(), param_after_load.to_local())
 
+
+instantiate_device_type_tests(
+    TestTpCheckpoint, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
