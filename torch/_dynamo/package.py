@@ -188,13 +188,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # the shared AOT path (AOTCompilePickler) does call it, so there an
         # empty scope surfaces as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
-        try:
-            # A <locals>/exec function can carry __module__ is None (bare
-            # globals with no __name__); import_module(None) raises
-            # AttributeError and import_module("") raises ValueError, neither
-            # of which is the ImportError below, so guard both into the empty scope.
-            f_globals = importlib.import_module(module).__dict__ if module else {}
-        except ImportError:
+        # __module__ need not be an importable string: a decorator can set it to
+        # a non-str (42), a <locals>/exec function can carry None or "" (bare
+        # globals with no __name__), and a relative name (".rel") or a module
+        # whose body raises fails import with something other than ImportError.
+        # None of those should fail the load, so require a non-empty str and
+        # swallow any import failure into the empty scope.
+        if isinstance(module, str) and module:
+            try:
+                f_globals = importlib.import_module(module).__dict__
+            except Exception:
+                f_globals = {}
+        else:
             f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
@@ -231,12 +236,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # rooted there rebakes, so restore what the reducer captured.
         fn.__doc__ = doc
         fn.__annotations__ = annotations
+        # Assign __dict__ before __type_params__: on Python < 3.12 the function
+        # has no __type_params__ slot, so that write lands in __dict__ and a
+        # wholesale __dict__ assignment afterwards would discard it. Assigning
+        # the dict wholesale (rather than copying entries in) also lets the AOT
+        # pickler, which passes obj.__dict__ verbatim, round-trip a helper that
+        # stashed `self.d is self.__dict__` as the same object; the guard pickler
+        # rebuilds a fresh dict, so that identity holds only on the AOT path.
+        fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
-        # Assign the dict wholesale rather than copy entries in: a helper that
-        # stashed `self.d is self.__dict__` round-trips as the same object only
-        # if the reconstructed __dict__ keeps the pickled dict's identity.
-        fn.__dict__ = attributes
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
 
@@ -1020,8 +1029,11 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        # A bypassed entry is never installed, so what it already registered
-        # would only be serialized for nothing.
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
 
@@ -1042,6 +1054,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -1049,6 +1063,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
