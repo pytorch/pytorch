@@ -962,6 +962,9 @@ class ComboKernel(Kernel):
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
+            "has_indirect_access": any(
+                sub_kernel.has_indirect_access for sub_kernel in self.sub_kernels
+            ),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             # Matches triton.py:codegen_kernel(): inference/backward graphs skip

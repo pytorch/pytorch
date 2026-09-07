@@ -3372,6 +3372,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._op_trace_cse_names: dict[str, str] = {}
         self._op_trace_symbol_names: dict[sympy.Symbol, sympy.Symbol] = {}
         self._op_trace_symbol_counts: collections.Counter[str] = collections.Counter()
+        self.has_indirect_access: bool = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3872,6 +3873,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         narrowing was actually applied.
         """
         index = self.prepare_indexing(index)
+        if self.is_indirect_indexing(index):
+            self.has_indirect_access = True
         index_vars = index.free_symbols
         has_rindex = False
 
@@ -7607,6 +7610,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.codegen_prologue(self.body)
         self._prescan_host_tma_materializability()
         self.codegen_body()
+
+        if self.has_indirect_access:
+            self.inductor_meta["has_indirect_access"] = True
 
         tma_fields = (
             "tma_min_block_sizes",

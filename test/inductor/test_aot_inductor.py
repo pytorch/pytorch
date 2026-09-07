@@ -2311,6 +2311,22 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @requires_autotune_at_compile_time
+    def test_empty_indirect_embedding(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(2, 1)
+
+            def forward(self, x):
+                return self.embedding((x[x >= 1] - 1).long())
+
+        inputs = [
+            (torch.zeros(1, dtype=torch.int32, device=self.device),),
+            (torch.ones(1, dtype=torch.int32, device=self.device),),
+        ]
+        self.check_model_with_multiple_inputs(Model(), inputs)
+
     @config.patch({"unbacked_symint_fallback": 12})
     @parametrize("shift_k", [0, 1, 2, 3])
     @parametrize("use_static_size", [True, False])
