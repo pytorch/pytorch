@@ -609,7 +609,7 @@ void LayerNormBackwardKernelImpl(
     Tensor* dbeta) {
   if (at::isReducedFloatingType(X.scalar_type())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-      if (gamma.scalar_type() == at::kFloat) {
+      if (mean.scalar_type() == at::kFloat) {
         LayerNormBackwardKernelImplInternal<scalar_t, float>(
             dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       } else {
