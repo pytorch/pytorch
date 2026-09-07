@@ -14,7 +14,9 @@ from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
+from torch.testing._internal import common_device_type
 from torch.testing._internal.common_device_type import (
+    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyAccelerator,
 )
@@ -25,12 +27,7 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_TRITON,
-    requires_gpu_with_enough_memory,
-    requires_triton,
-)
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
 
 try:
@@ -413,10 +410,8 @@ class TestTritonHeuristics(TestCase):
 
 
 class _TritonDeviceTestCase(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
+    def setUp(self):
+        device = self.get_primary_device()
         if not HAS_TRITON:
             raise unittest.SkipTest(f"triton is required for {device}")
         try:
@@ -429,6 +424,7 @@ class _TritonDeviceTestCase(TestCase):
             device_interface.raise_if_triton_unavailable(device)
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
+        super().setUp()
 
 
 @requires_triton()
@@ -568,12 +564,8 @@ class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    @parametrize("do_pruning", [False, True])
-    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
+class _TritonHeuristicsBackendConfig(_TritonDeviceTestCase):
+    def _test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
         from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
@@ -603,6 +595,22 @@ class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+
+class TestCudaHeuristicsBackendConfig(_TritonHeuristicsBackendConfig):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
+        self._test_prune_configs_over_shared_memory_limit(device, do_pruning)
+
+
+class TestXpuHeuristicsBackendConfig(_TritonHeuristicsBackendConfig):
+    hw_classification = HardwareClassification.XPU
+
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
+        self._test_prune_configs_over_shared_memory_limit(device, do_pruning)
 
 
 @requires_triton()
@@ -679,15 +687,13 @@ class TestCachingAutotunerPrecompileDriverSetup(_TritonDeviceTestCase):
 class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @staticmethod
-    def _get_stream(device):
+    def _get_stream(self, device):
         from torch._dynamo.device_interface import get_interface_for_device
 
         device_interface = get_interface_for_device(torch.device(device).type)
         return device_interface.get_raw_stream(device_interface.current_device())
 
-    @staticmethod
-    def _make_kernel_inputs(device):
+    def _make_kernel_inputs(self, device):
         in_ptr = torch.zeros(16, device=device, dtype=torch.float32)
         out_ptr = torch.zeros(16, device=device, dtype=torch.float32)
         return (in_ptr, out_ptr, 16)
@@ -863,13 +869,18 @@ class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
         self.assertEqual(revived._plugins, [])
 
 
-class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class _ArgumentCloneAndRestore(_TritonDeviceTestCase):
     # Our tensor is large enough. If a unexpected copy happens, the
     # peak memory increase should be larger than tolerance and the test
     # will fail.
     MEM_TOLERANCE = int(256 * 1e6)
+
+    def setUp(self):
+        device = self.get_primary_device()
+        device_module = torch.get_device_module(device)
+        if device_module.get_device_properties(device).total_memory < 1e10:
+            self.skipTest("requires at least 10GB of device memory")
+        super().setUp()
 
     def _create_caching_autotuner(self, device):
         args = _get_cos_kernel_caching_autotuner_args(device)
@@ -924,30 +935,50 @@ class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
-    @onlyAccelerator
-    @requires_gpu_with_enough_memory(1e10)
-    def test_clone_contiguous_args(self, device):
+    def _test_clone_contiguous_args(self, device):
         arg = self._create_tensor(device, pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(device, arg)
 
-    @onlyAccelerator
-    @requires_gpu_with_enough_memory(1e10)
-    def test_clone_non_contiguous_args(self, device):
+    def _test_clone_non_contiguous_args(self, device):
         arg = self._create_tensor(device, pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(device, arg)
 
-    @onlyAccelerator
-    @requires_gpu_with_enough_memory(1e10)
-    def test_clone_args_with_non_zero_offset(self, device):
+    def _test_clone_args_with_non_zero_offset(self, device):
         arg = self._create_tensor(device, pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() > 0)
 
         self._do_test(device, arg)
+
+
+class TestCudaArgumentCloneAndRestore(_ArgumentCloneAndRestore):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_clone_contiguous_args(self, device):
+        self._test_clone_contiguous_args(device)
+
+    def test_clone_non_contiguous_args(self, device):
+        self._test_clone_non_contiguous_args(device)
+
+    def test_clone_args_with_non_zero_offset(self, device):
+        self._test_clone_args_with_non_zero_offset(device)
+
+
+class TestXpuArgumentCloneAndRestore(_ArgumentCloneAndRestore):
+    hw_classification = HardwareClassification.XPU
+
+    def test_clone_contiguous_args(self, device):
+        self._test_clone_contiguous_args(device)
+
+    def test_clone_non_contiguous_args(self, device):
+        self._test_clone_non_contiguous_args(device)
+
+    def test_clone_args_with_non_zero_offset(self, device):
+        self._test_clone_args_with_non_zero_offset(device)
 
 
 @requires_triton()
@@ -1071,8 +1102,7 @@ class TestRecheckAutotuneCache(_TritonDeviceTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @staticmethod
-    def _make_compile_result(cfg):
+    def _make_compile_result(self, cfg):
         """Create a mock StaticTritonCompileResult with the given config."""
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
@@ -1080,8 +1110,7 @@ class TestRecheckAutotuneCache(_TritonDeviceTestCase):
         result.config = cfg
         return result
 
-    @staticmethod
-    def _make_autotuner_with_results(configs, compile_results, device):
+    def _make_autotuner_with_results(self, configs, compile_results, device):
         """
         Create a CachingAutotuner and inject compile_results directly,
         bypassing actual Triton compilation.
@@ -1415,16 +1444,14 @@ class TestDynamicScaleRblockCacheInteraction(_TritonDeviceTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @staticmethod
-    def _make_compile_result(cfg):
+    def _make_compile_result(self, cfg):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
         result = MagicMock(spec=StaticTritonCompileResult)
         result.config = cfg
         return result
 
-    @staticmethod
-    def _make_autotuner_with_results(configs, compile_results, device):
+    def _make_autotuner_with_results(self, configs, compile_results, device):
         args = _get_cos_kernel_caching_autotuner_args(device)
         args["configs"] = configs
         autotuner = CachingAutotuner(**args)
@@ -1825,64 +1852,81 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
-instantiate_device_type_tests(
-    TestTritonHeuristicsRuntime,
-    globals(),
-    except_for=("hpu",),
-    allow_xpu=True,
+def _instantiate_device_tests(test_class, scope, **kwargs):
+    # Device discovery must not enter Dynamo's class fixtures during collection.
+    test_bases = common_device_type.get_desired_device_type_test_bases(**kwargs)
+    for base in test_bases:
+        if base._should_exclude(test_class.__name__):
+            continue
+        if any(
+            name.startswith("test")
+            and not base._should_exclude(test_class.__name__, test_name=name)
+            for name in test_class.__dict__
+        ):
+            base._init_and_get_primary_device()
+    # PrivateUse1 setup can rename the backend after candidates were filtered.
+    with patch.object(
+        common_device_type,
+        "get_desired_device_type_test_bases",
+        return_value=test_bases,
+    ):
+        instantiate_device_type_tests(test_class, scope, **kwargs)
+
+
+class _MTIATestBase(DeviceTypeTestBase):
+    device_type = "mtia"
+
+
+# Keep the legacy MTIA coverage until it has a built-in device test base.
+_test_bases = common_device_type.device_type_test_bases.copy()
+if torch.mtia.is_available() and not any(
+    base.device_type == "mtia" for base in _test_bases
+):
+    _test_bases.append(_MTIATestBase)
+
+with patch.object(common_device_type, "device_type_test_bases", _test_bases):
+    _instantiate_device_tests(
+        TestTritonHeuristicsRuntime, globals(), except_for=("hpu",), allow_xpu=True
+    )
+    _instantiate_device_tests(
+        TestCachingAutotunerPrecompileDriverSetup,
+        globals(),
+        except_for=("hpu",),
+        allow_xpu=True,
+    )
+    _instantiate_device_tests(
+        TestCachingAutotunerPlugin, globals(), except_for=("hpu",), allow_xpu=True
+    )
+    _instantiate_device_tests(
+        TestDumpLaunchTensors, globals(), except_for=("hpu",), allow_xpu=True
+    )
+    _instantiate_device_tests(
+        TestRecheckAutotuneCache, globals(), except_for=("hpu",), allow_xpu=True
+    )
+    _instantiate_device_tests(
+        TestDynamicScaleRblockCacheInteraction,
+        globals(),
+        except_for=("hpu",),
+        allow_xpu=True,
+    )
+    _instantiate_device_tests(
+        TestCheckLauncherCallArgs, globals(), except_for=("hpu",), allow_xpu=True
+    )
+
+_instantiate_device_tests(
+    TestCudaHeuristicsBackendConfig, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(
-    TestTritonHeuristicsBackendConfig,
-    globals(),
-    only_for=(GPU_TYPE,),
-    allow_xpu=True,
+_instantiate_device_tests(
+    TestXpuHeuristicsBackendConfig, globals(), only_for=("xpu",), allow_xpu=True
 )
-instantiate_device_type_tests(
-    TestArgumentCloneAndRestore,
-    globals(),
-    only_for=(GPU_TYPE,),
-    allow_xpu=True,
+_instantiate_device_tests(
+    TestCudaArgumentCloneAndRestore, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(
-    TestTritonHeuristicsROCm,
-    globals(),
-    only_for=("cuda",),
+_instantiate_device_tests(
+    TestXpuArgumentCloneAndRestore, globals(), only_for=("xpu",), allow_xpu=True
 )
-instantiate_device_type_tests(
-    TestCachingAutotunerPrecompileDriverSetup,
-    globals(),
-    except_for=("hpu",),
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestCachingAutotunerPlugin,
-    globals(),
-    except_for=("hpu",),
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestDumpLaunchTensors, globals(), except_for=("hpu",), allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestRecheckAutotuneCache, globals(), except_for=("hpu",), allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestHIPInvalidConfigHandling,
-    globals(),
-    only_for=("cuda",),
-)
-instantiate_device_type_tests(
-    TestDynamicScaleRblockCacheInteraction,
-    globals(),
-    except_for=("hpu",),
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestCheckLauncherCallArgs,
-    globals(),
-    except_for=("hpu",),
-    allow_xpu=True,
-)
+_instantiate_device_tests(TestTritonHeuristicsROCm, globals(), only_for=("cuda",))
+_instantiate_device_tests(TestHIPInvalidConfigHandling, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
