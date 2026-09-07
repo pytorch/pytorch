@@ -123,7 +123,9 @@ class LinearAPoT(WeightedQuantizedModule):
         rows2 = decomposed_weight.shape[0]
         cols2 = decomposed_weight.shape[1]
 
-        result = torch.zeros(rows1, cols2)
+        result = torch.zeros(
+            rows1, cols2, dtype=torch.float32, device=activation.device
+        )
 
         # compute matrix multiplication with bitshifts
         for i in range(rows1):
@@ -138,7 +140,7 @@ class LinearAPoT(WeightedQuantizedModule):
 
         return result
 
-    def forward(self, activation: torch.Tensor) -> torch.FloatTensor:
+    def forward(self, activation: torch.Tensor) -> torch.Tensor:
         r"""
         Multiply APoT quantized weight and uniformly quantized activation (dtype: quint8)
         with bitshifting instead of matrix multiplication.
@@ -160,12 +162,10 @@ class LinearAPoT(WeightedQuantizedModule):
         for row in range(weight_rows):
             for col in range(weight_cols):
                 decomposed_weight[row][col] = self.decompose_APoT(
-                    bin(self.weight_transposed[row][col])
+                    bin(int(self.weight_transposed[row][col]))
                 )
 
-        result = self.matmul(decomposed_weight, activation).type(torch.FloatTensor)
-
-        return result
+        return self.matmul(decomposed_weight, activation)
 
     @classmethod
     def from_reference(  # type: ignore[override]
