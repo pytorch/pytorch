@@ -266,7 +266,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         dist_model, dist_optim = self._create_model(device, compile, model_type)
         _, original_train_state = _train(dist_model, dist_optim, train_steps=2)
 
-        original_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))  # tests arbitrary saving/loading
+        original_stateful_obj = TestStatefulObj(
+            torch.rand(10, 10, device=self.device_type)
+        )  # tests arbitrary saving/loading
         sd = {
             "model": dist_model,
             "optimizer": dist_optim,
@@ -294,9 +296,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 sd,
                 storage_writer=writer,
                 async_checkpointer_type=(
-                    async_checkpointer_type
-                    if async_checkpointer_type
-                    else AsyncCheckpointerType.THREAD
+                    async_checkpointer_type or AsyncCheckpointerType.THREAD
                 ),
                 async_stager=stager,
             )
@@ -318,7 +318,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
 
-        loaded_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))
+        loaded_stateful_obj = TestStatefulObj(
+            torch.rand(10, 10, device=self.device_type)
+        )
         loaded_train_state = TestTrainState()
         dist_model, dist_optim = self._create_model(device, compile, model_type)
 
@@ -345,7 +347,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
-
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -400,12 +401,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save(sd, checkpoint_id=self.temp_dir)
         DCP.load(sd, checkpoint_id=self.temp_dir)
 
-
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
     def test_partial_load(self, device):
-        model, optim = self._create_model(device, compile=False, model_type=ModelType.NONE)
+        model, optim = self._create_model(
+            device, compile=False, model_type=ModelType.NONE
+        )
         _train(model, optim, train_steps=2)
 
         dist_model, dist_optim = self._create_model(
@@ -417,7 +419,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             {"model": dist_model, "optimizer": dist_optim}, checkpoint_id=self.temp_dir
         )
 
-        dist_model, _ = self._create_model(device, compile=False, model_type=ModelType.FSDP)
+        dist_model, _ = self._create_model(
+            device, compile=False, model_type=ModelType.FSDP
+        )
         DCP.load({"model": dist_model}, checkpoint_id=self.temp_dir)
 
         dist_msd = get_model_state_dict(dist_model)
@@ -439,7 +443,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 self._compare_tensor(
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
-
 
 
 class TestNoCPU(DTensorTestBase):
@@ -500,6 +503,7 @@ class TestInitStateDict(DTensorTestBase):
         self.assertEqual(msd, get_model_state_dict(model_2))
         self.assertEqual(osd, get_optimizer_state_dict(model_2, optim_2))
         self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
+
     @with_temp_dir
     def test_stateful_and_non_stateful_loads(self) -> None:
         class StateDict(dict):
@@ -550,6 +554,8 @@ class TestInitStateDict(DTensorTestBase):
         DCP.save({}, checkpoint_id=self.temp_dir)
         DCP.load({}, checkpoint_id=self.temp_dir)
 
+    @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
@@ -571,7 +577,6 @@ class TestInitStateDict(DTensorTestBase):
                 {"random": t2},
                 storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
             )
-
 
 
 instantiate_device_type_tests(
