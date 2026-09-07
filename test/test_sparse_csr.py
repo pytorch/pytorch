@@ -3038,6 +3038,36 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
+    @skipMeta
+    @dtypes(torch.float32, torch.int32, torch.complex64)
+    @parametrize("op", [subtest(torch.sum, name="sum"),
+                        subtest(torch.ops.aten._sparse_csr_prod.dim_dtype, name="prod")])
+    @parametrize("dim", [(0, 1), (1, 0), ()])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_empty_csr_full_reduction(self, device, dtype, op, dim, index_dtype):
+        source = torch.sparse_csr_tensor(
+            torch.zeros(4, dtype=index_dtype, device=device),
+            torch.empty(0, dtype=index_dtype, device=device),
+            torch.empty(0, dtype=dtype, device=device),
+            size=(3, 4), check_invariants=True)
+        result = op(source, dim=dim, keepdim=True)
+
+        self.assertEqual(result.layout, torch.sparse_csr)
+        self.assertEqual(result.shape, (1, 1))
+        self.assertEqual(result._nnz(), 0)
+        self.assertEqual(result.values().shape, (0,))
+        self.assertEqual(result.values().numel(), 0)
+        self.assertEqual(result.dense_dim(), 0)
+        self.assertEqual(result.crow_indices(), torch.zeros(2, dtype=index_dtype, device=device))
+        self.assertEqual(result.col_indices(), source.col_indices())
+        torch._validate_sparse_compressed_tensor_args(
+            result.crow_indices(), result.col_indices(), result.values(), result.shape, result.layout)
+
+        result_dtype = torch.int64 if dtype == torch.int32 else dtype
+        expected = torch.zeros((1, 1), dtype=result_dtype, device=device)
+        self.assertEqual(result.to_dense(), expected)
+        self.assertEqual(result.to_sparse_coo(), expected.to_sparse())
+
     @skipIfTorchDynamo()
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
