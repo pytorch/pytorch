@@ -37,10 +37,9 @@ from torch._inductor.utils import (
 )
 from torch._library import capture_triton
 from torch.testing import FileCheck
-from torch.testing._internal import common_device_type, common_utils
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import (
     Capability,
-    DeviceTypeTestBase,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -7276,44 +7275,30 @@ if HAS_TRITON:
         custom_store(out_ptr + offs, x + y, mask=mask)
 
 
-class _MTIATestBase(DeviceTypeTestBase):
-    device_type = "mtia"
-
-
-# Preserve the legacy MTIA entry until device discovery provides a test base.
-_test_bases = common_device_type.device_type_test_bases
-if torch.mtia.is_available() and not any(
-    base.device_type == "mtia" for base in _test_bases
-):
-    _test_bases = [*_test_bases, _MTIATestBase]
-
-
-with mock.patch.object(common_device_type, "device_type_test_bases", _test_bases):
-    instantiate_device_type_tests(
-        KernelTests,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        KernelTestsCompilation,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        KernelTestsRuntime,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        KernelTestsPrecisionAndConstexpr,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-
+instantiate_device_type_tests(
+    KernelTests,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsCompilation,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsRuntime,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsPrecisionAndConstexpr,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
 instantiate_device_type_tests(
     KernelTestsArgReductionSemantics,
     globals(),
@@ -7340,32 +7325,30 @@ instantiate_device_type_tests(
     only_for=("xpu",),
     allow_xpu=True,
 )
-with mock.patch.object(common_device_type, "device_type_test_bases", _test_bases):
-    instantiate_device_type_tests(
-        CustomOpTests,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        CustomOpTestsRuntime,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        MutationTests,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        MutationTestsTritonLauncher,
-        globals(),
-        except_for=("cpu", "hpu"),
-        allow_xpu=True,
-    )
-
+instantiate_device_type_tests(
+    CustomOpTests,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    CustomOpTestsRuntime,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    MutationTests,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    MutationTestsTritonLauncher,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
 instantiate_device_type_tests(
     MutationTestsTritonLauncherFallback,
     globals(),
@@ -7381,9 +7364,6 @@ instantiate_device_type_tests(
     globals(),
     only_for=("cuda",),
 )
-
-
-del _test_bases
 
 
 if __name__ == "__main__":
