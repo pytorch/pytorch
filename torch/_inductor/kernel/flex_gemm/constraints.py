@@ -81,7 +81,10 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 )
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
-FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = "FlexGEMM grouped main outputs do not yet compose with auxiliary outputs or reductions"
+FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = (
+    "FlexGEMM grouped main outputs compose only with the unchanged physical "
+    "GEMM output as an auxiliary"
+)
 FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "FlexGEMM grouped main output shape must contract only the GEMM N dimension"
 )

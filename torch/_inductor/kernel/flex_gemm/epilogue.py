@@ -1701,7 +1701,15 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs or outputs.indexed_output is not None:
+        if outputs.indexed_output is not None or (
+            outputs.aux_outputs
+            and (
+                outputs.aux_outputs != (gemm,)
+                or outputs.local_reduce is not None
+                or grouped_main.transform.group != 2
+                or grouped_main.transform.chunked
+            )
+        ):
             raise NotImplementedError(FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR)
         if (
             grouped_main.transform.chunked
@@ -2470,7 +2478,7 @@ class FlexGemmEpiModEmitter:
 
     @staticmethod
     def value(name: str, dtype: torch.dtype) -> CuteDSLCSEVariable:
-        """Represent one generated EpiMod scalar/F2 value with dtype metadata."""
+        """Represent one generated EpiMod value with dtype metadata."""
         return CuteDSLCSEVariable(
             name,
             ValueRanges.unknown(),

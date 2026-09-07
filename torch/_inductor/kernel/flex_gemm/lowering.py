@@ -738,9 +738,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generated epilogues require output metadata"
         )
     output_size = ir.convert_shape_to_inductor(output_meta.shape)
-    aux_metas = validate_flex_gemm_aux_outputs(
-        gemm_op, outputs.aux_outputs, output_size
-    )
+    if main_transform is not None and outputs.aux_outputs:
+        if outputs.aux_outputs != (gemm_fx_node,):
+            raise AssertionError(
+                "grouped-main auxiliary must be the physical GEMM output"
+            )
+        gemm_output_meta = gemm_fx_node.meta.get("val")
+        if not isinstance(gemm_output_meta, torch.Tensor):
+            raise NotImplementedError(
+                "FlexGEMM physical auxiliary requires GEMM output metadata"
+            )
+        aux_metas = (gemm_output_meta,)
+    else:
+        aux_metas = validate_flex_gemm_aux_outputs(
+            gemm_op, outputs.aux_outputs, output_size
+        )
     indexed_metas = () if indexed_output is None else (indexed_output.node.meta["val"],)
     if not has_flex_gemm_quack():
         raise NotImplementedError("FlexGEMM QUACK backend requires CuTeDSL")

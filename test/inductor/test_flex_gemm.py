@@ -238,20 +238,6 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             "cutlass.min(cutlass.max(x, lower), upper)",
         )
 
-    def test_scalar_callback_division_respects_fast_math(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmScalarCallbackOpOverrides,
-        )
-
-        self.assertEqual(
-            FlexGemmScalarCallbackOpOverrides(False).truediv("a", "b"),
-            "epi_math.divide(a, b, fast=False)",
-        )
-        self.assertEqual(
-            FlexGemmScalarCallbackOpOverrides(True).truediv("a", "b"),
-            "epi_math.divide(a, b, fast=True)",
-        )
-
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     def test_epimod_cache_identity_includes_all_capture_dtypes(self):
@@ -649,6 +635,53 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         self.assertIsNone(grouped_tensor_layout((4, 5, group), (4, 8)))
         self.assertEqual(shape_env.guards, [])
+
+    def test_scalar_callback_division_respects_fast_math(self):
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            FlexGemmScalarCallbackOpOverrides,
+        )
+
+        self.assertEqual(
+            FlexGemmScalarCallbackOpOverrides(False).truediv("a", "b"),
+            "epi_math.divide(a, b, fast=False)",
+        )
+        self.assertEqual(
+            FlexGemmScalarCallbackOpOverrides(True).truediv("a", "b"),
+            "epi_math.divide(a, b, fast=True)",
+        )
+
+    @parametrize("use_cat", (False, True))
+    def test_packed_interleaved_main_output_fails_closed(self, use_cat):
+        """Interleaved (stack/cat + view) main outputs are not a grouped-main pattern."""
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        m, h, k = 4, 6, 8
+
+        def body(a, b, packed):
+            acc = torch.mm(a, b)
+            pairs = packed.view(m, h, 2)
+            gate, up = pairs.select(-1, 0).float(), pairs.select(-1, 1).float()
+            lanes = ((acc.float() * up).to(a.dtype), (acc.float() * gate).to(a.dtype))
+            packed_grad = (
+                torch.cat(tuple(lane.unsqueeze(-1) for lane in lanes), dim=-1)
+                if use_cat
+                else torch.stack(lanes, dim=-1)
+            ).view(m, 2 * h)
+            return packed_grad, (gate * up).to(a.dtype)
+
+        graph_module = make_fx(body)(
+            torch.randn(m, k, dtype=torch.bfloat16),
+            torch.randn(k, h, dtype=torch.bfloat16),
+            torch.randn(m, 2 * h, dtype=torch.bfloat16),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "physical GEMM output shape"):
+            analyze_flex_gemm_epilogue(
+                graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+            )
 
     def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
         """Rejected recognitions must not leak grouped layouts or guards."""
@@ -1052,7 +1085,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "grouped_main_composition",
                 paired_difference_main,
                 torch.tensor([0, 3, 4, 7]),
-                "do not yet compose",
+                "compose only",
             ),
         ),
         name_fn=lambda case: case[0],
@@ -2911,6 +2944,40 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_grouped_main_output_with_physical_aux(self):
+        m, n, k = 128, 128, 64
+
+        def epilogue_fn(acc):
+            grouped = acc.view(m, n, 2)
+            main = grouped.select(-1, 0) + grouped.select(-1, 1)
+            return main, acc
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected = epilogue_fn(a @ b)
+
+        self.assertMatchesLowPrecisionEager(
+            actual[0], expected[0], epilogue_fn(a.double() @ b.double())[0], k
+        )
+        self.assertEqual(actual[1], expected[1])
+        self.assertIn("FlexGemmGroupedMainOutputTransform(group=2", code)
+        self.assertIn("aux_outs=", code)
+        self.assertNotIn("extern_kernels.mm", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_grouped_main_output_uint8(self):
         m = n = k = 64
         group = 2
@@ -3016,7 +3083,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         def auxiliary(a, b):
             def epilogue(acc):
                 lanes = acc.view(m, n, 2)
-                return lanes[..., 0] - lanes[..., 1], acc
+                return lanes[..., 0] - lanes[..., 1], acc + 1
 
             return flex_gemm(
                 torch.mm,
@@ -3025,8 +3092,28 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        with self.assertRaisesRegex(Exception, "do not yet compose"):
+        with self.assertRaisesRegex(Exception, "compose only"):
             torch.compile(auxiliary, backend="inductor", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
+        def chunked_auxiliary(a, b):
+            def epilogue(acc):
+                first, second = acc.chunk(2, dim=-1)
+                return first - second, acc
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        chunked_b = torch.randn(2 * n, k, device="cuda", dtype=torch.float16).t()
+        with self.assertRaisesRegex(Exception, "compose only"):
+            torch.compile(chunked_auxiliary, backend="inductor", fullgraph=True)(
+                a, chunked_b
+            )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
