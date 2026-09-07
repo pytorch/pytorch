@@ -871,6 +871,61 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs=2)
         self.opt = old_opt
 
+    def test_nested_sequentiallr_does_not_skip_an_epoch(self):
+        """A nested SequentialLR runs the same schedule as it does on its own."""
+        epochs = 8
+        # The first five values are exactly what the inner scheduler produces
+        # when it is used directly: two epochs of ConstantLR, then ExponentialLR
+        # from its epoch 0. Nesting must not consume one of those epochs.
+        inner_targets = [0.5, 0.5, 1.0, 0.9, 0.81]
+        outer_targets = [1.0, 1.0, 0.5]
+        single_targets = inner_targets + outer_targets
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        inner = SequentialLR(
+            self.opt,
+            schedulers=[
+                ConstantLR(self.opt, factor=0.5, total_iters=2),
+                ExponentialLR(self.opt, gamma=0.9),
+            ],
+            milestones=[2],
+        )
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[inner, StepLR(self.opt, step_size=2, gamma=0.5)],
+            milestones=[5],
+        )
+        self._test(scheduler, targets, epochs)
+
+    def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
+        """A nested ChainedScheduler runs the same schedule as it does on its own."""
+        epochs = 8
+        # The first five values are exactly what the chained scheduler produces
+        # when it is used directly: ConstantLR and ExponentialLR both scaling
+        # the lr from its epoch 0. Nesting must not apply either of them twice.
+        inner_targets = [0.5, 0.45, 0.81, 0.729, 0.6561]
+        outer_targets = [1.0, 1.0, 0.5]
+        single_targets = inner_targets + outer_targets
+        targets = [
+            [0.05 * x for x in single_targets],
+            [0.5 * x for x in single_targets],
+        ]
+        inner = ChainedScheduler(
+            [
+                ConstantLR(self.opt, factor=0.5, total_iters=2),
+                ExponentialLR(self.opt, gamma=0.9),
+            ],
+            optimizer=self.opt,
+        )
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[inner, StepLR(self.opt, step_size=2, gamma=0.5)],
+            milestones=[5],
+        )
+        self._test(scheduler, targets, epochs)
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
