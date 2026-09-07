@@ -19,6 +19,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -34,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
     all_types_and_complex,
     all_types_and_complex_and,
     floating_and_complex_types,
@@ -303,6 +305,7 @@ class TestSparseCompressedDevice(TestCase):
     @parametrize('input_kind', [subtest('tensor', name='from_tensor'), subtest('list', name='from_list')])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
         device_type = torch.device(device).type
@@ -311,7 +314,7 @@ class TestSparseCompressedDevice(TestCase):
             if device_type != 'cpu':
                 # list inputs to factory/constructor function without
                 # specifying device will result a sparse compressed tensor
-                # on CPU. So, skip testing against cuda device as unused.
+                # on CPU. So, skip testing against other devices as unused.
                 self.skipTest("nothing to test")
             if dtype not in {torch.float32, torch.complex64, torch.int64, torch.bool}:
                 self.skipTest("dtype not supported with list values")
@@ -394,6 +397,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_empty(self, layout, device, dtype):
         ns = [5, 2, 0]
         batch_shapes = [(), (2,), (2, 3)]
@@ -425,6 +429,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @sparse_compressed_nonblock_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_empty_errors(self, layout, device, dtype):
         with self.assertRaisesRegex(RuntimeError,
                                     "torch.empty: Only batched sparse compressed \\(non-block\\) tensors are supported"
@@ -434,6 +439,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_sparse_compressed_tensor_with_dims(self, layout, device, dtype):
 
         def get_sparse_compressed_tensor_properties(s):
@@ -474,6 +480,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_clone(self, layout, device, dtype):
         for sparse in self.generate_simple_inputs(
                 layout, device=device, dtype=dtype, index_dtype=torch.int32):
@@ -510,8 +517,11 @@ class TestSparseCompressedDevice(TestCase):
                   [0, 0, 0, 0, 8, 8],
                   [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 2)] if enable_hybrid else [()]),
             ]
+            # MPS has no float64
+            dtypes = ([torch.float32] if torch.device(device).type == "mps"
+                      else [torch.float32, torch.float64])
             for index_dtype in [torch.int32, torch.int64]:
-                for dtype in [torch.float32, torch.float64]:
+                for dtype in dtypes:
                     for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
                             layout, device=device, dtype=dtype, index_dtype=index_dtype, enable_hybrid=enable_hybrid,
                             enable_non_contiguous_indices=False, enable_non_contiguous_values=False,
@@ -555,6 +565,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_copy(self, layout, device, dtype):
 
         def run_test(shape, blocksize, nnz, index_type):
@@ -577,6 +588,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_copy_errors(self, layout, device, dtype):
         blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
         nnz = 6 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 1
@@ -634,6 +646,11 @@ class TestSparseCompressedDevice(TestCase):
         if (layout == torch.sparse_csr and not dtype.is_floating_point
                 and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout and {dtype} dtype")
+
+        # Reducing over a dimension of a compressed tensor goes through
+        # _sparse_csr_sum / _sparse_csr_prod, which have no MPS kernel yet.
+        if torch.device(device).type == 'mps' and op.name in ('sum', 'prod', 'masked.sum', 'masked.prod'):
+            self.skipTest(f"{op.name} over a {layout} tensor is not implemented on MPS")
 
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
 
@@ -695,6 +712,7 @@ class TestSparseCompressedDevice(TestCase):
     @all_sparse_compressed_layouts()
     @all_sparse_compressed_layouts('layout2')
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_empty_like(self, layout, layout2, device, dtype):
         for sparse in self.generate_simple_inputs(layout):
             if layout == layout2:
@@ -716,6 +734,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_validate(self, layout, device, dtype):
         def make_zero_batched(t):
             return torch.empty(*((0,) + t.shape), dtype=t.dtype, device=t.device)
@@ -1012,13 +1031,50 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_to_dtype(self, layout, device, dtype):
+        if torch.device(device).type == "mps":
+            to_dtypes = all_mps_types_and(torch.bool)
+        else:
+            to_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)
         # to_dense does not support hybrid inputs
         for sparse in self.generate_simple_inputs(layout, dtype=dtype, device=device, enable_hybrid=False):
-            for to_dtype in all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16):
+            for to_dtype in to_dtypes:
                 sparse_to_dtype = sparse.to(to_dtype)
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
+
+    @skipMeta
+    @dtypes(torch.int32, torch.int64)
+    def test_convert_indices_roundtrip(self, device, dtype):
+        # The compressed/plain index conversions are the primitives every layout
+        # conversion is built on, and each backend implements them itself.
+        for size, rows in [(4, []), (1, [0]), (3, [0, 0, 1, 2, 2]), (257, sorted(torch.randint(0, 257, (1000,)).tolist()))]:
+            coo_rows = torch.tensor(rows, dtype=dtype, device=device)
+            for out_int32 in [False, True]:
+                actual = torch._convert_indices_from_coo_to_csr(coo_rows, size, out_int32=out_int32)
+                expected = torch._convert_indices_from_coo_to_csr(coo_rows.cpu(), size, out_int32=out_int32)
+                self.assertEqual(actual.cpu(), expected)
+
+        for batch in [(), (3,), (2, 3)]:
+            nrows, ncols, per_row = 4, 5, 2
+            crow = torch.arange(0, nrows * per_row + 1, per_row).expand(*batch, nrows + 1).contiguous()
+            cols = torch.cat([torch.arange(per_row) for _ in range(nrows)])
+            col = cols.expand(*batch, nrows * per_row).contiguous()
+            crow, col = crow.to(dtype).to(device), col.to(dtype).to(device)
+            for out_int32 in [False, True]:
+                for transpose in [False, True]:
+                    actual = torch._convert_indices_from_csr_to_coo(
+                        crow, col, out_int32=out_int32, transpose=transpose)
+                    expected = torch._convert_indices_from_csr_to_coo(
+                        crow.cpu(), col.cpu(), out_int32=out_int32, transpose=transpose)
+                    self.assertEqual(actual.cpu(), expected)
+
+        empty_crow = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+        empty_col = torch.tensor([], dtype=dtype, device=device)
+        self.assertEqual(
+            torch._convert_indices_from_csr_to_coo(empty_crow, empty_col).cpu(),
+            torch._convert_indices_from_csr_to_coo(empty_crow.cpu(), empty_col.cpu()))
 
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182086")
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181682")
@@ -1027,6 +1083,7 @@ class TestSparseCompressedDevice(TestCase):
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
     def test_pickle(self, layout, dtype, device):
         import pickle
 
@@ -1039,6 +1096,7 @@ class TestSparseCompressedDevice(TestCase):
     @all_sparse_compressed_layouts()
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_select_copy(self, device, dtype, index_dtype, layout):
 
         def is_view_of(base, other):
@@ -4398,7 +4456,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
 
 instantiate_parametrized_tests(TestSparseCompressed)
-instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestSparseCompressedDevice, globals(), allow_xpu=True, allow_mps=True)
 
 instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
