@@ -147,6 +147,29 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_subnormal(self):
+        # https://github.com/pytorch/pytorch/issues/195007
+        def fn(x):
+            return torch.frexp(x)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for dtype, int_dtype, mbits, nbits in (
+            (torch.float32, torch.int32, 23, 32),
+            (torch.float64, torch.int64, 52, 64),
+        ):
+            # subnormals, +-0.0, and the smallest normal, both signs
+            pos = [0, 1, 2, 3, 127, (1 << mbits) - 1, 1 << mbits]
+            bits = pos + [p - (1 << (nbits - 1)) for p in pos]
+            x = torch.tensor(bits, dtype=int_dtype, device=device_type).view(dtype)
+            expected_mantissa, expected_exponent = fn(x)
+            actual_mantissa, actual_exponent = compiled(x)
+            # compare bit patterns to catch a lost -0.0 sign
+            self.assertEqual(
+                actual_mantissa.view(int_dtype), expected_mantissa.view(int_dtype)
+            )
+            self.assertEqual(actual_exponent, expected_exponent)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -2801,14 +2824,11 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         self.assertEqual(foo(x0), result)
 
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    def test_atomic_add_bfloat16(self):
+    def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
 
@@ -2861,47 +2881,77 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             self.assertEqual(torch.compile(f)(x, y), out)
 
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device=device_type, requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device=device_type)
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("aten.index_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
-    @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
-    )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback_direct(self):
+    def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
-            return torch.index_add(x, 0, idx, src)
+            return torch.index_add(x, -1, idx, src, alpha=0.5)
 
-        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
-        idx = torch.randperm(8, device=device_type)
-        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+        x = torch.zeros(16, 256, dtype=torch.bfloat16, device=device_type).T
+        idx = torch.tensor(
+            [0, 1, 1, 2, 2, 2, 7, 7], dtype=torch.int32, device=device_type
+        )
+        src = torch.ones(8, 256, dtype=torch.bfloat16, device=device_type).T
 
         out = f(x, idx, src)
-        compiled_out = torch.compile(f)(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    def test_index_add_bfloat16_scalar_index(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(8, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.tensor(3, device=device_type)
+        src = torch.ones(8, 1, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    @skipIfXpu(msg="XPU deterministic mode does not use the aten.index_put_ fallback")
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "fbcode uses its bfloat16 atomic add lowering",
+    )
+    def test_index_add_bfloat16_deterministic(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(32, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.arange(8, device=device_type)
+        src = torch.ones(32, 8, dtype=torch.bfloat16, device=device_type)
+
+        with DeterministicGuard(True):
+            out = f(x, idx, src)
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, idx, src
+            )
+
+        FileCheck().check("aten.index_put_").check_not("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
         self.assertEqual(out, compiled_out)
 
     @requires_multigpu()
