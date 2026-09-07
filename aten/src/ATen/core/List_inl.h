@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/ivalue.h>
+#include <type_traits>
 
 namespace c10 {
 
@@ -364,3 +365,47 @@ void List<T>::unsafeSetElementType(TypePtr t) {
 }
 
 }
+
+// ListElementReference converts to T (or const T&), but the two are
+// otherwise-unrelated types, so std::common_reference's "simple common
+// reference" rule (same type up to cv/ref-qualification) never applies to
+// the pair, and indirectly_readable requires
+// common_reference_with<ListElementReference&&, T&> (among others) to hold.
+// Some standard libraries' fallback for that case tries the proxy's
+// conversion operator through a conditional-expression-like check and
+// succeeds; others don't. basic_common_reference is the standard's sanctioned
+// extension point for exactly this situation, and is checked before that
+// fallback, so it makes the outcome the same everywhere: a value common
+// reference is always obtainable (the proxy can materialize a T), just not a
+// real reference to one, so T is what this resolves to.
+namespace std {
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    T,
+    c10::impl::ListElementReference<T, Iterator>,
+    TQual,
+    UQual> {
+  using type = T;
+};
+
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    c10::impl::ListElementReference<T, Iterator>,
+    T,
+    TQual,
+    UQual> {
+  using type = T;
+};
+} // namespace std
