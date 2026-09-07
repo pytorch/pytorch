@@ -128,7 +128,8 @@ static PyObject* unpack_saved_variables(
   // because we will never hit this line of code if the buffers are freed--
   // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
-  for (const auto i : c10::irange(num_saved)) {
+  for (const auto j : c10::irange(num_saved)) {
+    const auto i = num_saved - 1 - j;
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
