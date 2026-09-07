@@ -850,8 +850,8 @@ if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)
   add_definitions(-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1)
   add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
-  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
-  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
+  # CUTLASS include dirs are attached SYSTEM to torch_cuda in caffe2/CMakeLists.txt;
+  # routing them through ATen_CUDA_INCLUDE would emit -I, not -isystem.
 
   if($ENV{ATEN_STATIC_CUDA})
     if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
