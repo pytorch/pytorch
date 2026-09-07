@@ -672,7 +672,11 @@ supported:
         groups = [
             g
             for g in grouped
-            if isinstance(g, NativeFunctionsGroup) and backend_index.has_kernel(g.out)
+            if isinstance(g, NativeFunctionsGroup)
+            and (
+                backend_index.has_kernel(g.out)
+                or backend_index.has_kernel(g.functional)
+            )
         ]
         return groups, backend_index, class_name
 
@@ -831,6 +835,29 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         )
         # no derived functional: a Tensor[] output is never allocated as a single empty Tensor
         self.assertNotIn("at::empty", out)
+
+    # Primacy follows the variant the backend registers, so use_out_as_primary is a default
+    # rather than a backend-wide mode: an op registered by its functional derives its out and
+    # inplace from that functional (the _copy_from_and_resize path) instead of going
+    # unregistered. angle is non-structured, so registering it out-as-primary would be rejected
+    # -- registering the functional is the escape that error tells the backend to take.
+    def test_functional_registration_opts_the_op_out_of_out_as_primary(self) -> None:
+        out = self.anonymous_definitions("- angle")
+        # the functional is the backend kernel, and .out is derived from it
+        self.assertIn("PrivateUse1NativeFunctions::angle(self)", out)
+        self.assertIn("wrapper_PrivateUse1_out_angle_out", out)
+        self.assertIn("at::_copy_from_and_resize", out)
+
+    # The derived wrapper must translate to the .out KERNEL's signature, not the raw dispatcher
+    # schema: the schema is always symint-typed, but an .out kernel not declared `symint:` takes
+    # IntArrayRef. resize.out carries SymInt[] size, so the derived resize_ has to wrap it in
+    # C10_AS_INTARRAYREF_SLOW -- passing the SymIntArrayRef straight through would not compile.
+    def test_derived_wrapper_uses_kernel_signature_not_symint_schema(self) -> None:
+        out = self.anonymous_definitions("- resize\n- resize.out")
+        self.assertIn(
+            "PrivateUse1NativeFunctions::resize_out(self, C10_AS_INTARRAYREF_SLOW(size), memory_format, self)",
+            out,
+        )
 
     # A structured op that is also a symint op must NOT get a "_symint" suffix on its kernel
     # name: kernel_name becomes the generated struct name (structured_<kernel>), which must

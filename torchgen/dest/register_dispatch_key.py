@@ -400,7 +400,9 @@ class RegisterDispatchKey:
             return None
         k = f.func.kind()
         sig = self.wrapper_kernel_sig(f)
-        out_sig = DispatcherSignature.from_schema(g.out.func)
+        # Translate to the .out KERNEL's signature: the raw dispatcher schema is always
+        # symint-typed, but a kernel not declared `symint:` takes int64_t/IntArrayRef.
+        out_sig = kernel_signature(g.out, self.backend_index)
         out_args_bindings = out_sig.arguments()
 
         # Separate the bindings into 'non-out' and 'out' for translation
@@ -509,13 +511,6 @@ class RegisterDispatchKey:
                 ):
                     inplace_meta = True
                 elif (
-                    not self.backend_index.use_out_as_primary
-                    and g is not None
-                    and gets_generated_out_inplace_wrapper(f, g, self.backend_index)
-                ):
-                    # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
-                    gets_out_inplace_wrapper = True
-                elif (
                     self.backend_index.dispatch_key == DispatchKey.PrivateUse1
                     and self.backend_index.use_out_as_primary
                     and self.backend_index.external
@@ -567,6 +562,18 @@ class RegisterDispatchKey:
                             "output dtype from."
                         )
                     gets_func_inplace_wrapper = True
+                elif (
+                    # Out-of-tree only: in-tree keys reach their out/inplace variants through
+                    # the structured path or an explicit registration, never through here.
+                    self.backend_index.external
+                    and g is not None
+                    and gets_generated_out_inplace_wrapper(f, g, self.backend_index)
+                ):
+                    # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
+                    # Reached under use_out_as_primary too: primacy follows the variant the backend
+                    # actually registered, so an op registered by its functional derives its
+                    # out/inplace from that functional instead of going unregistered.
+                    gets_out_inplace_wrapper = True
                 else:
                     return None
             if f.manual_kernel_registration:
