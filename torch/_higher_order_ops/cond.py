@@ -751,6 +751,8 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         )
 
     lvl = interpreter.level()
+    batch_size = interpreter.batch_size()
+    randomness = interpreter.randomness()
     # unbatched tensors are not vmapped
     (unbatched_pred, tensors), (pred_bdim, in_dims) = unwrap_batched(
         (pred, tuple(inputs)), lvl
@@ -759,16 +761,18 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     if pred_bdim is None:
         # predicate is known at this stage and it is a boolean expression or a
         # tensor with one element.
-        true_fn = torch.vmap(true_fn, in_dims=in_dims)
-        false_fn = torch.vmap(false_fn, in_dims=in_dims)
+        true_fn = torch.vmap(true_fn, in_dims=in_dims, randomness=randomness)
+        false_fn = torch.vmap(false_fn, in_dims=in_dims, randomness=randomness)
 
         with interpreter.lower():
             result = cond_op(unbatched_pred, true_fn, false_fn, tensors)
 
     else:
         # Each batch element takes its own branch, so run both branches for the whole
-        # batch and select every output per element.
-        pred_ = move_bdim_to_front(unbatched_pred, pred_bdim, interpreter.batch_size())
+        # batch and select every output per element. cond only requires the predicate to
+        # hold one element, not to be 0-dim, so flatten the leftover singleton dims to keep
+        # p below 0-dim: a p of shape (1,) broadcasts a 0-dim branch output up to (1,).
+        pred_ = move_bdim_to_front(unbatched_pred, pred_bdim, batch_size).flatten()
 
         def fn(p, *args):
             return pytree.tree_map(
@@ -776,7 +780,8 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
             )
 
         with interpreter.lower():
-            result = torch.vmap(fn, in_dims=(0,) + in_dims)(pred_, *tensors)
+            batched_fn = torch.vmap(fn, in_dims=(0,) + in_dims, randomness=randomness)
+            result = batched_fn(pred_, *tensors)
 
     if not isinstance(result, tuple):
         result = (result,)
