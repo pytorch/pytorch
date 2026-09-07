@@ -10,10 +10,16 @@ from torch.distributed.checkpoint.planner import LoadItemType, ReadItem
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestQuantizedHfStorage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         """Set up common test fixtures."""
