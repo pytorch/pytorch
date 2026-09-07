@@ -844,6 +844,9 @@ class parametrize(_TestParametrizer):
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
         arg_values (iterable): Iterable of arg values (e.g. range(10)) or
             tuples of arg values (e.g. [(1, 2), (3, 4)]).
+            May also be a callable that returns such an iterable. For device-type tests,
+            the callable receives the instantiated device test class, allowing the
+            parameter values to depend on device-specific properties.
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
@@ -887,7 +890,10 @@ class parametrize(_TestParametrizer):
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
             # * A subtest instance with arg_values matching the previous.
             values = check_exhausted_iterator = object()
-            for idx, values in enumerate(self.arg_values):
+            arg_values = self.arg_values
+            if callable(arg_values):
+                arg_values = arg_values(device_cls)
+            for idx, values in enumerate(arg_values):
                 maybe_name = None
 
                 decorators: list[Any] = []

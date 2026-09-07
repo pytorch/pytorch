@@ -348,6 +348,7 @@ class Capability:
 
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
+        cudnn_attention = "attention.cudnn_attention"
 
 
 class DeviceTypeTestBase(TestCase):
@@ -793,6 +794,7 @@ class CPUTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: True,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.cudnn_attention: lambda: False,
         }
 
 
@@ -811,6 +813,7 @@ class CUDATestBase(DeviceTypeTestBase):
     @classmethod
     def _capabilities(cls):
         from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_CUDNN_ATTENTION,
             PLATFORM_SUPPORTS_FLASH_ATTENTION,
             PLATFORM_SUPPORTS_FP8,
             PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -822,6 +825,7 @@ class CUDATestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: SM80OrLater,
             Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
             Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            Capability.attention.cudnn_attention: lambda: PLATFORM_SUPPORTS_CUDNN_ATTENTION,
         }
 
     @classmethod
@@ -907,6 +911,7 @@ class MPSTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: False,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.cudnn_attention: lambda: False,
         }
 
 
@@ -925,6 +930,7 @@ class XPUTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
             Capability.attention.mem_efficient_attention: lambda: True,
+            Capability.attention.cudnn_attention: lambda: False,
         }
 
     @classmethod
@@ -1179,13 +1185,18 @@ def get_desired_device_type_test_bases(
     )
 
 
-def requires_capabilities(*caps: str):
+def requires_capabilities(*caps: str, any: bool = False):
     """Declare that a test method requires device capabilities.
 
     Wraps the test to call ``type(self).get_capabilities()`` at runtime
-    and skip if any required capability is unsupported by the device.
+    and skip if the device does not satisfy the requirement.
 
-    Raises AssertionError if a capability is not declared in the
+    By default, all capabilities must be supported (AND semantics). Pass
+    ``any=True`` to require only one of them (OR semantics). With
+    ``any=True``, undeclared capabilities are tolerated unless none of the
+    required capabilities are declared.
+
+    Raises AssertionError if a required capability is not declared in the
     device's ``_capabilities()`` map.
     """
     caps_set = set(caps)
@@ -1195,14 +1206,33 @@ def requires_capabilities(*caps: str):
         def wrapper(self, *args, **kwargs):
             device_caps = type(self).get_capabilities()
 
-            unsupported = set()
-            missing = set()
-            for c in caps_set:
-                if c in device_caps:
-                    if not device_caps[c]:
-                        unsupported.add(c)
-                else:
-                    missing.add(c)
+            missing = {c for c in caps_set if c not in device_caps}
+            unsupported = {c for c in caps_set - missing if not device_caps[c]}
+
+            if any:
+                if missing == caps_set:
+                    raise AssertionError(
+                        f"Device '{type(self).device_type}' has not declared any of the "
+                        f"required capabilities: {', '.join(sorted(caps_set))}. "
+                        f"Add them to {type(self).__name__}._capabilities()."
+                    )
+
+                supported = caps_set - missing - unsupported
+                if supported:
+                    return fn(self, *args, **kwargs)
+
+                parts = []
+                if unsupported:
+                    parts.append(
+                        f"unsupported capabilities: {', '.join(sorted(unsupported))}"
+                    )
+                if missing:
+                    parts.append(f"missing capabilities: {', '.join(sorted(missing))}")
+
+                raise unittest.SkipTest(
+                    f"Device '{type(self).device_type}' does not satisfy any of the "
+                    f"required capabilities: {'; '.join(parts)}"
+                )
 
             if missing:
                 raise AssertionError(
