@@ -4566,15 +4566,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
                 return self._reduce_function_by_value(obj)
+            resolved: Any = None
             if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
+                resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                if f is not obj:
-                    # See Note [Reconstructing a function a guard is rooted at].
-                    if id(obj) not in self.guard_tree_values:
-                        return _Missing, ("fqn mismatch",)
-                    return self._reduce_function_by_value(obj)
+                    resolved = getattr(resolved, name, None)
+            if resolved is not obj:
+                # See Note [Reconstructing a function a guard is rooted at].
+                # A module absent from sys.modules (an exec-created function, or
+                # __module__ is None) is an fqn mismatch too: reference-pickling
+                # would fail, so rebuild a guarded function by value and prune an
+                # unguarded one, rather than fall through and fail the dump.
+                if id(obj) not in self.guard_tree_values:
+                    return _Missing, ("fqn mismatch",)
+                return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
