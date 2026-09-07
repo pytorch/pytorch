@@ -1602,9 +1602,7 @@ class ChainedScheduler(LRScheduler):
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
-        self._schedulers_accept_kwargs = [
-            _accepts_kwargs(scheduler.step) for scheduler in schedulers
-        ]
+        self._schedulers_accept_kwargs = [_accepts_kwargs(s.step) for s in schedulers]
         self.optimizer = optimizer
         # Unlike the other schedulers, this does not end with
         # `self._initial_step()`: every scheduler in `schedulers` already took
