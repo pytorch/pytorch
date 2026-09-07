@@ -183,12 +183,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # file from the one the function lives in; a pickler that guards
         # __globals__ sends the snapshot variant instead. A module that only
         # existed in sys.modules at save (exec-created, transformers_modules.*)
-        # gets an empty scope: a guard never calls the rebuilt function.
+        # gets an empty scope. That is safe on the guard-serialization path,
+        # which reads attributes off the rebuilt function without calling it;
+        # the shared AOT path (AOTCompilePickler) does call it, so there an
+        # empty scope surfaces as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
         try:
             # A <locals>/exec function can carry __module__ is None (bare
-            # globals with no __name__); import_module(None) would raise
-            # AttributeError, not ImportError, so guard it into the empty scope.
+            # globals with no __name__); import_module(None) raises
+            # AttributeError and import_module("") raises ValueError, neither
+            # of which is the ImportError below, so guard both into the empty scope.
             f_globals = importlib.import_module(module).__dict__ if module else {}
         except ImportError:
             f_globals = {}
@@ -203,7 +207,10 @@ class FunctionPicklerBase(pickle.Pickler):
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # The scope arrives as pickle STATE, through _apply_function_state.
+        # The scope arrives as pickle STATE, through _apply_function_state. The
+        # {} is fresh per call, so two functions that shared one module dict at
+        # save get distinct __globals__ after load; deliberate and unobservable,
+        # since no serialized guard reads __globals__ identity.
         return cls._build_function({}, module, code, qualname, name, closure)
 
     @staticmethod
