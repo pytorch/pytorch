@@ -115,6 +115,7 @@ Tensor & masked_fill__quantized_cuda(Tensor& self, const Tensor & mask, const Te
 
 Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  checkAtLeastOneIndexTensor(indices);
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
   TORCH_CHECK(!accumulate, "index_put for quantized tensors is currently only supported for accumulate=False");
@@ -150,6 +151,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::opt
 
 Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  checkAtLeastOneIndexTensor(indices);
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
   TORCH_CHECK(!accumulate, "index_put for quantized tensors is currently only supported for accumulate=False");

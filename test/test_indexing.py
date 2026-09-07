@@ -922,6 +922,100 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "at least one index must be provided"):
             torch.ops.aten.index.Tensor(t, [])
 
+    def test_index_tensor_all_none_indices(self, device):
+        source = torch.arange(4, device=device).reshape(2, 2)
+        indices = [None]
+
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index.Tensor(source, indices)
+
+        out = torch.empty_like(source)
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index.Tensor_out(source, indices, out=out)
+
+    @parametrize(
+        "variant, accumulate, scalar_value",
+        [
+            ("out", False, False),
+            ("inplace", False, True),
+            ("functional", True, True),
+        ],
+    )
+    def test_index_put_all_none_indices(
+        self, device, variant, accumulate, scalar_value
+    ):
+        source = torch.arange(4, dtype=torch.float32, device=device).reshape(2, 2)
+        indices = [None]
+        values = (
+            torch.tensor(10.0)
+            if scalar_value
+            else torch.tensor([10.0, 20.0], device=device)
+        )
+
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            if variant == "out":
+                torch.ops.aten.index_put.out(
+                    source,
+                    indices,
+                    values,
+                    accumulate,
+                    out=torch.empty_like(source),
+                )
+            elif variant == "inplace":
+                torch.ops.aten.index_put_.default(
+                    source.clone(), indices, values, accumulate
+                )
+            else:
+                torch.ops.aten.index_put.default(source, indices, values, accumulate)
+
+    @onlyCPU
+    def test_all_none_indices_meta(self, device):
+        source = torch.empty(2, 2, device="meta")
+        values = torch.empty(2, device="meta")
+
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index.Tensor(source, [None])
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index_put.default(source, [None], values)
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index_put_.default(source, [None], values)
+
+    @onlyCPU
+    def test_index_put_all_none_indices_quantized(self, device):
+        source = torch.quantize_per_tensor(
+            torch.arange(4, dtype=torch.float32).reshape(2, 2),
+            scale=0.25,
+            zero_point=5,
+            dtype=torch.qint8,
+        )
+        values = torch.tensor([1.25, 2.5])
+
+        with self.assertRaisesRegex(
+            IndexError, "at least one index tensor must be provided"
+        ):
+            torch.ops.aten.index_put.default(source, [None], values, False)
+
+    def test_all_none_indices_too_many(self, device):
+        source = torch.empty(2, 2, device=device)
+        indices = [None, None, None]
+
+        with self.assertRaisesRegex(IndexError, "too many indices"):
+            torch.ops.aten.index.Tensor(source, indices)
+        with self.assertRaisesRegex(IndexError, "too many indices"):
+            torch.ops.aten.index_put.default(source, indices, source)
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
