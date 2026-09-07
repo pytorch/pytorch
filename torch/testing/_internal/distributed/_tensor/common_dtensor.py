@@ -52,7 +52,6 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
-    ACCELERATOR_DIST_BACKENDS,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -798,43 +797,23 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         if backend is None:
             backend = self.backend
 
-        requires_gpu = any(
-            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
-        )
-        if requires_gpu and torch.accelerator.device_count() < self.world_size:
+        if not dist.is_backend_available(backend):
+            sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
+        is_accelerator_test = self.device_type != "cpu"
+        if is_accelerator_test and (
+            not torch.accelerator.is_available()
+            or torch.accelerator.device_count() < self.world_size
+        ):
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-
-        if backend not in [
-            "nccl",
-            "nccl-legacy",
-            "gloo",
-            "mpi",
-            f"cpu:gloo,{self.device_type}:{curr_backend}",
-            "cpu:gloo,cuda:ncclx",
-            "cuda:ncclx",
-            "hccl",
-            "xccl",
-            "fake",
-            "cpu:gloo,xpu:xccl",
-        ]:
-            raise RuntimeError(f"Backend {backend} not supported!")
-
         device_id = None
-        if requires_gpu:
-            # set device for accelerator pg for collectives (nccl/xccl/hccl)
-            # TODO: if users want to enable testing across hosts, we may need
-            # to change this part.
+        if is_accelerator_test:
             torch.accelerator.set_device_index(self.rank)
-            # we only need to set device_id for nccl backend with eager init
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
 
-        # For nccl backend, bind the device to the process if device_id is not None
-        # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecessary overhead.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -1223,7 +1202,7 @@ class LocalDTensorTestBase(DTensorTestBase):
 
 def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
-    def wrapped(self):
+    def wrapped(self, *args, **kwargs):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
@@ -1232,12 +1211,20 @@ def make_wrapped(fn, ctxs):
             else:
                 stack.enter_context(ctx)
         try:
-            out = fn(self)
+            out = fn(self, *args, **kwargs)
         finally:
             stack.close()
         return out
 
     return wrapped
+
+
+def make_skipped(fn):
+    @functools.wraps(fn)
+    def skipped(self, *args, **kwargs):
+        self.skipTest("Skipped test")
+
+    return skipped
 
 
 def create_local_tensor_test_class(
@@ -1252,7 +1239,7 @@ def create_local_tensor_test_class(
         if not callable(fn):
             continue
         elif name in skipped_tests:
-            dct[name] = lambda self: self.skipTest("Skipped test")
+            dct[name] = make_skipped(fn)
         elif name.startswith("test_"):
             ctxs = [
                 lambda test: test._get_local_tensor_mode(),
