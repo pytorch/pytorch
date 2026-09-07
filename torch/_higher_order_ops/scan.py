@@ -35,7 +35,7 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     mask_list,
     materialize_as_graph,
-    move_bdim_to_front,
+    materialize_bdim_at_front,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -1162,7 +1162,7 @@ def scan_batch_rule(
     # JAX's _scan_batching_rule, so it matches the fresh contiguous carry combine_fn
     # returns and while_loop's front-batched carry when scan is nested inside one.
     unbatched_init = tuple(
-        move_bdim_to_front(t, bdim, batch_size)
+        materialize_bdim_at_front(t, bdim, batch_size)
         for t, bdim in zip(unbatched_init, init_dims)
     )
     # xs and the additional inputs keep their batch dim last, clear of the scan dim.
