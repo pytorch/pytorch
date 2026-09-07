@@ -1122,6 +1122,32 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_autocast_object_input(self):
+        def fn(x, ac):
+            with ac:
+                return torch.mm(x, x)
+
+        x = torch.randn(4, 4)
+        ac = torch.autocast("cpu", dtype=torch.bfloat16)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, ac)
+        same = torch.autocast("cpu", dtype=torch.bfloat16)
+        other = torch.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+        self._test_check_fn(ref, loaded, {"x": x, "ac": same}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "ac": other}, False)
+
+        # The EQUALS_MATCH filter above dropped TYPE_MATCH; without it a duck-typed object passes.
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, x, ac)
+
+        class DuckAutocast:
+            def __init__(self):
+                self.device = "cpu"
+                self.fast_dtype = torch.bfloat16
+                self._enabled = True
+                self._cache_enabled = True
+
+        self._test_check_fn(ref, loaded, {"x": x, "ac": same}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "ac": DuckAutocast()}, False)
+
     def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
         # Two functools.wraps helpers bound at module scope and called from one
         # frame is ordinary code; see the fixture for why both are rebuilt
