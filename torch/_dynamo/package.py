@@ -208,12 +208,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # file from the one the function lives in; a pickler that guards
         # __globals__ sends the snapshot variant instead. A module that only
         # existed in sys.modules at save (exec-created, transformers_modules.*)
-        # gets an empty scope: a guard never calls the rebuilt function.
+        # gets an empty scope. That is safe on the guard-serialization path,
+        # which reads attributes off the rebuilt function without calling it;
+        # the shared AOT path (AOTCompilePickler) does call it, so there an
+        # empty scope surfaces as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
         try:
             # A <locals>/exec function can carry __module__ is None (bare
-            # globals with no __name__); import_module(None) would raise
-            # AttributeError, not ImportError, so guard it into the empty scope.
+            # globals with no __name__); import_module(None) raises
+            # AttributeError and import_module("") raises ValueError, neither
+            # of which is the ImportError below, so guard both into the empty scope.
             f_globals = importlib.import_module(module).__dict__ if module else {}
         except ImportError:
             f_globals = {}
@@ -228,7 +232,10 @@ class FunctionPicklerBase(pickle.Pickler):
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # The scope arrives as pickle STATE, through _apply_function_state.
+        # The scope arrives as pickle STATE, through _apply_function_state. The
+        # {} is fresh per call, so two functions that shared one module dict at
+        # save get distinct __globals__ after load; deliberate and unobservable,
+        # since no serialized guard reads __globals__ identity.
         return cls._build_function({}, module, code, qualname, name, closure)
 
     @staticmethod
@@ -796,8 +803,10 @@ def _cpu_codegen_target_problem(
     exactly (march is the unresolved config knob, so two hosts recording None
     compare equal though -march=native expands differently -- benign, since the
     loading host supplies the actual flags); a wider host ISA is not a superset
-    here, its masked loads
-    zero-fill the lanes the narrower tiling never wrote. The ISA name and its
+    here, its masked loads zero-fill the lanes the narrower tiling never wrote.
+    simdlen is compared as its own component, not only through the resolved ISA,
+    so a host that would pick the same ISA under a different simdlen knob is
+    still rejected (fail-closed). The ISA name and its
     bit width must both agree: VecSVE(128) and VecSVE(256) share the name
     "asimd", so the name alone would accept a kernel tiled for the wrong width.
     The build macros disambiguate further: VecNEON and VecSVE(128) share both
@@ -1424,6 +1433,12 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
+        # A bypassed entry is never installed, so skip the device scan (and the
+        # C++ toolchain probe it can trigger), matching add_guarded_code and
+        # add_inlined_source. This can also run outside a code_context (no
+        # current entry), so it does not assert one is set the way they do.
+        if self._current_entry is not None and self._current_entry.bypassed:
+            return
         # An empty variant contributes no device, and a SymInt-first graph is not
         # "cpu": either misread bakes a cpu_codegen_target into a pure-accelerator
         # capture, which then refuses to load on a host with a different ISA.
