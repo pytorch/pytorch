@@ -53,22 +53,29 @@ set(BFLOAT_METAL_CODE "
     ptr[idx] += 1;
   }
 ")
-# Probes the MetalPerformancePrimitives surface that the Metal 4 kernels
-# actually use, not just the metal4.0 language standard. Some SDKs accept
-# -std=metal4.0 but do not provide the cooperative-tensor input accessors,
-# and there the language-only check passes and Attention_40.air then fails
-# to build. Mirrors the instantiation in MppAttention.h: half inputs with a
-# float accumulator, since that is what the build instantiates.
-set(LAMBDA_METAL_CODE "
+# Probes what the Metal 4.0 pass actually needs, rather than the language
+# standard alone. Two things drifted apart before: the pass compiles every
+# native/mps/*.metal shader with -std=metal4.0 -mmacos-version-min=26.2, and
+# some SDKs accept that standard while not providing the cooperative-tensor
+# input accessors MppAttention.h calls. A language-only probe then passes and
+# Attention_40.air fails to build.
+#
+# So probe both, with the flags the build uses:
+#   * a lambda returning a deduced type, as Convolution.metal does
+#   * the MPP instantiation from MppAttention.h, half inputs, float accumulator
+set(METAL_40_PROBE_CODE "
+#include <metal_stdlib>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
   kernel void test(device float* ptr,
                    uint idx [[thread_position_in_grid]]) {
+    auto fn = [](float x) { return x + 1.0; };
+    ptr[idx] = fn(ptr[idx]);
     constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
         16, 32, 16, false, false, true,
         mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
     mpp::tensor_ops::matmul2d<desc, metal::execution_simdgroup> gemm_op;
     auto ct_a = gemm_op.template get_left_input_cooperative_tensor<half, half, float>();
-    ptr[idx] = ct_a[0];
+    ptr[idx] += ct_a[0];
   }
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
@@ -86,8 +93,8 @@ if(NOT CAN_COMPILE_METAL_FOUND)
         set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
     endif()
     if(CAN_COMPILE_METAL)
-        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/lambda_test.metal" "${LAMBDA_METAL_CODE}")
-        execute_process(COMMAND xcrun metal -std=metal4.0 -c lambda_test.metal -o /dev/null
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/metal_40_probe.metal" "${METAL_40_PROBE_CODE}")
+        execute_process(COMMAND xcrun metal -std=metal4.0 -mmacos-version-min=26.2 -c metal_40_probe.metal -o /dev/null
                         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                         OUTPUT_VARIABLE XCRUN_OUTPUT
                         ERROR_VARIABLE XCRUN_OUTPUT
