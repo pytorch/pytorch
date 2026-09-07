@@ -715,6 +715,26 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_torch_compile_wrapper_passes_name(self):
+        captured_kwargs = {}
+
+        def my_custom_backend(gm, example_inputs, **kwargs):
+            captured_kwargs.update(kwargs)
+            return gm.forward
+
+        wrapper = torch._TorchCompileWrapper(
+            my_custom_backend, None, None, None, name="test_name"
+        )
+        self.assertEqual(wrapper.name, "test_name")
+        self.assertEqual(wrapper.kwargs.get("name"), "test_name")
+
+        @torch.compile(backend=my_custom_backend, name="test_compile_name")
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2))
+        self.assertEqual(captured_kwargs.get("name"), "test_compile_name")
+
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
         from torch._dynamo.exc import InvalidBackend
