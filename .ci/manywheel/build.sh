@@ -21,15 +21,9 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
 
         python3 "${SCRIPTPATH}/build_install_deps.py" "${PYTORCH_ROOT}"
 
-        # Unified manywheel jobs rebuild once per Python ABI on one runner.
-        # Each Python env installs its own `cmake`/`ninja` wheel, so each
-        # iteration would reconfigure with a different CMAKE_COMMAND. CMake bakes
-        # that absolute path into DEPFILE-based custom commands (the
-        # cmake_transform_depfile step of torch-xpu-ops SYCL device objects and
-        # other generated-file steps), so Ninja sees changed commands and
-        # recompiles the whole SYCL/ABI-free backend per Python. Pin the
-        # toolchain cmake/ninja from the first iteration so later ABI iterations
-        # keep identical commands and reuse the existing objects.
+        # Keep CMake and Ninja stable across Python ABI iterations. PATH alone is
+        # insufficient because scikit-build-core prefers its importable,
+        # per-environment cmake/ninja packages.
         shared_tools_dir="${RUNNER_TEMP:-/tmp}/pytorch-shared-build-tools"
         if [[ ! -x "${shared_tools_dir}/cmake" ]]; then
             mkdir -p "${shared_tools_dir}"
@@ -37,7 +31,9 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
             ln -sf "$(readlink -f "$(command -v ninja)")" "${shared_tools_dir}/ninja"
         fi
         PATH="${shared_tools_dir}:${PATH}"
-        export PATH
+        CMAKE_EXECUTABLE="$(readlink -f "${shared_tools_dir}/cmake")"
+        CMAKE_ARGS="${CMAKE_ARGS:-} -DCMAKE_MAKE_PROGRAM=$(readlink -f "${shared_tools_dir}/ninja")"
+        export PATH CMAKE_EXECUTABLE CMAKE_ARGS
 
         : "${PYTORCH_FINAL_PACKAGE_DIR:=/artifacts}"
         mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}"
