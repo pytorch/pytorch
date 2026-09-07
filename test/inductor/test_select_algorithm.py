@@ -1363,6 +1363,96 @@ class TestTemplateRender(TestCase):
                 kernels[0]
             )
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    def test_extra_signature_constexprs_promotes_meta_key(self):
+        """Meta params can be moved from the template body into the signature.
+
+        By default a meta param is rendered as a body define, so every value
+        renders the same kernel signature. A backend whose autotuner varies
+        Config(kwargs) needs the param in the signature instead, so each value
+        is a distinct specialization. extra_signature_constexprs() promotes it;
+        gen_defines() drops it from the body so it is not declared twice.
+        """
+        import re
+
+        class PromotingTemplateKernel(TritonTemplateKernel):
+            def extra_signature_constexprs(self) -> list[str]:
+                return ["BLOCK_SIZE"]
+
+            def gen_defines(self):
+                return "".join(
+                    f"{line}\n"
+                    for line in super().gen_defines().splitlines()
+                    if "BLOCK_SIZE" not in line
+                )
+
+        class PromotingTritonTemplate(TritonTemplate):
+            kernel_type = PromotingTemplateKernel
+
+        BLOCK_SIZE = 32
+
+        add_template = PromotingTritonTemplate(
+            name="promoted_add",
+            grid=lambda *args, **kwargs: (1, 1, 1),
+            source=(
+                r"""
+{{def_kernel("A", "B")}}
+    xoffset = tl.program_id(0)
+    xindex = xoffset + tl.arange(0, BLOCK_SIZE)
+    xmask = tl.full([BLOCK_SIZE], True, tl.int1)
+    tmp0 = tl.load(A + xindex)
+    tmp1 = tl.load(B + xindex)
+    tmp2 = tmp0 + tmp1
+    {{store_output(("xindex",), "tmp2", mask="xmask", val_shape=("BLOCK_SIZE",))}}
+    """
+            ),
+        )
+
+        def add_override(a, b, alpha=None):
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            choices = []
+            add_template.maybe_append_choice(
+                choices,
+                input_nodes=(a, b),
+                layout=layout,
+                num_stages=1,
+                num_warps=2,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+            node, _ = autotune_select_algorithm("promoted_add", choices, [a, b], layout)
+            return node
+
+        with patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        ):
+
+            @torch.compile
+            def add(a, b):
+                return a + b
+
+            a = torch.zeros((BLOCK_SIZE,), device=GPU_TYPE)
+            b = torch.zeros((BLOCK_SIZE,), device=GPU_TYPE)
+
+            _result, kernels = run_and_get_kernels(add, a, b)
+
+        self.assertEqual(len(kernels), 1)
+        kernel = kernels[0]
+        signature = kernel.split("):", 1)[0]
+
+        # Promoted into the signature ...
+        self.assertRegex(signature, r"BLOCK_SIZE\s*:\s*tl\.constexpr")
+        # ... and not also declared as a body define.
+        self.assertIsNone(re.search(r"BLOCK_SIZE\s*:\s*tl\.constexpr\s*=", kernel))
+
     def test_subgraph_nodes_participate_in_template_index_dtype(self):
         """Covers implicit template buffers that are not explicit arguments."""
         import sympy
