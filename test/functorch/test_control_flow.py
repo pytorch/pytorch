@@ -38,6 +38,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
@@ -12735,6 +12736,7 @@ class <lambda>(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
     @skipCUDAIf(not SM70OrLater, "triton")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5193")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
         class M(torch.nn.Module):
@@ -13875,20 +13877,26 @@ class TestControlFlowAndRNGCUDA(TestCase):
             self.assertEqual(out.shape, x.shape)
 
 
-only_for = ("cpu", "cuda")
+only_for = ("cpu", "cuda", "xpu")
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
-instantiate_device_type_tests(TestControlFlowTracedDevice, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestControlFlowTracedDevice, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 instantiate_device_type_tests(
-    TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for
+    TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for, allow_xpu=True
 )
 
 instantiate_parametrized_tests(TestControlFlow)
-instantiate_device_type_tests(TestControlFlowDevice, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestControlFlowDevice, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_parametrized_tests(AssociativeScanTests)
-instantiate_device_type_tests(AssociativeScanTestsDevice, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    AssociativeScanTestsDevice, globals(), only_for=only_for, allow_xpu=True
+)
 
 instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
