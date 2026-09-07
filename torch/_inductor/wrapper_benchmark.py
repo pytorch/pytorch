@@ -403,14 +403,27 @@ def ncu_analyzer(
 def collect_memory_snapshot(
     benchmark_compiled_module_fn: BenchmarkCallableType,
 ) -> None:
-    if not torch.cuda.is_available():
-        raise AssertionError("CUDA is not available")
+    # check_available matters: without it we may get a built-but-unavailable
+    # accelerator and the snapshot calls below would fail with a runtime error
+    acc = torch.accelerator.current_accelerator(check_available=True)
+    if acc is None:
+        raise AssertionError("No accelerator is available")
 
-    torch.cuda.memory._record_memory_history(max_entries=100000)
+    # not every device module exposes a memory submodule (e.g. mps) or
+    # implements snapshots; skip gracefully instead of crashing
+    mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+    if mem_mod is None or not (
+        hasattr(mem_mod, "_record_memory_history")
+        and hasattr(mem_mod, "_dump_snapshot")
+    ):
+        print(f"Memory snapshot is not supported on {acc.type}, skipping")
+        return
+
+    mem_mod._record_memory_history(max_entries=100000)
     benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
     snapshot_path = f"{tempfile.gettempdir()}/memory_snapshot.pickle"
-    torch.cuda.memory._dump_snapshot(snapshot_path)
-    torch.cuda.memory._record_memory_history(enabled=None)
+    mem_mod._dump_snapshot(snapshot_path)
+    mem_mod._record_memory_history(enabled=None)
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
@@ -445,10 +458,11 @@ def compiled_module_main(
         help="Whether to profile the compiled module",
     )
     parser.add_argument(
+        "--memory-snapshot",
         "--cuda-memory-snapshot",
         action="store_true",
         help="""
-            Whether to collect CUDA memory snapshot. Refer to
+            Whether to collect accelerator memory snapshot. Refer to
             "https://pytorch.org/blog/understanding-gpu-memory-1/
             for details about how to visualize the collected snapshot
         """,
@@ -498,15 +512,19 @@ def compiled_module_main(
         times = args.times
         repeat = args.repeat
 
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
+        # check_available: report peak memory only when the accelerator is
+        # actually usable, matching the old torch.cuda.is_available() gating
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        if acc is not None:
+            torch.accelerator.reset_peak_memory_stats()
+
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
-        if torch.cuda.is_available():
-            peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
+        if acc is not None:
+            peak_mem = torch.accelerator.max_memory_allocated()
+            print(f"Peak {acc.type.upper()} memory usage {peak_mem / 1e6:.3f} MB")
 
-        if torch.cuda.is_available() and args.cuda_memory_snapshot:
+        if acc is not None and args.memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)
 
         if args.profile:
