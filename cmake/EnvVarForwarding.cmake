@@ -26,6 +26,11 @@
 #                            is set)
 #   USE_CUDA=0, BUILD_TEST=0, ...   feature toggles, next section
 #   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "8.0;9.0"
+#   TORCH_NATIVE_AOT=0       skip the native-AOT stage-2 step (export DSL
+#                            kernels, relink them into libtorch_cuda). Honored by
+#                            both tools/native_aot/build_stage2.py and the
+#                            generated build/native_aot/native_aot.cmake. Not
+#                            forwarded: both sides read the environment directly
 #
 # Feature toggles (USE_*/BUILD_*, forwarded by prefix):
 #   USE_CUDA=0                disables CUDA build
@@ -54,6 +59,7 @@
 #   USE_ROCM_KERNEL_ASSERT=1 enables kernel assert on ROCm
 #   USE_ROCM_CK_GEMM=1       builds the CK GEMM backend on ROCm
 #   USE_ROCM_CK_SDPA=1       builds the CK SDPA backend on ROCm
+#   USE_ROCM_CK_SDPA_GFX12=1 enables CK SDPA for targeted gfx12 architectures
 #   USE_LAYERNORM_FAST_RECIPROCAL  fast reciprocals for layer norm (default on)
 #   USE_MIMALLOC             static-link mimalloc into c10 (default: Windows/AArch64)
 #   USE_CUSTOM_DEBINFO="a.cpp;b.cpp"  build debug info only for the listed files

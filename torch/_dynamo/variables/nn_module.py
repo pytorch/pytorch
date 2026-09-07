@@ -1097,6 +1097,90 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, submod))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
+    def _inline_nn_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        fn = getattr(module, name).__func__
+        fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn, source=fn_source),
+            [self] + list(args),
+            kwargs,
+        )
+
+    def _check_input_dim(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .constant import ConstantVariable
+
+        module = tx.output.get_submodule(self.module_key)
+        check = getattr(type(module), "_check_input_dim", None)
+        if check is None:
+            return None
+        try:
+            filename = inspect.getfile(check)
+        except TypeError:
+            return None
+        if not trace_rules.is_torch_inline_allowed(filename):
+            return None
+        return ConstantVariable.create(True)
+
+    def _module_contains(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict)):
+            return None
+        if not item.is_python_constant():
+            return None
+        return VariableTracker.build(tx, item.as_python_constant() in module)
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        result = self._module_contains(tx, item)
+        if result is not None:
+            return result
+        return super().sq_contains_impl(tx, item)
+
+    def _get_abs_string_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._inline_nn_method(tx, "_get_abs_string_index", args, kwargs)
+
+    def _conv_forward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvNd):
+            return None
+        return self._inline_nn_method(tx, "_conv_forward", args, kwargs)
+
+    def _output_padding(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvTransposeNd):
+            return None
+        return self._inline_nn_method(tx, "_output_padding", args, kwargs)
+
     tp_methods = {
         "_call_impl": Method(_call_impl),
         "_wrapped_call_impl": Method(_call_impl),
@@ -1113,6 +1197,10 @@ class NNModuleVariable(VariableTracker):
         "keys": Method(keys),
         "values": Method(values),
         "items": Method(items),
+        "_check_input_dim": Method(_check_input_dim),
+        "_get_abs_string_index": Method(_get_abs_string_index),
+        "_conv_forward": Method(_conv_forward),
+        "_output_padding": Method(_output_padding),
     }
 
     def call_method(
@@ -1123,62 +1211,28 @@ class NNModuleVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
-        from .constant import ConstantVariable
-
         module = tx.output.get_submodule(self.module_key)
 
-        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
-            inspect.getfile(module.__class__._check_input_dim)  # type: ignore[union-attr]
-        ):
-            return ConstantVariable.create(True)
-
+        # `constant=` is a Dynamo-internal extra arg from UserMethodVariable,
+        # not a Python method. Base call_method cannot take it.
         if constant:
             fn = getattr(module, name)
             const_name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, const_name, args, kwargs)
 
-        if name == "__iter__":
-            return self.tp_iter_impl(tx)
-        elif (
-            name == "__contains__"
-            and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
-            and args
-            and args[0].is_python_constant()
-        ):
-            return VariableTracker.build(
-                tx, args[0].as_python_constant() in module._modules
-            )
-        elif (
-            name == "_get_abs_string_index"
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvNd)
-                and name == "_conv_forward"
-            )
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
-                and name == "_output_padding"
-            )
-        ):
-            # Inline the function
-            fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=fn_source),
-                [self] + list(args),
-                kwargs,
-            )
-        # A loose heuristic, but seems to be generally good before we drop into
-        # the manual handling of inputs. Skip tp_methods names so they reach the
-        # declarative dispatch in the base call_method.
-        elif (
+        # Loose heuristic for remaining class methods with all-tensor args.
+        # Skip tp_methods and slot names so they reach base call_method.
+        # Empty-args calls (e.g. __iter__) would otherwise match
+        # `all(x.is_tensor() for x in ())`.
+        if (
             name not in self.tp_methods
+            and self.lookup_slotdefs(name) is None
             and name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
             and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
             return self._generic_call_method_helper(tx, name, args, kwargs)
-        else:
-            return super().call_method(tx, name, list(args), kwargs)
+        return super().call_method(tx, name, list(args), kwargs)
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Sequence length for container modules (e.g., nn.Sequential)."""
