@@ -1597,6 +1597,25 @@ include_patterns = [
 ]
 
 [[linter]]
+code = 'LICENSE_FILES'
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.10',
+    '--script',
+    'tools/linter/adapters/license_files_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    'pyproject.toml',
+    'test/test_license.py',
+    'tools/linter/license_files_audit.py',
+    'tools/linter/license_audit_manifest.toml',
+]
+
+[[linter]]
 code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'uv',
