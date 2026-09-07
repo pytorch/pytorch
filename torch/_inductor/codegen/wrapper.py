@@ -1514,7 +1514,7 @@ class PythonWrapperCodegen(CodeGen):
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol
-        self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
+        self.computed_sizes: OrderedSet[tuple[sympy.Symbol, int]] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -2104,7 +2104,10 @@ class PythonWrapperCodegen(CodeGen):
         return name
 
     def get_codegened_graph(self):
-        return self.codegened_graph_stack[-1]
+        if self.codegened_graph_stack:
+            return self.codegened_graph_stack[-1]
+        # Graph partition wrappers are generated without pushing onto the stack.
+        return V.graph
 
     def push_codegened_graph(self, graph):
         self.codegened_graph_stack.append(graph)
@@ -3019,12 +3022,14 @@ class PythonWrapperCodegen(CodeGen):
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
-            if sym in self.computed_sizes:
+            graph = self.get_codegened_graph()
+            key = (sym, id(graph))
+            if key in self.computed_sizes:
                 return
-            self.computed_sizes.add(sym)
-            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.computed_sizes.add(key)
+            expr = graph.sizevars.inv_precomputed_replacements[sym]
             arg = SymbolicCallArg(sym, expr)
-            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+            self.writeline(SymbolicCallArgLine(self, arg, graph))
 
     def finalize_prefix(self):
         pass
@@ -3958,6 +3963,8 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def prepare_triton_kernel_call(self, call_args):
+        graph = self.get_codegened_graph()
+
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -3965,11 +3972,12 @@ class PythonWrapperCodegen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return pexpr(V.graph.sizevars.simplify(arg))
+                return pexpr(graph.sizevars.simplify(arg))
 
         return [wrap_arg(arg) for arg in call_args]
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
+        graph = self.get_codegened_graph()
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -3989,15 +3997,15 @@ class PythonWrapperCodegen(CodeGen):
 
             if buf is None:
                 raise AssertionError(f"Failed to find a buffer for arg {arg}")
-            size = V.graph.sizevars.optimization_hints(buf.get_size())
-            allocation_size = V.graph.sizevars.optimization_hints(
-                V.graph.get_allocation_size(buf)
+            size = graph.sizevars.optimization_hints(buf.get_size())
+            allocation_size = graph.sizevars.optimization_hints(
+                graph.get_allocation_size(buf)
             )
-            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+            stride = graph.sizevars.optimization_hints(buf.get_stride())
 
             device = buf.get_device()
             dtype = buf.get_dtype()
-            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
+            offset = graph.sizevars.optimization_hint(buf.get_layout().offset)
             value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
@@ -4022,10 +4030,10 @@ class PythonWrapperCodegen(CodeGen):
                 arg = raw_arg
             if isinstance(arg, SymbolicCallArg):
                 arg = arg.inner_expr
-            if arg in V.graph.sizevars.inv_precomputed_replacements:
-                arg = V.graph.sizevars.inv_precomputed_replacements[arg]
+            if arg in graph.sizevars.inv_precomputed_replacements:
+                arg = graph.sizevars.inv_precomputed_replacements[arg]
 
-            return str(V.graph.sizevars.optimization_hint(arg))
+            return str(graph.sizevars.optimization_hint(arg))
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
@@ -4848,7 +4856,6 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_subgraph_common(self, subgraph):
-        self.push_codegened_graph(subgraph.graph)
         self.make_comment("")
         self.make_comment(f"{self.comment} subgraph: {subgraph.name}")
 

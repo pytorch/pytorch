@@ -3075,6 +3075,156 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @requires_autotune_at_compile_time
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
+    def test_cond_dynamic_intermediate_autotune_inputs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        # The two levels make the parent and cond graphs assign ps0 to different
+        # expressions; size 128 makes the parent's value unsafe in the branch kernel.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.regularisation = torch.nn.Parameter(torch.tensor(1e-5))
+                self.n_small_iteration = 1
+                self.n_big_iteration = 1
+
+            def neighbors(self, x):
+                padded = torch.nn.functional.pad(x, [1, 1, 1, 1], mode="reflect")
+                return (
+                    padded[:, :, 1:-1, :-2],
+                    padded[:, :, 1:-1, 2:],
+                    padded[:, :, :-2, 1:-1],
+                    padded[:, :, 2:, 1:-1],
+                )
+
+            def run_sweeps(
+                self,
+                n_iteration,
+                fb,
+                aximage,
+                w_l,
+                w_r,
+                w_t,
+                w_b,
+                b00,
+                b01,
+                b11,
+            ):
+                for _ in range(n_iteration):
+                    fb_l, fb_r, fb_t, fb_b = self.neighbors(fb)
+                    unknown = (
+                        w_l * fb_l
+                        + w_r * fb_r
+                        + w_t * fb_t
+                        + w_b * fb_b
+                        + aximage
+                    )
+                    unknown_f, unknown_b = unknown[0:1], unknown[1:2]
+                    fb = torch.clip(
+                        torch.cat(
+                            [
+                                b00 * unknown_f + b01 * unknown_b,
+                                b01 * unknown_f + b11 * unknown_b,
+                            ]
+                        ),
+                        0,
+                        1,
+                    )
+                return fb
+
+            def forward(self, image, mask):
+                def true_fn(fb, aximage, w_l, w_r, w_t, w_b, b00, b01, b11):
+                    return self.run_sweeps(
+                        self.n_small_iteration,
+                        fb,
+                        aximage,
+                        w_l,
+                        w_r,
+                        w_t,
+                        w_b,
+                        b00,
+                        b01,
+                        b11,
+                    )
+
+                def false_fn(fb, aximage, w_l, w_r, w_t, w_b, b00, b01, b11):
+                    return self.run_sweeps(
+                        self.n_big_iteration,
+                        fb,
+                        aximage,
+                        w_l,
+                        w_r,
+                        w_t,
+                        w_b,
+                        b00,
+                        b01,
+                        b11,
+                    )
+
+                f = torch.nn.functional.interpolate(image, (1, 1), mode="bilinear")
+                fb = torch.cat([f, f], dim=0)
+                for level in range(1, 3):
+                    divisor = 2 ** (2 - level)
+                    h = 2 + (image.shape[2] - 2 + divisor - 1) // divisor
+                    w = 2 + (image.shape[3] - 2 + divisor - 1) // divisor
+                    image_level = torch.nn.functional.interpolate(
+                        image, (h, w), mode="bilinear"
+                    )
+                    mask_level = torch.nn.functional.interpolate(
+                        mask, (h, w), mode="bilinear"
+                    )
+                    fb = torch.nn.functional.interpolate(fb, (h, w), mode="bilinear")
+                    a0 = mask_level
+                    a1 = 1 - a0
+                    aximage = torch.cat((a0, a1)) * image_level
+                    m_l, m_r, m_t, m_b = self.neighbors(mask_level)
+                    w_l = self.regularisation + torch.abs(a0 - m_l)
+                    w_r = self.regularisation + torch.abs(a0 - m_r)
+                    w_t = self.regularisation + torch.abs(a0 - m_t)
+                    w_b = self.regularisation + torch.abs(a0 - m_b)
+                    gradient_sum = w_l + w_r + w_t + w_b
+                    a00 = a0 * a0 + gradient_sum
+                    a11 = a1 * a1 + gradient_sum
+                    a01 = a0 * a1
+                    inv_det = 1 / (a00 * a11 - a01 * a01)
+                    b00, b01, b11 = inv_det * a11, -inv_det * a01, inv_det * a00
+                    pred = (
+                        torch.full((), h, dtype=torch.int64, device=image.device) <= 32
+                    ) & (
+                        torch.full((), w, dtype=torch.int64, device=image.device) <= 32
+                    )
+                    fb = torch.cond(
+                        pred,
+                        true_fn,
+                        false_fn,
+                        (fb, aximage, w_l, w_r, w_t, w_b, b00, b01, b11),
+                    )
+                return fb.chunk(2)
+
+        inputs = (
+            torch.rand(1, 3, 128, 128, device=self.device),
+            torch.rand(1, 1, 128, 128, device=self.device),
+        )
+        model = Model().to(self.device).eval()
+        h = Dim("h", min=2, max=6000)
+        w = Dim("w", min=2, max=6000)
+        spatial = {2: h, 3: w}
+        with torch.no_grad():
+            expected = model(*inputs)
+            compiled_model = torch.compile(model, fullgraph=True, dynamic=True)
+            self.assertEqual(compiled_model(*inputs), expected)
+            ep = torch.export.export(
+                model,
+                inputs,
+                dynamic_shapes=(spatial, spatial),
+                strict=False,
+            )
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+        aoti_model = torch._inductor.aoti_load_package(package_path)
+        self.assertEqual(aoti_model(*inputs), expected)
+
     @common_utils.parametrize("max_autotune", [False, True])
     def test_cond_cpu_predicate_cuda_operands(self, max_autotune):
         """
