@@ -1,10 +1,16 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
+import contextvars
 import dataclasses
+import functools
 import inspect
+import logging
 import os
+import threading
+import time
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -20,15 +26,178 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
+from torch._subclasses.fake_tensor import is_fake
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+log = logging.getLogger(__name__)
+
+
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
     return os.path.join(cache_dir(), "quack")
+
+
+_CONFIG_SELECTION: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
+    "flex_gemm_config_selection", default=None
+)
+
+
+@contextlib.contextmanager
+def select_flex_gemm_configs():
+    """Collect QuACK's legal GemmConfigs without launching the generated call."""
+    configs: list[Any] = []
+    token = _CONFIG_SELECTION.set(configs)
+    try:
+        yield configs
+    finally:
+        _CONFIG_SELECTION.reset(token)
+
+
+class _InductorCompileExecutor(concurrent.futures.Executor):
+    """Run QuACK's GPU-blind compile worker in Inductor's process pool.
+
+    Inductor owns the pool's lifetime, so the inherited ``shutdown`` is a no-op.
+    """
+
+    def __init__(self, quack_arch: str | None, cute_dsl_arch: str | None) -> None:
+        self.arch = (quack_arch, cute_dsl_arch)
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+        from torch._inductor.async_compile import AsyncCompile
+
+        return AsyncCompile.process_pool().submit(
+            _flex_gemm_compile_worker, *self.arch, fn, *args, **kwargs
+        )
+
+
+@functools.cache
+def _init_flex_gemm_compile_worker(
+    quack_arch: str | None, cute_dsl_arch: str | None
+) -> None:
+    """Pin QuACK's dispatch and ptxas arch once per Inductor compile worker."""
+    from torch._vendor.quack.cache import async_compile as quack_async
+
+    if quack_arch is not None:
+        os.environ["QUACK_ARCH"] = quack_arch
+    if cute_dsl_arch is not None:
+        os.environ["CUTE_DSL_ARCH"] = cute_dsl_arch
+    import torch._vendor.quack.cache  # noqa: F401
+
+    quack_async._pin_dsl_arch(cute_dsl_arch)
+    if quack_arch is not None:
+        quack_async._install_gpu_blind_device_attrs()
+
+
+def _flex_gemm_compile_worker(
+    quack_arch: str | None,
+    cute_dsl_arch: str | None,
+    fn: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> str | None:
+    """Run one QuACK pool job inside an Inductor compile worker."""
+    _init_flex_gemm_compile_worker(quack_arch, cute_dsl_arch)
+    return fn(*args, **kwargs)
+
+
+_PRECOMPILE_LOCK = threading.Lock()
+_PRECOMPILE_POOL: Any = None
+
+
+def precompile_flex_gemm_kernel(run: Callable[[], None], *, wait: bool = True) -> None:
+    """Compile the QuACK kernel ``run`` needs in Inductor's worker pool.
+
+    ``run`` invokes the generated kernel on real tensors; with QuACK's compile
+    pool active, a cold ``jit_cache`` miss ships the pickled compile arguments
+    to a worker and raises ``CompilePending`` instead of compiling in-process.
+    Submission is serialized (QuACK's pool bookkeeping is single-threaded) and
+    the pool is active only inside that window, so kernels launched anywhere
+    else, including Inductor's benchmark loop, never see it. Without ``wait``
+    the compile overlaps the rest of Inductor's compilation; a first call that
+    arrives early blocks on QuACK's per-key file lock and then loads the result.
+    """
+    from torch._vendor.quack.cache import async_compile as quack_async
+
+    global _PRECOMPILE_POOL
+    with _PRECOMPILE_LOCK:
+        if _PRECOMPILE_POOL is None:
+            _PRECOMPILE_POOL = quack_async.CompilePool(
+                executor=_InductorCompileExecutor(*quack_async._detect_arch_env())
+            )
+        pool = _PRECOMPILE_POOL
+        previous = quack_async._active_pool
+        quack_async._active_pool = pool
+        try:
+            run()
+            return
+        except quack_async.CompilePending as pending:
+            sha = pending.sha
+        finally:
+            quack_async._active_pool = previous
+    if not wait:
+        return
+    while pool.poll(sha)[0] == "pending":
+        time.sleep(0.02)
+    state, error = pool.poll(sha)
+    if state != "done":
+        log.warning(
+            "FlexGEMM worker precompile failed (%s); compiling in-process", error
+        )
+
+
+def flex_gemm_candidate_configs(
+    epimod: Any,
+    a: torch.Tensor,
+    b: torch.Tensor,
+    sfa: torch.Tensor | None,
+    output_buffers: dict[str, torch.Tensor],
+    operands: dict[str, Any],
+    config_constraints: tuple[tuple[str, Any], ...],
+    concat_layout: Any,
+) -> list[Any]:
+    """Return QuACK's legal configs for this call, its untuned default first.
+
+    Mirrors ``EpiMod.__call__``'s selection: the per-arch default leads when it
+    is legal, followed by every other candidate the EpiMod's ops accept.
+    """
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+    from torch._vendor.quack.gemm_config import (
+        blockscaled_default_config,
+        default_config,
+    )
+    from torch._vendor.quack.gemm_runtime.autotune import (
+        _legal_mod_configs,
+        mod_selection_args,
+    )
+
+    device = a.device
+    capacity = get_device_capacity(device)[0]
+    b_kn = capacity >= 9 and not concat_layout
+    named_args = mod_selection_args(
+        operands,
+        {name: output_buffers[name] for name in epimod.outputs},
+        A=a,
+        B=b if b_kn else b.mT,
+        b_kn=b_kn,
+        SFA=sfa,
+        concat_layout=concat_layout,
+    )
+    preferred = (
+        blockscaled_default_config(a.shape[-2], b.shape[-1], device_capacity=capacity)
+        if sfa is not None
+        else default_config(device)
+    )
+    return _legal_mod_configs(
+        epimod,
+        device,
+        config_constraints,
+        named_args,
+        preferred_config=preferred,
+    )
 
 
 # NOTE [Byte-backed epilogue tensor storage]
@@ -132,10 +301,9 @@ def flex_gemm_epimod(
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
-    fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
 ):
-    """Build and cache a QuACK EpiMod from generated FlexGEMM metadata."""
+    """Build and cache a QuACK TensorSSA EpiMod from generated FlexGEMM metadata."""
     epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
     key = (
         epilogue_fn,
@@ -143,7 +311,6 @@ def flex_gemm_epimod(
         epilogue_arg_dtypes,
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
-        fragmentwise,
         main_transform,
     )
     epimod = _EPIMOD_CACHE.get(key)
@@ -162,7 +329,7 @@ def flex_gemm_epimod(
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
     }
-    ops = {}
+    ops: dict[str, Any] = {}
     for index, (arg, kind) in enumerate(
         zip(epilogue_args, epilogue_arg_kinds, strict=True)
     ):
@@ -178,12 +345,11 @@ def flex_gemm_epimod(
             epi_ops.GroupedMainStore(
                 "main",
                 main_transform.group,
-                paired=not fragmentwise and main_transform.group == 2,
             ),
         )
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
-    sinks = {}
+    sinks: dict[str, Any] = {}
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
@@ -261,34 +427,13 @@ def flex_gemm_epimod(
                 ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
             else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-    if fragmentwise:
-        epimod = epilogue_module.fragment_epilogue(
-            outputs=outputs,
-            ops=ops,
-            outs=sinks,
-            prepass=prepass,
-            prepass_outs=prepass_outs,
-        )(epilogue_fn)
-    else:
-        epimod = epilogue_module.gemm_epilogue(
-            outputs=outputs,
-            ops=ops,
-            outs=sinks,
-            mode=(
-                "acc_pair"
-                if main_transform is not None and main_transform.group == 2
-                else None
-            ),
-            prepass=prepass,
-            prepass_outs=prepass_outs,
-            vectorize=(
-                False
-                if main_transform is not None
-                and main_transform.group == 2
-                and local_reduce is not None
-                else None
-            ),
-        )(epilogue_fn)
+    epimod = epilogue_module.fragment_epilogue(
+        outputs=outputs,
+        ops=ops,
+        outs=sinks,
+        prepass=prepass,
+        prepass_outs=prepass_outs,
+    )(epilogue_fn)
     _EPIMOD_CACHE[key] = epimod
     return epimod
 
@@ -306,13 +451,16 @@ def gemm_epimod(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
-    fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
-    tuned: bool = False,
+    config: tuple[tuple[str, Any], ...] | None = None,
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense FlexGEMM call through the vendored QuACK EpiMod."""
+    """Run a dense FlexGEMM call through the vendored QuACK EpiMod.
+
+    ``config`` pins the exact GemmConfig Inductor selected; ``None`` takes
+    QuACK's untuned default for the remaining ``config_constraints``.
+    """
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
@@ -324,7 +472,6 @@ def gemm_epimod(
         epilogue_arg_kinds,
         len(aux_outs),
         local_reduce,
-        fragmentwise,
         main_transform,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
@@ -394,6 +541,31 @@ def gemm_epimod(
             ),
         }
     )
+    main_name = "main" if main_transform is not None else "D"
+    concat_layout = None if main_transform is None else main_transform.concat_layout
+    legal_configs = _CONFIG_SELECTION.get()
+    if legal_configs is not None:
+        if not is_fake(a):
+            raise AssertionError("FlexGEMM config probe reached a real GEMM call")
+        legal_configs.extend(
+            flex_gemm_candidate_configs(
+                epimod,
+                a,
+                b,
+                None,
+                output_buffers,
+                operands,
+                config_constraints,
+                concat_layout,
+            )
+        )
+        return output_buffers[main_name]
+    if config is not None:
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        quack_config = GemmConfig(**dict(config))
+    else:
+        quack_config = None
     stream_context = (
         torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
         if stream is not None
@@ -410,12 +582,11 @@ def gemm_epimod(
             out=output_buffers,
             out_dtype=out.dtype,
             store_d=main_transform is None,
-            config=None,
+            config=quack_config,
             config_constraints=config_constraints,
-            tuned=tuned,
-            concat_layout=(
-                None if main_transform is None else main_transform.concat_layout
-            ),
+            tuned=False,
+            concat_layout=concat_layout,
+            compile_dispatch=False,
             **operands,
         )
-    return result["main" if main_transform is not None else "D"]
+    return result[main_name]

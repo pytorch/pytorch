@@ -475,18 +475,33 @@ def mod_selection_args(
     }
 
 
-def _select_mod_config(
+def _legal_mod_configs(
     mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
 ):
-    """Return the preferred native config when legal, or the first supported one."""
+    """Return every supported native config, with the preferred one first when legal."""
     constraints = canonicalize_config_constraints(config_constraints)
     configs = _config_space(mod, device, constraints)
     if preferred_config in configs:
         configs = [preferred_config, *(config for config in configs if config != preferred_config)]
     candidates = [AutotuneConfig(config=config) for config in configs]
-    return _prune_for_mod(mod, transform_a, candidates, named_args, config_constraints=constraints)[
-        0
-    ].kwargs["config"]
+    survivors = _prune_for_mod(
+        mod, transform_a, candidates, named_args, config_constraints=constraints
+    )
+    return [candidate.kwargs["config"] for candidate in survivors]
+
+
+def _select_mod_config(
+    mod, device, config_constraints, named_args, *, preferred_config=None, transform_a=None
+):
+    """Return the preferred native config when legal, or the first supported one."""
+    return _legal_mod_configs(
+        mod,
+        device,
+        config_constraints,
+        named_args,
+        preferred_config=preferred_config,
+        transform_a=transform_a,
+    )[0]
 
 
 def tuned_mod_gemm(

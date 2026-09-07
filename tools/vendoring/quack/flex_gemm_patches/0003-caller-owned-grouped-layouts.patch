@@ -1,21 +1,21 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 0643ea1..531b066 100644
+index ce5435a..8fbc0a1 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1054,0 +1055 @@ class EpiMod:
+@@ -1064,0 +1065 @@ class EpiMod:
 +                        swap_ab=swap_ab,
-@@ -1087,0 +1089 @@ class EpiMod:
+@@ -1097,0 +1099 @@ class EpiMod:
 +                    swap_ab=swap_ab,
-@@ -1136,0 +1139 @@ class EpiMod:
+@@ -1146,0 +1149 @@ class EpiMod:
 +                        swap_ab=swap_ab,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index 994431b..8248bd2 100644
+index 5342fb0..85bf548 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -2587 +2587 @@ class GroupedColStatsOut(EpiOp):
+@@ -2606 +2606 @@ class GroupedColStatsOut(EpiOp):
 -    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
 +    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
-@@ -2988 +2988 @@ class ColVecSelect(EpiOp):
+@@ -3007 +3007 @@ class ColVecSelect(EpiOp):
 -    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
 +    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
 diff --git a/quack/gemm_base.py b/quack/gemm_base.py
