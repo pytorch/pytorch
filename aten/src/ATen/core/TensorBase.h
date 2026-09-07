@@ -1027,31 +1027,28 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
 namespace symint {
 
 template <typename T>
-    requires std::is_same_v<T, c10::SymInt>
-c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
+concept is_symint = std::is_same_v<T, c10::SymInt>;
 template <typename T>
-    requires std::is_same_v<T, int64_t>
+concept is_int = std::is_same_v<T, int64_t>;
+
+template <is_symint T>
+c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
+template <is_int T>
 IntArrayRef sizes(const TensorBase& t) { return t.sizes(); }
 
-template <typename T>
-    requires std::is_same_v<T, c10::SymInt>
+template <is_symint T>
 c10::SymInt size(const TensorBase& t, int64_t dim) { return t.sym_size(dim); }
-template <typename T>
-    requires std::is_same_v<T, int64_t>
+template <is_int T>
 int64_t size(const TensorBase& t, int64_t dim) { return t.size(dim); }
 
-template <typename T>
-    requires std::is_same_v<T, c10::SymInt>
+template <is_symint T>
 c10::SymIntArrayRef strides(const TensorBase& t) { return t.sym_strides(); }
-template <typename T>
-    requires std::is_same_v<T, int64_t>
+template <is_int T>
 IntArrayRef strides(const TensorBase& t) { return t.strides(); }
 
-template <typename T>
-    requires std::is_same_v<T, c10::SymInt>
+template <is_symint T>
 c10::SymInt numel(const TensorBase& t) { return t.sym_numel(); }
-template <typename T>
-    requires std::is_same_v<T, int64_t>
+template <is_int T>
 int64_t numel(const TensorBase& t) { return t.numel(); }
 
 } // namespace symint
