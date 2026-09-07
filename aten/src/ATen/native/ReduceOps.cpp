@@ -330,7 +330,7 @@ static ScalarType get_result_or_self_value_dtype(
 
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
       "norm(): input dtype should be either floating point or complex. "
       "Got ", self.scalar_type(), " instead.");
