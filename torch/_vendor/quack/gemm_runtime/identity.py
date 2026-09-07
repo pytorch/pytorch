@@ -120,8 +120,21 @@ def semantic_value_key(value, seen, *, force_source=False):
             semantic_value_key(value.keywords, seen, force_source=force_source),
         )
     if inspect.isclass(value):
+        if force_source and not (
+            value.__module__ == "torch._vendor.quack" or value.__module__.startswith("torch._vendor.quack.")
+        ):
+            raise TypeError(
+                f"cannot fingerprint callable class {value!r}; use a function wrapper "
+                "or a callable instance implementing __quack_semantic_key__"
+            )
         return ("class", value.__module__, value.__qualname__)
     if dataclasses.is_dataclass(value):
+        if callable(value) and not (
+            type(value).__module__ == "torch._vendor.quack" or type(value).__module__.startswith("torch._vendor.quack.")
+        ):
+            raise TypeError(
+                f"cannot fingerprint callable dataclass {value!r}; implement __quack_semantic_key__"
+            )
         marker = ("id", id(value))
         if marker in seen:
             return ("dataclass_ref", type(value).__module__, type(value).__qualname__)

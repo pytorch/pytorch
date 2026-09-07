@@ -103,6 +103,17 @@ class GemmReductionGeometry:
 
 
 @dataclasses.dataclass(frozen=True)
+class GemmAssociativeState:
+    """Float32 planes of a reduction state, each tagged with the scalar reduction it equals."""
+
+    reduction_projections: tuple[GemmReductionType | None, ...]
+
+    @property
+    def planes(self) -> int:
+        return len(self.reduction_projections)
+
+
+@dataclasses.dataclass(frozen=True)
 class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
@@ -289,7 +300,9 @@ class GemmReductionArguments:
 
 @dataclasses.dataclass(frozen=True)
 class NormalizedReduction:
-    """Canonical arguments for a supported FX reduction."""
+    """Canonical arguments for a supported scalar-state FX reduction."""
+
+    associative_state: ClassVar[GemmAssociativeState] = GemmAssociativeState((None,))
 
     source: torch.fx.Node
     dim: Any
@@ -300,7 +313,11 @@ class NormalizedReduction:
 
 @dataclasses.dataclass(frozen=True)
 class NormalizedPrepareSoftmax:
-    """Canonical source and dimension for online softmax preparation."""
+    """Canonical source and dimension for online max/sum state preparation."""
+
+    associative_state: ClassVar[GemmAssociativeState] = GemmAssociativeState(
+        ("max", None)
+    )
 
     source: torch.fx.Node
     dim: Any

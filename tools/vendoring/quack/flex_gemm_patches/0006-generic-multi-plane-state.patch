@@ -1,0 +1,1052 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 7a37683..116a03d 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -61,2 +61,3 @@ guesses about vectorization.
+-  ``outs={name: sink_op}`` is the general form for any sink op
+-  (e.g. OnlineLSEReduce's coupled (max, sum) accumulator).
++  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
++  ``sink_arity``; arity greater than one means the fn returns a tuple of
++  independently collected value planes for the sink to combine.
+@@ -359,9 +360,6 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-            value = result[name]
+-            # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+-            planes = value if isinstance(value, tuple) else (value,)
+-            fragments = []
+-            for plane in planes:
+-                fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
+-                fragment.store(plane)
+-                fragments.append(fragment)
+-            sink_tmps.append(fragments[0] if len(fragments) == 1 else tuple(fragments))
++            planes = []
++            for value in self._value_planes(name, ops_by_name[name].sink_arity, result[name]):
++                plane = cute.make_rmem_tensor(value.shape, value.element_type)
++                plane.store(value)
++                planes.append(plane)
++            sink_tmps.append(tuple(planes))
+@@ -460 +458,3 @@ class EpiMod:
+-            if getattr(op, "scaled", False) and self.mode == "acc_pair":
++            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
++                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
++            if op.sink_arity > 1 and self.mode == "acc_pair":
+@@ -462 +462 @@ class EpiMod:
+-                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
++                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
+@@ -464,0 +465,8 @@ class EpiMod:
++        for name in self.prepass_outs:
++            op = self.ops.get(name)
++            if op is None:
++                op = self.sinks.get(name)
++            if op is not None and op.sink_arity > 1:
++                raise ValueError(
++                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
++                )
+@@ -805 +813 @@ class EpiMod:
+-                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
++                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index ed61d53..83aeb4c 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -18,2 +17,0 @@ import operator
+-import hashlib
+-import inspect
+@@ -34,0 +33 @@ from quack.cute_dsl_utils import torch2cute_dtype_map
++from quack.gemm_runtime.identity import semantic_value_key
+@@ -110,13 +109,2 @@ def _callable_config_key(fn):
+-    """Stable, picklable identity for a callable stored in an EpiOp config."""
+-    if fn is None:
+-        return None
+-    try:
+-        source = inspect.getsource(fn).encode()
+-    except (OSError, TypeError):
+-        code = getattr(fn, "__code__", None)
+-        source = code.co_code if code is not None else repr(fn).encode()
+-    return (
+-        getattr(fn, "__module__", ""),
+-        getattr(fn, "__qualname__", repr(fn)),
+-        hashlib.sha256(source).hexdigest(),
+-    )
++    """Fail-closed semantic identity for a callable stored in an EpiOp config."""
++    return None if fn is None else semantic_value_key(fn, set(), force_source=True)
+@@ -325,0 +314 @@ class EpiOp:
++    sink_arity = 1
+@@ -355,4 +344,6 @@ class EpiOp:
+-    def fn_sink_flush(self, gemm, state, frag):
+-        """Fold a fragment of fn-produced values into this op's accumulator.
+-        ``state`` is the begin_loop result; ``frag`` is elementwise-congruent
+-        with the accumulator tile fragment."""
++    def fn_sink_flush(self, gemm, state, *fragments):
++        """Fold the declared sink value planes into this op's accumulator.
++
++        ``state`` is the begin_loop result. Each fragment is elementwise-congruent
++        with the accumulator tile and corresponds to one of ``sink_arity`` planes.
++        """
+@@ -1607,0 +1599,5 @@ class VecReduce(EpiOp):
++    @property
++    def sink_arity(self):
++        """Number of value planes returned to this sink by the epilogue fn."""
++        return 2 if self.scaled else 1
++
+diff --git a/quack/epilogue/visit.py b/quack/epilogue/visit.py
+index 953ef2f..ede70e7 100644
+--- a/quack/epilogue/visit.py
++++ b/quack/epilogue/visit.py
+@@ -55,0 +56,13 @@ class _EpiModMixinBase(ComposableEpiMixin):
++    def _value_planes(self, name, arity, value):
++        """Normalize one fn return to its declared tuple of value planes."""
++        if arity == 1:
++            return (value,)
++        assert not isinstance(value, (F2, F16Lanes, Pair)), (
++            f"output {name!r} returned one packed-lane value where {arity} "
++            "state planes are required"
++        )
++        assert isinstance(value, tuple) and len(value) == arity, (
++            f"output {name!r} must return {arity} value planes"
++        )
++        return value
++
+@@ -57,2 +70 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        """One collection fragment per sink op; scaled reduces get a
+-        (val, scale) fragment pair so the fold can be a single fused FMA."""
++        """Allocate each sink's fixed tuple of collection fragments."""
+@@ -60,7 +72,3 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            (
+-                (
+-                    cute.make_rmem_tensor(shape, self.acc_dtype),
+-                    cute.make_rmem_tensor(shape, self.acc_dtype),
+-                )
+-                if getattr(ops_by_name[s], "scaled", False)
+-                else cute.make_rmem_tensor(shape, self.acc_dtype)
++            tuple(
++                cute.make_rmem_tensor(shape, self.acc_dtype)
++                for _ in range(ops_by_name[name].sink_arity)
+@@ -68 +76 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            for s in self._epi_mod_sinks
++            for name in self._epi_mod_sinks
+@@ -73,7 +81,2 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
+-            if const_expr(isinstance(stmp, tuple)):
+-                ops_by_name[sname].fn_sink_flush(
+-                    self, epi_loop_tensors[sname], stmp[0], scale=stmp[1]
+-                )
+-            else:
+-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
++        for name, fragments in zip(self._epi_mod_sinks, sink_tmps):
++            ops_by_name[name].fn_sink_flush(self, epi_loop_tensors[name], *fragments)
+@@ -220 +223 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            val_frags = outs + sink_tmps
++            val_frags = tuple((out,) for out in outs) + sink_tmps
+@@ -236,7 +239,4 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        # Scaled sink: the fn returns the (val, scale) factors.
+-                        v, s = res[vname]
+-                        vfrag[0][i], vfrag[1][i] = v, s
+-                    else:
+-                        vfrag[i] = res[vname]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        plane[i] = value
+@@ -259,2 +259,2 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            # (Scaled sinks are rejected in acc_pair mode at EpiMod init: a
+-            # tuple return already means the two lanes here.)
++            # Multi-plane sinks are rejected in acc_pair mode because a tuple
++            # return already means the two adjacent accumulator lanes here.
+@@ -262 +262 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
++                (cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype),)
+@@ -267 +267 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for p in (cute.flat_divide(t, cute.make_layout(2)) for t in sink_tmps)
++                for p in (cute.flat_divide(t[0], cute.make_layout(2)) for t in sink_tmps)
+@@ -320,2 +320 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
+-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
++            self._flush_sinks(ops_by_name, epi_loop_tensors, sink_tmps)
+@@ -328,4 +327,3 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        # Sink values are collected into a plain fragment per sink op (a
+-        # (val, scale) fragment pair for scaled reduces), then handed to the
+-        # op's fn_sink_flush (fragment-level: the op owns the fold into its —
+-        # possibly aliased, possibly coupled — accumulators).
++        # Sink values are collected into one or more fragments per sink, then
++        # handed to fn_sink_flush (fragment-level: the op owns the fold into
++        # its possibly aliased or coupled accumulators).
+@@ -335 +333 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        val_frags = outs + sink_tmps
++        val_frags = tuple((out,) for out in outs) + sink_tmps
+@@ -355,8 +353,7 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        v, s = res[vname]
+-                        vfrag[0][2 * i], vfrag[0][2 * i + 1] = v[0], v[1]
+-                        vfrag[1][2 * i], vfrag[1][2 * i + 1] = s[0], s[1]
+-                    else:
+-                        v = res[vname]
+-                        vfrag[2 * i], vfrag[2 * i + 1] = v[0], v[1]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        if const_expr(isinstance(value, tuple)):
++                            plane[2 * i], plane[2 * i + 1] = value[0], value[1]
++                        else:
++                            plane[2 * i], plane[2 * i + 1] = value, value
+@@ -376,6 +373,4 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        v, s = res[vname]
+-                        vfrag[0][i], vfrag[1][i] = v, s
+-                    else:
+-                        vfrag[i] = res[vname]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        plane[i] = value
+diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
+index 2c39d57..8b3a369 100644
+--- a/quack/gemm_runtime/identity.py
++++ b/quack/gemm_runtime/identity.py
+@@ -122,0 +123,7 @@ def semantic_value_key(value, seen, *, force_source=False):
++        if force_source and not (
++            value.__module__ == "quack" or value.__module__.startswith("quack.")
++        ):
++            raise TypeError(
++                f"cannot fingerprint callable class {value!r}; use a function wrapper "
++                "or a callable instance implementing __quack_semantic_key__"
++            )
+@@ -124,0 +132,6 @@ def semantic_value_key(value, seen, *, force_source=False):
++        if callable(value) and not (
++            type(value).__module__ == "quack" or type(value).__module__.startswith("quack.")
++        ):
++            raise TypeError(
++                f"cannot fingerprint callable dataclass {value!r}; implement __quack_semantic_key__"
++            )
+diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
+index 48871d7..a4abf35 100644
+--- a/quack/grouped_reduce.py
++++ b/quack/grouped_reduce.py
+@@ -514,0 +515,5 @@ class GroupedReduceBase(EpiOp):
++    ``reduce_planes`` is the fixed number of Float32 state components. For more
++    than one plane, the sink returns a tuple and callable combine/finalize
++    receive the complete state tuple. ``fragment_reduced`` means each returned
++    plane is already reduced and broadcast within its register fragment; the op
++    skips only that local fold and still combines subtiles, lanes, and warps.
+@@ -526,0 +532,2 @@ class GroupedReduceBase(EpiOp):
++        reduce_planes=1,
++        fragment_reduced=False,
+@@ -539,0 +547,8 @@ class GroupedReduceBase(EpiOp):
++        if not isinstance(reduce_planes, int) or reduce_planes < 1:
++            raise ValueError("reduce_planes must be a positive integer")
++        if reduce_planes > 1 and (not callable(combine) or not callable(finalize)):
++            raise TypeError("multi-plane grouped reductions require callable combine and finalize")
++        if not isinstance(fragment_reduced, bool):
++            raise TypeError("fragment_reduced must be bool")
++        if fragment_reduced and combine is None:
++            raise ValueError("fragment_reduced requires a cross-fragment combine")
+@@ -543,0 +559,2 @@ class GroupedReduceBase(EpiOp):
++        self.reduce_planes = reduce_planes
++        self.fragment_reduced = fragment_reduced
+@@ -547,5 +564,6 @@ class GroupedReduceBase(EpiOp):
+-        """Fail-closed static identity: callables fingerprint by source digest
+-        (``_callable_config_key``), so two epilogues with different generated
+-        combine/finalize code can never share a cached kernel. A subclass that
+-        adds configuration must extend this key, exactly like
+-        :meth:`EpiOp.config_key` demands of stateful ops."""
++        """Fail-closed identity for geometry, state algebra, and output layout.
++
++        Callable identity includes source, defaults, closures, and referenced
++        globals, so distinct generated state algebra cannot share a kernel.
++        A subclass that adds configuration must extend this key.
++        """
+@@ -554 +572,11 @@ class GroupedReduceBase(EpiOp):
+-                set(vars(self)) - {"name", "axis", "group", "combine", "finalize", "output_layout"}
++                set(vars(self))
++                - {
++                    "name",
++                    "axis",
++                    "group",
++                    "combine",
++                    "finalize",
++                    "reduce_planes",
++                    "fragment_reduced",
++                    "output_layout",
++                }
+@@ -567,0 +596,2 @@ class GroupedReduceBase(EpiOp):
++            self.reduce_planes,
++            self.fragment_reduced,
+@@ -595,0 +626,5 @@ class GroupedReduceBase(EpiOp):
++    @property
++    def sink_arity(self):
++        """Number of state planes returned to this sink by the epilogue fn."""
++        return self.reduce_planes
++
+@@ -600,0 +636,22 @@ class GroupedReduceBase(EpiOp):
++    def _state_planes(self, value):
++        """Return a tuple view of scalar or multi-plane reduction state."""
++        return (value,) if self.reduce_planes == 1 else value
++
++    @cute.jit
++    def _combine_state(self, lhs, rhs):
++        """Combine two tuples of grouped-reduction state components."""
++        if const_expr(self.reduce_planes == 1):
++            return (self.combine_fn(lhs[0], rhs[0]),)
++        result = self.combine_fn(lhs, rhs)
++        assert isinstance(result, tuple) and len(result) == self.reduce_planes, (
++            f"combine must return {self.reduce_planes} state planes"
++        )
++        return result
++
++    @cute.jit
++    def _finalize_state(self, values):
++        """Project grouped-reduction state to the scalar output value."""
++        if const_expr(self.reduce_planes == 1):
++            return self.finalize_value(values[0])
++        return self.finalize(values)
++
+@@ -761 +818,3 @@ class GroupedReduceBase(EpiOp):
+-        return EpiSmemBytes(unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8))
++        return EpiSmemBytes(
++            unstaged=cta_tile_shape_mnk[1] * planes * self.reduce_planes * (Float32.width // 8)
++        )
+@@ -765 +824,4 @@ class GroupedReduceBase(EpiOp):
+-        return (gemm.cta_tile_shape_mnk[1], planes) if planes else None
++        if not planes:
++            return None
++        shape = (gemm.cta_tile_shape_mnk[1], planes)
++        return shape if self.reduce_planes == 1 else (*shape, self.reduce_planes)
+@@ -771 +833 @@ class GroupedReduceBase(EpiOp):
+-        size = shape[0] * shape[1]
++        size = math.prod(shape)
+@@ -807 +869,8 @@ class GroupedReduceBase(EpiOp):
+-            frag = cute.make_rmem_tensor(shape if keep_subtiles else shape[:3], Float32)
++            frag_shape = shape if keep_subtiles else shape[:3]
++            frag = (
++                cute.make_rmem_tensor(frag_shape, Float32)
++                if const_expr(self.reduce_planes == 1)
++                else tuple(
++                    cute.make_rmem_tensor(frag_shape, Float32) for _ in range(self.reduce_planes)
++                )
++            )
+@@ -818 +887 @@ class GroupedReduceBase(EpiOp):
+-        """This subtile's slice of the register accumulator."""
++        """This subtile's slice of each register-state plane."""
+@@ -821 +890,5 @@ class GroupedReduceBase(EpiOp):
+-        if const_expr(cute.rank(state.frag) == 3):
++        if const_expr(self.reduce_planes == 1):
++            if const_expr(cute.rank(state.frag) == 3):
++                return state.frag
++            return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
++        if const_expr(cute.rank(state.frag[0]) == 3):
+@@ -823 +896 @@ class GroupedReduceBase(EpiOp):
+-        return state.frag[None, None, None, epi_coord[0], epi_coord[1]]
++        return tuple(plane[None, None, None, epi_coord[0], epi_coord[1]] for plane in state.frag)
+@@ -924,0 +998 @@ class GroupedReduceBase(EpiOp):
++        value_planes = self._state_planes(values)
+@@ -935 +1009,4 @@ class GroupedReduceBase(EpiOp):
+-                value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
++                state_value = tuple(plane[i] for plane in value_planes)
++                value = (
++                    self._finalize_state(state_value) if const_expr(finalize) else state_value[0]
++                )
+@@ -950,3 +1027,3 @@ class GroupedLocalReduce(GroupedReduceBase):
+-    ``combine=None`` skips the fold: the values are expected to be group-reduced
+-    and broadcast already (what FlexGEMM's generated TensorSSA does for N groups
+-    inside one fragment, and what :class:`GroupedLocalReduceFeed` produces).
++    ``combine=None`` skips every fold because values are fully group-reduced.
++    ``fragment_reduced=True`` skips only the in-fragment fold because TensorSSA
++    or another producer already reduced and broadcast each fragment partial.
+@@ -959,4 +1036,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+-    def fn_sink_flush(self, gemm, state, frag):
+-        """Collect the fn's values for this subtile; the fold runs in end_loop
+-        (one reduction site, with the coordinates the store needs)."""
+-        cute.autovec_copy(frag, state.frag)
++    def fn_sink_flush(self, gemm, state, *fragments):
++        """Collect each state plane; the physical fold runs in end_loop."""
++        assert len(fragments) == self.reduce_planes
++        destinations = self._state_planes(state.frag)
++        for source, destination in zip(fragments, destinations):
++            cute.autovec_copy(source, destination)
+@@ -965,7 +1044,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+-    def _fold_fragment(self, frag, geom):
+-        """Fold each aligned column run in place, broadcast within the run.
+-        Left-to-right so the tree is fixed and reproducible."""
+-        combine_fn = const_expr(self.combine_fn)
+-        for chunk in cutlass.range_constexpr(len(geom.chunks)):
+-            slots = const_expr(geom.chunks[chunk])
+-            value = frag[slots[0]]
++    def _fold_chunks(self, frag, chunks):
++        """Fold each static state chunk in place and broadcast its result."""
++        planes = self._state_planes(frag)
++        for chunk in cutlass.range_constexpr(len(chunks)):
++            slots = const_expr(chunks[chunk])
++            values = tuple(plane[slots[0]] for plane in planes)
+@@ -973 +1051 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                value = combine_fn(value, frag[slots[j]])
++                values = self._combine_state(values, tuple(plane[slots[j]] for plane in planes))
+@@ -975,13 +1053,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                frag[slots[j]] = value
+-
+-    @cute.jit
+-    def _fold_rows(self, frag, geom):
+-        """Combine rows one thread owns inside each logical M group."""
+-        combine_fn = const_expr(self.combine_fn)
+-        for chunk in cutlass.range_constexpr(len(geom.row_chunks)):
+-            slots = const_expr(geom.row_chunks[chunk])
+-            value = frag[slots[0]]
+-            for j in cutlass.range_constexpr(1, len(slots)):
+-                value = combine_fn(value, frag[slots[j]])
+-            for j in cutlass.range_constexpr(len(slots)):
+-                frag[slots[j]] = value
++                for plane, value in zip(planes, values):
++                    plane[slots[j]] = value
+@@ -991,3 +1058,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        """Reduce across the group's row lanes (halving butterfly), leaving the
+-        group value in every participating lane."""
+-        combine_fn = const_expr(self.combine_fn)
++        """Reduce across the group's row lanes and broadcast each state plane."""
++        planes = self._state_planes(frag)
+@@ -995 +1061,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        for i in cutlass.range(cute.size(frag), unroll_full=True):
++        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
++            values = tuple(plane[i] for plane in planes)
+@@ -998,5 +1065,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                frag[i] = combine_fn(
+-                    frag[i],
+-                    cute.arch.shuffle_sync_bfly(
+-                        frag[i], offset=cute.crd2idx((rows, 0), geom.lane_layout_MN)
+-                    ),
++                offset = cute.crd2idx((rows, 0), geom.lane_layout_MN)
++                values = self._combine_state(
++                    values,
++                    tuple(cute.arch.shuffle_sync_bfly(value, offset=offset) for value in values),
+@@ -1004,0 +1071,2 @@ class GroupedLocalReduce(GroupedReduceBase):
++            for plane, value in zip(planes, values):
++                plane[i] = value
+@@ -1008,3 +1076 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        """Combine the ``fragments_per_group`` epi-N subtiles of one group in
+-        ascending order (called at the group's last subtile)."""
+-        combine_fn = const_expr(self.combine_fn)
++        """Combine consecutive epi-N subtiles into one grouped state."""
+@@ -1012,2 +1078,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        merged = cute.make_rmem_tensor_like(
+-            state.frag[None, None, None, epi_coord[0], first], Float32
++        state_planes = self._state_planes(state.frag)
++        merged_planes = tuple(
++            cute.make_rmem_tensor_like(plane[None, None, None, epi_coord[0], first], Float32)
++            for plane in state_planes
+@@ -1015,2 +1083,3 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        cute.autovec_copy(state.frag[None, None, None, epi_coord[0], first], merged)
+-        merged_flt = cute.filter_zeros(merged)
++        for source, merged in zip(state_planes, merged_planes):
++            cute.autovec_copy(source[None, None, None, epi_coord[0], first], merged)
++        merged_planes = tuple(cute.filter_zeros(plane) for plane in merged_planes)
+@@ -1018,4 +1087,12 @@ class GroupedLocalReduce(GroupedReduceBase):
+-            other = cute.filter_zeros(state.frag[None, None, None, epi_coord[0], first + offset])
+-            for i in cutlass.range(cute.size(merged_flt), unroll_full=True):
+-                merged_flt[i] = combine_fn(merged_flt[i], other[i])
+-        return merged_flt
++            other_planes = tuple(
++                cute.filter_zeros(plane[None, None, None, epi_coord[0], first + offset])
++                for plane in state_planes
++            )
++            for i in cutlass.range(cute.size(merged_planes[0]), unroll_full=True):
++                values = self._combine_state(
++                    tuple(plane[i] for plane in merged_planes),
++                    tuple(plane[i] for plane in other_planes),
++                )
++                for plane, value in zip(merged_planes, values):
++                    plane[i] = value
++        return merged_planes[0] if const_expr(self.reduce_planes == 1) else merged_planes
+@@ -1035 +1112 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        combine_fn = const_expr(self.combine_fn)
++        planes = self._state_planes(frag)
+@@ -1042,2 +1119,7 @@ class GroupedLocalReduce(GroupedReduceBase):
+-            for i in cutlass.range(cute.size(frag), unroll_full=True):
+-                sReduce[coord[i][1], smem_warp] = frag[i]
++            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
++                n_idx = coord[i][1]
++                for plane_idx, plane in enumerate(planes):
++                    if const_expr(self.reduce_planes == 1):
++                        sReduce[n_idx, smem_warp] = plane[i]
++                    else:
++                        sReduce[n_idx, smem_warp, plane_idx] = plane[i]
+@@ -1046 +1128 @@ class GroupedLocalReduce(GroupedReduceBase):
+-            for i in cutlass.range(cute.size(frag), unroll_full=True):
++            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+@@ -1047,0 +1130 @@ class GroupedLocalReduce(GroupedReduceBase):
++                values = tuple(plane[i] for plane in planes)
+@@ -1049 +1132,10 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                    frag[i] = combine_fn(frag[i], sReduce[n_idx, smem_base + offset])
++                    smem_warp = smem_base + offset
++                    others = tuple(
++                        sReduce[n_idx, smem_warp]
++                        if const_expr(self.reduce_planes == 1)
++                        else sReduce[n_idx, smem_warp, plane_idx]
++                        for plane_idx in range(self.reduce_planes)
++                    )
++                    values = self._combine_state(values, others)
++                for plane, value in zip(planes, values):
++                    plane[i] = value
+@@ -1069 +1161,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+-        frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
++        frag = self._frag_slice(state, epi_coord)
++        frag = (
++            cute.filter_zeros(frag)
++            if const_expr(self.reduce_planes == 1)
++            else tuple(cute.filter_zeros(plane) for plane in frag)
++        )
+@@ -1072,2 +1169,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                if const_expr(geom.chunk > 1):
+-                    self._fold_fragment(frag, geom)
++                if const_expr(not self.fragment_reduced and geom.chunk > 1):
++                    self._fold_chunks(frag, geom.chunks)
+@@ -1080,2 +1177,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
+-                    self._fold_rows(frag, geom)
++                if const_expr(
++                    not self.fragment_reduced and any(len(chunk) > 1 for chunk in geom.row_chunks)
++                ):
++                    self._fold_chunks(frag, geom.row_chunks)
+@@ -1206 +1305 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+-    scaled = True
++    sink_arity = 2
+@@ -1254,5 +1353,5 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+-    def fn_sink_flush(self, gemm, state, frag, scale=None):
+-        """Capture the sum source and prepass value emitted as a sink pair."""
+-        assert scale is not None
+-        cute.autovec_copy(frag, state.frag)
+-        cute.autovec_copy(scale, state.finalize_arg)
++    def fn_sink_flush(self, gemm, state, *fragments):
++        """Capture one reduction plane and one independent finalizer argument."""
++        assert len(fragments) == 2
++        cute.autovec_copy(fragments[0], state.frag)
++        cute.autovec_copy(fragments[1], state.finalize_arg)
+@@ -1288 +1387 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+-            self._fold_fragment(frag, geom)
++            self._fold_chunks(frag, geom.chunks)
+diff --git a/tests/test_epi_ops.py b/tests/test_epi_ops.py
+index e2d3b5a..37e43ee 100644
+--- a/tests/test_epi_ops.py
++++ b/tests/test_epi_ops.py
+@@ -58,0 +59,14 @@ def test_tile_store_smem_bytes_are_d_staged():
++def test_tile_store_callable_key_covers_closure_values():
++    """Distinct callback captures cannot alias one persistent kernel."""
++
++    def make_predicate(limit):
++        def predicate(*_args):
++            return limit
++
++        return predicate
++
++    first = TileStore("mAuxOut", store_pred_fn=make_predicate(1))
++    second = TileStore("mAuxOut", store_pred_fn=make_predicate(2))
++    assert first.cache_key() != second.cache_key()
++
++
+diff --git a/tests/test_epilogue_iface.py b/tests/test_epilogue_iface.py
+index 5bbcce3..463b6ae 100644
+--- a/tests/test_epilogue_iface.py
++++ b/tests/test_epilogue_iface.py
+@@ -36,0 +37,15 @@ def _sq_reduce(acc):
++class _ThreePlaneColReduce(ColVecReduce):
++    """Add three independently produced value planes into one column reduce."""
++
++    sink_arity = 3
++
++    def fn_sink_flush(self, gemm, state, *fragments):
++        for fragment in fragments:
++            super().fn_sink_flush(gemm, state, fragment)
++
++
++@gemm_epilogue(outs={"sum3": _ThreePlaneColReduce("sum3")})
++def _three_plane_reduce(acc):
++    return {"D": acc, "sum3": (acc, acc * 2.0, acc * 3.0)}
++
++
+@@ -87,0 +103,31 @@ def test_reduce_finalized():
++def test_three_plane_sink():
++    A, B = _inputs()
++    result = _three_plane_reduce(A, B, config=CFG)
++    ref = A.float() @ B.float()
++    torch.testing.assert_close(result["D"].float(), ref, atol=2e-2, rtol=2e-2)
++    torch.testing.assert_close(result["sum3"], 6.0 * ref.sum(-1), rtol=1e-3, atol=1e-1)
++
++
++def test_multi_plane_sink_rejects_acc_pair():
++    with pytest.raises(ValueError, match="multi-plane sinks"):
++
++        @gemm_epilogue(mode="acc_pair", reduces={"sq": ColVecReduce("sq", scaled=True)})
++        def invalid(acc):
++            return {"D": acc, "sq": (acc, acc)}
++
++
++def test_multi_plane_sink_rejects_prepass_output():
++    def prepass(acc):
++        return {"sq": (acc, acc)}
++
++    with pytest.raises(ValueError, match="multi-plane sinks.*prepass_outs"):
++
++        @gemm_epilogue(
++            reduces={"sq": ColVecReduce("sq", scaled=True)},
++            prepass=prepass,
++            prepass_outs=("sq",),
++        )
++        def invalid(acc):
++            return {"D": acc, "sq": (acc, acc)}
++
++
+diff --git a/tests/test_gemm_epilogue.py b/tests/test_gemm_epilogue.py
+index b1b4688..10b36a8 100644
+--- a/tests/test_gemm_epilogue.py
++++ b/tests/test_gemm_epilogue.py
+@@ -22 +22 @@ from quack import epi_math
+-from quack.epilogue.frontend import EpiMod, fragment_epilogue, gemm_epilogue, pack, unpack
++from quack.epilogue.frontend import EpiMod, gemm_epilogue, pack, fragment_epilogue, unpack
+diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
+index 61531b5..04bfa59 100644
+--- a/tests/test_grouped_reduce.py
++++ b/tests/test_grouped_reduce.py
+@@ -14,0 +15 @@ Two layers:
++import dataclasses
+@@ -28 +29 @@ from quack import epi_math
+-from quack.epilogue.frontend import fragment_epilogue, gemm_epilogue
++from quack.epilogue.frontend import gemm_epilogue, fragment_epilogue
+@@ -156,0 +158,53 @@ _BLOCKED_LAYOUT = GroupedLocalReduceOutputLayout(
++
++def _sum_sumsq_combine(lhs, rhs):
++    return (lhs[0] + rhs[0], lhs[1] + rhs[1])
++
++
++def _sum_sumsq_finalize(state):
++    return state[0] + state[1]
++
++
++def _short_state_combine(lhs, rhs):
++    return (lhs[0] + rhs[0],)
++
++
++def _left_second_combine(lhs, rhs):
++    return (lhs[0] + rhs[0], lhs[1])
++
++
++def _second_finalize(state):
++    return state[1]
++
++
++def _three_plane_combine(lhs, rhs):
++    return (lhs[0] + rhs[0], lhs[1] + rhs[1], lhs[2] + rhs[2])
++
++
++def _three_plane_finalize(state):
++    return state[0] + state[1] + state[2]
++
++
++def _scale_finalize(value, scale):
++    return value * scale
++
++
++def _online_lse_combine(lhs, rhs):
++    maximum = cute.arch.fmax(lhs[0], rhs[0], nan=True)
++    one = cutlass.Float32(1.0)
++    lhs_scale = cutlass.select_(
++        lhs[0] == maximum,
++        one,
++        cute.math.exp(lhs[0] - maximum, fastmath=True),
++    )
++    rhs_scale = cutlass.select_(
++        rhs[0] == maximum,
++        one,
++        cute.math.exp(rhs[0] - maximum, fastmath=True),
++    )
++    return (maximum, lhs[1] * lhs_scale + rhs[1] * rhs_scale)
++
++
++def _online_lse_finalize(state):
++    return cute.math.log(state[1], fastmath=True) + state[0]
++
++
+@@ -169,0 +224,9 @@ def test_config_key_covers_geometry_and_combine():
++        GroupedLocalReduce("g", axis=1, group=32, fragment_reduced=True),
++        GroupedLocalReduce(
++            "g",
++            axis=1,
++            group=32,
++            combine=_sum_sumsq_combine,
++            finalize=_sum_sumsq_finalize,
++            reduce_planes=2,
++        ),
+@@ -175,0 +239,5 @@ def test_config_key_covers_geometry_and_combine():
++def test_fragment_reduced_requires_cross_fragment_combine():
++    with pytest.raises(ValueError, match="requires a cross-fragment combine"):
++        GroupedLocalReduce("g", axis=1, group=32, combine=None, fragment_reduced=True)
++
++
+@@ -177 +245 @@ def test_callable_combine_and_finalize_keys_are_distinct():
+-    """Generated callables key by source digest, not by identity or repr."""
++    """Callable keys include code, defaults, closures, and referenced values."""
+@@ -187,0 +256,12 @@ def test_callable_combine_and_finalize_keys_are_distinct():
++    def make_combine(scale):
++        def combine(lhs, rhs):
++            return (lhs[0] + rhs[0], lhs[1] + scale * rhs[1])
++
++        return combine
++
++    def make_finalize(scale):
++        def finalize(state, factor=scale):
++            return state[0] + factor * state[1]
++
++        return finalize
++
+@@ -192,0 +273,22 @@ def test_callable_combine_and_finalize_keys_are_distinct():
++    closure_keys = {
++        GroupedLocalReduce(
++            "g",
++            axis=1,
++            group=32,
++            combine=make_combine(scale),
++            finalize=_sum_sumsq_finalize,
++            reduce_planes=2,
++        ).cache_key()
++        for scale in (1.0, 2.0)
++    }
++    default_keys = {
++        GroupedLocalReduce(
++            "g",
++            axis=1,
++            group=32,
++            combine=_sum_sumsq_combine,
++            finalize=make_finalize(scale),
++            reduce_planes=2,
++        ).cache_key()
++        for scale in (1.0, 2.0)
++    }
+@@ -194 +296,2 @@ def test_callable_combine_and_finalize_keys_are_distinct():
+-    pickle.dumps(keys)
++    assert len(closure_keys) == len(default_keys) == 2
++    pickle.dumps((keys, closure_keys, default_keys))
+@@ -200,0 +304,30 @@ def test_callable_combine_and_finalize_keys_are_distinct():
++def test_callable_class_config_key_fails_closed():
++    """Dynamic callable classes must provide explicit semantic identity."""
++
++    def make_combine(scale):
++        class Combine:
++            factor = scale
++
++            def __call__(self, lhs, rhs):
++                return lhs + self.factor * rhs
++
++        return Combine
++
++    with pytest.raises(TypeError, match="callable class"):
++        GroupedLocalReduce("g", axis=1, group=32, combine=make_combine(1.0)).cache_key()
++
++
++def test_callable_dataclass_config_key_fails_closed():
++    """Callable dataclasses must provide explicit semantic identity."""
++
++    @dataclasses.dataclass
++    class Combine:
++        scale: float
++
++        def __call__(self, lhs, rhs):
++            return lhs + self.scale * rhs
++
++    with pytest.raises(TypeError, match="callable dataclass"):
++        GroupedLocalReduce("g", axis=1, group=32, combine=Combine(1.0)).cache_key()
++
++
+@@ -649,0 +783,4 @@ def test_feed_capability_gate():
++    with pytest.raises(ValueError, match="positive integer"):
++        GroupedLocalReduce("g", axis=1, group=8, reduce_planes=0)
++    with pytest.raises(TypeError, match="callable combine and finalize"):
++        GroupedLocalReduce("g", axis=1, group=8, reduce_planes=2)
+@@ -724,0 +862,34 @@ def _store_mod(axis, group, combine, finalize):
++def _state_store_mod(axis, group):
++    op = GroupedLocalReduce(
++        "g",
++        axis=axis,
++        group=group,
++        combine=_sum_sumsq_combine,
++        finalize=_sum_sumsq_finalize,
++        reduce_planes=2,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_state_store(acc):
++        return {"D": acc, "g": (acc, acc * acc)}
++
++    return grouped_state_store
++
++
++def _lse_store_mod(group, axis=1):
++    op = GroupedLocalReduce(
++        "g",
++        axis=axis,
++        group=group,
++        combine=_online_lse_combine,
++        finalize=_online_lse_finalize,
++        reduce_planes=2,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_lse_store(acc):
++        return {"D": acc, "g": (acc, 1.0)}
++
++    return grouped_lse_store
++
++
+@@ -859,0 +1031,254 @@ def test_grouped_store(axis, group, combine, finalize):
++@pytest.mark.parametrize("axis,group", [(1, 32), (1, 128), (0, 64)])
++def test_grouped_store_multi_plane_state(axis, group):
++    """Fixed-arity state composes across fragment, subtile, and warp boundaries."""
++    l, m, n, k = 1, 512, 512, 256
++    A, B, x = _inputs(l, m, n, k, seed=13)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, axis, group)
++    _state_store_mod(axis, group).gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    if axis == 1:
++        grouped = x.unflatten(-1, (n // group, group))
++        ref = (grouped + grouped.square()).sum(-1)
++    else:
++        grouped = x.unflatten(-2, (m // group, group))
++        ref = (grouped + grouped.square()).sum(-2)
++    _check(D, x, "D")
++    _check(out, ref, "multi-plane grouped", tol=2e-3)
++
++
++def test_grouped_store_multi_plane_fragment_epilogue():
++    """TensorSSA callbacks use the same declared multi-plane sink contract."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_sum_sumsq_combine,
++        finalize=_sum_sumsq_finalize,
++        reduce_planes=2,
++    )
++
++    @fragment_epilogue(outs={"g": op})
++    @cute.jit
++    def grouped_state_store(acc):
++        return {"D": acc, "g": (acc, acc * acc)}
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, x = _inputs(l, m, n, k, seed=14)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    grouped = x.unflatten(-1, (n // group, group))
++    _check(D, x, "D")
++    _check(out, (grouped + grouped.square()).sum(-1), "fragmentwise state")
++
++
++def test_grouped_store_fragment_reduced_multi_plane_fragment_epilogue():
++    """TensorSSA can reduce each fragment before the generic physical combine."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_sum_sumsq_combine,
++        finalize=_sum_sumsq_finalize,
++        reduce_planes=2,
++        fragment_reduced=True,
++    )
++
++    @fragment_epilogue(outs={"g": op})
++    @cute.jit
++    def grouped_state_store(acc):
++        fragment_group = cutlass.const_expr(min(group, cute.size(acc.shape, mode=[0])))
++        repeats = cutlass.const_expr(cute.size(acc.shape, mode=[0]) // fragment_group)
++        grouped = acc.reshape(((1, fragment_group, repeats), 1, 1))
++        profile = ((None, 1, None), 1, 1)
++        total = grouped.reduce(cute.ReductionOp.ADD, init_val=0.0, reduction_profile=profile)
++        square_total = (grouped * grouped).reduce(
++            cute.ReductionOp.ADD, init_val=0.0, reduction_profile=profile
++        )
++        keepdim_shape = ((1, 1, repeats), 1, 1)
++        return {
++            "D": acc,
++            "g": (
++                total.reshape(keepdim_shape).broadcast_to(grouped.shape),
++                square_total.reshape(keepdim_shape).broadcast_to(grouped.shape),
++            ),
++        }
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, x = _inputs(l, m, n, k, seed=14)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    grouped = x.unflatten(-1, (n // group, group))
++    _check(D, x, "D")
++    _check(out, (grouped + grouped.square()).sum(-1), "fragment-reduced state")
++
++
++def test_grouped_store_rejects_wrong_combine_arity():
++    """A malformed combine fails instead of silently dropping state planes."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_short_state_combine,
++        finalize=_sum_sumsq_finalize,
++        reduce_planes=2,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_state_store(acc):
++        return {"D": acc, "g": (acc, acc * acc)}
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, _ = _inputs(l, m, n, k, seed=14)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    with pytest.raises(AssertionError, match="combine must return 2 state planes"):
++        grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++
++
++def test_grouped_store_rejects_packed_lane_as_state_tuple():
++    """An SM100 F2 lane pair cannot masquerade as two logical state planes."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_sum_sumsq_combine,
++        finalize=_sum_sumsq_finalize,
++        reduce_planes=2,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_state_store(acc):
++        return {"D": acc, "g": acc}
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, _ = _inputs(l, m, n, k, seed=14)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    with pytest.raises(AssertionError, match="packed-lane value.*state planes"):
++        grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++
++
++def test_grouped_store_multi_plane_preserves_plane_bits():
++    """Temporal state transport preserves plane identity without rounding."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_left_second_combine,
++        finalize=_second_finalize,
++        reduce_planes=2,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_state_store(acc):
++        return {"D": acc, "g": (acc, -acc)}
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, _ = _inputs(l, m, n, k, seed=16)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
++    out = _compressed_out(l, m, n, 1, group)
++    grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    expected = (-D[..., ::group]).contiguous()
++    assert torch.equal(out.view(torch.int32), expected.view(torch.int32))
++
++
++def test_grouped_store_two_argument_finalizer():
++    """A two-plane sink can feed one reduced value and one finalizer argument."""
++    group = 16
++    op = GroupedLocalReduceWithFinalizeArg("g", axis=1, group=group, finalize=_scale_finalize)
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_finalize_store(acc):
++        return {"D": acc, "g": (acc, 2.0)}
++
++    l, m, n, k = 1, 65, 256, 64
++    A, B, x = _inputs(l, m, n, k, seed=15)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    grouped_finalize_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    _check(D, x, "D")
++    _check(out, 2.0 * x.unflatten(-1, (n // group, group)).sum(-1), "binary finalize")
++
++
++def test_grouped_store_three_plane_state():
++    """State arity is generic rather than a two-component LSE special case."""
++    group = 128
++    op = GroupedLocalReduce(
++        "g",
++        axis=1,
++        group=group,
++        combine=_three_plane_combine,
++        finalize=_three_plane_finalize,
++        reduce_planes=3,
++    )
++
++    @gemm_epilogue(outs={"g": op})
++    def grouped_state_store(acc):
++        return {"D": acc, "g": (acc, acc * acc, acc * acc * acc)}
++
++    l, m, n, k = 1, 65, 512, 64
++    A, B, x = _inputs(l, m, n, k, seed=17)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    grouped_state_store.gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    grouped = x.unflatten(-1, (n // group, group))
++    _check(D, x, "D")
++    _check(out, (grouped + grouped.square() + grouped.pow(3)).sum(-1), "three-plane state")
++
++
++@pytest.mark.parametrize("group", [64, 128, 192, 256])
++def test_grouped_store_online_lse_state(group):
++    """One generic two-plane sink covers large-group online logsumexp."""
++    l, m, n, k = 1, 65, 4 * group, 64
++    A, B, x = _inputs(l, m, n, k, seed=19)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 1, group)
++    config = {**_TILE, "tile_N": 192 if group == 192 else 256}
++    _lse_store_mod(group).gemm(A, B, D, epi_args=dict(g=out), **config)
++    _check(D, x, "D")
++    _check(out, x.unflatten(-1, (n // group, group)).logsumexp(-1), "grouped lse", tol=2e-3)
++
++
++def test_grouped_store_online_lse_cross_warp():
++    """Coupled state preserves plane identity through the M-warp exchange."""
++    l, m, n, k, group = 1, 512, 256, 64, 64
++    A, B, x = _inputs(l, m, n, k, seed=21)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
++    out = _compressed_out(l, m, n, 0, group)
++    _lse_store_mod(group, axis=0).gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    _check(D, x, "D")
++    _check(out, x.unflatten(-2, (m // group, group)).logsumexp(-2), "cross-warp lse")
++
++
++def test_grouped_store_online_lse_special_values():
++    """Tuple combine preserves PyTorch semantics for infinities and NaNs."""
++    l, m, n, k, group = 1, 4, 512, 16, 128
++    A = torch.ones((l, m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.zeros((l, n, k), device="cuda", dtype=torch.bfloat16)
++    B[:, :group] = (
++        torch.linspace(-80, 80, group, device="cuda", dtype=torch.bfloat16)[None, :, None] / k
++    )
++    B[:, group : 2 * group] = -torch.inf
++    B[:, 2 * group] = torch.inf
++    B[:, 3 * group] = torch.nan
++    x = torch.einsum("lmk,lnk->lmn", A.float(), B.float())
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
++    out = _compressed_out(l, m, n, 1, group)
++    _lse_store_mod(group).gemm(A, B, D, epi_args=dict(g=out), **_TILE)
++    torch.testing.assert_close(D, x, equal_nan=True)
++    torch.testing.assert_close(
++        out,
++        x.unflatten(-1, (n // group, group)).logsumexp(-1),
++        atol=2e-3,
++        rtol=2e-3,
++        equal_nan=True,
++    )
++
++

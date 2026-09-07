@@ -53,30 +53,33 @@ class _EpiModMixinBase(ComposableEpiMixin):
         d["split_k_workspace"] = getattr(args, "split_k_workspace", None)
         return self.EpilogueParams(**d)
 
+    def _value_planes(self, name, arity, value):
+        """Normalize one fn return to its declared tuple of value planes."""
+        if arity == 1:
+            return (value,)
+        assert not isinstance(value, (F2, F16Lanes, Pair)), (
+            f"output {name!r} returned one packed-lane value where {arity} "
+            "state planes are required"
+        )
+        assert isinstance(value, tuple) and len(value) == arity, (
+            f"output {name!r} must return {arity} value planes"
+        )
+        return value
+
     def _make_sink_tmps(self, ops_by_name, shape):
-        """One collection fragment per sink op; scaled reduces get a
-        (val, scale) fragment pair so the fold can be a single fused FMA."""
+        """Allocate each sink's fixed tuple of collection fragments."""
         return tuple(
-            (
-                (
-                    cute.make_rmem_tensor(shape, self.acc_dtype),
-                    cute.make_rmem_tensor(shape, self.acc_dtype),
-                )
-                if getattr(ops_by_name[s], "scaled", False)
-                else cute.make_rmem_tensor(shape, self.acc_dtype)
+            tuple(
+                cute.make_rmem_tensor(shape, self.acc_dtype)
+                for _ in range(ops_by_name[name].sink_arity)
             )
-            for s in self._epi_mod_sinks
+            for name in self._epi_mod_sinks
         )
 
     @cute.jit
     def _flush_sinks(self, ops_by_name, epi_loop_tensors, sink_tmps):
-        for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
-            if const_expr(isinstance(stmp, tuple)):
-                ops_by_name[sname].fn_sink_flush(
-                    self, epi_loop_tensors[sname], stmp[0], scale=stmp[1]
-                )
-            else:
-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
+        for name, fragments in zip(self._epi_mod_sinks, sink_tmps):
+            ops_by_name[name].fn_sink_flush(self, epi_loop_tensors[name], *fragments)
 
     @cute.jit
     def epi_prepass_subtile(self, params, epi_tensors, tRS_rD, epi_coord, epi_idx):
@@ -217,7 +220,7 @@ class _EpiModMixinBase(ComposableEpiMixin):
             )
             sink_tmps = self._make_sink_tmps(ops_by_name, tRS_rD.layout.shape)
             val_names = self._epi_mod_outputs + self._epi_mod_sinks
-            val_frags = outs + sink_tmps
+            val_frags = tuple((out,) for out in outs) + sink_tmps
             vectorize = const_expr(self.arch == 100 and self._epi_mod_vectorize is not False)
             for i in cutlass.range(n_el, vectorize=vectorize):
                 kw = {
@@ -233,13 +236,10 @@ class _EpiModMixinBase(ComposableEpiMixin):
                 res = fn(tRS_rD[i], **kw)
                 d = res["D"]  # required: it carries the (dx, dy) pair to pack
                 dxv[i], dyv[i] = d[0], d[1]
-                for vname, vfrag in zip(val_names, val_frags):
-                    if const_expr(isinstance(vfrag, tuple)):
-                        # Scaled sink: the fn returns the (val, scale) factors.
-                        v, s = res[vname]
-                        vfrag[0][i], vfrag[1][i] = v, s
-                    else:
-                        vfrag[i] = res[vname]
+                for vname, vfrags in zip(val_names, val_frags):
+                    values = self._value_planes(vname, len(vfrags), res[vname])
+                    for plane, value in zip(vfrags, values):
+                        plane[i] = value
             dxy16 = dxy.to(implicit)
             tRS_rD.store(cute.recast_tensor(dxy16, Float32).load())
             self._flush_sinks(ops_by_name, epi_loop_tensors, sink_tmps)
@@ -256,15 +256,15 @@ class _EpiModMixinBase(ComposableEpiMixin):
                 cute.make_rmem_tensor(aux_shape, self.acc_dtype) for _ in self._epi_mod_outputs
             )
             # Sink values span both lanes (full N): collect through pair views.
-            # (Scaled sinks are rejected in acc_pair mode at EpiMod init: a
-            # tuple return already means the two lanes here.)
+            # Multi-plane sinks are rejected in acc_pair mode because a tuple
+            # return already means the two adjacent accumulator lanes here.
             sink_tmps = tuple(
-                cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
+                (cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype),)
                 for _ in self._epi_mod_sinks
             )
             sink_views = tuple(
                 (p[0, ...], p[1, ...])
-                for p in (cute.flat_divide(t, cute.make_layout(2)) for t in sink_tmps)
+                for p in (cute.flat_divide(t[0], cute.make_layout(2)) for t in sink_tmps)
             )
             acc_pair = cute.flat_divide(tRS_rD, cute.make_layout(2))
             acc0, acc1 = acc_pair[0, ...], acc_pair[1, ...]
@@ -317,22 +317,20 @@ class _EpiModMixinBase(ComposableEpiMixin):
                 if const_expr("D" in res):
                     d = res["D"]
                     acc0[i], acc1[i] = d[0], d[1]
-            for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
+            self._flush_sinks(ops_by_name, epi_loop_tensors, sink_tmps)
             return outs
 
         outs = tuple(
             cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
             for _ in self._epi_mod_outputs
         )
-        # Sink values are collected into a plain fragment per sink op (a
-        # (val, scale) fragment pair for scaled reduces), then handed to the
-        # op's fn_sink_flush (fragment-level: the op owns the fold into its —
-        # possibly aliased, possibly coupled — accumulators).
+        # Sink values are collected into one or more fragments per sink, then
+        # handed to fn_sink_flush (fragment-level: the op owns the fold into
+        # its possibly aliased or coupled accumulators).
         sink_tmps = self._make_sink_tmps(ops_by_name, tRS_rD.layout.shape)
         # Names written by the fn, in collection order after "D".
         val_names = self._epi_mod_outputs + self._epi_mod_sinks
-        val_frags = outs + sink_tmps
+        val_frags = tuple((out,) for out in outs) + sink_tmps
         if const_expr(self.arch == 100 and cute.size(tRS_rD) % 2 == 0):
             # Packed f32x2 lanes: same loop shape as the hand-written SM100 mixins.
             for i in cutlass.range(cute.size(tRS_rD) // 2, unroll_full=True):
@@ -352,14 +350,13 @@ class _EpiModMixinBase(ComposableEpiMixin):
                 if const_expr("D" in res):
                     d = res["D"]
                     tRS_rD[2 * i], tRS_rD[2 * i + 1] = d[0], d[1]
-                for vname, vfrag in zip(val_names, val_frags):
-                    if const_expr(isinstance(vfrag, tuple)):
-                        v, s = res[vname]
-                        vfrag[0][2 * i], vfrag[0][2 * i + 1] = v[0], v[1]
-                        vfrag[1][2 * i], vfrag[1][2 * i + 1] = s[0], s[1]
-                    else:
-                        v = res[vname]
-                        vfrag[2 * i], vfrag[2 * i + 1] = v[0], v[1]
+                for vname, vfrags in zip(val_names, val_frags):
+                    values = self._value_planes(vname, len(vfrags), res[vname])
+                    for plane, value in zip(vfrags, values):
+                        if const_expr(isinstance(value, tuple)):
+                            plane[2 * i], plane[2 * i + 1] = value[0], value[1]
+                        else:
+                            plane[2 * i], plane[2 * i + 1] = value, value
         else:
             for i in cutlass.range(cute.size(tRS_rD), unroll_full=True):
                 kw = {
@@ -373,11 +370,9 @@ class _EpiModMixinBase(ComposableEpiMixin):
                 res = fn(tRS_rD[i], **kw)
                 if const_expr("D" in res):
                     tRS_rD[i] = res["D"]
-                for vname, vfrag in zip(val_names, val_frags):
-                    if const_expr(isinstance(vfrag, tuple)):
-                        v, s = res[vname]
-                        vfrag[0][i], vfrag[1][i] = v, s
-                    else:
-                        vfrag[i] = res[vname]
+                for vname, vfrags in zip(val_names, val_frags):
+                    values = self._value_planes(vname, len(vfrags), res[vname])
+                    for plane, value in zip(vfrags, values):
+                        plane[i] = value
         self._flush_sinks(ops_by_name, epi_loop_tensors, sink_tmps)
         return outs

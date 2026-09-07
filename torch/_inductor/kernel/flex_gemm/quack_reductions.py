@@ -68,6 +68,39 @@ class GroupedTensorSSALayout:
     def reduce_dims(self) -> tuple[int, ...]:
         return (-1, 2) if self.axis == 1 else (-2, 1)
 
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the grouped extent available in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group_size}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the number of grouped runs in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        """Return the grouped TensorSSA view for this logical axis."""
+        group = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {group}, {repeats}), 1, 1)"
+        return f"(({group}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        """Return the reduced TensorSSA shape before fragment broadcast."""
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def reduction_profile(self) -> str:
+        """Return the CuTe reduction profile for the grouped dimension."""
+        return (
+            "((None, 1, None), 1, 1)" if self.axis == 1 else "((1, None, None), 1, 1)"
+        )
+
     def matches_reduction_dim(self, dim: Any) -> bool:
         """Return whether an FX reduction selects this layout's grouped dimension."""
         dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
