@@ -401,6 +401,19 @@ class TestCaseMPS(TestCase):
     def wrap_with_mps_memory_check(self, method):
         return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
 
+# DO NOT MERGE: intentional failure raised in setUp (not at import) so pytest
+# actually runs the rest of the MPS suite and exercises the machinery before
+# the job goes red, to reproduce the venv cleanup EACCES on the m1-14 runner.
+# See pytorch/test-infra setup-python/cleanup.js.
+class TestReproVenvCleanup(TestCaseMPS):
+    def setUp(self):
+        super().setUp()
+        raise RuntimeError("Intentional setup failure to reproduce venv cleanup issue")
+
+    def test_repro(self):
+        pass
+
+
 class TestMemoryLeak(TestCaseMPS):
     @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/160550")
     def test_mps_memory_leak_detection(self):
