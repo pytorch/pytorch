@@ -33,7 +33,6 @@ import gc
 import importlib
 import inspect
 import itertools
-import json
 import logging
 import os
 import pstats
@@ -2031,7 +2030,7 @@ def _compile(
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=record,
+                save=record and output.package is not None,
                 cache_entries=cache_entries,
                 serialization_guard_filter_fn=(
                     package.serialization_guard_filter_fn
@@ -2159,12 +2158,10 @@ def _compile(
                         "name": "dynamo_cache_truncated",
                         "encoding": "json",
                     },
-                    payload_fn=lambda: json.dumps(
-                        {
-                            "reason": f"hit {limit_type}",
-                            "function": format_func_info(code),
-                        }
-                    ),
+                    payload_fn=lambda: {
+                        "reason": f"hit {limit_type}",
+                        "function": format_func_info(code),
+                    },
                     expect_trace_id=False,
                 )
 
