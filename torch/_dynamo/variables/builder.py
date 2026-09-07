@@ -694,7 +694,7 @@ class GraphArg:
     # stash a strong reference too.
     example_strong_ref: torch.Tensor | torch.SymInt | None = None
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
         # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
         # GraphArg creation can be traced, and with replay_side_effects=False,
@@ -850,7 +850,7 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
-        def _is_deduplicable_sym_variable(value: Any, vt: VariableTracker) -> bool:
+        def _is_deduplicable_sym_variable(value: object, vt: VariableTracker) -> bool:
             # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
@@ -1050,7 +1050,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: object, v: object
+        ) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -1095,7 +1097,7 @@ class VariableBuilder:
 
         return result
 
-    def _wrap(self, value: Any) -> VariableTracker:
+    def _wrap(self, value: object) -> VariableTracker:
         # import here to avoid circular dependencies
         from torch.utils._triton import (
             has_triton,
@@ -1236,7 +1238,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
@@ -1392,7 +1394,7 @@ class VariableBuilder:
                     VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
                 )
 
-            keywords = {}
+            keywords: dict[str, VariableTracker] = {}
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
                 if not ConstantVariable.is_literal(k):
@@ -2193,7 +2195,7 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
-                i: Any, k: Any, v: Any
+                i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
@@ -4763,7 +4765,7 @@ def _automatic_dynamic(
 
     if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
 
-        def _classify_symint(s: Any) -> DimDynamic:
+        def _classify_symint(s: object) -> DimDynamic:
             if not isinstance(s, SymInt):
                 return DimDynamic.STATIC
             if not has_guarding_hint(s):
@@ -5294,10 +5296,10 @@ class SourcelessBuilder:
 
     @overload
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker: ...
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -5312,7 +5314,11 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return CustomClassObjectVariable.create(value, value, tx=tx)
+            return CustomClassObjectVariable.create(
+                value,  # pyrefly: ignore[bad-argument-type]  # TODO: create() accepts opaque constants as proxies
+                value,
+                tx=tx,
+            )
         elif is_opaque_symbolic_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -5572,7 +5578,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())
