@@ -1433,7 +1433,7 @@ When :attr:`obj` is none of the above but a scalar, or a sequence of scalars the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
 current default device, and not share its memory.
 
-.. versionchanged:: 2.14
+.. versionchanged:: 2.15
    When a default device is set (via :func:`torch.set_default_device` or a
    ``with torch.device(...):`` block) and :attr:`device` is not given, the device of a
    device-bearing :attr:`obj` (a tensor, NumPy array, DLPack producer, or buffer) is now
