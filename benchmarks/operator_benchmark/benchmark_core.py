@@ -387,7 +387,7 @@ class BenchmarkRunner:
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return result.median
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
@@ -408,7 +408,7 @@ class BenchmarkRunner:
             },
         )
         result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return result.median
 
     def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
