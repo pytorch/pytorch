@@ -129,7 +129,6 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
   /* sizes */
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3); // number of channels (or colors)
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);

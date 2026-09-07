@@ -338,56 +338,16 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   const auto dilation_expanded = dilation_opt.has_value() ? copy_and_maybe_expand(dilation_opt.value(), pooling_dims)
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
-  for (const auto dim : c10::irange(pooling_dims)) {
-    TORCH_CHECK(stride_expanded[dim] > 0, op_name, ": stride should not be zero");
-    TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
-    TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
-                op_name,
-                ": pad should be at most half of effective kernel size");
-  }
-
-  if (pooling_dims == 2) {
-    const auto memory_format = input.suggest_memory_format();
-    bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      // Expect tensor in NHWC format and allow 0-dim only for N.
-      TORCH_CHECK((dims == 4 && valid_dims && input.size(3) != 0),
-                  "Expected 4D (batch mode) tensor expected for input with channels_last layout"
-                  " with optional 0 dim batch size for input, but got: ",
-                  input.sizes());
-    } else {
-      TORCH_CHECK((dims == 3 && input.size(0) != 0 && valid_dims) || (dims == 4 && valid_dims && input.size(3) != 0),
-                  "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
-                  input.sizes());
-    }
-  }
-
   check_non_empty_dims(input, /*first_dim=*/leading_dims == 2 ? 1 : 0, op_name.c_str(), "input");
 
-  // According to the documentation, the output size of each pooling dimension
-  // follows this basic formula:
-  // (in_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
-
   std::vector<int64_t> output_pooling_size(pooling_dims);
-
   for (const auto dim : c10::irange(pooling_dims)) {
-    int64_t out_size = (input.size(leading_dims + dim) + 2 * padding_expanded[dim] -
-                        dilation_expanded[dim] * (kernel_size_expanded[dim] - 1)) -
-        1;
-
-    if (ceil_mode) {
-      out_size += stride_expanded[dim] - 1;
-    }
-
-    // Use div_rtn for proper floor division (matching CPU behavior)
-    out_size = div_rtn<int64_t>(out_size, static_cast<int64_t>(stride_expanded[dim])) + 1;
-
-    if (ceil_mode) {
-      if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
-        out_size -= 1;
-      }
-    }
-    output_pooling_size[dim] = out_size;
+    output_pooling_size[dim] = pooling_output_shape<int64_t>(input.size(leading_dims + dim),
+                                                            kernel_size_expanded[dim],
+                                                            padding_expanded[dim],
+                                                            stride_expanded[dim],
+                                                            dilation_expanded[dim],
+                                                            ceil_mode);
   }
 
   std::vector<int64_t> output_size(dims);
@@ -398,7 +358,6 @@ static PoolSizes process_pool_sizes(const Tensor& input,
     output_size[leading_dims + dim] = output_pooling_size[dim];
   }
 
-  // Validate output sizes using the same shape check functions as CPU/CUDA
   if (pooling_dims == 2) {
     const auto memory_format = input.suggest_memory_format();
     pool2d_shape_check(input,
