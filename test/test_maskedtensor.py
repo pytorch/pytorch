@@ -116,7 +116,7 @@ def _fix_fn_name(fn_name):
     return fn_name
 
 
-class TestBasics(TestCase):
+class TestBasicsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_invalid_tensor_inputs(self, device):
@@ -894,7 +894,7 @@ MASKEDTENSOR_FLOAT_TYPES = {
     torch.float64,
 }
 
-class TestOperators(TestCase):
+class TestOperatorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _convert_mt_args(self, args, mask, layout):
@@ -1011,9 +1011,10 @@ class TestOperators(TestCase):
         self._test_reduction_equality(device, dtype, op, layout)
 
 
-instantiate_device_type_tests(TestOperators, globals())
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(TestOperatorsDevice, globals(), only_for=only_for, allow_xpu=True)
 
-instantiate_device_type_tests(TestBasics, globals())
+instantiate_device_type_tests(TestBasicsDevice, globals(), only_for=only_for, allow_xpu=True)
 instantiate_parametrized_tests(TestUnary)
 instantiate_parametrized_tests(TestBinary)
 instantiate_parametrized_tests(TestReductions)
