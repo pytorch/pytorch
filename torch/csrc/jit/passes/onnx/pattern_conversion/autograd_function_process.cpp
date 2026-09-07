@@ -21,10 +21,8 @@ static void convertSubgraphToSubBlock(Block* block) {
         env[subgraph->inputs()[i]] = subblock->inputs()[i];
       }
       for (auto* n : subgraph->nodes()) {
-        auto cloned_n =
-            subblock->appendNode(graph->createClone(n, [&](Value* v) {
-              return env.find(v) != env.end() ? env[v] : v;
-            }));
+        auto cloned_n = subblock->appendNode(graph->createClone(
+            n, [&](Value* v) { return env.contains(v) ? env[v] : v; }));
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           env[n->outputs().at(i)] = cloned_n->outputs().at(i);
           auto it = std::find(

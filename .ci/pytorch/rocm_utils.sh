@@ -44,6 +44,26 @@ build_rocm_ck_wheel() {
   pushd "$ck_dir" >/dev/null || return 1
   git fetch --depth 1 https://github.com/ROCm/composable_kernel.git "$ck_commit"
   git checkout FETCH_HEAD
+
+  # ck4inductor packages include/ck but not include/ck_tile, so the CK-Tile inductor
+  # backend has no headers to compile against now that ROCm no longer installs them
+  # system-wide. Patch it here until the fix lands upstream; bail out rather than build
+  # a wheel that is silently missing the headers.
+  local ck_include_unpatched='"ck4inductor.include" = ["ck/**/*.hpp"]'
+  local ck_include_patched='"ck4inductor.include" = ["ck/**/*.hpp", "ck_tile/**/*.hpp", "ck_tile/**/*.inc"]'
+  if grep -qxF "$ck_include_unpatched" pyproject.toml; then
+    echo "Patching pyproject.toml to package ck_tile headers"
+    if ! python -c 'import sys; s = open("pyproject.toml").read(); open("pyproject.toml", "w").write(s.replace(sys.argv[1], sys.argv[2], 1))' "$ck_include_unpatched" "$ck_include_patched"; then
+      echo "build_rocm_ck_wheel: failed to patch pyproject.toml" >&2
+      popd >/dev/null || true
+      return 1
+    fi
+  elif ! grep -qF 'ck_tile/**/*.hpp' pyproject.toml; then
+    echo "build_rocm_ck_wheel: unrecognized ck4inductor.include package-data in pyproject.toml" >&2
+    popd >/dev/null || true
+    return 1
+  fi
+
   python -m build --wheel --no-isolation --outdir "$output_dir"
   popd >/dev/null || return 1
 

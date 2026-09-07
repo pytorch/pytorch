@@ -140,7 +140,7 @@ bool SubgraphMatcher::tryMatchNodeInputs(
   // match pattern node inputs
   for (const auto i : c10::irange(target_node->attributes().size())) {
     const auto& it = target_node->attributes()[i];
-    if (matched_attributes.find(it.name) != matched_attributes.end()) {
+    if (matched_attributes.contains(it.name)) {
       continue; // Skip attributes already matched
     }
     const auto& patternInput = findInputByName(pattern_node, it.name);
@@ -159,9 +159,9 @@ bool SubgraphMatcher::tryMatchNodeInputs(
     Value* dummyOutput = dummyNode->addOutput(
         targetGraph->getUniqueValueName(), Type::Kind::None);
     targetGraph->insertBefore(dummyNode, target_node);
-    if (match.value_map.find(patternInput->value) != match.value_map.end()) {
-      return match.value_map[patternInput->value]->producer()->target() ==
-          kDummyTarget;
+    if (auto it = match.value_map.find(patternInput->value);
+        it != match.value_map.end()) {
+      return it->second->producer()->target() == kDummyTarget;
     }
     match.value_map[patternInput->value] = dummyOutput;
     match.dummy_input_to_attribute_map[dummyOutput] = &it.value;
@@ -173,8 +173,8 @@ bool SubgraphMatcher::tryMatchNode(
     const Node* pattern_node,
     Node* target_node,
     Match& match) {
-  if (match.node_map.find(pattern_node) != match.node_map.end()) {
-    return match.node_map[pattern_node] == target_node;
+  if (auto it = match.node_map.find(pattern_node); it != match.node_map.end()) {
+    return it->second == target_node;
   }
 
   // If the pattern node is an input, it should match every node
@@ -225,8 +225,8 @@ bool SubgraphMatcher::tryMatchValue(
     const Value* pval,
     Value* tval,
     Match& match) {
-  if (match.value_map.find(pval) != match.value_map.end()) {
-    return match.value_map[pval] == tval;
+  if (auto it = match.value_map.find(pval); it != match.value_map.end()) {
+    return it->second == tval;
   }
 
   const Node* pProducer = pval->producer();
@@ -270,7 +270,7 @@ bool SubgraphRewriter::overlapsWithUsedNodes(
     const Match& match,
     const std::unordered_set<Node*>& usedNodes) {
   for (const auto& kv : match.node_map) {
-    if (usedNodes.find(kv.second) != usedNodes.end()) {
+    if (usedNodes.contains(kv.second)) {
       return true;
     }
   }
@@ -361,10 +361,11 @@ void SubgraphRewriter::rewriteMatch(
   Node* insertionPoint = nullptr;
   std::vector<Value*> inputs, outputs;
   for (Value* v : pattern.inputs()) {
-    if (match.value_map.find(v) == match.value_map.end()) {
+    auto it = match.value_map.find(v);
+    if (it == match.value_map.end()) {
       continue;
     }
-    Value* input = match.value_map.at(v);
+    Value* input = it->second;
     // We want to insert after latest producer of any input that is not a dummy
     // node
     if (!insertionPoint ||
@@ -405,8 +406,9 @@ void SubgraphRewriter::rewriteMatch(
   }
 
   for (auto& patternNode : pattern.nodes()) {
-    if (match.node_map.find(&patternNode) != match.node_map.end()) {
-      Node* n = match.node_map.at(&patternNode);
+    if (auto it = match.node_map.find(&patternNode);
+        it != match.node_map.end()) {
+      Node* n = it->second;
       replacedNodes_.insert(n);
     }
   }

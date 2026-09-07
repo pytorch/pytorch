@@ -278,7 +278,7 @@ void FoldConvBatchNormHelper::analyze(
 
       GRAPH_DEBUG("number of Conv-BatchNorm matches: ", matches.size());
       Graph* g = method.graph().get();
-      if (!conv_bn_paths_.count(g)) {
+      if (!conv_bn_paths_.contains(g)) {
         // This is to make sure we don't visit one graph multiple times
         conv_bn_paths_[g] = {};
         for (const Match& match : matches) {

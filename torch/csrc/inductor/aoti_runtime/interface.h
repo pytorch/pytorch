@@ -223,8 +223,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
     size_t* num_entries,
     bool use_inactive);
 
-// Setup the constant buffer in model container with provided ConstantMap.
-// The ConstantMap is user managed, and the user would retain ownership.
+// Setup the constant buffer in model container with a user-managed ConstantMap.
+// The caller retains ownership of the provided handles. The container retains
+// shallow handles to the same tensor storage without copying its data until an
+// entry is replaced or the container is deleted.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
@@ -364,7 +366,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles);
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
-// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+// so be sure to handle ordering if AOTInductorModelRun is run concurrently.
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);

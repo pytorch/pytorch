@@ -83,10 +83,19 @@ def _wrap(fn, i, args, error_file):
     # terminate if their parent terminates before they do.
     _prctl_pr_set_pdeathsig(signal.SIGINT)
 
+    parent_pid = os.getppid()
+
     try:
         fn(i, *args)
     except KeyboardInterrupt:
-        pass  # SIGINT; Killed by parent, do nothing
+        # Parent died (pdeathsig SIGINT): exit quietly. Otherwise report
+        # it like any other failure instead of faking success.
+        if os.getppid() == parent_pid:
+            import traceback
+
+            with open(error_file, "wb") as fh:
+                pickle.dump(traceback.format_exc(), fh)
+            sys.exit(128 + signal.SIGINT)
     except Exception:
         # Propagate exception to parent process, keeping original traceback
         import traceback
@@ -168,7 +177,7 @@ class ProcessContext:
         # Try SIGKILL if the process isn't going down after another grace_period.
         # The reason is related to python signal handling is limited
         # to main thread and if that is in c/c++ land and stuck it won't
-        # to handle it. We have seen processes getting stuck not handling
+        # handle it. We have seen processes getting stuck not handling
         # SIGTERM for the above reason.
         self._join_procs_with_timeout(30 if grace_period is None else grace_period)
         for process in self.processes:

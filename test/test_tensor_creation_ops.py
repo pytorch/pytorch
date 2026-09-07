@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -470,7 +470,7 @@ class TestTensorCreation(TestCase):
             b = torch.tensor([3, 4], device=device, dtype=dtype)
             error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
-            with self.assertRaisesRegex(RuntimeError, error):
+            with self.assertRaisesRegex(NotImplementedError, error):
                 op(a, b)
 
     @onlyNativeDeviceTypes
@@ -1073,6 +1073,9 @@ class TestTensorCreation(TestCase):
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
+    # XPU float->int finite conversion differs for int32/int64; see:
+    # https://github.com/intel/torch-xpu-ops/issues/5054
+    @dtypesIfXPU(torch.bool, torch.uint8, torch.int8, torch.int16)
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
@@ -4555,12 +4558,12 @@ class TestAsArray(TestCase):
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
 
-instantiate_device_type_tests(TestTensorCreation, globals())
-instantiate_device_type_tests(TestRandomTensorCreation, globals())
-instantiate_device_type_tests(TestLikeTensorCreation, globals())
+instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
-instantiate_device_type_tests(TestAsArray, globals())
+instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

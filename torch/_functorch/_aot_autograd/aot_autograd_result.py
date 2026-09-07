@@ -610,7 +610,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         that AOTAutograd returned the first time it was run. It does this by running the various
         post compile steps that AOTAutograd runs on its compiled artifact after running the fw/bw compilers.
 
-        In the inference path, this consists of the Subclass, FunctionalzedRngRuntime, and RuntimeWrappers.
+        In the inference path, this consists of the Subclass, FunctionalizedRngRuntime, and RuntimeWrappers.
         In the autograd path, this consists of AOTAutogradDispatch.post_compile.
 
         The steps here should match exactly the steps that are run in aot_dispatch_base and aot_dispatch_autograd.

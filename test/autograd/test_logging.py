@@ -3,10 +3,13 @@
 import logging
 
 import torch
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 class TestAutogradLogging(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(autograd=logging.DEBUG)
     def test_logging(self, records):
         a = torch.rand(10, requires_grad=True)

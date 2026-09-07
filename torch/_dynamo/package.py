@@ -853,7 +853,9 @@ class CompilePackage:
                 "First code entry does not match _innermost_fn.__code__"
             )
 
-    def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
+    def _install_global(
+        self, module: types.ModuleType, name: str, value: object
+    ) -> None:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.

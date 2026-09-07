@@ -41,7 +41,7 @@ inline SymDimVector computeStrideForViewAsReal(SymIntArrayRef oldstride) {
 }
 
 inline Tensor _view_as_real_physical(const Tensor& self) {
-  TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
+  TORCH_CHECK_TYPE(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto old_sizes = self.sym_sizes();
   SymDimVector new_sizes(old_sizes.size() + 1);
   std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
@@ -83,7 +83,8 @@ inline SymDimVector computeStrideForViewAsComplex(
 // expects as input a float or double tensor with last dimension of size 2
 // and returns back a tensor with corresponding complex dtype
 Tensor view_as_complex(const Tensor& self) {
-  TORCH_CHECK(
+  TORCH_CHECK_TYPE(!self.is_complex(), "view_as_complex is not supported for complex tensors");
+  TORCH_CHECK_NOT_IMPLEMENTED(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 

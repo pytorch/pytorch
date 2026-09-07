@@ -162,7 +162,7 @@ void AliasAnalyzer::squash_deep_aliases(const Graph& graph) {
           // if the source of the source is not an alias
           // (i.e., it has ownership over its data ptr)
           // then we want to add it as a source of 'output'
-          if (aliases_.find(src_of_src) == aliases_.end()) {
+          if (!aliases_.contains(src_of_src)) {
             filtered_srcs.emplace(src_of_src);
           }
         }
@@ -184,7 +184,7 @@ void AliasAnalyzer::maybe_extend_lifetimes(const Graph& graph) {
           aliasIt != aliases_.end()) {
         const auto& alias = aliasIt->second;
         for (const auto& src : alias) {
-          if (extended.find(src) != extended.end()) {
+          if (extended.contains(src)) {
             continue;
           }
 
@@ -195,7 +195,7 @@ void AliasAnalyzer::maybe_extend_lifetimes(const Graph& graph) {
 
           extended.emplace(src);
 
-          if (aliases_.find(src) == aliases_.end() &&
+          if (!aliases_.contains(src) &&
               eol == graph.nodes().size() - 1 /* aliases output */) {
             values_associated_with_outputs_.emplace(src);
           }

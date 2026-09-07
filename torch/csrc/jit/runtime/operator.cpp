@@ -297,8 +297,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::namespaces::onnx,
   };
 
-  return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
+  return handled.contains(sym) || unneeded.contains(sym) ||
+      !required_namespaces.contains(sym.ns());
 }
 
 } // anonymous namespace
@@ -378,7 +378,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::AutogradAdd,
   };
 
-  return handled.count(symbol) || purposefully_not_handled.count(symbol);
+  return handled.contains(symbol) || purposefully_not_handled.contains(symbol);
 }
 
 void registerOperator(Operator&& op) {

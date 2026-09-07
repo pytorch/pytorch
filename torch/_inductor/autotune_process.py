@@ -169,7 +169,9 @@ class TuningProcess:
 
     @staticmethod
     def send(
-        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str | None] | None = None
+        obj: object,
+        write_pipe: IO[bytes],
+        extra_env: dict[str, str | None] | None = None,
     ) -> None:
         pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
@@ -233,7 +235,7 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any, extra_env: dict[str, str | None] | None = None) -> None:
+    def put(self, req: object, extra_env: dict[str, str | None] | None = None) -> None:
         """
         Push a work item to the child process.
         """
@@ -1725,7 +1727,8 @@ class AsyncAutotuner:
         Get autotuning results, blocking until complete.
 
         Args:
-            timeout: Maximum time to wait in seconds. None means wait forever.
+            choices: Candidate choices whose scheduled results should be collected.
+            inputs_key: Cache key used to identify each choice's Future.
 
         Returns:
             Dict mapping ChoiceCaller to benchmark timing
@@ -1734,5 +1737,12 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
+            if future is None:
+                autotuning_log.debug(
+                    "Skipping choice without a scheduled autotuning Future: %s",
+                    choice_hash,
+                )
+                continue
+            timings[choice] = future.result()
         return timings

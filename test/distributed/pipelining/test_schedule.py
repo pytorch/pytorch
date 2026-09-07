@@ -680,6 +680,31 @@ class TestSchedulePlan(TestCase):
                     num_stages=num_stages,
                 )
 
+    def test_max_active_stages_is_used_for_lowering(self):
+        stages = [
+            MockPipelineStage(group_size=4, group_rank=3, num_stages=16)
+            for _ in range(4)
+        ]
+
+        default_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+        )
+        retained_schedule = ScheduleInterleaved1F1B(
+            stages,
+            n_microbatches=16,
+            max_active_stages=4,
+        )
+
+        def count_stage_15_unshards(schedule):
+            return sum(
+                action.stage_index == 15 and action.computation_type == UNSHARD
+                for action in schedule.pipeline_order_with_comms[3]
+            )
+
+        self.assertEqual(count_stage_15_unshards(default_schedule), 4)
+        self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
+
     @parametrize(
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleInterleavedZeroBubble],

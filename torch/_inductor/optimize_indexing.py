@@ -1,19 +1,71 @@
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
 import torch
-from torch.fx.node import map_arg
+from torch.fx.node import Argument, map_arg
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .loop_body import LoopBody
-from .utils import dominated_nodes
+from .utils import dominated_nodes, flatten_index
+from .virtualized import V
 
 
-def val_expressable_in_32_bits(val: Any) -> bool:
+_ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+
+
+def remove_redundant_argreduce_indices(
+    loop_bodies: Sequence[LoopBody],
+) -> None:
+    """Drop explicit arg-reduction indices that match the final loop order."""
+    reductions: dict[torch.fx.Node, Any] = {}
+    non_native: OrderedSet[torch.fx.Node] = OrderedSet()
+    for loop_body in loop_bodies:
+        if not loop_body.reduce_vars:
+            continue
+        native_index = flatten_index(loop_body.reduce_vars, loop_body.sizes[1])
+        for block in (loop_body.root_block, *loop_body.subblocks.values()):
+            for node in block.graph.find_nodes(op="call_method", target="reduction"):
+                if node.args[-2] not in _ARG_REDUCTION_TYPES:
+                    continue
+                value = node.args[-1]
+                if not (isinstance(value, tuple) and len(value) == 2):
+                    continue
+                reduction_value, logical_index = value
+                if not (
+                    isinstance(logical_index, torch.fx.Node)
+                    and logical_index.target in ("index_expr", "value_expr")
+                ):
+                    continue
+                index_node = logical_index.args[1]
+                if not isinstance(index_node, torch.fx.Node):
+                    continue
+                index_name = index_node.args[0]
+                if not isinstance(index_name, str):
+                    continue
+                reductions[node] = reduction_value
+                if not V.graph.sizevars.statically_known_equals(
+                    loop_body.indexing_exprs[index_name], native_index
+                ):
+                    non_native.add(node)
+
+    for node, reduction_value in reductions.items():
+        if node not in non_native:
+            node.args = (*node.args[:-1], reduction_value)
+
+
+def val_expressable_in_32_bits(val: object) -> bool:
     if getattr(val, "is_Boolean", False):
         return True
 
@@ -132,25 +184,25 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
 
 @dataclass(frozen=True)
 class _ValueUseRule:
-    # These fields are op arguments, so Any covers FX nodes, SymPy exprs,
+    # These fields are op arguments, so object covers FX nodes, SymPy exprs,
     # scalars, and nested tuples/lists. value_sinks seed the backward walk
     # unconditionally. value_inputs propagate value demand only when the op's
     # result is already value-reachable. indexing_inputs block propagation
     # because they only affect addresses, bounds, masks, or other indexing-only
     # state.
-    value_inputs: tuple[Any, ...] = ()
-    value_sinks: tuple[Any, ...] = ()
-    indexing_inputs: tuple[Any, ...] = ()
+    value_inputs: tuple[object, ...] = ()
+    value_sinks: tuple[object, ...] = ()
+    indexing_inputs: tuple[object, ...] = ()
 
 
-def _collect_fx_nodes(arg: Any) -> OrderedSet[torch.fx.Node]:
+def _collect_fx_nodes(arg: object) -> OrderedSet[torch.fx.Node]:
     nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
     def add_node(node: torch.fx.Node) -> torch.fx.Node:
         nodes.add(node)
         return node
 
-    map_arg(arg, add_node)
+    map_arg(cast(Argument, arg), add_node)
     return nodes
 
 
@@ -167,7 +219,7 @@ def _collect_input_nodes(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
 
 class _ValueUseRules:
     @staticmethod
-    def default_rule(*args: Any, **kwargs: Any) -> _ValueUseRule | None:
+    def default_rule(*args: object, **kwargs: object) -> _ValueUseRule | None:
         return None
 
     def load(self, name: str, index: sympy.Expr) -> _ValueUseRule:
@@ -180,8 +232,8 @@ class _ValueUseRules:
         self,
         name: str,
         index: sympy.Expr,
-        value: Any,
-        mode: Any = None,
+        value: object,
+        mode: object = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(
             value_sinks=(value,),
@@ -189,7 +241,7 @@ class _ValueUseRules:
         )
 
     def store_reduction(
-        self, name: str, index: sympy.Expr, value: Any
+        self, name: str, index: sympy.Expr, value: object
     ) -> _ValueUseRule:
         return _ValueUseRule(
             value_sinks=(value,),
@@ -201,7 +253,7 @@ class _ValueUseRules:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: str,
-        value: Any,
+        value: object,
     ) -> _ValueUseRule:
         return _ValueUseRule(value_sinks=(value,))
 
@@ -209,15 +261,15 @@ class _ValueUseRules:
         self,
         name: str,
         reduction_type: str,
-        value: Any,
-        extra_meta: dict[str, Any],
+        value: object,
+        extra_meta: dict[str, object],
     ) -> _ValueUseRule:
         return _ValueUseRule(value_sinks=(value,))
 
     def sort(
         self,
         dtypes: tuple[torch.dtype, ...],
-        values: tuple[Any, ...],
+        values: tuple[object, ...],
         stable: bool,
         descending: bool,
     ) -> _ValueUseRule:
@@ -226,22 +278,22 @@ class _ValueUseRules:
     def scan(
         self,
         dtypes: tuple[torch.dtype, ...],
-        combine_fn_or_values: Any,
-        values: tuple[Any, ...] | None = None,
+        combine_fn_or_values: object,
+        values: tuple[object, ...] | None = None,
     ) -> _ValueUseRule:
         if values is None:
-            values = combine_fn_or_values
+            values = cast(tuple[object, ...], combine_fn_or_values)
         return _ValueUseRule(value_sinks=(values,))
 
     def bucketize(
         self,
-        values: Any,
+        values: object,
         boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
-        boundary_indices: Any,
+        boundary_indices: object,
         indexing_dtype: torch.dtype,
         right: bool,
         sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: Any | None = None,
+        sorter_indices: object | None = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(
             value_inputs=(values,),
@@ -249,7 +301,7 @@ class _ValueUseRules:
         )
 
     def indirect_indexing(
-        self, x: Any, size: sympy.Expr, check: bool = True, wrap_neg: bool = True
+        self, x: object, size: sympy.Expr, check: bool = True, wrap_neg: bool = True
     ) -> _ValueUseRule:
         return _ValueUseRule(indexing_inputs=(x, size))
 
@@ -258,16 +310,16 @@ class _ValueUseRules:
     ) -> _ValueUseRule:
         return _ValueUseRule(indexing_inputs=(expr, size))
 
-    def masked(self, mask: Any, body: Any, other: Any) -> _ValueUseRule:
+    def masked(self, mask: object, body: object, other: object) -> _ValueUseRule:
         return _ValueUseRule(value_inputs=(other,), indexing_inputs=(mask,))
 
-    def masked_subblock(self, mask: Any, other: Any) -> _ValueUseRule:
+    def masked_subblock(self, mask: object, other: object) -> _ValueUseRule:
         return _ValueUseRule(value_inputs=(other,), indexing_inputs=(mask,))
 
-    def set_indirect(self, new_var: Any) -> _ValueUseRule:
+    def set_indirect(self, new_var: object) -> _ValueUseRule:
         return _ValueUseRule(indexing_inputs=(new_var,))
 
-    def device_assert_async(self, cond: Any, msg: str) -> _ValueUseRule:
+    def device_assert_async(self, cond: object, msg: str) -> _ValueUseRule:
         return _ValueUseRule(indexing_inputs=(cond,))
 
 
@@ -286,7 +338,7 @@ class _ValueUseAnalysis:
 
         self.value_reachable: OrderedSet[torch.fx.Node] = OrderedSet()
         self.worklist: list[tuple[torch.fx.Graph, torch.fx.Node]] = []
-        self.indirect_inputs: dict[sympy.Symbol, tuple[torch.fx.Graph, Any]] = {}
+        self.indirect_inputs: dict[sympy.Symbol, tuple[torch.fx.Graph, Argument]] = {}
 
     def run(self) -> bool:
         if not self.has_index_expr():
