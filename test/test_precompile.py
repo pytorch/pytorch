@@ -6,6 +6,7 @@ import pickle
 import sys
 import types
 import typing
+from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
@@ -214,6 +215,21 @@ class TestPrecompile(TestCase):
         self.assertIs(importlib.import_module("torch.compiler.precompile"), p)
         self.assertIs(sys.modules["torch.compiler.precompile"], p)
         self.assertEqual(p.__name__, "torch.compiler.precompile")
+
+    def _spy_on_guard_drift(self, stack, drift):
+        """Patch _report_guard_drift to append each newly recorded drift to ``drift``."""
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        real = PrecompileSession._report_guard_drift
+
+        def spy(session, code_entry, rebuilt, live_key):
+            before = set(session._drifted_guards)
+            real(session, code_entry, rebuilt, live_key)
+            drift.extend(session._drifted_guards - before)
+
+        stack.enter_context(
+            mock.patch.object(PrecompileSession, "_report_guard_drift", spy)
+        )
 
     @parametrize("name", _PRECOMPILE_PUBLIC_METHODS)
     def test_precompile_member_module_and_qualname_resolve_to_it(self, name):
