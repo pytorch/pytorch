@@ -8963,6 +8963,18 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 3, 10, 10, 10, device=device)
             torch.ops.aten.reflection_pad2d(inp, (2, 2, 2, 2))
 
+        grad_output = torch.randn(1, 1, 1, device=device)
+        inp = torch.randn(1, 1, 1, device=device)
+
+        for padding in [(), (0,), (0, 0), (0, 0, 0), (0, 0, 0, 0, 0)]:
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"padding size is expected to be 4, but got: {len(padding)}",
+            ):
+                torch.ops.aten.reflection_pad2d_backward(
+                    grad_output, inp, padding
+                )
+
         with self.assertRaisesRegex(RuntimeError, r'Padding size 6 is not supported for 6D input tensor'):
             mod = torch.nn.ReflectionPad3d(3)
             inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)

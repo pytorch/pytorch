@@ -269,6 +269,11 @@ void reflection_pad2d_out_template(
 void reflection_pad2d_backward_out_template(
     Tensor &grad_input, const Tensor &grad_output,
     const Tensor &input, IntArrayRef padding) {
+  TORCH_CHECK_VALUE(
+    padding.size() == 4,
+    "padding size is expected to be 4, but got: ",
+    padding.size());
+
   int dim_w = 2;
   int dim_h = 1;
 
