@@ -4275,7 +4275,7 @@ def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
 
 
 @register_meta([aten._weight_int4pack_mm_with_scales_and_zeros])
-def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros):
+def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros=None):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
@@ -4285,6 +4285,10 @@ def _weight_int4pack_mm_with_scales_and_zeros(x, w, q_group_size, qScale, qZeros
     torch._check(
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    torch._check(
+        qScale.dtype == x.dtype or qScale.dtype == torch.float32,
+        lambda: f"expected qScale.dtype to match x.dtype ({x.dtype}) or be fp32, got {qScale.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
