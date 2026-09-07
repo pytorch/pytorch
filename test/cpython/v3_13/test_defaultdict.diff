@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_defaultdict.py b/test/cpython/v3_13/test_defaultdict.py
-index bdbe9b81e8f..d8626c759a9 100644
+index bdbe9b81e8fb3f5a0786478ef1c01d1ee1aea291..d8626c759a9226c71c2052ef701c1162044d414c 100644
 --- a/test/cpython/v3_13/test_defaultdict.py
 +++ b/test/cpython/v3_13/test_defaultdict.py
 @@ -1,3 +1,60 @@

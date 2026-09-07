@@ -13,18 +13,13 @@ namespace torch::autograd {
 void PyAnomalyMetadata::store_stack() {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
-  if (!mod) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(mod);
 
   THPObjectPtr list(PyObject_CallMethod(mod.get(), "format_stack", ""));
-  if (!list) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(list);
 
-  if (PyDict_SetItemString(dict(), ANOMALY_TRACE_KEY, list.get())) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      !PyDict_SetItemString(dict(), ANOMALY_TRACE_KEY, list.get()));
 }
 
 void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
@@ -32,44 +27,42 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   if (!PyDict_Check(dict())) {
     TORCH_CHECK(false, "Anomaly metadata is not a python dictionary.");
   }
-  PyObject* trace_stack = nullptr;
-  if (PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack) < 0) {
-    throw python_error();
-  }
-  _print_stack(trace_stack, current_node_name, false);
-  PyObject* pyparent = nullptr;
-  if (PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
-    throw python_error();
-  }
+  PyObject* trace_stack_ptr = nullptr;
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack_ptr) >=
+      0);
+  THPObjectPtr trace_stack(trace_stack_ptr);
+  _print_stack(trace_stack.get(), current_node_name, false);
+  PyObject* pyparent_ptr = nullptr;
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent_ptr) >= 0);
+  THPObjectPtr pyparent(pyparent_ptr);
 
   // if there is no "parent_" in metadata, then it means this metadata's node
   // is the root and stop printing the traceback
   while (pyparent) {
-    THPObjectPtr parent_metadata(PyObject_GetAttrString(pyparent, "metadata"));
-    if (!parent_metadata) {
-      throw python_error();
-    }
-    THPObjectPtr parent_name_pyobj(PyObject_CallMethod(pyparent, "name", ""));
-    if (!parent_name_pyobj) {
-      throw python_error();
-    }
+    THPObjectPtr parent_metadata(
+        PyObject_GetAttrString(pyparent.get(), "metadata"));
+    TORCH_CHECK_PYTHON(parent_metadata);
+    THPObjectPtr parent_name_pyobj(
+        PyObject_CallMethod(pyparent.get(), "name", ""));
+    TORCH_CHECK_PYTHON(parent_name_pyobj);
     const char* parent_name_char = PyUnicode_AsUTF8(parent_name_pyobj.get());
-    if (!parent_name_char) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(parent_name_char);
     const std::string parent_name(parent_name_char);
-    PyObject* parent_stack = nullptr;
-    if (PyDict_GetItemStringRef(
-            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack) < 0) {
-      throw python_error();
-    }
-    _print_stack(parent_stack, parent_name, true);
+    PyObject* parent_stack_ptr = nullptr;
+    TORCH_CHECK_PYTHON(
+        PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack_ptr) >= 0);
+    THPObjectPtr parent_stack(parent_stack_ptr);
+    _print_stack(parent_stack.get(), parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
-    if (PyDict_GetItemStringRef(
-            parent_metadata.get(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
-      throw python_error();
-    }
+    PyObject* next_parent_ptr = nullptr;
+    TORCH_CHECK_PYTHON(
+        PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_PARENT_KEY, &next_parent_ptr) >= 0);
+    pyparent = THPObjectPtr(next_parent_ptr);
   }
 }
 
@@ -84,12 +77,9 @@ void PyAnomalyMetadata::assign_parent(
     return;
 
   THPObjectPtr parent_node_(functionToPyObject(parent_node));
-  if (!parent_node_) {
-    throw python_error();
-  }
-  if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get())) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(parent_node_);
+  TORCH_CHECK_PYTHON(
+      !PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get()));
 }
 
 void _print_stack(
@@ -107,16 +97,12 @@ void _print_stack(
   }
 
   THPObjectPtr empty_string(PyUnicode_FromString(""));
-  if (!empty_string) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(empty_string);
 
   // stack is a list of Python strings ending with newlines. Use join to convert
   // to a single string.
   THPObjectPtr msg(PyUnicode_Join(empty_string, stack));
-  if (!msg) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(msg);
 
   if (!is_parent) {
     TORCH_WARN(

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 permissions:
@@ -27,37 +27,34 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc
 
-  linux-jammy-py3_14t-clang18-tsan-build:
-    name: linux-jammy-py3.14t-clang18-tsan
+  linux-jammy-py3_14t-clang21-tsan-build:
+    name: linux-jammy-py3.14t-clang21-tsan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.14t-clang18-tsan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang18
+      build-environment: linux-jammy-py3.14t-clang21-tsan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "tsan", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
-      use-arc: true
       python-version: "3.14t"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_14t-clang18-tsan-test:
-    name: linux-jammy-py3.14t-clang18-tsan
+  linux-jammy-py3_14t-clang21-tsan-test:
+    name: linux-jammy-py3.14t-clang21-tsan
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_14t-clang18-tsan-build
+      - linux-jammy-py3_14t-clang21-tsan-build
       - get-label-type
     with:
-      build-environment: linux-jammy-py3.14t-clang18-tsan
-      docker-image: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix }}
-      use-arc: true
+      build-environment: linux-jammy-py3.14t-clang21-tsan
+      docker-image: ${{ needs.linux-jammy-py3_14t-clang21-tsan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_14t-clang21-tsan-build.outputs.test-matrix }}
       python-version: "3.14t"
-      compiler: clang18
+      compiler: clang21
     secrets: inherit

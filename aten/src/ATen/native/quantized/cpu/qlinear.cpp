@@ -1135,10 +1135,11 @@ static at::Tensor linear_int8_with_onednn_weight(
           context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
 #endif
   if (allow_cache) {
-    if (qlinear_forward_params_map.contains(cache_key)) {
+    if (auto it = qlinear_forward_params_map.find(cache_key);
+        it != qlinear_forward_params_map.end()) {
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      auto& params = qlinear_forward_params_map.at(cache_key);
+      auto& params = it->second;
       if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()
@@ -1351,8 +1352,8 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.N = N;
     params.out_dtype = out_dtype;
     params.output_size = output_size;
-    params.primitive = primitive;
-    params.packed_weight = expected_weight;
+    params.primitive = std::move(primitive);
+    params.packed_weight = std::move(expected_weight);
     // keep a copy rather than a view of weight scales
     params.weight_scales = tensor(wei_scales_t.get_desc());
     memcpy(params.weight_scales.get_data_handle(), wei_scales_t.get_data_handle(), wei_scales_t.get_desc().get_size());
@@ -1361,9 +1362,9 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.src_zero_point = input_zero_point != 0 ? std::make_optional<tensor>(src_zp_t) : std::nullopt;
     params.dst_zero_point = output_zero_point != 0 ? std::make_optional<tensor>(dst_zp_t) : std::nullopt;
     params.bias = with_bias ? std::make_optional<tensor>(onednn_bias) : std::nullopt;
-    params.scratchpad = scratchpad;
-    params.src = src;
-    params.dst = dst;
+    params.scratchpad = std::move(scratchpad);
+    params.src = std::move(src);
+    params.dst = std::move(dst);
     params.src1 = binary_post_op == "add" ? std::make_optional<tensor>(src1) : std::nullopt;
     params.init_args();
     qlinear_forward_params_map[cache_key] = params;

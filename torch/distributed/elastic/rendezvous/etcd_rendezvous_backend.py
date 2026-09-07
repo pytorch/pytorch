@@ -199,7 +199,7 @@ def create_backend(params: RendezvousParameters) -> tuple[EtcdRendezvousBackend,
     | ssl_cert_key | The path to the private key of the SSL client certificate |
     |              | to use along with HTTPS. Defaults to ``None``.            |
     +--------------+-----------------------------------------------------------+
-    | ca_cert      | The path to the rool SSL authority certificate. Defaults  |
+    | ca_cert      | The path to the root SSL authority certificate. Defaults  |
     |              | to ``None``.                                              |
     +--------------+-----------------------------------------------------------+
     """

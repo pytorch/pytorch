@@ -22,7 +22,10 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
   is_channels_last_ = other.is_channels_last_;
   is_channels_last_3d_ = other.is_channels_last_3d_;
   is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
-  available_.store(other.available_.load());
+  // clear cache bits so copy rematerializes them lazily
+  available_.store(
+      other.available_.load() &
+      ~(sizes_materialized_avail | strides_materialized_avail));
   // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
@@ -401,6 +404,46 @@ void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
         return compute_is_non_overlapping_and_dense_anydim();
     }
   }());
+}
+
+void SymbolicShapeMeta::set_materialized_sizes() const {
+  if (has_materialized_sizes()) {
+    return;
+  }
+  SmallVector<int64_t, 5> materialized(sizes_.size());
+  for (size_t i = 0; i < sizes_.size(); i++) {
+    materialized[i] = sizes_[i].guard_int(__FILE__, __LINE__);
+  }
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_sizes()) {
+    return;
+  }
+  materialized_sizes_ = std::move(materialized);
+  available_.fetch_or(sizes_materialized_avail);
+}
+
+void SymbolicShapeMeta::set_materialized_strides() const {
+  if (has_materialized_strides()) {
+    return;
+  }
+  SmallVector<int64_t, 5> materialized(strides_.size());
+  for (size_t i = 0; i < strides_.size(); i++) {
+    materialized[i] = strides_[i].guard_int(__FILE__, __LINE__);
+  }
+  std::scoped_lock lock(mutables_);
+  if (has_materialized_strides()) {
+    return;
+  }
+  materialized_strides_ = std::move(materialized);
+  available_.fetch_or(strides_materialized_avail);
+}
+
+void SymbolicShapeMeta::init_materialized_sizes() const {
+  set_materialized_sizes();
+}
+
+void SymbolicShapeMeta::init_materialized_strides() const {
+  set_materialized_strides();
 }
 
 } // namespace c10

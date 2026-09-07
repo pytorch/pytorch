@@ -6,7 +6,6 @@ import sys
 
 import torch
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
@@ -32,6 +31,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     add_test_failures,
     CommonTemplate,
     copy_tests,
+    make_compile_fx_wrapper_with_dynamic_dim_assertions,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
@@ -52,6 +52,7 @@ def check_codegen(
     device: torch.types.Device,
     is_cpp_code: bool,
     copy_to_gpu: bool = True,
+    assert_dynamic_dims=None,
 ):
     kwargs = kwargs or {}
 
@@ -76,10 +77,17 @@ def check_codegen(
 
     called = False
 
-    def compile_fx_wrapper(model_, example_inputs_):
+    def mark_called():
         nonlocal called
         called = True
-        return compile_fx(model_, example_inputs_)
+
+    compile_fx_wrapper = make_compile_fx_wrapper_with_dynamic_dim_assertions(
+        self,
+        assert_dynamic_dims,
+        example_inputs,
+        kwargs,
+        mark_called,
+    )
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -91,7 +99,10 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
+        self.assertTrue(
+            "def triton" in code,
+            lambda msg: f"{msg}\nFailed to find triton kernel\n{code}",
+        )
 
     if not called:
         raise AssertionError("Ran graph without calling compile_fx")
@@ -106,6 +117,14 @@ test_failures = {
     #
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    #
+    # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
+    # of the model, so the parent stops emitting triton_per_ and the
+    # persistent-vs-looped contrast the test asserts no longer exists.
+    #
+    "test_regional_codegen_only_config_cpp_wrapper_dynamic_shapes": TestFailure(
+        ("cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable (no kernels generated)
     #
@@ -131,6 +150,9 @@ test_failures = {
     "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_scatter_empty_index_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -139,6 +161,7 @@ test_failures = {
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
     ),
+    "test_view_as_complex_non_contiguous_dynamic_shapes": TestFailure(("cpu",)),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -155,6 +178,7 @@ test_failures = {
         ("cpu",)
     ),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
+    "test_expand_implicit_kwarg_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
@@ -190,6 +214,12 @@ test_failures = {
     # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
     "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_int_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_bincount_empty_with_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -205,8 +235,15 @@ test_failures = {
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     # XPU falls back max_pool2d_with_indices_backward to ATen eager (see
     # torch/_decomp/decompositions.py), so no Triton kernel is generated.
+    "test_max_pool2d_with_indices_backward_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward2_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward3_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward4_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward_fallback_dynamic_shapes": TestFailure(
+        ("xpu",)
+    ),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -230,6 +267,7 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(("cpu",)),
     "test_unsafe_chunk_empty_tensor_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -509,7 +547,102 @@ if HAS_CPU:
         maxDiff = None
         device = "cpu"
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_rejects_specialized_dim(self):
+            def fn(x):
+                if x.size(0) == 3:
+                    return x + 1
+                return x - 1
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 0 dim 0 to be dynamic",
+            ):
+                self.common(
+                    fn,
+                    (torch.randn(3, 4),),
+                    assert_dynamic_dims={0: (0, 1)},
+                )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_indexes_user_inputs_not_parameters(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.randn(4))
+                    self.register_buffer("bias", torch.randn(4))
+
+                def forward(self, x):
+                    return x + self.weight + self.bias
+
+            self.common(
+                Model(),
+                (torch.randn(3, 4),),
+                assert_dynamic_dims={0: (0,)},
+            )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_preserves_keyword_input_order(self):
+            def fn(*, z, a):
+                if z.size(0) == 3:
+                    return z.sum() + a
+                return z.sum() - a
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 0 dim 0 to be dynamic",
+            ):
+                self.common(
+                    fn,
+                    (),
+                    kwargs={"z": torch.randn(3, 4), "a": torch.randn(5, 4)},
+                    assert_dynamic_dims={0: (0,)},
+                )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_rejects_eliminated_input(self):
+            def fn(x, y):
+                return y + 1
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 0 to be present in the Dynamo graph",
+            ):
+                self.common(
+                    fn,
+                    (torch.randn(3, 4), torch.randn(5, 4)),
+                    assert_dynamic_dims={0: (0,)},
+                )
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_sorts_positional_inputs_numerically(self):
+            def fn(*xs):
+                result = xs[10].sum()
+                if xs[2].size(0) == 4:
+                    result = result + xs[2].sum()
+                for i, x in enumerate(xs):
+                    if i not in (2, 10):
+                        result = result + x.sum()
+                return result
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Expected user tensor input 2 dim 0 to be dynamic",
+            ):
+                self.common(
+                    fn,
+                    tuple(torch.randn(i + 2, 4) for i in range(11)),
+                    assert_dynamic_dims={2: (0,)},
+                )
+
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            assert_dynamic_dims=None,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -517,6 +650,7 @@ if HAS_CPU:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
+                assert_dynamic_dims=assert_dynamic_dims,
             )
 
     copy_tests(
@@ -539,6 +673,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             example_inputs,
             kwargs=None,
             copy_to_gpu=True,
+            assert_dynamic_dims=None,
             **_rest,
         ):
             return check_codegen(
@@ -549,6 +684,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 kwargs=kwargs,
                 is_cpp_code=False,
                 copy_to_gpu=copy_to_gpu,
+                assert_dynamic_dims=assert_dynamic_dims,
             )
 
     copy_tests(

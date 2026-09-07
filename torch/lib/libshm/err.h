@@ -1,7 +1,8 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+#include <c10/util/error.h>
 #include <cerrno>
-#include <system_error>
 
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
 // `errno` to `EINVAL` in child process on some macos
@@ -17,7 +18,7 @@
       if (errno == EINTR) {                                     \
         continue;                                               \
       } else {                                                  \
-        throw std::system_error(errno, std::system_category()); \
+        TORCH_CHECK(false, c10::utils::str_error(errno));        \
       }                                                         \
     } else {                                                    \
       break;                                                    \

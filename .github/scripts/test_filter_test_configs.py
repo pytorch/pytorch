@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 from typing import Any
 from unittest import main, mock, TestCase
@@ -12,6 +13,7 @@ from filter_test_configs import (
     filter_selected_test_configs,
     get_ghstack_below_count,
     get_labels,
+    get_reenabled_issues,
     mark_unstable_jobs,
     parse_reenabled_issues,
     perform_misc_tasks,
@@ -832,6 +834,31 @@ class TestConfigFilter(TestCase):
 
         pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
+
+    @mock.patch("subprocess.check_output")
+    def test_get_reenabled_issues(self, mocked_subprocess: Any) -> None:
+        mocked_subprocess.return_value = b"Fixes #123\nUnrelated commit\nCloses #456\n"
+        self.assertEqual(
+            get_reenabled_issues(pr_body="Resolves #789"), ["789", "123", "456"]
+        )
+
+        # Must stay on a command that reads commit objects only: git cherry
+        # computes patch-ids, which makes a treeless CI checkout (--filter=tree:0)
+        # lazily fetch every tree off the default branch.
+        args, kwargs = mocked_subprocess.call_args
+        self.assertEqual(args[0][:3], ["git", "log", "--format=%s"])
+        self.assertTrue(args[0][3].endswith("..HEAD"))
+        self.assertIsNotNone(kwargs.get("timeout"))
+
+    @mock.patch("subprocess.check_output")
+    def test_get_reenabled_issues_when_git_fails(self, mocked_subprocess: Any) -> None:
+        # A broken git lookup must not lose the issues named in the PR body.
+        for err in (
+            subprocess.CalledProcessError(128, "git"),
+            subprocess.TimeoutExpired("git", 60),
+        ):
+            mocked_subprocess.side_effect = err
+            self.assertEqual(get_reenabled_issues(pr_body="Fixes #123"), ["123"])
 
     def test_get_ghstack_below_count(self) -> None:
         # Not a ghstack body.

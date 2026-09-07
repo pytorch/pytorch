@@ -40,7 +40,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
-from torch._dynamo.variables.script_object import TorchScriptObjectVariable
+from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
@@ -55,6 +55,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, variables
 from ..exc import (
+    FakeTensorObservedException,
     ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -66,7 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import SetVariable
+from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
 
 
 if TYPE_CHECKING:
@@ -248,7 +249,7 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
-    elif isinstance(var, SetVariable):
+    elif isinstance(var, (SetVariable, FrozensetVariable, DictKeySetVariable)):
         for key in var.items:
             mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
@@ -350,15 +351,15 @@ def overwrite_tensor_vt_proxy(
             (
                 variables.SymNodeVariable,
                 variables.TensorVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             if not (
                 subgraph_vt.is_tensor()
-                or isinstance(subgraph_vt, (SymNodeVariable, TorchScriptObjectVariable))
+                or isinstance(subgraph_vt, (SymNodeVariable, CustomClassObjectVariable))
             ):
                 raise AssertionError(
-                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or TorchScriptObjectVariable"
+                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or CustomClassObjectVariable"
                 )
             orig_vt.proxy = subgraph_vt.proxy
 
@@ -1282,14 +1283,19 @@ def validate_args_and_maybe_create_graph_inputs(
 #     means by node target (branches in separate tracing contexts can produce
 #     distinct proxies for the same nn module attr); the proxy from the first
 #     branch is chosen as the canonical representative.
-#   * unique_per_branch[i]: proxies lifted by branch i but not shared.
+#   * unique_per_branch[i]: proxies lifted by branch i, not shared, and not
+#     already assigned to an earlier branch's unique block. With N > 2 a
+#     freevar can be lifted by some but not all branches; the first such branch
+#     claims it, and later branches that also lift it reuse the same placeholder.
+#     For N == 2 any non-shared freevar is lifted by exactly one branch -> no-op.
 # Each block is sorted by node name for determinism.
 #
 # Side effect: each graph is rewritten in-place so its placeholders follow the
 # 1 + N block layout: shared block (no suffix), then one block per branch
-# (suffixed with "_<branch_name>") holding that branch's unique freevars. Only
-# the originating branch's unique placeholders are wired to the inner uses;
-# the other branches' unique blocks become unused placeholders for signature
+# (suffixed with "_<branch_name>") holding that branch's unique freevars. A
+# branch graph wires its inner uses to whichever block holds the placeholder
+# for the freevar it lifted (its own block, or the earlier branch that
+# claimed it); the remaining blocks become unused placeholders for signature
 # alignment.
 def _merge_graph_inputs(
     graphs: list[torch.fx.Graph],
@@ -1326,28 +1332,23 @@ def _merge_graph_inputs(
     # Step 2: derive the shared block and the per-branch unique blocks. Plain
     # proxies are the same object across branches, so a single canonical entry
     # covers all of them; for shared get_attrs the canonical is the branch-0
-    # proxy.
+    # proxy. A non-shared canonical lifted by multiple branches is assigned
+    # to the first branch that lifted it.
     def _sort_by_name(vars: Iterable[Proxy]) -> list[Proxy]:
         return sorted(vars, key=lambda var: var.node.name)
 
     shared = _sort_by_name(shared_canonical)
-    unique_per_branch = [
-        _sort_by_name(
-            outer
-            for outer, canonical in outer_to_canonical.items()
-            if canonical not in shared_canonical
-        )
-        for outer_to_canonical in per_branch_outer_to_canonical
-    ]
+    claimed_canonical: set[Proxy] = set(shared_canonical)
+    unique_per_branch: list[list[Proxy]] = []
+    for outer_to_canonical in per_branch_outer_to_canonical:
+        branch_unique = []
+        for outer, canonical in outer_to_canonical.items():
+            if canonical in claimed_canonical:
+                continue
+            branch_unique.append(outer)
+            claimed_canonical.add(canonical)
+        unique_per_branch.append(_sort_by_name(branch_unique))
 
-    # Let's say we capture cond(pred, true_fn, false_fn, (x,)).
-    # With set_graph_input set to automatic,
-    #   true_fn has lifted variables x, a, b, c
-    #   false_fn has lifted variables x, a, b, d
-    # Then fixup_branch_inps makes sure both branches have the same signature, i.e.:
-    #   true_fn(x, a, b, c_true_branch, d_false_branch)
-    #   false_fn(x, a, b, c_true_branch, d_false_branch)
-    #
     # For N branches the merged signature has 1 + N blocks: shared (no suffix)
     # then one suffixed block per branch. Within each block proxies are
     # ordered by node name for determinism.
@@ -1867,7 +1868,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
-                    vt, (SymNodeVariable, TorchScriptObjectVariable)
+                    vt, (SymNodeVariable, CustomClassObjectVariable)
                 ):
                     graph_output_vts.append(vt)
 
@@ -2238,6 +2239,8 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
                 e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
             raise
         except (Unsupported, ObservedException) as e:
+            if isinstance(e, FakeTensorObservedException):
+                raise
             # Only tag if not already tagged (reports deepest HOP only)
             if hasattr(e, "_hop_name"):
                 raise
@@ -2303,7 +2306,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -2607,7 +2610,11 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.switch import _get_branch
+
         from . import ListVariable
+
+        self.supports_input_mutation = not torch.is_grad_enabled()
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -2639,8 +2646,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             idx = index.as_python_constant()
             branch_fns = branches.unpack_var_sequence(tx)
-            clamped = min(max(0, idx), len(branch_fns) - 1)
-            return branch_fns[clamped].call_function(
+            return _get_branch(branch_fns, idx).call_function(
                 tx, operands.unpack_var_sequence(tx), {}
             )
 
@@ -2876,7 +2882,7 @@ def validate_subgraph_output_types(
                     out.is_python_constant()
                     and isinstance(out.as_python_constant(), (int, bool))
                 )
-                or isinstance(out, TorchScriptObjectVariable)
+                or isinstance(out, CustomClassObjectVariable)
             ):
                 continue
             unimplemented(
@@ -3009,17 +3015,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
         _check_all_tensorvariable(additional_inputs_vars)
-
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.associative_scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
 
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
@@ -3286,18 +3281,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 explanation=f"Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
                 hints=[
                     *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
-        # scan_length check
-        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
-        if scan_length == 0:
-            unimplemented(
-                gb_type="torch.scan: zero-sized tensor",
-                context=str(xs_vars[0]),
-                explanation="associative_scan() operator doesn't support zero-sized tensors during tracing.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         _check_all_tensorvariable(init_vars)
@@ -4369,7 +4352,15 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
             if isinstance(
-                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ConstDictVariable,
+                    SetVariable,
+                    FrozensetVariable,
+                    DictKeySetVariable,
+                ),
             ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
@@ -5137,7 +5128,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -6150,6 +6141,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
+            enable_spmd_types,
             *user_args,
         ) = args
 

@@ -23,11 +23,11 @@ from ...utils import can_use_tma
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
-    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     set_head_dim_values,
@@ -221,12 +221,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         for k, v in kernel_options.items()
     }
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -352,9 +348,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -441,22 +434,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    inputs_for_flex_decoding = (
-        [
-            query,
-            key,
-            value,
-            buf_M,
-            buf_L,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
-    )
-
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -467,9 +444,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
-        # Autotuning materializes benchmark tensors. Scalar shape captures stay
-        # in subgraph_inps below for dependency tracking and codegen.
-        [x for x in inputs_for_flex_decoding if is_tensor_ir_node(x)],
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout_acc,
         input_gen_fns=input_gen_fns,
     )

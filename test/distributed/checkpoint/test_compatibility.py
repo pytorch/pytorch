@@ -1,10 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+from typing import cast
 from unittest.mock import patch
 
 import torch
 import torch.distributed.checkpoint as dcp
+from torch.distributed._shard.sharded_tensor.metadata import (
+    MEM_FORMAT_ENCODING as SHARDED_MEM_FORMAT_ENCODING,
+    TensorProperties as ShardedTensorProperties,
+)
 from torch.distributed.checkpoint.metadata import (
+    _MEM_FORMAT_ENCODING,
     BytesStorageMetadata,
     ChunkStorageMetadata,
     Metadata,
@@ -12,11 +18,26 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
+class _TensorLikeWithoutStride:
+    dtype = torch.float32
+    layout = torch.strided
+    requires_grad = False
+
+    def is_pinned(self) -> bool:
+        return False
+
+
 class TestDCPCompatbility(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_metadata(self) -> None:
         # Ensure that all the new fields of all the metadata have the default
         # values so that we can always deserialize from a legacy metadata.
@@ -94,6 +115,95 @@ class TestDCPCompatbility(TestCase):
         dcp._version._act_like_version = None
         dcp.load(load_sd, checkpoint_id=self.temp_dir)
         self.assertEqual(sd, load_sd)
+
+    def test_tensor_properties_backward_compat_without_strides(self) -> None:
+        """Ensure TensorProperties pickled before the strides field was added can still be loaded."""
+        import pickle
+
+        # Simulate an old checkpoint's pickled TensorProperties (5-element state, no strides).
+        props = TensorProperties(dtype=torch.float32)
+        old_state = (
+            torch.float32,
+            torch.strided,
+            False,
+            _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT,
+            False,
+        )
+
+        # Verify the current round-trip works (6-element state).
+        props_bytes = pickle.dumps(props)
+        restored_new = pickle.loads(props_bytes)
+        self.assertIsNone(restored_new.strides)
+
+        # Directly test __setstate__ with a 5-element tuple.
+        restored_old = TensorProperties.__new__(TensorProperties)
+        restored_old.__setstate__(old_state)
+        self.assertIsNone(restored_old.strides)
+        self.assertEqual(restored_old.dtype, torch.float32)
+        self.assertEqual(restored_old.memory_format, torch.contiguous_format)
+
+    def test_tensor_properties_strides_survive_pickle_roundtrip(self) -> None:
+        """Ensure strides survive a pickle round-trip (as used by torch.save/load)."""
+        import pickle
+
+        tensor = torch.rand(3, 4)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (4, 1))
+
+        restored = pickle.loads(pickle.dumps(props))
+        self.assertEqual(restored.strides, (4, 1))
+        self.assertEqual(restored.dtype, torch.float32)
+
+    def test_tensor_properties_tensor_like_without_stride(self) -> None:
+        tensor_like = cast(torch.Tensor, _TensorLikeWithoutStride())
+        props = TensorProperties.create_from_tensor(tensor_like)
+        self.assertIsNone(props.strides)
+        self.assertFalse(props.pin_memory)
+
+    def test_sharded_tensor_properties_tensor_like_without_stride(self) -> None:
+        tensor_like = cast(torch.Tensor, _TensorLikeWithoutStride())
+        props = ShardedTensorProperties.create_from_tensor(tensor_like)
+        self.assertIsNone(props.strides)
+        self.assertFalse(props.pin_memory)
+
+    def test_sharded_tensor_properties_backward_compat_without_strides(self) -> None:
+        """Ensure sharded tensor TensorProperties also handles old pickles without strides."""
+        old_state = (
+            torch.float32,
+            torch.strided,
+            False,
+            SHARDED_MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT,
+            False,
+        )
+        restored = ShardedTensorProperties.__new__(ShardedTensorProperties)
+        restored.__setstate__(old_state)
+        self.assertIsNone(restored.strides)
+        self.assertEqual(restored.dtype, torch.float32)
+
+    def test_sharded_tensor_properties_strides_roundtrip(self) -> None:
+        """Ensure sharded tensor TensorProperties preserves strides through getstate/setstate."""
+        tensor = torch.rand(3, 4)
+        props = ShardedTensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (4, 1))
+
+        state = props.__getstate__()
+        self.assertEqual(len(state), 6)
+
+        restored = ShardedTensorProperties.__new__(ShardedTensorProperties)
+        restored.__setstate__(state)
+        self.assertEqual(restored.strides, (4, 1))
+        self.assertEqual(restored.dtype, torch.float32)
+
+    def test_sharded_tensor_properties_non_contiguous_strides(self) -> None:
+        """Ensure sharded tensor TensorProperties captures non-contiguous strides."""
+        tensor = torch.rand(5, 10).t()  # shape [10, 5], strides (1, 10)
+        props = ShardedTensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (1, 10))
+
+        state = props.__getstate__()
+        restored = ShardedTensorProperties.__new__(ShardedTensorProperties)
+        restored.__setstate__(state)
+        self.assertEqual(restored.strides, (1, 10))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: package/deploy"]
+# Owner(s): ["module: package/deploy"]
 
 import importlib
 from io import BytesIO

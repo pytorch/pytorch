@@ -41,7 +41,7 @@ class TORCH_API MultiWait {
   // the whole lifetime of the returned function.
   std::function<void()> Completer(std::function<void()> func);
 
-  // Similar as the above API, but with explicit capture of the MultiWait shared
+  // Similar to the above API, but with explicit capture of the MultiWait shared
   // pointer.
   static std::function<void()> Completer(
       std::shared_ptr<MultiWait> mwait,

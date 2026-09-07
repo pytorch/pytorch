@@ -378,10 +378,10 @@ static void pushPackingPastRnn(Block* b) {
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
       if (next->kind() == onnx::Reshape) {
-        // bidirection
+        // bidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size) * 2);
       } else {
-        // unidirection
+        // unidirectional
         new_sizes.push_back(rnn->i(attr::hidden_size));
       }
       TensorTypePtr newType = TensorType::createContiguous(

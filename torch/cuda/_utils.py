@@ -17,6 +17,16 @@ except ImportError:
     _cuda_bindings_runtime = None  # type: ignore[assignment]
     _HAS_CUDA_BINDINGS = False
 
+if _HAS_CUDA_BINDINGS and torch.version.hip is not None:
+    # cuda.bindings drives NVIDIA's CUDA runtime, so it is useless in a ROCm build --
+    # but it is an ordinary pip package that installs and imports perfectly well on a
+    # ROCm box, and only fails at the first actual call (cudaErrorInsufficientDriver).
+    # Report it as absent here so every caller degrades the way it already does when the
+    # package is missing, rather than each one having to recognize that failure.
+    _cuda_bindings_driver = None  # type: ignore[assignment]
+    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _HAS_CUDA_BINDINGS = False
+
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
@@ -519,11 +529,15 @@ class _CudaKernel:
         device_props = torch.cuda.get_device_properties()
         # HIP doesn't have shared_memory_per_block_optin in device properties, so we hard-code it here
         if torch.version.hip:
-            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
-            # CDNA4 allows a max of 160KB shared memory
-            max_shared_mem = (
-                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
-            )
+            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory,
+            # CDNA4 (gfx950) 160KB, and CDNA5 (gfx1250) 320KB.
+            gcn_arch = device_props.gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx950":
+                max_shared_mem = 160 * 1024
+            elif gcn_arch == "gfx1250":
+                max_shared_mem = 320 * 1024
+            else:
+                max_shared_mem = 65536
         else:
             max_shared_mem = getattr(
                 device_props, "shared_memory_per_block_optin", 49152

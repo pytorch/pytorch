@@ -383,7 +383,7 @@ def prepare_fx(
         #    ...
 
         # backend_config = BackendConfig().set_backend_pattern_config(linear_pattern_config)
-        # `prepare_fx` will check that the setting requested by suer in qconfig_mapping
+        # `prepare_fx` will check that the setting requested by user in qconfig_mapping
         # is supported by the backend_config and insert observers and fake quant modules
         # in the model
         prepared_model = prepare_fx(float_model, qconfig_mapping, example_inputs)

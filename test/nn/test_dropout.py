@@ -1,29 +1,29 @@
 # Owner(s): ["module: nn"]
 import itertools
 import random
-import unittest
 from itertools import product
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     expectedFailureXLA,
     instantiate_device_type_tests,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_nn import freeze_rng_state, NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     set_default_dtype,
-    TEST_PRIVATEUSE1,
 )
 
 
 class TestDropoutNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -59,30 +59,6 @@ class TestDropoutNN(NNTestCase):
         input = torch.randn(50, 20, 64, 64)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
-    @unittest.skipIf(
-        not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PRIVATEUSE1 unavailable"
-    )
-    def test_native_dropout_corner_case(self):
-        if TEST_CUDA:
-            device = "cuda"
-        elif TEST_PRIVATEUSE1:
-            device = torch._C._get_privateuse1_backend_name()
-        for train in [True, False]:
-            for p in [0.0, 1.0]:
-                for current_device in [device, "cpu"]:
-                    x = torch.randn(5).to(device=current_device).requires_grad_()
-                    x_ref = x.detach().requires_grad_()
-                    o = torch.native_dropout(x, p, train)[0]
-                    o_ref = torch.dropout(x_ref, p, train)
-                    o.sum().backward()
-                    o_ref.sum().backward()
-                    if not o.equal(o_ref):
-                        raise AssertionError("Expected o.equal(o_ref) to be True")
-                    if not x.grad.equal(x_ref.grad):
-                        raise AssertionError(
-                            "Expected x.grad.equal(x_ref.grad) to be True"
-                        )
-
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))
@@ -98,6 +74,8 @@ class TestDropoutNN(NNTestCase):
 
 
 class TestDropoutNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)
@@ -186,9 +164,11 @@ class TestDropoutNNDeviceType(NNTestCase):
 
         self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
-        if self.device_type == "cuda" or self.device_type == "cpu":
-            input = input.bfloat16()
-            self._test_dropout(nn.Dropout, device, input)
+    @dtypes(torch.bfloat16)
+    @onlyAccelerator
+    def test_Dropout_bfloat16(self, device, dtype):
+        input = torch.empty(1000, dtype=dtype)
+        self._test_dropout(nn.Dropout, device, input)
 
     def _test_dropoutNd_no_batch(self, dropout, input):
         input_clone = input.clone()
@@ -322,8 +302,28 @@ class TestDropoutNNDeviceType(NNTestCase):
         out = torch.nn.functional.dropout(x)
         self.assertEqual(out.size(), x.size())
 
+    @onlyAccelerator
+    def test_native_dropout_corner_case(self, device):
+        for train in [True, False]:
+            for p in [0.0, 1.0]:
+                for current_device in [device, "cpu"]:
+                    x = torch.randn(5).to(device=current_device).requires_grad_()
+                    x_ref = x.detach().requires_grad_()
+                    o = torch.native_dropout(x, p, train)[0]
+                    o_ref = torch.dropout(x_ref, p, train)
+                    o.sum().backward()
+                    o_ref.sum().backward()
+                    if not o.equal(o_ref):
+                        raise AssertionError("Expected o.equal(o_ref) to be True")
+                    if not x.grad.equal(x_ref.grad):
+                        raise AssertionError(
+                            "Expected x.grad.equal(x_ref.grad) to be True"
+                        )
 
-instantiate_device_type_tests(TestDropoutNNDeviceType, globals(), allow_mps=True)
+
+instantiate_device_type_tests(
+    TestDropoutNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestDropoutNN)
 
 if __name__ == "__main__":

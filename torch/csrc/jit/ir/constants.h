@@ -28,7 +28,7 @@ TORCH_API Value* insertConstant(
     std::optional<SourceRange> loc = std::nullopt,
     std::optional<ScopePtr> scope = std::nullopt);
 
-// note: prefer g.insertConsant(val, loc) which does exactly the same thing
+// note: prefer g.insertConstant(val, loc) which does exactly the same thing
 // this function is only declared/defined here because its implementation is
 // closely related to the implementation of prim::Constant that is also in
 // constants.cpp.

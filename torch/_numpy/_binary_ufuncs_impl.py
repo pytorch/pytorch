@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """Export torch work functions for binary ufuncs, rename/tweak to match numpy.
 This listing is further exported to public symbols in the `torch._numpy/_ufuncs.py` module.
 """
@@ -51,7 +49,7 @@ from . import _dtypes_impl, _util
 
 
 # work around torch limitations w.r.t. numpy
-def matmul(x, y):
+def matmul(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     # work around:
     #  - RuntimeError: expected scalar type Int but found Double
     #  - RuntimeError: "addmm_impl_cpu_" not implemented for 'Bool'
@@ -81,5 +79,5 @@ def matmul(x, y):
 
 # a stub implementation of divmod, should be improved after
 # https://github.com/pytorch/pytorch/issues/90820 is fixed in pytorch
-def divmod(x, y):
+def divmod(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return x // y, x % y

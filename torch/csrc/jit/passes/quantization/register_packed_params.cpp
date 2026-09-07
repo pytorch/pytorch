@@ -106,7 +106,7 @@ std::unordered_set<std::string> RegisterPrePackParams(
         Value* packed_param_attr =
             graph->insertGetAttr(graph->inputs()[0], attr_name)
                 ->setType(n->output(0)->type());
-        // We must replace this specific usage and we cannot doe
+        // We must replace this specific usage and we cannot do
         // replaceAllUsesWith This is because we first had to insert SetAttr
         // node. This also takes as input packed_param_value, similar to the
         // actual op. But only the use of the actual op must be replaced by

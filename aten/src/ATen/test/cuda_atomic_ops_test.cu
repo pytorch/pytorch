@@ -45,6 +45,36 @@ __global__ void min_test_kernel(T * a, T * min) {
 }
 
 template <typename T>
+__global__ void return_value_test_kernel(T * dst, T * ret) {
+  *ret = gpuAtomicMax(dst, static_cast<T>(4));
+}
+
+// gpuAtomic* return the value in memory before the update. Max has no native
+// fp16/bf16 instruction, so this exercises the AtomicFPOp Compare-and-Swap (CAS)
+// loop on all archs.
+template <typename T>
+void test_atomic_return_value() {
+  T *dstd, *retd;
+  T dst = 2, ret = 0;
+
+  cudaMalloc((void**)&dstd, sizeof(T));
+  cudaMalloc((void**)&retd, sizeof(T));
+  cudaMemcpy(dstd, &dst, sizeof(T), cudaMemcpyHostToDevice);
+
+  return_value_test_kernel<<<1, 1>>>(dstd, retd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  cudaMemcpy(&dst, dstd, sizeof(T), cudaMemcpyDeviceToHost);
+  cudaMemcpy(&ret, retd, sizeof(T), cudaMemcpyDeviceToHost);
+
+  ASSERT_EQ(ret, static_cast<T>(2)) << typeid(T).name();
+  ASSERT_EQ(dst, static_cast<T>(4)) << typeid(T).name();
+
+  cudaFree(dstd);
+  cudaFree(retd);
+}
+
+template <typename T>
 void test_atomic_add() {
   dim3 dimBlock(blocksize, 1);
   dim3 dimGrid(1, 1);
@@ -249,4 +279,12 @@ TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicMin)) {
   test_atomic_min<at::Half>();
   test_atomic_min<float>();
   test_atomic_min<double>();
+}
+
+TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicReturnValue)) {
+  if (!at::cuda::is_available()) return;
+  test_atomic_return_value<at::BFloat16>();
+  test_atomic_return_value<at::Half>();
+  test_atomic_return_value<float>();
+  test_atomic_return_value<double>();
 }

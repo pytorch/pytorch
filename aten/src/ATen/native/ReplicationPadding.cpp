@@ -1,10 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Padding.h>
-#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -63,18 +60,24 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   IntArrayRef paddingSize
 ) {
   int64_t dimw = 1;
+  int64_t dimc = 0;
   TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
   if (input.ndimension() == 3) {
     dimw++;
+    dimc++;
   }
 
   /* sizes */
+  int64_t ichannel = input.size(dimc);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput channel unexpected. Expected: ", ichannel,
+      ", Got: ", gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth,
       " Got: ", gradOutput.size(dimw));
@@ -111,9 +114,10 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1,
-      "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
-      " Calculated output H: ", oheight, " W: ", owidth);
+  TORCH_CHECK(owidth >= 1 && oheight >= 1,
+      "Calculated output H: ", oheight, " W: ", owidth,
+      " must be >= 1 in every dimension"
+      " (input H: ", iheight, ", W: ", iwidth, ")");
 
   if (input.dim() == 3) {
     set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
@@ -157,10 +161,10 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
-      ") is too small."
-      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
+  TORCH_CHECK(owidth >= 1 && oheight >= 1 && odepth >= 1,
+      "Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth,
+      " must be >= 1 in every dimension"
+      " (input D: ", idepth, ", H: ", iheight, ", W: ", iwidth, ")");
 
   /* resize output */
   if (input.dim() == 4) {
@@ -187,20 +191,26 @@ void replication_pad2d_backward_out_cpu_template(
   int pad_r = paddingSize[1];
   int pad_t = paddingSize[2];
   int pad_b = paddingSize[3];
+  int dimc = 0;
   int dimw = 2;
   int dimh = 1;
 
   if (input.dim() == 4) {
+    dimc++;
     dimw++;
     dimh++;
   }
 
   /* sizes */
+  int64_t ichannel = input.size(dimc);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput channel unexpected. Expected: ", ichannel, ", Got: ",
+      gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));

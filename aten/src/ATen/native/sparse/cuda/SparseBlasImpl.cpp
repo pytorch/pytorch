@@ -3,14 +3,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
-#include <ATen/cuda/CUDAContext.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

@@ -105,7 +105,7 @@ void PrefixStore::multiSet(
   store_->multiSet(prefixed_keys, values);
 }
 
-// Returns true if this store support append, multiGet and multiSet
+// Returns true if this store supports append, multiGet and multiSet
 bool PrefixStore::hasExtendedApi() const {
   return store_->hasExtendedApi();
 }

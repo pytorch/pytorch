@@ -187,7 +187,7 @@ class _lazy_property_and_property(lazy_property[T, R], property):
 def tril_matrix_to_vec(mat: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a `D x D` matrix or a batch of matrices into a (batched) vector
-    which comprises of lower triangular elements from the matrix in row order.
+    which comprises lower triangular elements from the matrix in row order.
     """
     n = mat.shape[-1]
     if not torch._C._get_tracing_state() and (diag < -n or diag >= n):

@@ -1,16 +1,12 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
-#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -42,8 +38,7 @@ PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
 static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
   ncclComm_t comm =
       (ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
-  if (!comm)
-    throw python_error();
+  TORCH_CHECK_PYTHON(comm);
   return comm;
 }
 
@@ -82,8 +77,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
     comms = {unpack_nccl_comm(obj)};
   } else {
     auto seq = THPObjectPtr(PySequence_Fast(obj, "comm is not a sequence"));
-    if (!seq)
-      throw python_error();
+    TORCH_CHECK_PYTHON(seq);
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
     for (const auto i : c10::irange(size)) {
@@ -299,8 +293,7 @@ static at::Tensor extract_tensor(PyObject* obj) {
 
 static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
-  if (!seq)
-    throw python_error();
+  TORCH_CHECK_PYTHON(seq);
 
   const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;

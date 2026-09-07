@@ -275,7 +275,7 @@ Args:
              Could be either a single strategy (used for all) or a list of
              three strategies for X, w, b.
 Generates:
-    (X, W, b, g): Tensors of type `float32` of the following drawen shapes:
+    (X, W, b, g): Tensors of type `float32` of the following drawn shapes:
         X: (`batch_size, input_channels, H, W`)
         W: (`output_channels, input_channels_per_group) + kernel_shape
         b: `(output_channels,)`

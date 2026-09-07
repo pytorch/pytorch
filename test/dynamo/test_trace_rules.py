@@ -22,13 +22,20 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
-from torch._dynamo.utils import hashable, is_safe_constant, istype
+from torch._dynamo.utils import hashable, is_compile_supported, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfWindows,
+    TEST_CUDA,
+    TEST_XPU,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 try:
@@ -48,6 +55,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch.sparse_csc_tensor",
     "torch.sparse_csr_tensor",
     "torch.cuda._get_device_properties",
+    "torch.xpu._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
@@ -72,7 +80,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
@@ -335,16 +342,17 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
 
-    def test_cuda_manual_seed_functions_graph_break(self):
+    @unittest.skipUnless(TEST_XPU or TEST_CUDA, "GPU is not available")
+    def test_gpu_manual_seed_functions_graph_break(self):
         for name in (
-            "torch.cuda.manual_seed",
-            "torch.cuda.manual_seed_all",
-            "torch.cuda.random.manual_seed",
-            "torch.cuda.random.manual_seed_all",
+            f"torch.{GPU_TYPE}.manual_seed",
+            f"torch.{GPU_TYPE}.manual_seed_all",
+            f"torch.{GPU_TYPE}.random.manual_seed",
+            f"torch.{GPU_TYPE}.random.manual_seed_all",
         ):
             self.assertIs(
                 torch._dynamo.trace_rules.lookup(load_object(name)),
@@ -427,6 +435,21 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    @parametrize("device", ("cuda", torch.device("cuda")))
+    def test_is_compile_supported_constant(self, device):
+        def fn(x, device):
+            if is_compile_supported(device):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        expected = x + 1 if is_compile_supported(device) else x - 1
+        cnt = CompileCounter()
+        opt_fn = torch.compile(backend=cnt, fullgraph=True)(fn)
+        self.assertEqual(expected, opt_fn(x, device))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
 
@@ -488,6 +511,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_current_stream",  # Safely implemented
             "handle_synchronize",  # Device type from function identity or arg
             "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
+            "handle_set_tensor_requires_grad",  # Only re-reads the proxy's own metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -499,7 +523,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
@@ -566,6 +590,9 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
         )
         # Numerical results should match
         self.assertTrue(torch.allclose(y_lambda, y_exp))
+
+
+instantiate_parametrized_tests(TraceRuleTests)
 
 
 if __name__ == "__main__":

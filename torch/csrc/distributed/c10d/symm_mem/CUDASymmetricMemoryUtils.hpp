@@ -22,14 +22,28 @@ std::string getSymmMemBackendCUDA();
 
 // All-gather a fixed-size byte payload through the given ProcessGroup.
 // Uses ProcessGroup::all_gather_single (NCCL allgather for a NCCL-backed PG).
-// The payload is staged through a uint8 CUDA tensor on `device_idx`; the H2D
-// and D2H copies are negligible at the sizes exchanged during rendezvous (a
-// few hundred bytes per rank). Returns a contiguous CPU tensor of
-// world_size * nbytes uint8 elements.
+// The payload is staged through a uint8 tensor on `device_idx`. Returns a
+// contiguous CPU tensor of world_size * nbytes uint8 elements.
 at::Tensor pg_all_gather_bytes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     const void* data,
     size_t nbytes,
+    int device_idx);
+
+// Broadcast a fixed-size byte payload from rank `root` through the given
+// ProcessGroup. Same staging scheme as `pg_all_gather_bytes`. Returns a
+// contiguous CPU tensor of `nbytes` uint8 elements.
+at::Tensor pg_broadcast_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx,
+    int root);
+
+// Blocking barrier over the given ProcessGroup, pinned to `device_idx` so the
+// backend does not have to guess which device to barrier on.
+void pg_barrier(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     int device_idx);
 
 // Templated wrapper around `pg_all_gather_bytes` matching the shape of
@@ -54,6 +68,29 @@ std::vector<T> pg_all_gather(
       flat.numel());
   std::vector<T> out(world_size);
   std::memcpy(out.data(), flat.data_ptr(), expected);
+  return out;
+}
+
+// Templated wrapper around `pg_broadcast_bytes`. On non-source ranks `val` is
+// ignored and only used to size the payload.
+template <typename T>
+T pg_broadcast(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx,
+    int root,
+    const T& val) {
+  static_assert(
+      std::is_trivially_copyable_v<T>,
+      "pg_broadcast requires a trivially copyable type");
+  at::Tensor flat = pg_broadcast_bytes(pg, &val, sizeof(T), device_idx, root);
+  TORCH_CHECK(
+      static_cast<size_t>(flat.numel()) == sizeof(T),
+      "pg_broadcast: expected ",
+      sizeof(T),
+      " bytes but got ",
+      flat.numel());
+  T out{};
+  std::memcpy(&out, flat.data_ptr(), sizeof(T));
   return out;
 }
 
@@ -105,7 +142,7 @@ class StoreExchange {
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
       oss << store_prefix_ << '/' << seq_id_ << '/' << r;
-      peer_keys.push_back(oss.str());
+      peer_keys.push_back(std::move(oss).str());
     }
     ++seq_id_;
 
@@ -137,7 +174,7 @@ class StoreExchange {
     std::ostringstream oss;
     oss << store_prefix_ << '/' << seq_id_;
     ++seq_id_;
-    store->barrier(oss.str(), world_size);
+    store->barrier(std::move(oss).str(), world_size);
   }
 
  private:

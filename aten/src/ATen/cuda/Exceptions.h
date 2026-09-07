@@ -181,15 +181,25 @@ constexpr const char* _hipsolver_backend_suggestion =           \
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                          \
   do {                                                                      \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                        \
     CUresult __err = EXPR;                                                  \
     if (__err != CUDA_SUCCESS) {                                            \
+      const auto __cuda_error_log_message =                                 \
+          __cuda_error_log.get_error_log_suffix();                          \
       const char* err_str;                                                  \
       [[maybe_unused]] CUresult get_error_str_err =                         \
           at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                              \
-        TORCH_CHECK(false, "CUDA driver error: unknown error");             \
+        TORCH_CHECK(                                                        \
+            false,                                                          \
+            "CUDA driver error: unknown error",                            \
+            __cuda_error_log_message);                                      \
       } else {                                                              \
-        TORCH_CHECK(false, "CUDA driver error: ", err_str);                 \
+        TORCH_CHECK(                                                        \
+            false,                                                          \
+            "CUDA driver error: ",                                         \
+            err_str,                                                        \
+            __cuda_error_log_message);                                      \
       }                                                                     \
     }                                                                       \
   } while (0)

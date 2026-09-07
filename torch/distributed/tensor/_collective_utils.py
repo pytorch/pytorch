@@ -25,6 +25,7 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
+from torch.fx.experimental.proxy_tensor import get_proxy_mode
 from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.types import IntLikeType
 
@@ -77,6 +78,31 @@ def _shard_dim_alltoall_meta(
     chunk_size = cat_tensor.size(shard_dim) // group_size
     chunk = torch.narrow(cat_tensor, shard_dim, group_rank * chunk_size, chunk_size)
     return chunk.contiguous()
+
+
+def _shard_dim_alltoall_backward(ctx, grad_output):
+    return (
+        torch.ops._dtensor.shard_dim_alltoall.default(
+            grad_output.contiguous(), ctx.shard_dim, ctx.gather_dim, ctx.group_name
+        ),
+        None,
+        None,
+        None,
+    )
+
+
+def _shard_dim_alltoall_setup_context(ctx, inputs, output):
+    input, gather_dim, shard_dim, group_name = inputs
+    ctx.gather_dim = gather_dim
+    ctx.shard_dim = shard_dim
+    ctx.group_name = group_name
+
+
+torch.library.register_autograd(
+    "_dtensor::shard_dim_alltoall",
+    _shard_dim_alltoall_backward,
+    setup_context=_shard_dim_alltoall_setup_context,
+)
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
@@ -211,22 +237,20 @@ def mesh_broadcast(
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
+def _can_skip_zero_size_op(size: IntLikeType) -> bool:
+    # Captured graphs must retain zero-size ops so all ranks have the same structure.
+    if isinstance(size, int):
+        return size == 0 and not (
+            torch.compiler.is_dynamo_compiling() or get_proxy_mode() is not None
+        )
+    return not _are_we_tracing() and guard_or_false(size == 0)
+
+
 @maybe_run_for_local_tensor
 def pad_tensor(
     tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
 ) -> torch.Tensor:
-    # During tracing, always emit the pad op even when pad_size=0 so all
-    # ranks produce identical FX graph structure (SPMD).
-    # In eager with concrete pad_size=0, guard_or_false returns True and we
-    # skip the no-op pad. Check _are_we_tracing() first to avoid
-    # guard_or_false creating a guard that concretizes symbolic pad sizes
-    # during make_fx tracing.
-    if isinstance(pad_size, int):
-        # Fast path: avoids _are_we_tracing() which is costly at compile
-        # time due to multiple C++ dispatch mode checks.
-        if pad_size == 0:
-            return tensor
-    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
+    if _can_skip_zero_size_op(pad_size):
         return tensor
     if _are_we_tracing():
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
@@ -245,18 +269,7 @@ def pad_tensor(
 def unpad_tensor(
     tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
 ) -> torch.Tensor:
-    # During tracing, always emit the narrow op even when pad_size=0 so all
-    # ranks produce identical FX graph structure (SPMD).
-    # In eager with concrete pad_size=0, guard_or_false returns True and we
-    # skip the no-op narrow. Check _are_we_tracing() first to avoid
-    # guard_or_false creating a guard that concretizes symbolic pad sizes
-    # during make_fx tracing.
-    if isinstance(pad_size, int):
-        # Fast path: avoids _are_we_tracing() which is costly at compile
-        # time due to multiple C++ dispatch mode checks.
-        if pad_size == 0:
-            return tensor
-    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
+    if _can_skip_zero_size_op(pad_size):
         return tensor
     return tensor.narrow(
         pad_dim,
@@ -407,7 +420,9 @@ def _compute_placement_transition_cost(
 
     Returns:
         A tuple of (cost, updated_comm_bytes_gb):
-            - cost: The communication cost for this transition (float("inf") if invalid).
+            - cost: The communication cost for this transition. ``float("inf")``
+              means that the strategy planner must not select the transition
+              implicitly; the explicit redistribution API may still support it.
             - updated_comm_bytes_gb: The updated communication bytes after this step.
     """
     if current_placement == target_placement:
@@ -434,8 +449,11 @@ def _compute_placement_transition_cost(
         comm_bytes_gb /= num_devices_on_mesh_dim
         return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_partial():
-        # ban shard -> partial as it does not make sense to perform
-        # this redistribute
+        # Shard -> Partial("sum") is a valid explicit redistribution, but it
+        # materializes a logical-shape tensor and copies the local shard into it.
+        # The cost model accounts only for communication, so assigning zero cost
+        # would make the strategy planner over-prefer this memory- and copy-heavy
+        # transition. Exclude it from implicit strategy selection instead.
         return float("inf"), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_partial():
         # we already handled the == case at the top, and we ban converting between partial types.

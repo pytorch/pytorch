@@ -1,11 +1,7 @@
 #ifdef USE_C10D_NCCL
-#include <ATen/cuda/CUDAEvent.h>
 #include <cuda_runtime.h>
 
-#include <nlohmann/json.hpp>
 #include <fstream>
-#include <mutex>
-#include <vector>
 
 #include <torch/csrc/distributed/c10d/FlightRecorderDetail.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>

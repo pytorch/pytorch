@@ -5,8 +5,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
-#include <c10/util/llvmMathExtras.h>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -441,7 +441,7 @@ class DispatchKeySet final {
   // - the highest "functionality" bit in the keyset.
   // - the highest "backend" bit in the keyset.
   [[nodiscard]] uint8_t indexOfHighestBit() const {
-    return 64 - llvm::countLeadingZeros(repr_);
+    return static_cast<uint8_t>(std::bit_width(repr_));
   }
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)

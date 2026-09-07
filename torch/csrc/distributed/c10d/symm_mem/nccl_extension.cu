@@ -371,7 +371,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
-  auto offset = nccl_hdl->get_offset();
+  auto offset = nccl_hdl->get_window_offset();
   auto byte_size = tensor.numel() * tensor.element_size();
 
   // Get the NCCL communicator
@@ -486,6 +486,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nccl_get_out",
       torch::CppFunction::makeFromBoxedFunction<&nccl_get_out_boxed>());
   m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
+  m.impl("nccl_all_to_all_nd", c10d::nccl_extension::nccl_all_to_all_nd);
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input

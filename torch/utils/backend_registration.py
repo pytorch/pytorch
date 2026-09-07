@@ -112,6 +112,13 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (5) ``set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None``
         Sets the random number generator state of the specified "foo" device.
 
+    Note(inductor): To defer the Inductor integration of the device out of import
+    time, BackendModule may define an optional ``_inductor_backend_init`` no-arg
+    callable. Inductor invokes it on each torch.compile / ``compile_fx()`` /
+    AOTInductor compilation until the device is registered; it must call
+    ``torch._inductor.codegen.common.register_backend_for_device`` itself. See
+    ``docs/source/accelerator/autoload.md`` for details.
+
     And there are some common funcs:
 
     (1) ``is_available() -> bool``
@@ -239,8 +246,8 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
     if not hasattr(torch.Tensor, custom_backend_name):
         raise RuntimeError(
             f"Can not automatically generate {custom_backend_name}() method for torch.nn.Module."
-            f"Because torch.Tensor doesn't has the method {custom_backend_name}()."
-            f"For this error, you can try setting for_tensor=True."
+            f" Because torch.Tensor doesn't have the method {custom_backend_name}()."
+            f" For this error, you can try setting for_tensor=True."
         )
 
     def wrap_module_to(
@@ -278,9 +285,9 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
         raise RuntimeError(
             f"Can not automatically generate is_{custom_backend_name}() or "
             f"{custom_backend_name}() method for torch.nn.utils.rnn.PackedSequence."
-            f"Because torch.Tensor doesn't has the method is_{custom_backend_name}()"
-            f"or {custom_backend_name}()."
-            f"For this error, you can try setting for_tensor=True."
+            f" Because torch.Tensor doesn't have the method is_{custom_backend_name}()"
+            f" or {custom_backend_name}()."
+            f" For this error, you can try setting for_tensor=True."
         )
 
     @property  # type: ignore[misc]

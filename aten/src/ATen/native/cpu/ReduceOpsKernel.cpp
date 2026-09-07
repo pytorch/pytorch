@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
+#include <bit>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -428,19 +429,12 @@ void argmin_kernel_impl(TensorIterator &iter) {
 template <typename scalar_t, typename acc_t = uint64_t, typename out_t = acc_t>
 struct XorSumOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    if (std::is_same<scalar_t, bool>::value) {
-      return acc ^ (data ? 1 : 0);
-    } else if (
+    if constexpr (
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, double>::value ||
         std::is_same<scalar_t, at::BFloat16>::value ||
         std::is_same<scalar_t, at::Half>::value) {
-      union {
-        double d;
-        uint64_t u;
-      } converter;
-      converter.d = static_cast<double>(data);
-      return acc ^ converter.u;
+      return acc ^ std::bit_cast<acc_t>(static_cast<double>(data));
     } else {
       return acc ^ static_cast<uint64_t>(data);
     }

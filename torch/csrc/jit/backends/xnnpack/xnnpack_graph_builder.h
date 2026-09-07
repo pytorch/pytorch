@@ -36,7 +36,7 @@ class XNNGraph {
   std::vector<torch::jit::Value*> _outputs;
 
   // Graph passes for optimizing and tracing torchscript graph
-  // Essentially massaging the graph into a digestiable format for
+  // Essentially massaging the graph into a digestible format for
   // xnnpack graph lowering.
   std::shared_ptr<torch::jit::Graph> optimizeAndTraceGraph(
       std::shared_ptr<torch::jit::Graph> graph,

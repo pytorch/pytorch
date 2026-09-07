@@ -283,6 +283,25 @@ TEST(StaticKernelTest, MulScalar) {
   }
 }
 
+TEST(StaticKernelTest, MulScalarBool) {
+  // A bool tensor times a scalar shows up in torch.export'ed graphs as
+  // `aten.gt(...) * c` (lifting a mask into the int/float range). The static
+  // mul_out kernel dispatches the bool `self` via the kBool path added to it;
+  // compare against the non-static ATen reference, which already supports bool.
+  const std::string graph = R"(graph(%in0_t, %in1_t):
+    %out = torch.ops.aten.mul.Scalar(self=%in0_t, other=%in1_t)
+    return (%out)
+  )";
+
+  at::Tensor mask = at::rand({3, 4}) > 0.5; // bool tensor
+  // bool * int64 -> int64 ; bool * double -> default float
+  for (const c10::IValue& scalar :
+       std::vector<c10::IValue>{c10::IValue(int64_t{38}), c10::IValue(2.5)}) {
+    std::vector<c10::IValue> inputs = {mask, scalar};
+    testStaticKernelEquality(graph, inputs);
+  }
+}
+
 TEST(StaticKernelTest, SymSizeInt) {
   const std::string graph = R"(graph(%self, %dim):
     %out = torch.ops.aten.sym_size.int(self=%self, dim=%dim)

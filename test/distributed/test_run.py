@@ -7,7 +7,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import io
 import os
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import find_spec
 from unittest.mock import MagicMock, patch
 
 import torch.distributed.run as run
@@ -122,6 +126,85 @@ class RunTest(TestCase):
         run.run(args)
         self.assertEqual(args.rdzv_backend, "c10d")
         self.assertEqual(args.rdzv_endpoint, "localhost:0")
+
+    def _log_line_prefix_template(self, args):
+        """config_from_args' template, with the prefix env vars under our control."""
+        with patch.dict(os.environ):
+            os.environ.pop("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE", None)
+            os.environ.pop("PET_LOG_LINE_PREFIX_TEMPLATE", None)
+            config, _, _ = run.config_from_args(self._parse_args(args))
+        return config.log_line_prefix_template
+
+    def test_log_line_prefix_template_from_args(self):
+        """--log-line-prefix-template is passed through to LaunchConfig."""
+        template = "${hostname}:${rank}: "
+        self.assertEqual(
+            template,
+            self._log_line_prefix_template(
+                [f"--log-line-prefix-template={template}", "dummy_script.py"]
+            ),
+        )
+
+    def test_log_line_prefix_template_unset(self):
+        """Unset, the template stays None so the default [role_name][local_rank] prefix is kept."""
+        self.assertIsNone(self._log_line_prefix_template(["dummy_script.py"]))
+
+    def test_log_line_prefix_template_env_var(self):
+        """TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE still works, and the flag overrides it."""
+        with patch.dict(
+            os.environ, {"TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE": "[${rank}]:"}
+        ):
+            config, _, _ = run.config_from_args(self._parse_args(["dummy_script.py"]))
+            self.assertEqual("[${rank}]:", config.log_line_prefix_template)
+
+            config, _, _ = run.config_from_args(
+                self._parse_args(
+                    ["--log-line-prefix-template=${hostname}: ", "dummy_script.py"]
+                )
+            )
+            self.assertEqual("${hostname}: ", config.log_line_prefix_template)
+
+    def _print_completion(self, shell):
+        """Run --print-completion, returning (exit_code, stdout, stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                # no training_script: the action must exit before argparse
+                # complains about the missing positional
+                self._parse_args([f"--print-completion={shell}"])
+        return cm.exception.code, out.getvalue(), err.getvalue()
+
+    @unittest.skipIf(find_spec("shtab") is None, "shtab is not installed")
+    def test_print_completion(self):
+        """--print-completion emits a completion script naming torchrun's options."""
+        for shell in ("bash", "zsh", "tcsh"):
+            with self.subTest(shell=shell):
+                code, out, _ = self._print_completion(shell)
+                self.assertEqual(0, code)
+                # tcsh lists options without the leading dashes
+                self.assertIn("nproc-per-node", out)
+                self.assertIn("rdzv-backend", out)
+                # completions must bind to `torchrun`, not to the module that
+                # happens to be running the parser
+                self.assertIn("torchrun", out)
+
+    @unittest.skipIf(find_spec("shtab") is not None, "shtab is installed")
+    def test_print_completion_without_shtab(self):
+        """Without shtab, the flag fails with an actionable message, not a traceback."""
+        code, _, err = self._print_completion("bash")
+        self.assertEqual(1, code)
+        self.assertIn("pip install shtab", err)
+
+    def test_print_completion_rejects_unknown_shell(self):
+        """The shell choices are validated by argparse.
+
+        Deliberately not a real shell: the choices come from
+        shtab.SUPPORTED_SHELLS when shtab is installed, so naming one shtab
+        could plausibly add later would make this test fail on upgrade.
+        """
+        with self.assertRaises(SystemExit):
+            with redirect_stderr(io.StringIO()):
+                self._parse_args(["--print-completion=notashell"])
 
 
 if __name__ == "__main__":

@@ -60,24 +60,6 @@ CO_ASYNC_GENERATOR = 0x0200
 # trace_rules.py import this constant for consistency
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
-RESUME_FRAME_VALUES_VARNAME = "__resume_frame_values"
-
-
-def create_load_frame_value(frame_values_name: str, index: int) -> list[Instruction]:
-    return [
-        create_instruction("LOAD_FAST", argval=frame_values_name),
-        create_load_const(index),
-        create_binary_subscr(),
-    ]
-
-
-def create_clear_frame_value(frame_values_name: str, index: int) -> list[Instruction]:
-    return [
-        create_load_const(None),
-        create_instruction("LOAD_FAST", argval=frame_values_name),
-        create_load_const(index),
-        create_instruction("STORE_SUBSCR"),
-    ]
 
 
 # If is_resume - this codegen is for a resume function
@@ -145,7 +127,7 @@ def _try_except_tf_mode_template(dummy: Any) -> None:
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: tuple[Any, ...] | None = None
+    target_values: tuple[object, ...] | None = None
 
     def try_except_torch_function_mode(
         self, code_options: CodeOptions, cleanup: list[Instruction]
@@ -181,8 +163,7 @@ class ReenterWith:
             exit context
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
@@ -224,8 +205,7 @@ class ReenterWith:
             (rest)
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
 
@@ -279,7 +259,6 @@ class ReenterWith:
 class ResumeFunctionMetadata:
     code: types.CodeType
     instructions: list[Instruction] = dataclasses.field(default_factory=list)
-    boxed_call: bool = False
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
@@ -317,7 +296,7 @@ def _filter_iter(
     return res
 
 
-def _load_tuple_and_call(tup: tuple[Any, ...]) -> list[Instruction]:
+def _load_tuple_and_call(tup: tuple[object, ...]) -> list[Instruction]:
     insts: list[Instruction] = []
     _initial_push_null(insts)
     insts.extend(create_load_const(val) for val in tup)
@@ -353,8 +332,8 @@ class ContinueExecutionCache:
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
         handle_inactive_ctx: bool,
-        stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
-        argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[object, ...]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[object, ...]], ...],
         null_idxes: tuple[int, ...],
         # mainly used to ensure distinct code objects per stack trace,
         # which prevents excessive recompilation of inner frames
@@ -401,26 +380,9 @@ class ContinueExecutionCache:
         ) -> None:
             meta.instructions = copy.deepcopy(instructions)
 
-            target = next(i for i in instructions if i.offset == resume_offset)
-            # A resume function that may execute DELETE_FAST must not receive
-            # its frame values as normal positional args: CPython keeps those
-            # arg references alive for the duration of the call.
-            frame_value_names = set(argnames)
-            frame_value_names.update(f"___stack{i}" for i in range(nstack))
-            meta.boxed_call = any(
-                inst.opname == "DELETE_FAST"
-                and inst.argval in frame_value_names
-                and inst.offset is not None
-                and inst.offset >= resume_offset
-                for inst in instructions
-            )
-
             args = ["__nested_resume_fns", "__nested_frame_values"]
-            if meta.boxed_call:
-                args.append(RESUME_FRAME_VALUES_VARNAME)
-            else:
-                args += [f"___stack{i}" for i in range(nstack)]
-                args.extend(v for v in argnames if v not in args)
+            args += [f"___stack{i}" for i in range(nstack)]
+            args.extend(v for v in argnames if v not in args)
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
@@ -447,26 +409,16 @@ class ContinueExecutionCache:
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
-            local_argnames = [v for v in argnames if v not in args]
-            null_local_argnames = [
-                v for v in argnames_null if v not in args and v not in local_argnames
-            ]
             code_options["co_varnames"] = tuple(
                 args
-                + local_argnames
-                + null_local_argnames
-                + [
-                    v
-                    for v in code_options["co_varnames"]
-                    if v not in args
-                    and v not in local_argnames
-                    and v not in null_local_argnames
-                ]
+                + [v for v in argnames_null if v not in args]
+                + [v for v in code_options["co_varnames"] if v not in args]
                 + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            target = next(i for i in instructions if i.offset == resume_offset)
 
             prefix = []
             if is_py311_plus:
@@ -506,21 +458,9 @@ class ContinueExecutionCache:
                     prefix.append(create_instruction("PUSH_NULL"))
                     null_i += 1
                 else:
-                    if meta.boxed_call:
-                        prefix.extend(
-                            create_load_frame_value(
-                                RESUME_FRAME_VALUES_VARNAME, stack_i
-                            )
-                        )
-                        prefix.extend(
-                            create_clear_frame_value(
-                                RESUME_FRAME_VALUES_VARNAME, stack_i
-                            )
-                        )
-                    else:
-                        prefix.append(
-                            create_instruction("LOAD_FAST", argval=f"___stack{stack_i}")
-                        )
+                    prefix.append(
+                        create_instruction("LOAD_FAST", argval=f"___stack{stack_i}")
+                    )
                     if handle_inactive_ctx and stack_i in stack_ctx_vars_d:
                         # NOTE: we assume that current stack var is a context manager CLASS!
                         # Load args for context variable and construct it
@@ -546,21 +486,6 @@ class ContinueExecutionCache:
 
             if hooks:
                 raise AssertionError(f"Unprocessed hooks remaining: {hooks}")
-
-            if meta.boxed_call:
-                for i, name in enumerate(argnames):
-                    frame_value_index = nstack + i
-                    prefix.extend(
-                        create_load_frame_value(
-                            RESUME_FRAME_VALUES_VARNAME, frame_value_index
-                        )
-                    )
-                    prefix.append(create_instruction("STORE_FAST", argval=name))
-                    prefix.extend(
-                        create_clear_frame_value(
-                            RESUME_FRAME_VALUES_VARNAME, frame_value_index
-                        )
-                    )
 
             # NOTE: we assume that local var is a context manager CLASS!
             # initialize inactive context vars in argnames
@@ -590,7 +515,6 @@ class ContinueExecutionCache:
 
             # Call nested resume function
             if nested_code_objs:
-                nested_uses_boxed_call = cls.uses_boxed_call(nested_code_objs[-1])
                 prefix.extend(
                     [
                         # set up __nested_resume_fns[-1] call
@@ -611,39 +535,16 @@ class ContinueExecutionCache:
                         create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("BUILD_LIST", arg=2),
-                    ]
-                )
-                if nested_uses_boxed_call:
-                    prefix.extend(
-                        [
-                            # load __nested_frame_values[-1]
-                            create_instruction(
-                                "LOAD_FAST", argval="__nested_frame_values"
-                            ),
-                            create_instruction("LOAD_CONST", argval=-1),
-                            create_binary_subscr(),
-                            create_instruction("LIST_APPEND", arg=1),
-                        ]
-                    )
-                else:
-                    prefix.extend(
-                        [
-                            # load __nested_frame_values[-1]
-                            create_instruction(
-                                "LOAD_FAST", argval="__nested_frame_values"
-                            ),
-                            create_instruction("LOAD_CONST", argval=-1),
-                            create_binary_subscr(),
-                            # create [
-                            #     __nested_resume_fns,
-                            #     __nested_frame_values,
-                            #     *__nested_frame_values[-1],
-                            # ]
-                            create_instruction("LIST_EXTEND", arg=1),
-                        ]
-                    )
-                prefix.extend(
-                    [
+                        # load __nested_frame_values[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("LOAD_CONST", argval=-1),
+                        create_binary_subscr(),
+                        # create [
+                        #     __nested_resume_fns,
+                        #     __nested_frame_values,
+                        #     *__nested_frame_values[-1],
+                        # ]
+                        create_instruction("LIST_EXTEND", arg=1),
                         # del __nested_frame_values[-1]
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("LOAD_CONST", argval=-1),
@@ -713,11 +614,6 @@ class ContinueExecutionCache:
         new_code, _ = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
-
-    @classmethod
-    def uses_boxed_call(cls, code: types.CodeType) -> bool:
-        meta = cls.generated_code_metadata.get(code)
-        return bool(meta and meta.boxed_call)
 
     @staticmethod
     def unreachable_codes(code_options: dict[str, Any]) -> list[Instruction]:

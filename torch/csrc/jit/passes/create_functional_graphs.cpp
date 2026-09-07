@@ -90,7 +90,7 @@ struct FunctionalGraphSlicer {
       // if `n` is functional, all of its blocks will be merged into the
       // new functional subgraph, so we only need to recurse if it is not
       // functional
-      if (!functional_nodes_.count(n)) {
+      if (!functional_nodes_.contains(n)) {
         for (Block* b : n->blocks()) {
           auto block_changed = CreateFunctionalGraphsImpl(b);
           changed = block_changed && changed;

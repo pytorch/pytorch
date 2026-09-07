@@ -30,7 +30,7 @@ from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
 
 __all__ = [
@@ -164,6 +164,8 @@ class _KinetoProfile:
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -174,8 +176,12 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -273,29 +279,42 @@ class _KinetoProfile:
         self._custom_profiler_config = _parse_custom_profiler_config(
             self.experimental_config
         )
-        self._use_cupti_monitor = self._custom_profiler_config.get(
+        self._use_cuspy = self._custom_profiler_config.get(
             "backend"
-        ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
-        # The ProfilerObserver driving the shared CUPTI monitor this session; window opened
-        # at start, closed at stop (_monitor_window_id), exported by export_chrome_trace.
-        self._cupti_profiler_observer: Any = None
-        self._monitor_window_id: int | None = None
-        # cupti_monitor exports synchronously by default (like the stock profiler).
-        # {"cupti_monitor_async_export": true} hands the merge+write off-thread, joined by
-        # wait_for_exports; cupti_monitor-only, rejected elsewhere.
-        self._cupti_async_export = False
-        if self._use_cupti_monitor:
+        ) == "cuspy" or bool(self._custom_profiler_config.get("cuspy"))
+        # The ProfilerObserver driving the shared Cuspy singleton this session; window opened
+        # at start, closed at stop (_cuspy_window_id), exported by export_chrome_trace.
+        self._cuspy_profiler_observer: Any = None
+        self._cuspy_window_id: int | None = None
+        # cuspy exports synchronously by default (like the stock profiler).
+        # {"cuspy_async_export": true} hands the merge+write off-thread, joined by
+        # wait_for_exports; cuspy-only, rejected elsewhere.
+        self._cuspy_async_export = False
+        if self._use_cuspy:
             if ProfilerActivity.CPU not in self.activities:
                 raise ValueError(
-                    "cupti_monitor profiler backend currently requires CPU activity"
+                    "cuspy profiler backend currently requires CPU activity"
                 )
-            self._cupti_async_export = bool(
-                self._custom_profiler_config.get("cupti_monitor_async_export", False)
+            self._cuspy_async_export = bool(
+                self._custom_profiler_config.get("cuspy_async_export", False)
             )
-        elif "cupti_monitor_async_export" in self._custom_profiler_config:
+            # Arm graph-dependency recording now, at profiler construction -- before the
+            # training loop captures its CUDA graphs. The recording hook must observe each
+            # graph's one-time instantiate(); the per-window ProfilerObserver registers it
+            # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
+            if self._custom_profiler_config.get("enable_graph_dependencies"):
+                from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
+
+                _GraphDependencyRecorder().arm()
+            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
+            # the recorder reads each graph's event nodes at its one-time instantiate().
+            if self._custom_profiler_config.get("enable_event_node_ids"):
+                from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
+
+                _EventNodeRecorder().arm()
+        elif "cuspy_async_export" in self._custom_profiler_config:
             raise ValueError(
-                "cupti_monitor_async_export is only supported with the cupti_monitor "
-                "backend"
+                "cuspy_async_export is only supported with the cuspy backend"
             )
 
     def start(self) -> None:
@@ -317,7 +336,7 @@ class _KinetoProfile:
                 "To keep events across cycles, set acc_events=True."
             )
         if (self.profiler is None) or (not self.acc_events):
-            use_device = None if self._use_cupti_monitor else self.use_device
+            use_device = None if self._use_cuspy else self.use_device
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
                 use_device=use_device,
@@ -335,23 +354,50 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
-        if self._use_cupti_monitor:
-            from torch.profiler._cupti.observers.profiler import ProfilerObserver
+        if self._use_cuspy:
+            from torch.profiler._cuspy.observers.profiler import ProfilerObserver
 
-            self._monitor_trace_window = None
-            # Constructing the observer registers it with the shared monitor and starts
+            self._cuspy_trace_window = None
+            # Constructing the observer registers it with the shared Cuspy singleton and
             # collection. cuda_sync events are opt-in via the config, matching kineto's flag.
-            self._cupti_profiler_observer = ProfilerObserver(
+            self._cuspy_profiler_observer = ProfilerObserver(
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # GPU environment counters (power/clock/thermal/cooling) are periodically
+                # sampled; opt-in since the sampling adds overhead.
+                enable_environment_counters=bool(
+                    self._custom_profiler_config.get("enable_environment_counters")
+                ),
+                # PM sampling (true SM-active % + DRAM-throughput % counters) is a Cuspy
+                # feature, opt-in like the env counters. The metrics are per-profile
+                # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
+                enable_pm_sampling=bool(
+                    self._custom_profiler_config.get("enable_pm_sampling")
+                ),
+                pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
+                # instantiate + arrow rendering); off unless the config requests them.
+                enable_graph_dependencies=bool(
+                    self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
+                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
+                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
+                # CUDA_EVENT record kind.
+                enable_event_node_ids=bool(
+                    self._custom_profiler_config.get("enable_event_node_ids")
+                ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
-                defer_export=self._cupti_async_export,
+                defer_export=self._cuspy_async_export,
             )
             # Publish the observer so record_function routes annotations to it. The reference
-            # lives in torch.autograd (not the cupti package), so record_function never
-            # imports the cupti chain on a non-cupti run.
-            prof._set_active_cupti_profiler_observer(self._cupti_profiler_observer)
+            # lives in torch.autograd (not the cuspy package), so record_function never
+            # imports the cuspy chain on a non-cuspy run.
+            prof._set_active_cuspy_profiler_observer(self._cuspy_profiler_observer)
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -360,10 +406,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
-        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
+        if self._use_cuspy and self._cuspy_profiler_observer is not None:
             # Open the trace window here (stamps the start boundary, native clock, no
             # device sync); records before this are excluded from the window.
-            self._cupti_profiler_observer.open_window()
+            self._cuspy_profiler_observer.open_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -410,41 +456,66 @@ class _KinetoProfile:
             self.execution_trace_observer.stop()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
-        if self._use_cupti_monitor:
+        if self._use_cuspy:
             # Unpublish the observer (record_function stops routing here) and close the trace
             # window (end boundary, native clock, no device sync), queuing it for deferred
             # export; the observer is kept alive past stop for the async write.
-            prof._set_active_cupti_profiler_observer(None)
-            if self._cupti_profiler_observer is not None:
-                self._monitor_window_id = self._cupti_profiler_observer.close_window()
+            prof._set_active_cuspy_profiler_observer(None)
+            if self._cuspy_profiler_observer is not None:
+                self._cuspy_window_id = self._cuspy_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
-    def export_chrome_trace(self, path: str, use_python_export: bool = False):
+    def export_chrome_trace(
+        self,
+        path: str,
+        use_python_export: bool = False,
+        cuda_graph_annotations: Mapping[int, Any] | None = None,
+        graph_lanes: str = "none",
+        default_stream: int = 7,
+    ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
+        matching graphed work carries its annotation's fields in ``args``. Pass
+        :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
+        :func:`~torch.cuda.graph_annotations.mark_kernels` recorded, or any mapping in
+        that shape -- a filtered or edited copy, or one unpickled from an earlier run.
+        An empty mapping is treated as no annotations at all. Passing it implies
+        ``use_python_export``, the export path able to inject (the ``cuspy``
+        backend does its own injection and ignores this argument).
+
+        ``graph_lanes`` decides whether graphed events are moved onto display lanes.
+        ``"none"`` (default) leaves the trace's stream layout alone, reporting a recorded
+        lane as ``args["annotated_stream"]`` instead of acting on it. ``"all"`` moves each
+        graphed event to the lane its annotation names (as
+        :func:`~torch.cuda.graph_annotations.mark_stream` records) and the rest onto
+        ``default_stream`` -- what a replay scattered over many hardware streams needs,
+        at the cost of piling everything onto one lane when no annotation names a stream.
+        A moved event keeps the stream it ran on as ``args["original_stream"]``. ``"all"``
+        requires ``cuda_graph_annotations`` and raises without them, since on its own it
+        would only do the collapsing half.
         """
         if self.profiler is None:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
-        if self._use_cupti_monitor:
-            obs = self._cupti_profiler_observer
-            if obs is None or not obs.available or self._monitor_window_id is None:
+        if self._use_cuspy:
+            obs = self._cuspy_profiler_observer
+            if obs is None or not obs.available or self._cuspy_window_id is None:
                 # Nothing to export this cycle: the per-cycle ProfilerObserver didn't register
-                # with the CUPTI monitor (available is False -- the intermittent case), or its
+                # with Cuspy (available is False -- the intermittent case), or its
                 # window wasn't opened/closed (window id None). Skip rather than crash -- a
                 # profiler-trace hiccup must not take down a training run -- and clean up below.
-                _warn_once(
-                    "CUPTI monitor observer unavailable; skipping chrome trace export"
-                )
-                # join() tears down the poll thread + monitor registration, which exist only
+                _warn_once("Cuspy observer unavailable; skipping chrome trace export")
+                # join() tears down the poll thread + Cuspy registration, which exist only
                 # when the observer registered (available). An unavailable observer never
                 # started either, so just drop the reference and let it be GC'd.
                 if obs is not None and obs.available:
                     obs.join()
-                self._cupti_profiler_observer = None
-                self._monitor_window_id = None
+                self._cuspy_profiler_observer = None
+                self._cuspy_window_id = None
                 return
             # Capture the profiler's CPU-side trace (cheap, no device sync) and hand it + the
             # output path to the observer. Async: the poller merges + writes `path` once the
@@ -454,18 +525,26 @@ class _KinetoProfile:
             )
             fp.close()
             self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
-            self._cupti_profiler_observer.set_export(
-                self._monitor_window_id, fp.name, path
+            self._cuspy_profiler_observer.set_export(
+                self._cuspy_window_id, fp.name, path
             )
-            if not self._cupti_async_export:
+            if not self._cuspy_async_export:
                 # Synchronous: finalize + write now, so `path` exists on return.
-                self._cupti_profiler_observer.join()
-                self._cupti_profiler_observer = None
-                self._monitor_window_id = None
+                self._cuspy_profiler_observer.join()
+                self._cuspy_profiler_observer = None
+                self._cuspy_window_id = None
             return
-        if use_python_export:
+        # graph_lanes moves events on its own (it only needs each event's graph node id,
+        # which kineto already reports), so anything but the "none" default has to reach
+        # the Python exporter -- including an invalid value, which it rejects.
+        if use_python_export or cuda_graph_annotations or graph_lanes != "none":
             self.profiler.export_chrome_trace(
-                path, self._trace_metadata, use_python_export=True
+                path,
+                self._trace_metadata,
+                use_python_export=True,
+                cuda_graph_annotations=cuda_graph_annotations,
+                graph_lanes=graph_lanes,
+                default_stream=default_stream,
             )
         elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
@@ -476,23 +555,23 @@ class _KinetoProfile:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 
     def wait_for_exports(self) -> None:
-        """Block until every deferred cupti_monitor export is written, then unregister.
-        No-op unless the cupti_monitor backend is active. Call on the training thread when
+        """Block until every deferred cuspy export is written, then unregister.
+        No-op unless the cuspy backend is active. Call on the training thread when
         you need the file(s) on disk; the finalize force-flushes CUPTI (safe here)."""
-        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
-            self._cupti_profiler_observer.join()
-            self._cupti_profiler_observer = None
-            self._monitor_window_id = None
+        if self._use_cuspy and self._cuspy_profiler_observer is not None:
+            self._cuspy_profiler_observer.join()
+            self._cuspy_profiler_observer = None
+            self._cuspy_window_id = None
 
-    def take_pending_cupti_export(self) -> Any:
-        """Detach this cycle's cupti_monitor ProfilerObserver (with its unwritten window) so
+    def take_pending_cuspy_export(self) -> Any:
+        """Detach this cycle's cuspy ProfilerObserver (with its unwritten window) so
         the deferred export can be finalized OFF the training thread (call
-        ``obs.join(force=False)`` on a worker). None for non-cupti backends."""
-        if not self._use_cupti_monitor:
+        ``obs.join(force=False)`` on a worker). None for non-cuspy backends."""
+        if not self._use_cuspy:
             return None
-        obs = self._cupti_profiler_observer
-        self._cupti_profiler_observer = None
-        self._monitor_window_id = None
+        obs = self._cuspy_profiler_observer
+        self._cuspy_profiler_observer = None
+        self._cuspy_window_id = None
         return obs
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
@@ -526,14 +605,17 @@ class _KinetoProfile:
                 ]
             ) as p:
                 code_to_profile_0()
-                // turn off collection of all CUDA activity
-                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                # turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(
+                    False, [torch.profiler.ProfilerActivity.CUDA]
+                )
                 code_to_profile_1()
-                // turn on collection of all CUDA activity
-                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                # turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(
+                    True, [torch.profiler.ProfilerActivity.CUDA]
+                )
                 code_to_profile_2()
-            print(p.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
         """
         if self.profiler is None:
             return
@@ -841,6 +923,8 @@ class profile(_KinetoProfile):
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable invoked at the end of each profiling cycle
@@ -856,8 +940,12 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -872,9 +960,6 @@ class profile(_KinetoProfile):
         custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
             invoked once per profiling cycle. Defaults to a random UUID; retrieve via
             :meth:`get_trace_id`.
-        use_cuda (bool):
-            .. deprecated:: 1.8.1
-                use ``activities`` instead.
 
     .. note::
         Use :func:`~torch.profiler.schedule` to generate the callable schedule.
@@ -986,31 +1071,13 @@ class profile(_KinetoProfile):
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
-        # deprecated:
-        use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        # Extract activities for the use_cuda deprecation check.
         if activities is not None:
-            activities_set: set[ProfilerActivity] = set()
-            for item in activities:
-                if isinstance(item, ProfilerActivity):
-                    activities_set.add(item)
-                elif isinstance(item, dict):
-                    activities_set.update(item.keys())
+            activities_set, _ = _parse_activities(activities)
         else:
             activities_set = supported_activities()
-        if use_cuda is not None:
-            warn(
-                "`use_cuda` is deprecated, use `activities` argument instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if use_cuda:
-                activities_set.add(ProfilerActivity.CUDA)
-            elif ProfilerActivity.CUDA in activities_set:
-                activities_set.remove(ProfilerActivity.CUDA)
         if len(activities_set) == 0:
             raise AssertionError("No valid profiler activities found")
 
@@ -1437,7 +1504,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self.output_file_path, create_dir=can_create
         )
         if not generated_path:
-            # could not find of create the resources dir
+            # could not find or create the resources dir
             return None
         self.resources_dir = generated_path
         return self.resources_dir

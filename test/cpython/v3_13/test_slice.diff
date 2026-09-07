@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_slice.py b/test/cpython/v3_13/test_slice.py
-index c35a2293f79..36dd8597ba4 100644
+index c35a2293f790a2b40a6f7767a72fa19614d2144b..36dd8597ba4a30afce5c68c5275ea0801e4ba25f 100644
 --- a/test/cpython/v3_13/test_slice.py
 +++ b/test/cpython/v3_13/test_slice.py
 @@ -1,3 +1,21 @@

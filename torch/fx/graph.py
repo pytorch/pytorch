@@ -20,11 +20,12 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
+from typing_extensions import TypeVarTuple, Unpack
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -69,9 +70,10 @@ _legal_ops = dict.fromkeys(
 )
 
 
-# Signature for functions thattransforms the body (`list[str]`) of the
+# Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
+_InputArgs = TypeVarTuple("_InputArgs")
 
 
 class _CustomBuiltin(NamedTuple):
@@ -471,7 +473,7 @@ class CodeGen:
         else:
             return f"return {repr_fn(output_args)}"
 
-    def process_inputs(self, *args: Any) -> Any:
+    def process_inputs(self, *args: Unpack[_InputArgs]) -> tuple[Unpack[_InputArgs]]:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being
@@ -566,9 +568,11 @@ class CodeGen:
 
             typename = _type_repr(o)
             if isinstance(o, types.UnionType) and "|" in typename:
-                # str | int
+                # TorchScript's PEP604 parser does not resolve generated globals
+                # for nested aliases such as typing_Dict.
+                origin_typename = add_global(_type_repr(typing.Union), typing.Union)
                 args = [type_repr(arg) for arg in typing.get_args(o)]
-                return "|".join(args)
+                return f"{origin_typename}[{','.join(args)}]"
 
             if origin_type := getattr(o, "__origin__", None):
                 # list[...], typing.List[...], TensorType[...]
@@ -649,7 +653,7 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
-            elif is_opaque_value_type(type(arg)):
+            elif is_opaque_constant_type(type(arg)):
                 obj_repr, opaque_types = get_opaque_obj_repr(arg)
                 for n, t in opaque_types.items():
                     add_global(n, t)

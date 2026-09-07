@@ -3,6 +3,8 @@ name: xpu
 
 on:
   push:
+    branches:
+      - viable/strict
     tags:
       - ciflow/xpu/*
   workflow_dispatch:
@@ -43,7 +45,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -66,7 +67,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
@@ -105,7 +105,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-client
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       test-matrix: |
         { include: [
           { config: "smoke_xpu", shard: 1, num_shards: 1, runner: "linux.client.xpu" },
@@ -130,7 +129,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.3'
+      xpu-version: '2026.0'
       vc-year: '2022'
     secrets: inherit
 
@@ -142,6 +141,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2026.0'
+      xpu-version: '2026.1'
       vc-year: '2022'
     secrets: inherit

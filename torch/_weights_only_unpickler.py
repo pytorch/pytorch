@@ -2,7 +2,7 @@
 # Unpickler restricted to loading only state dicts
 # Restrict constructing types to a list defined in _get_allowed_globals()
 # Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
-# Restrict APPEND/APPENDS to `list`
+# Restrict APPEND/APPENDS to `list` (and allowlisted list subclasses)
 # In `GLOBALS` operation do not do class lookup by name, but rather rely on dictionary
 # defined by `_get_allowed_globals()` method, that contains:
 # - torch types (Storage, dtypes, Tensor, `torch.Size`),
@@ -15,7 +15,7 @@
 # `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
 # `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
-# Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
+# Based on https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
 # For example:
 # data = urllib.request.urlopen('https://download.pytorch.org/models/resnet50-0676ba61.pth').read()
@@ -120,6 +120,12 @@ class _safe_globals:
         _remove_safe_globals(self.safe_globals)
 
 
+class _PendingNewobj:
+    def __init__(self, cls, args):
+        self.cls = cls
+        self.args = args
+
+
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
 # For example if user had a script like
 #   torch.load(file_a)
@@ -157,7 +163,6 @@ def _tensor_rebuild_functions():
         torch._utils._rebuild_tensor_v3,
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
         torch._utils._rebuild_wrapper_subclass,
         # Allowlisting this, but not allowlisting the numpy functions by default
         # Reasoning is that we don't have control over the numpy functions, but
@@ -319,6 +324,7 @@ class Unpickler:
         """
         self.metastack = []
         self.stack: list[Any] = []
+        pending_newobjs: set[_PendingNewobj] = set()
         self.append = self.stack.append
         read = self.read
         while True:
@@ -339,16 +345,6 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
-                elif full_path in (
-                    [
-                        "torch.nested._internal.nested_tensor.NestedTensor",
-                        "torch.nested._internal.nested_tensor._rebuild_njt",
-                        "torch._dynamo.decorators._DimRange",
-                    ]
-                ):
-                    raise UnpicklingError(
-                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
-                    )
                 elif full_path in (
                     [
                         "torch.distributed.device_mesh.DeviceMesh",
@@ -390,7 +386,12 @@ class Unpickler:
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
                 ):
-                    result = cls.__new__(cls, *args)
+                    result: Any
+                    if torch._C._is_pybind11_type(cls):
+                        result = _PendingNewobj(cls, args)
+                        pending_newobjs.add(result)
+                    else:
+                        result = cls.__new__(cls, *args)
                     if cls in torch._tensor_classes and "sparse" in cls.__module__:
                         _sparse_tensors_to_validate.append(result)
                     self.append(result)
@@ -419,6 +420,14 @@ class Unpickler:
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
+                if isinstance(inst, _PendingNewobj):
+                    pending = inst
+                    inst = pending.cls.__new__(pending.cls, *pending.args)
+                    self.stack[-1] = inst
+                    for memo_id, memo_value in self.memo.items():
+                        if memo_value is pending:
+                            self.memo[memo_id] = inst
+                    pending_newobjs.remove(pending)
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
 
@@ -453,18 +462,12 @@ class Unpickler:
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
                 list_obj = self.stack[-1]
-                if type(list_obj) is not list:
-                    raise UnpicklingError(
-                        f"Can only append to lists, but got {type(list_obj)}"
-                    )
+                self._check_append_target(list_obj)
                 list_obj.append(item)
             elif key[0] == APPENDS[0]:
                 items = self.pop_mark()
                 list_obj = self.stack[-1]
-                if type(list_obj) is not list:
-                    raise UnpicklingError(
-                        f"Can only extend lists, but got {type(list_obj)}"
-                    )
+                self._check_append_target(list_obj)
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
@@ -563,6 +566,11 @@ class Unpickler:
                         stacklevel=2,
                     )
             elif key[0] == STOP[0]:
+                if pending_newobjs:
+                    raise UnpicklingError(
+                        "Object created by NEWOBJ was not initialized by BUILD; "
+                        "the pickle data is likely corrupt or malicious"
+                    )
                 rc = self.stack.pop()
                 return rc
             else:
@@ -581,6 +589,15 @@ class Unpickler:
                 f"Can only {opcode} for dict, collections.OrderedDict, "
                 f"collections.Counter, but got {type(self.stack[-1])}"
             )
+
+    def _check_append_target(self, list_obj):
+        # list subclasses allowlisted via add_safe_globals can be appended to
+        # (e.g. traceback.StackSummary); plain list is always allowed
+        if type(list_obj) is not list and not (
+            isinstance(list_obj, list)
+            and type(list_obj) in _get_user_allowed_globals().values()
+        ):
+            raise UnpicklingError(f"Can only append to lists, but got {type(list_obj)}")
 
     def persistent_load(self, pid):
         raise UnpicklingError("unsupported persistent id encountered")

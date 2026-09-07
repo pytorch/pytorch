@@ -44,13 +44,12 @@ jobs:
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.1" },
         ]}
     secrets: inherit
 

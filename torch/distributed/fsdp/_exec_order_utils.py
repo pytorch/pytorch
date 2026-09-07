@@ -25,7 +25,7 @@ class _ExecOrderData:
     the pre-forward order on the *first* iteration for forward prefetching
     (which thus assumes static graph) and the post-forward order on *every*
     iteration for backward prefetching (which thus does not assume static
-    graph but may be provide an incorrect order).
+    graph but may provide an incorrect order).
     """
 
     def __init__(

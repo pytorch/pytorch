@@ -113,6 +113,7 @@ void replicate_grad_edges(
     for (const auto i : c10::irange(devices.size())) {
       autograd::set_history(replicas[i]->parameters_[parameter.key()], grad_fn);
     }
+    autograd::fire_node_creation_hooks(grad_fn);
   }
 
   for (auto& buffer : module->named_buffers(/*recurse=*/false)) {
@@ -123,6 +124,7 @@ void replicate_grad_edges(
       for (const auto i : c10::irange(devices.size())) {
         autograd::set_history(replicas[i]->buffers_[buffer.key()], grad_fn);
       }
+      autograd::fire_node_creation_hooks(grad_fn);
     }
   }
 

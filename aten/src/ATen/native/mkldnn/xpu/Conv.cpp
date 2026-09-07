@@ -1,15 +1,11 @@
 #include <vector>
 
 #include <ATen/core/ATen_fwd.h>
-#include <ATen/core/interned_strings.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/Conv.h>
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/ops/full.h>
-#include <ATen/ops/neg.h>
-#include <c10/core/Scalar.h>
+#include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
 #include <torch/library.h>
 #include <optional>
@@ -197,10 +193,10 @@ static void check_shape_forward(
       TORCH_CHECK(
           0,
           "Calculated padded input size per channel: (",
-          input_ss.str(),
+          std::move(input_ss).str(),
           "). "
           "Kernel size: (",
-          kernel_ss.str(),
+          std::move(kernel_ss).str(),
           "). Kernel size can't be greater than actual input size");
     }
   } else {
@@ -493,8 +489,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16, half and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
-
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
   bool transposed_ = false;
@@ -528,6 +522,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     output_padding_ = output_padding;
     groups_ = groups;
   }
+
+  bool is_channels_last_suggested = use_channels_last_for_conv(input_, weight_);
 
   // ensure the tensors are contiguous
   auto mfmt = is_channels_last_suggested

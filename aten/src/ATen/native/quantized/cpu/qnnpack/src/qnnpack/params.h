@@ -564,6 +564,10 @@ struct pytorch_q8conv_parameters {
   pytorch_q8gemm_ukernel_function gemm;
   pytorch_q8conv_ukernel_function conv;
   pytorch_q8gemm_dq_ukernel_function gemm_dq;
+  // Entry i is the dq kernel for a batch size of exactly i + 1, or NULL; only
+  // ever called with mr == that size. C array, as this header is also C.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  pytorch_q8gemm_dq_ukernel_function gemm_dq_exact[4];
   uint8_t mr;
   uint8_t nr;
   uint8_t kr;

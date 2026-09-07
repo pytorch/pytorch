@@ -183,12 +183,9 @@ void THXPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THXPStreamType.tp_base = THPStreamClass;
   THXPStreamClass = (PyObject*)&THXPStreamType;
-  if (PyType_Ready(&THXPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THXPStreamType) >= 0);
   Py_INCREF(&THXPStreamType);
-  if (PyModule_AddObject(module, "_XpuStreamBase", (PyObject*)&THXPStreamType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_XpuStreamBase", (PyObject*)&THXPStreamType) >= 0);
 }

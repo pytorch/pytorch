@@ -3,7 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/llvmMathExtras.h>
+#include <bit>
 
 #ifdef USE_FBGEMM
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
@@ -138,9 +138,8 @@ T CeilLog2(const T& x) {
   if (x <= 2) {
     return 1;
   }
-  // Last set bit is floor(log2(x)), floor + 1 is ceil
-  // except when x is an exact powers of 2, so subtract 1 first
-  return static_cast<T>(llvm::findLastSet(static_cast<uint64_t>(x) - 1)) + 1;
+  // bit_width(x - 1) is ceil(log2(x)) for x > 1
+  return static_cast<T>(std::bit_width(static_cast<uint64_t>(x) - 1));
 }
 
 // matrix transpose:

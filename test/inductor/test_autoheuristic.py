@@ -136,46 +136,6 @@ class AutoHeuristicTest(TestCase):
         # TODO (AlnisM): Find a way to check whether heuristic is used
         self.run_mm()
 
-    def run_mixed_mm(self):
-        def fn(a, b):
-            return torch.mm(a, b.to(a.dtype))
-
-        a = torch.randn(8, 1024, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randint(
-            -128, 127, (1024, 1024), dtype=torch.int8, device=GPU_TYPE
-        ).t()
-        torch.compile(fn, mode="max-autotune-no-cudagraphs")(a, b)
-
-    # have to set autoheuristic_use="" because if autoheuristic_use="mixed_mm",
-    # autoheuristic creates a precompile key, puts it into the registry, and then
-    # a choice made by the heuristic might be added to the list of choices
-    # and if select_algorithm now creates a new precompile key, it will be
-    # different from the precompile key created by autoheuristic
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @unittest.skip(
-        "mixed_mm autoheuristic collection is broken after mixed_mm special casing deletion (PR #147151)"
-    )
-    @inductor_config.patch("autoheuristic_collect.mixed_mm", True)
-    @inductor_config.patch("autoheuristic_use.mixed_mm", False)
-    @inductor_config.patch(fx_graph_cache=False)
-    @inductor_config.patch(fx_graph_remote_cache=False)
-    def test_global_feedback(self):
-        self.run_mixed_mm()
-        path = self.get_path_to_autoheuristic_log("mixed_mm")
-        self.assertTrue(os.path.exists(path))
-        num_lines = self.count_lines_in_file(path)
-
-        # 1 line for metadata, 1 line for header
-        # 1 line for fallback + at least 1 config
-        self.assertTrue(num_lines > 4)
-
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch("autoheuristic_use.mixed_mm", True)
-    @unittest.skipIf(not IS_A100, "heuristic only run on A100")
-    def test_mixed_mm_a100(self):
-        self.run_mixed_mm()
-        # TODO (AlnisM): Find a way to check whether heuristic is used
-
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_H100 and not IS_A100, "heuristic only run on H100")
     @inductor_config.patch(deterministic=True)

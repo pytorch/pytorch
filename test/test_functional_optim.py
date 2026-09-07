@@ -8,7 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.optim import Adam, AdamW, SGD
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MyModule(torch.nn.Module):
@@ -79,6 +83,8 @@ if torch.distributed.is_available():
     not torch.distributed.is_available(), "These are testing distributed functions"
 )
 class TestFunctionalOptimParity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _validate_parameters(self, params_1, params_2):
         for p1, p2 in zip(params_1, params_2):
             self.assertEqual(p1, p2)

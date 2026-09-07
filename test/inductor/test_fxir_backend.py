@@ -7,6 +7,7 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
+from unittest.mock import MagicMock
 
 import sympy
 
@@ -23,12 +24,13 @@ from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen, UnbackedSymbolDefsLine
 from torch._inductor.codegen.wrapper_fxir import (
     FxConverter,
     replace_floor_div,
     WrapperFxCodegen,
 )
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
@@ -47,17 +49,18 @@ from torch.utils._sympy.functions import FloorDiv
 
 
 try:
-    from .test_control_flow import CondModels
+    from .test_control_flow import CondModels, SwitchModels
 except ImportError:
     from test_control_flow import (
         CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+        SwitchModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
     )
 
 if HAS_GPU:
     import triton
     import triton.language as tl
 
-    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+    from torch.testing._internal.triton_utils import add_kernel, add_kernel_2d_autotuned
 
 test_config = {
     "compile_threads": 1,
@@ -729,6 +732,30 @@ class FxirTestCase(InductorTestCase):
             target = subgm_getattr.name
             self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
 
+    @parametrize("idx", (0, 1, 2))
+    def test_switch_subgraph(self, idx: int):
+        x = torch.randn((2, 3), device=self.device)
+        idx_tensor = torch.tensor(idx, device=self.device)
+        model = SwitchModels.Simple()
+        gm = self._compile_and_check(
+            model, [idx_tensor, x], expected_num_triton_kernels=4
+        )[-1]
+
+        # The FX graph should call torch.ops.higher_order.switch (not cond).
+        switch_nodes = list(
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.switch
+            )
+        )
+        self.assertEqual(len(switch_nodes), 1)
+
+        # Each branch should be a subgraph GraphModule attached as an attribute.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 3)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
     @parametrize("pred", (False, True))
     def test_cond_no_operands(self, pred: bool):
         """
@@ -1009,6 +1036,23 @@ class AOTFxirTestCase(InductorTestCase):
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
         )
 
+    def test_custom_triton_view_arg(self):
+        # The mm output's halves reach the kernel as reinterpret_tensor(...) views.
+        n = 8
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                t = torch.mm(x, w).view(-1)
+                output = torch.zeros(n, device=x.device)
+                add_kernel[(1,)](t[:n], t[n:], output, n, BLOCK_SIZE=n)
+                return output
+
+        inp = (
+            torch.randn(2 * n, 4, device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+        self.check(Model().to(device=self.device), inp, strict=True)
+
     def test_custom_triton_autotune_dynamic(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -1132,8 +1176,8 @@ class AOTFxirTestCase(InductorTestCase):
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
@@ -1347,6 +1391,102 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.check(TestModule(), (data, offsets))
 
+    def test_compound_symint_graph_input(self):
+        """A compound symbolic graph input binds to a single placeholder.
+
+        The branches close over 2 * y.shape[0] + 1, so the lifted argument
+        reaches the converter as a sympy.Add rather than a single Symbol.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = 2 * y.shape[0] + 1
+
+                def true_fn(t):
+                    return t + a
+
+                # Identical branches would share one Triton kernel between
+                # two separately converted subgraphs, which FX conversion
+                # cannot resolve.
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        gm = self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+        # The lifted argument is a placeholder of the branch subgraphs, not of
+        # the parent graph. Check each branch on its own: one symbolic
+        # placeholder holding the whole expression, so neither branch fell back
+        # to taking the constituent symbol instead.
+        branches = [
+            submod
+            for name, submod in gm.named_modules()
+            if name and isinstance(submod, torch.fx.GraphModule)
+        ]
+        self.assertEqual(len(branches), 2, "expected the two cond subgraphs")
+        for branch in branches:
+            symbolic = [
+                node.meta["val"]
+                for node in branch.graph.find_nodes(op="placeholder")
+                if isinstance(node.meta.get("val"), torch.SymInt)
+            ]
+            self.assertEqual(len(symbolic), 1)
+            expr = symbolic[0].node.expr
+            (sym,) = expr.free_symbols
+            self.assertEqual(expr, 2 * sym + 1)
+
+    def test_nonlinear_compound_input_rejected(self):
+        """A compound input the solver cannot invert fails with a clear error.
+
+        y.shape[0] * y.shape[0] lifts as s**2, which the solver does not invert
+        to recover s.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a = y.shape[0] * y.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4))
+        with self.assertRaisesRegex(InductorError, "Cannot solve input expression"):
+            self.check(M(), inp, dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}))
+
+    def test_underdetermined_compound_input_rejected(self):
+        """A compound input holding two unknowns fails with a clear error.
+
+        The branches close over y.shape[0] + z.shape[0] but take neither
+        tensor, so one bound value would have to determine both symbols.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0] + z.shape[0]
+
+                def true_fn(t):
+                    return t + a
+
+                def false_fn(t):
+                    return t + a + 1
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = tuple(torch.randn(numel, device=self.device) for numel in (8, 4, 6))
+        with self.assertRaisesRegex(InductorError, "leaves these symbols undefined"):
+            self.check(
+                M(),
+                inp,
+                dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+            )
+
 
 class TestReplaceFloorDiv(InductorTestCase):
     """
@@ -1472,6 +1612,24 @@ class TestReplaceFloorDiv(InductorTestCase):
         x, y = sympy.symbols("x y")
         expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
         self._check(expr)
+
+
+class TestUnbackedSymbolDefs(InductorTestCase):
+    """Tests for FxConverter._generate_unbacked_symbol_defs."""
+
+    def test_empty_bindings_returns_before_buffer_lookup(self):
+        # A line with no unbacked symbols must return before the output-buffer
+        # lookup: such kernels are not recorded in buffer_to_node, so the lookup
+        # would KeyError. Fails without the early-return guard, passes with it.
+        conv = MagicMock(spec=FxConverter)
+        conv.gm = MagicMock()
+        conv.buffer_to_node = {}
+        line = MagicMock(spec=UnbackedSymbolDefsLine)
+        # output_name is set so that, absent the guard, the buffer_to_node lookup
+        # is actually reached and raises KeyError (its documented failure mode).
+        line.output_name = "buf0"
+        line.unbacked_bindings = {}
+        self.assertIsNone(FxConverter._generate_unbacked_symbol_defs(conv, line))
 
 
 if __name__ == "__main__":

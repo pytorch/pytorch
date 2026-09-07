@@ -27,6 +27,7 @@ from torch.utils._sympy.functions import (
     Min as TorchSymMin,
     LShift,
     Mod,
+    ModularIndexing,
     OpaqueUnaryFn_cos,
     PythonMod,
     RShift,
@@ -281,6 +282,13 @@ class TestValueRanges(TestCase):
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
+    def test_bound_sympy_negative_pow(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+
+        self.assertEqual(
+            bound_sympy(x**-1, {x: ValueRanges(3, 4)}), ValueRanges.unknown()
+        )
+
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):
@@ -366,6 +374,68 @@ class TestValueRanges(TestCase):
                     self.assertEqual(len(unique), 1)
                 else:
                     self.assertEqual(len(unique), 2)
+
+    def test_bool_minimum_maximum(self):
+        vals = [sympy.false, sympy.true]
+        for fn in ("minimum", "maximum"):
+            for a, b in itertools.product(generate_range(vals), repeat=2):
+                with self.subTest(fn=fn, a=a, b=b):
+                    ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(ref_r.is_bool)
+                    unique = set()
+                    for a0, b0 in itertools.product(vals, repeat=2):
+                        if a0 not in a or b0 not in b:
+                            continue
+                        if fn == "minimum":
+                            expected = bool(a0) and bool(b0)
+                        else:
+                            expected = bool(a0) or bool(b0)
+                        r = sympy.true if expected else sympy.false
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                    if ref_r.lower == ref_r.upper:
+                        self.assertEqual(len(unique), 1)
+                    else:
+                        self.assertEqual(len(unique), 2)
+
+    def test_bool_minimum_maximum_mixed_raises(self):
+        # min/max require both operands to be boolean or both non-boolean;
+        # a mixed boolean/non-boolean pair must raise.
+        bool_range = ValueRanges(sympy.false, sympy.true)
+        int_range = ValueRanges(sympy.Integer(0), sympy.Integer(4))
+        for fn in ("minimum", "maximum"):
+            for a, b in ((bool_range, int_range), (int_range, bool_range)):
+                with self.subTest(fn=fn, a=a, b=b):
+                    with self.assertRaisesRegex(
+                        AssertionError, "operands must both be boolean"
+                    ):
+                        getattr(ValueRangeAnalysis, fn)(a, b)
+
+    def test_eq_ne_bool_ranges(self):
+        # eq/ne must accept boolean ranges. sympy booleans do not support
+        # ordered comparison (bool >/< raises), which the disjoint-range test in
+        # eq would otherwise hit. Regression test for eq/ne raising TypeError on
+        # a boolean range, which test_binary_bool_ref_range does not cover (it
+        # omits COMPARE_OPS).
+        full = ValueRanges(sympy.false, sympy.true)
+        T = ValueRanges.wrap(sympy.true)
+        F = ValueRanges.wrap(sympy.false)
+        for a, b in [(full, full), (full, T), (F, full), (T, F), (T, T), (F, F)]:
+            with self.subTest(a=a, b=b):
+                for fn in ("eq", "ne"):
+                    r = getattr(ValueRangeAnalysis, fn)(a, b)
+                    self.assertTrue(r.is_bool)
+                    self.assertIn(r.lower, (sympy.true, sympy.false))
+                    self.assertIn(r.upper, (sympy.true, sympy.false))
+        # singletons resolve precisely: equal -> definitely eq, disjoint -> not
+        self.assertEqual(ValueRangeAnalysis.eq(T, T), T)
+        self.assertEqual(ValueRangeAnalysis.ne(T, T), F)
+        self.assertEqual(ValueRangeAnalysis.eq(F, F), T)
+        self.assertEqual(ValueRangeAnalysis.ne(F, F), F)
+        self.assertEqual(ValueRangeAnalysis.eq(T, F), F)
+        self.assertEqual(ValueRangeAnalysis.ne(T, F), T)
+        self.assertEqual(ValueRangeAnalysis.eq(F, T), F)
+        self.assertEqual(ValueRangeAnalysis.ne(F, T), T)
 
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
@@ -502,7 +572,7 @@ class TestValueRanges(TestCase):
                 result = x % y
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
-                self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
+                self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)
@@ -737,7 +807,7 @@ class TestSympyInterp(TestCase):
                         torch.allclose(
                             direct_result, interp_result, rtol=1e-5, atol=1e-8
                         ),
-                        f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
+                        lambda msg: f"{msg}\nMismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
                     )
 
                     if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
@@ -790,6 +860,8 @@ class TestSympySolve(TestCase):
             Eq(FloorDiv(a, b), c),
             # Result is a 'sympy.Or'.
             Ne(FloorDiv(a, b), c),
+            # Relational operation over booleans, not arithmetic expressions.
+            Eq(Eq(a, 0, evaluate=False), Eq(b, 0, evaluate=False), evaluate=False),
         ]
 
         for case in cases:
@@ -1061,6 +1133,20 @@ class TestSympyFunctions(TestCase):
         x = sympy.Symbol("x", integer=True)
         self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
         self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
+
+    def test_modular_indexing_does_not_strip_unproven_nonnegative_term(self):
+        q0 = sympy.Symbol("q0", integer=True, nonnegative=True)
+        n = sympy.Symbol("n", integer=True, positive=True)
+        poisoned_base = n**2 + FloorDiv(-1 - q0, 2)
+        expr = ModularIndexing(poisoned_base, 1, n**2)
+
+        self.assertNotEqual(expr, ModularIndexing(-1 - q0, 2, n**2))
+        for nv in range(2, 9):
+            for q0v in range(4 * nv * nv):
+                actual = int(expr.subs({n: nv, q0: q0v}))
+                expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
+                self.assertEqual(actual, expected)
+                self.assertTrue(0 <= actual < nv * nv)
 
 
 class TestSingletonInt(TestCase):

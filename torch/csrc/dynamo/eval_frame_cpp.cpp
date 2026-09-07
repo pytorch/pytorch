@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
-#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
@@ -383,7 +382,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
+    DEBUG_TRACE("throw %s", get_frame_name(frame));
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -460,7 +459,7 @@ PyObject* dynamo__custom_eval_frame(
     // DebugContextGuard calls __enter__ on construction and __exit__ on
     // destruction, so the debug session is scoped to this eval_custom call.
     std::optional<DebugContextGuard> debug_guard;
-    if (breakpoint_code_objects.count(cached_code) &&
+    if (breakpoint_code_objects.contains(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
       auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
                      .attr("_DebugContext")();

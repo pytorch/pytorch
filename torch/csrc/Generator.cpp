@@ -2,11 +2,8 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
@@ -24,8 +21,7 @@ static bool generatorMetaclassSet = false;
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = cdata;
   self_->weakreflist = nullptr;
@@ -122,7 +118,7 @@ static uint64_t unpack_uint64(PyObject* pyobj) {
       unsigned_obj = *(reinterpret_cast<uint64_t*>(&obj));
     } else {
       // If any other type of exception happened, rethrow it
-      throw; // @allow-raw-throw
+      throw;
     }
   }
   return unsigned_obj;
@@ -225,6 +221,36 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_philoxState(
+    PyObject* _self,
+    PyObject* increment) {
+  HANDLE_TH_ERRORS
+  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  TORCH_CHECK(
+      THPUtils_checkLong(increment),
+      "philox_state expected an int, but got ",
+      THPUtils_typename(increment));
+  // Deliberately not unpack_uint64: a negative increment is never
+  // meaningful, so let the OverflowError propagate.
+  const uint64_t inc = THPUtils_unpackUInt64(increment);
+
+  std::tuple<at::Tensor, at::Tensor, at::Tensor> state;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    state = gen.philox_state(inc);
+  }
+  auto& [seed_t, offset_t, intragraph_t] = state;
+
+  auto ret = THPObjectPtr{PyTuple_New(3)};
+  TORCH_CHECK_PYTHON(ret);
+  PyTuple_SET_ITEM(ret.get(), 0, THPVariable_Wrap(std::move(seed_t)));
+  PyTuple_SET_ITEM(ret.get(), 1, THPVariable_Wrap(std::move(offset_t)));
+  PyTuple_SET_ITEM(ret.get(), 2, THPVariable_Wrap(std::move(intragraph_t)));
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
@@ -237,23 +263,20 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   auto& gen = self->cdata;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
-  if (!ret)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(ret);
 
   py::object torch_module = py::module::import("torch");
   py::object torch_generator = torch_module.attr("Generator");
   PyTuple_SET_ITEM(ret.get(), 0, torch_generator.release().ptr());
 
   auto args = THPObjectPtr{PyTuple_New(1)};
-  if (!args)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(args);
 
   PyTuple_SET_ITEM(args.get(), 0, THPGenerator_get_device(self, nullptr));
   PyTuple_SET_ITEM(ret.get(), 1, args.release());
 
   auto state = THPObjectPtr{PyTuple_New(3)};
-  if (!state)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(state);
 
   c10::DeviceType device_type = gen.device().type();
   PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
@@ -307,6 +330,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
+    {"philox_state", THPGenerator_philoxState, METH_O, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

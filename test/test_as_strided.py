@@ -3,7 +3,11 @@
 from collections import deque
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def get_state(t: torch.Tensor) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -84,6 +88,8 @@ def enumerate_reachable_states(
 
 
 class TestAsStrided(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_size_10_exhaustive(self) -> None:
         """Test that size 10 produces exactly the expected 54 states."""
         expected_states = {
@@ -161,12 +167,12 @@ class TestAsStrided(TestCase):
                 # Check that prev_states is a strict subset of current_states
                 self.assertTrue(
                     prev_states.issubset(current_states),
-                    f"States from size {size - 1} are not a subset of size {size}",
+                    lambda msg: f"{msg}\nStates from size {size - 1} are not a subset of size {size}",
                 )
                 # Check that it's a strict subset (not equal)
                 self.assertTrue(
                     len(prev_states) < len(current_states),
-                    f"States from size {size - 1} should be strictly fewer than size {size}",
+                    lambda msg: f"{msg}\nStates from size {size - 1} should be strictly fewer than size {size}",
                 )
 
             prev_states = current_states

@@ -23,7 +23,7 @@ std::unordered_set<std::string>& ObservedOperators::getUnobservedOperatorList() 
 
 /* static */
 bool ObservedOperators::isObserved(const OperatorName& name) {
-  return !ObservedOperators::getUnobservedOperatorList().count(name.name);
+  return !ObservedOperators::getUnobservedOperatorList().contains(name.name);
 }
 
 } // namespace c10

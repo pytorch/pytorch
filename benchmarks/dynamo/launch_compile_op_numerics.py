@@ -78,9 +78,12 @@ class Mode:
                 }
                 kwargs["options"] = options
             return torch.compile(fn, **kwargs)
-        assert self.backend is None  # noqa: S101
-        assert self.mode is None  # noqa: S101
-        assert self.options is None  # noqa: S101
+        if self.backend is not None:
+            raise AssertionError("expected self.backend to be None")
+        if self.mode is not None:
+            raise AssertionError("expected self.mode to be None")
+        if self.options is not None:
+            raise AssertionError("expected self.options to be None")
         return fn
 
 
@@ -488,7 +491,8 @@ def sortable_config_key(config):
 
 
 async def worker(args):
-    assert len(args.gpu) == 1  # noqa: S101
+    if len(args.gpu) != 1:
+        raise AssertionError(f"expected exactly one gpu, got {len(args.gpu)}")
     # find golden task
     # a config is a tuple (pytorch_version, cuda_version)
     # where pytorch_version can either be a version string or nightly or a git hash
@@ -932,7 +936,8 @@ def main():
     parser.add_argument("--mode")
     args = parser.parse_args()
     if args.runner:
-        assert torch is not None  # noqa: S101
+        if torch is None:
+            raise AssertionError("expected torch to be not None")
         torch.set_default_device("cuda")
         (gpu,) = args.gpu
         logging.basicConfig(

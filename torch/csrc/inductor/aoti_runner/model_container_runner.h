@@ -2,8 +2,12 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_observer.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
+
+#include <atomic>
+#include <memory>
 
 // Forward declare DynamicLibrary
 namespace at {
@@ -65,6 +69,7 @@ class TORCH_API AOTIModelContainerRunner {
   void swap_constant_buffer();
   void free_inactive_constant_buffer();
   void update_constant_buffer_from_blob(const std::string& weights_path);
+  bool did_call_load_constants() const;
 
   std::vector<std::string> get_call_spec();
 
@@ -78,6 +83,35 @@ class TORCH_API AOTIModelContainerRunner {
                            : std::unordered_map<std::string, c10::IValue>{};
   }
 
+  // Attach an observer to receive begin/end callbacks bracketing container
+  // lifecycle events (constants load, constant-buffer update/swap/fold/free,
+  // inference). Optional; a null observer is zero overhead.
+  //
+  // Attach-once, and detaching is NOT supported: the hot path reads the
+  // observer through an atomic raw pointer, and because the owning shared_ptr
+  // is never replaced that pointer stays valid for the lifetime of the runner.
+  // Allowing a swap or a detach would race with -- and could free the observer
+  // out from under -- an in-flight run(). The slot is claimed with a
+  // compare-exchange rather than a plain check so a second concurrent caller
+  // reliably throws instead of racing on observer_owner_; only the winner
+  // assigns it. Passing nullptr is always an unconditional no-op.
+  void set_observer(std::shared_ptr<AOTIModelContainerObserver> observer) {
+    if (observer == nullptr) {
+      return;
+    }
+    AOTIModelContainerObserver* expected = nullptr;
+    TORCH_CHECK(
+        observer_.compare_exchange_strong(
+            expected,
+            observer.get(),
+            std::memory_order_release,
+            std::memory_order_relaxed),
+        "AOTIModelContainerRunner::set_observer() may only be called once per runner");
+    // Safe to publish before taking ownership: the caller's shared_ptr keeps
+    // the observer alive across this call.
+    observer_owner_ = std::move(observer);
+  }
+
  protected:
   AOTIModelContainerRunner(
       const std::string& model_so_path,
@@ -85,6 +119,16 @@ class TORCH_API AOTIModelContainerRunner {
       const std::string& device_str,
       const std::string& cubin_dir,
       const bool run_single_threaded);
+
+  // Construct with externally-provided weights. Skips the .so weight load
+  // entirely (no GPU allocation) and seeds the container's constants map
+  // from the caller-supplied tensors. The caller retains ownership.
+  AOTIModelContainerRunner(
+      const std::string& model_so_path,
+      size_t num_models,
+      const std::string& device_str,
+      const std::string& cubin_dir,
+      std::unordered_map<std::string, at::Tensor>& constants);
 
   // Default constructor for custom device implementations that don't
   // use .so files. Derived classes must override run_impl().
@@ -127,16 +171,37 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   decltype(&AOTInductorModelContainerGetConstantsBlobSize)
       get_constants_blob_size_func_{nullptr};
+  decltype(&AOTInductorModelContainerDidCallLoadConstants)
+      did_call_load_constants_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
   decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
+  decltype(&AOTInductorModelContainerCreateWithExternalConstants)
+      create_with_external_constants_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 
+  // Read on the hot path; see set_observer() for why this is attach-once.
+  AOTIModelContainerObserver* observer() const {
+    return observer_.load(std::memory_order_acquire);
+  }
+
  private:
+  void load_aoti_symbols(
+      const std::string& model_so_path,
+      const std::string& device_str,
+      bool run_single_threaded);
+
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
+
+  // Private, not protected: the lifetime argument in set_observer() only holds
+  // while every write goes through that compare-exchange, so subclasses (and
+  // out-of-tree runners registered via RegisterAOTIModelRunner) must not be
+  // able to assign these directly. They get the observer() accessor instead.
+  std::shared_ptr<AOTIModelContainerObserver> observer_owner_;
+  std::atomic<AOTIModelContainerObserver*> observer_{nullptr};
 };
 
 using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(

@@ -121,7 +121,7 @@ class LogitRelaxedBernoulli(Distribution):
 
 class RelaxedBernoulli(TransformedDistribution):
     r"""
-    Creates a RelaxedBernoulli distribution, parametrized by
+    Creates a RelaxedBernoulli distribution, parameterized by
     :attr:`temperature`, and either :attr:`probs` or :attr:`logits`
     (but not both). This is a relaxed version of the `Bernoulli` distribution,
     so the values are in (0, 1), and has reparametrizable samples.

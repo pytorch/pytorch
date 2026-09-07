@@ -33,6 +33,20 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+  # protobuf's CMakeLists.txt injects compiler-only flags (e.g. /bigobj, /utf-8)
+  # via add_definitions(), which CMake also applies to the resource compiler.
+  # protobuf works around this by overriding CMAKE_RC_COMPILE_OBJECT to drop the
+  # compile <FLAGS>, but only when CMAKE_CXX_COMPILER_ID STREQUAL "MSVC". With
+  # clang-cl the id is "Clang" (while MSVC stays true), so the workaround is
+  # skipped and rc.exe fails with "RC1106 invalid option: /bigobj". Install the
+  # same override for the clang-cl case, restoring it afterwards.
+  set(__caffe2_CMAKE_RC_COMPILE_OBJECT "${CMAKE_RC_COMPILE_OBJECT}")
+  if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    enable_language(RC)
+    set(CMAKE_RC_COMPILE_OBJECT
+        "<CMAKE_RC_COMPILER> /l0x409 <DEFINES> /fo<OBJECT> <SOURCE>")  # codespell:ignore fo
+  endif()
+
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Ancient protobuf forces CMake compatibility")
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
@@ -41,6 +55,8 @@ macro(custom_protobuf_find)
   else()
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
   endif()
+
+  set(CMAKE_RC_COMPILE_OBJECT "${__caffe2_CMAKE_RC_COMPILE_OBJECT}")
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -133,73 +149,3 @@ if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
 else()
   set(CAFFE2_PROTOC_EXECUTABLE protobuf::protoc)
 endif()
-
-################################################################################################
-# Modification of standard 'protobuf_generate_cpp()' with output dir parameter and python support
-# Usage:
-#   caffe2_protobuf_generate_cpp_py(<srcs_var> <hdrs_var> <python_var> <proto_files>)
-function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
-  if(NOT ARGN)
-    message(SEND_ERROR "Error: caffe_protobuf_generate_cpp_py() called without any proto files")
-    return()
-  endif()
-
-  set(${srcs_var})
-  set(${hdrs_var})
-  set(${python_var})
-  foreach(fil ${ARGN})
-    get_filename_component(abs_fil ${fil} ABSOLUTE)
-    get_filename_component(fil_we ${fil} NAME_WE)
-
-    list(APPEND ${srcs_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc")
-    list(APPEND ${hdrs_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h")
-    list(APPEND ${python_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py")
-
-    # Add TORCH_API prefix to protobuf classes and methods in all cases
-    set(DLLEXPORT_STR "dllexport_decl=TORCH_API:")
-
-    # Note: the following depends on PROTOBUF_PROTOC_EXECUTABLE. This
-    # is done to make sure protoc is built before attempting to
-    # generate sources if we're using protoc from the third_party
-    # directory and are building it as part of the Caffe2 build. If
-    # points to an existing path, it is a no-op.
-
-    if(${CAFFE2_LINK_LOCAL_PROTOBUF})
-      # We need to rewrite the pb.h files to route GetEmptyStringAlreadyInited
-      # through our wrapper in proto_utils so the memory location test
-      # is correct.
-      add_custom_command(
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
-               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
-               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
-        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
-
-        # If we remove all reference to these pb.h files from external
-        # libraries and binaries this rewrite can be removed.
-        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -DNAMESPACES=caffe\;caffe2\;onnx\;torch -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
-
-        DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
-        COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
-    else()
-      add_custom_command(
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
-               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
-               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
-        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
-        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -DNAMESPACES=caffe\;caffe2\;onnx\;torch -DSYSTEM_PROTOBUF=YES -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
-        DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
-        COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
-    endif()
-  endforeach()
-
-  set_source_files_properties(${${srcs_var}} ${${hdrs_var}} ${${python_var}} PROPERTIES GENERATED TRUE)
-  set(${srcs_var} ${${srcs_var}} PARENT_SCOPE)
-  set(${hdrs_var} ${${hdrs_var}} PARENT_SCOPE)
-  set(${python_var} ${${python_var}} PARENT_SCOPE)
-endfunction()

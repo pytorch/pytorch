@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import ast
+import math
 import os
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import (
+    _serialize_sym_expr,
     aot_graph_input_parser,
     generate_env_vars_string,
     NNModuleToString,
@@ -15,6 +18,7 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 f32 = torch.float32
@@ -23,6 +27,111 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    def test_serialize_symbolic_storage_nbytes(self):
+        from sympy import floor
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import Max
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(4, ConstantSource("storage_size"))
+        expr = 4 * symbol + 18428 * Max(1, symbol)
+        nbytes = torch.SymInt(SymNode(expr, shape_env, int, hint=73728))
+        source = _serialize_sym_expr(nbytes)
+
+        self.assertNotIn("Max", source)
+        for value in (0, 1, 4):
+            self.assertEqual(
+                eval(source, {"max": max}, {str(symbol): value}),
+                int(expr.subs(symbol, value)),
+            )
+
+        floor_expr = floor(symbol / 2)
+        floor_nbytes = torch.SymInt(SymNode(floor_expr, shape_env, int, hint=2))
+        floor_source = _serialize_sym_expr(floor_nbytes)
+        self.assertIn("math.floor", floor_source)
+        self.assertEqual(
+            eval(floor_source, {"math": math}, {str(symbol): 4}),
+            2,
+        )
+
+    def test_input_writer_symbolic_tensor_metadata_is_python(self):
+        from torch._dynamo.debug_utils import InputWriter
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.functions import CeilToInt, IntTrueDiv
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(64, ConstantSource("s33"))
+        # 32*ceil(s33/32) reprs as 32*CeilToInt(IntTrueDiv(s33, 32)) under sympy
+        expr = 32 * CeilToInt(IntTrueDiv(symbol, 32))
+        dim = torch.SymInt(SymNode(expr, shape_env, int, hint=64))
+
+        writer = InputWriter(None)
+        with FakeTensorMode(shape_env=shape_env):
+            base = torch.empty(4, dim, device="cpu")
+            writer.tensor("shape_arg", base)
+            writer.tensor("stride_arg", base.transpose(0, 1))
+            writer.tensor("offset_arg", base[1])
+
+        source = "\n".join(writer.lines())
+        self.assertIn("math.ceil", source)
+        self.assertNotIn("CeilToInt", source)
+        self.assertNotIn("IntTrueDiv", source)
+
+        class Reader:
+            def __init__(self):
+                self.tensors = []
+
+            def storage(self, storage_hash, nbytes, **kwargs):
+                return nbytes
+
+            def tensor(self, buf, shape, stride=None, *, storage_offset=0, **kwargs):
+                self.tensors.append((shape, stride, storage_offset))
+
+        # The repro preamble imports math and torch (sym_max shows up in
+        # contiguous strides); the symbol is bound by the caller.
+        namespace = {"math": math, "torch": torch, str(symbol): 64}
+        exec(source, namespace)
+        reader = Reader()
+        namespace["load_args"](reader)
+        self.assertEqual(
+            reader.tensors,
+            [((4, 64), None, 0), ((64, 4), (1, 64), 0), ((64,), None, 64)],
+        )
+
+    def test_repro_templates_import_symexpr_dependencies(self):
+        from torch._dynamo.repro.after_aot import generate_compiler_repro_string
+        from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        args = [torch.ones(1)]
+
+        repros = {
+            "after_aot": generate_compiler_repro_string(gm, args),
+            "after_dynamo": generate_dynamo_fx_repro_string(
+                gm, args, compiler_name="eager"
+            ),
+        }
+        for name, source in repros.items():
+            with self.subTest(name=name):
+                tree = ast.parse(source)
+                imports = ast.Module(
+                    body=[
+                        node
+                        for node in tree.body
+                        if isinstance(node, (ast.Import, ast.ImportFrom))
+                    ],
+                    type_ignores=[],
+                )
+                namespace = {}
+                exec(compile(imports, f"<{name}>", "exec"), namespace)
+                self.assertEqual(eval("math.floor(3 / 2)", namespace), 1)
+
     def test_cast_model_to_fp64_dtype_args(self):
         # Test that dtype arguments are converted to fp64
 
@@ -256,7 +365,7 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'.to("{expected_device}")', result)
-            self.assertNotIn(".cuda()", result)
+            self.assertNotIn(f".{GPU_TYPE}()", result)
 
     def test_nn_module_to_string_param_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -271,7 +380,7 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'device="{expected_device}"', result)
-            self.assertNotIn(', device="cuda")', result)
+            self.assertNotIn(f', device="{GPU_TYPE}")', result)
 
 
 instantiate_device_type_tests(
@@ -280,7 +389,9 @@ instantiate_device_type_tests(
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), except_for="mps")
+instantiate_device_type_tests(
+    TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
+)
 
 
 class TestBackendOverrideIntegration(TestCase):
@@ -819,7 +930,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
             patch.object(torch._functorch.config, "enable_autograd_cache", False),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             x = torch.randn(10, device=device, requires_grad=True)
             result = compiled_fn(x)
             result.backward()
@@ -827,8 +938,16 @@ class TestInductorConfigOverrideIntegration(TestCase):
         # Verify each graph has fwd+bwd, correct overrides, no cross-graph
         # leak, and identical configs for forward and backward.
         for gid in range(3):
-            self.assertIn((gid, False), configs_at_compile, f"graph {gid} fwd missing")
-            self.assertIn((gid, True), configs_at_compile, f"graph {gid} bwd missing")
+            self.assertIn(
+                (gid, False),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} fwd missing",
+            )
+            self.assertIn(
+                (gid, True),
+                configs_at_compile,
+                lambda msg: f"{msg}\ngraph {gid} bwd missing",
+            )
             expected = {**baseline, **expected_overrides[gid]}
             for is_bw in [False, True]:
                 phase = "backward" if is_bw else "forward"
@@ -842,7 +961,10 @@ class TestInductorConfigOverrideIntegration(TestCase):
 
 
 instantiate_device_type_tests(
-    TestInductorConfigOverrideIntegration, globals(), only_for=["cpu", "cuda"]
+    TestInductorConfigOverrideIntegration,
+    globals(),
+    only_for=["cpu", "cuda", "xpu"],
+    allow_xpu=True,
 )
 
 

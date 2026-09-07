@@ -5,6 +5,7 @@ from copy import copy
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -15,6 +16,8 @@ from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # "https://github.com/pytorch/pytorch/issues/127112
     @xfailIfTorchDynamo
     def test_module_hierarchy(self):

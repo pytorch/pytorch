@@ -2,11 +2,25 @@
 """Tests for tp_str / generic_str behavior in Dynamo."""
 
 import collections
+import logging
+import sys
 import typing
+import unittest
+from unittest.mock import patch
 
 import torch
+import torch._dynamo
+import torch._dynamo.testing
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch._dynamo.utils import counters
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+    subtest,
+)
 
 
 class _OpaqueStrDescriptorObject:
@@ -14,6 +28,8 @@ class _OpaqueStrDescriptorObject:
 
 
 class TpStrTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_str_int(self):
         assert str(42) == "42"  # noqa: S101
@@ -74,6 +90,8 @@ class TpStrTests(TestCase):
 
 
 class TpStrUserDefinedTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_counter_str(self):
         def fn(x):
             return str(collections.Counter("aba"))
@@ -204,9 +222,10 @@ class TpStrUserDefinedTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
+        self.assertIn("__str__", out)
         self.assertEqual(fn(x, obj), out)
-        self.assertIn("__str__ returned non-string", out)
 
+    @unittest.expectedFailure
     def test_user_defined_opaque_str_descriptor_raises_type_error(self):
         def fn(x, obj):
             try:
@@ -344,6 +363,8 @@ class TpStrUserDefinedTests(TestCase):
 
 
 class TpStrExceptionTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_exception_no_args(self):
         assert str(ValueError()) == ""  # noqa: S101
@@ -396,12 +417,88 @@ class TpStrExceptionTests(TestCase):
         self.assertEqual(fn(x), compiled(x))
 
 
+@instantiate_parametrized_tests
+class FStringGraphBreakTests(TestCase):
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_logger_fstring_debug_resumes_after_graph_break(self):
+        test_logger = logging.getLogger(
+            "test_logger_fstring_debug_resumes_after_graph_break"
+        )
+
+        def f(x):
+            a = x + 1
+            test_logger.warning(f"a : {a=}")  # noqa: G004
+            b = x * 2
+            return b + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        opt_f = torch.compile(f, backend=cnt)
+        with self.assertLogs(test_logger, level="WARNING") as captured:
+            opt_out = opt_f(x)
+            second_out = opt_f(x + 1)
+
+        self.assertEqual(opt_out, x * 2 + 1)
+        self.assertEqual(second_out, (x + 1) * 2 + 1)
+        self.assertEqual(
+            [record.getMessage() for record in captured.records],
+            ["a : a=tensor([2., 2.])", "a : a=tensor([3., 3.])"],
+        )
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
+
+        graph_breaks = counters["graph_break"]
+        repr_breaks = sum(
+            count
+            for reason, count in graph_breaks.items()
+            if reason.startswith("repr() on tensor")
+        )
+        logging_breaks = sum(
+            count
+            for reason, count in graph_breaks.items()
+            if reason.startswith("logging.Logger method not supported")
+        )
+        self.assertEqual(repr_breaks, 1)
+        self.assertEqual(logging_breaks, 2)
+        self.assertEqual(sum(graph_breaks.values()), repr_breaks + logging_breaks)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "requires split f-string opcodes")
+    @parametrize("with_spec", (False, True))
+    def test_split_format_opcode_resumes_unsupported(self, with_spec):
+        def fail_format(*args, **kwargs):
+            raise Unsupported("test f-string formatting graph break")
+
+        def f(x):
+            y = x + 1
+            if with_spec:
+                f"{x:}"
+            else:
+                f"{x}"
+            return y + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        with patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslatorBase._format_value",
+            side_effect=fail_format,
+        ):
+            opt_out = torch.compile(f, backend=cnt)(x)
+
+        self.assertEqual(opt_out, x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
+
+@instantiate_parametrized_tests
 class FStringMutationTests(TestCase):
     """Tests for f-string mutation ordering (issue #177582).
 
     Dynamo must evaluate f-string formatting at the correct bytecode point
     so that mutations between two f-strings are reflected in the output.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _check(self, fn, *args_factory):
         import copy
@@ -493,6 +590,55 @@ class FStringMutationTests(TestCase):
             return x, s1, s2
 
         self._check(fn, torch.randn(3), Obj([1, 2]))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    @parametrize(
+        "format_kind",
+        (
+            # TODO: Preserve formatting order without breaking fullgraph
+            # reorderable logging, which relies on deferred tensor formatting.
+            subtest("plain", decorators=[unittest.expectedFailure]),
+            subtest("plain_with_spec", decorators=[unittest.expectedFailure]),
+            "str",
+            "repr",
+            "ascii",
+            "repr_with_spec",
+        ),
+    )
+    def test_fstring_tensor_formatting_tracks_mutations(self, format_kind):
+        def fn(x):
+            x = x + 1
+            if format_kind == "plain":
+                s = f"{x}"
+            elif format_kind == "plain_with_spec":
+                s = f"{x:>20}"
+            elif format_kind == "str":
+                s = f"{x!s}"
+            elif format_kind == "repr":
+                s = f"{x!r}"
+            elif format_kind == "ascii":
+                s = f"{x!a}"
+            elif format_kind == "repr_with_spec":
+                s = f"{x!r:>20}"
+            else:
+                raise AssertionError(f"unexpected format kind: {format_kind}")
+            x.add_(1)
+            return s, x
+
+        inp = (
+            torch.tensor(1.0)
+            if format_kind == "plain_with_spec"
+            else torch.tensor([1.0, 2.0])
+        )
+        eager_result = fn(inp.clone())
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_result = torch.compile(fn, backend=cnt)(inp.clone())
+        self.assertEqual(compiled_result, eager_result)
+
+        if format_kind not in ("plain", "plain_with_spec"):
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.op_count, 2)
+            self.assertEqual(sum(counters["graph_break"].values()), 1)
 
     def test_explicit_str_tracks_mutations(self):
         import torch

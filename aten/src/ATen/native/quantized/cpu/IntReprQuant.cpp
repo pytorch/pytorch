@@ -43,7 +43,7 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
       auto iter = TensorIteratorConfig()
         .check_all_same_dtype(false)
         .add_output(dst)
-        .add_input(self)
+        .add_const_input(self)
         .build();
       cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
       }

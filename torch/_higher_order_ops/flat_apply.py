@@ -8,7 +8,7 @@ import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator
 
 
@@ -17,18 +17,21 @@ _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
 
 
-def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
+def is_graphable(val: object) -> bool:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
-    return isinstance(
-        val, (*torch.fx.node.base_types, FakeScriptObject)
-    ) or is_opaque_type(type(val))
+    return (
+        val is None
+        or isinstance(val, (*torch.fx.node.base_types, FakeScriptObject))
+        or is_custom_class(type(val))
+    )
 
 
 def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable."""
     return (
-        issubclass(typ, torch.fx.node.base_types)
-        or is_opaque_type(typ)
+        typ is type(None)
+        or issubclass(typ, torch.fx.node.base_types)
+        or is_custom_class(typ)
         or issubclass(typ, FakeScriptObject)
     )
 
@@ -83,7 +86,7 @@ _OpTypes = (
 _op_types = typing.get_args(_OpTypes)
 
 
-_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes | None
 # pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
 # pyrefly: ignore[not-a-type]
 _FXOutput = _Base | Sequence["_FXOutput"]
@@ -125,7 +128,7 @@ class FlatApply(HigherOrderOperator):
         """
         if not (
             isinstance(func, _op_types)
-            or is_opaque_type(type(func))
+            or is_custom_class(type(func))
             or pytree._is_constant_holder(func)
         ):
             raise AssertionError(

@@ -2,6 +2,9 @@
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace {
@@ -102,14 +105,28 @@ struct SDPALogicalParams {
       // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
       // head_dim_qk]. Please refer to
       // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
-      reshaped_query = query_.view(
+      reshaped_query = reshaped_query.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
-      reshaped_key = key_.unsqueeze(2);
-      reshaped_value = value_.unsqueeze(2);
-      reshaped_attention = attention_.view(
+      reshaped_key = reshaped_key.unsqueeze(2);
+      reshaped_value = reshaped_value.unsqueeze(2);
+      reshaped_attention = reshaped_attention.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
-      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+      if (attn_mask_.has_value() && reshaped_attn_mask.dim() == 4) {
+        // check_attn_mask_shape restricts a 4D mask's head
+        // dim to 1 or num_head_q. GQA target shape is
+        // [batch, group_num, group_size, seq_q, seq_k]. When mask head == 1
+        // we rely on implicit broadcast; when mask head == num_head_q we must
+        // split it into [group_num, group_size].
+        if (reshaped_attn_mask.size(1) == num_head_q) {
+          reshaped_attn_mask = reshaped_attn_mask.reshape(
+              {reshaped_attn_mask.size(0),
+               group_num,
+               group_size,
+               reshaped_attn_mask.size(2),
+               reshaped_attn_mask.size(3)});
+        } else {
+          reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+        }
       }
     }
 

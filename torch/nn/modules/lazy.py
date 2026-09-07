@@ -220,7 +220,7 @@ class LazyModuleMixin:
             if key in state_dict and param is not None:
                 input_param = state_dict[key]
                 if is_lazy(param):
-                    # The current parameter is not initialized but the one being loaded one is
+                    # The current parameter is not initialized but the one being loaded is
                     # create a new parameter based on the uninitialized one
                     if not is_lazy(input_param):
                         with torch.no_grad():

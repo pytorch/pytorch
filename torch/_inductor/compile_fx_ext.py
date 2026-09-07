@@ -11,7 +11,7 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile
@@ -75,12 +75,12 @@ class _VirtualizedSerializer:
 
     # The values here get serialized. We don't grab everything because some of
     # the fields can't be serialized.
-    aot_compilation: Any = None
-    choices: Any = None
-    local_buffer_context: Any = None
-    ops: Any = None
-    kernel: Any = None
-    current_node: Any = None
+    aot_compilation: object = None
+    choices: object = None
+    local_buffer_context: object = None
+    ops: object = None
+    kernel: object = None
+    current_node: object = None
 
     @classmethod
     def serialize(cls) -> _VirtualizedSerializer:

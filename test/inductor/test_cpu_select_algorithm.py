@@ -2968,6 +2968,31 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
+    @requires_mkl
+    @dtypes(torch.float32, torch.bfloat16, torch.half)
+    def test_bmm_with_template_buffer_other_users(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/185405
+        # The BMM output is returned raw *and* consumed by an epilogue, so the GEMM
+        # output buffer gets an extra local-to-global copy epilogue whose ranges are
+        # 3D while the template stores 2D tiles, hence it needs the batch reindexer.
+        class M(torch.nn.Module):
+            def forward(self, q, k):
+                matmul = torch.matmul(q, k.transpose(-2, -1))
+                return matmul, torch.mul(matmul, 0.35355339059327373)
+
+        counters.clear()
+        q = torch.randn(2, 8, 4, 8).to(dtype=dtype)
+        k = torch.randn(2, 8, 4, 8).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (q, k), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        # The bug requires the mul to actually be fused into the template, since
+        # template_buffer_has_other_users is False when there are no epilogue nodes.
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
     @parametrize("bs", (1, 50))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))

@@ -30,15 +30,9 @@ def _reify(t: Iterator[object], s: dict[Var, object]) -> Iterator[object]:
     # return (reify(arg, s) for arg in t)
 
 
-_reify
-
-
 @dispatch(tuple, dict)  # type: ignore[no-redef]
 def _reify(t: tuple[Unpack[_Ts]], s: dict[Var, object]) -> tuple[Unpack[_Ts]]:
     return tuple(reify(iter(t), s))  # pyrefly: ignore[bad-argument-type, bad-return]
-
-
-_reify
 
 
 @dispatch(list, dict)  # type: ignore[no-redef]
@@ -46,15 +40,9 @@ def _reify(t: list[object], s: dict[Var, object]) -> list[object]:
     return list(reify(iter(t), s))  # pyrefly: ignore[bad-argument-type]
 
 
-_reify
-
-
 @dispatch(dict, dict)  # type: ignore[no-redef]
 def _reify(d: dict[object, object], s: dict[Var, object]) -> dict[object, object]:
     return {k: reify(v, s) for k, v in d.items()}
-
-
-_reify
 
 
 @dispatch(object, dict)  # type: ignore[no-redef]
@@ -146,9 +134,8 @@ def unify(
     return _unify(u, v, s)
 
 
-unify
-
-
 @dispatch(object, object)  # type: ignore[no-redef]
-def unify(u: object, v: object) -> dict[Var, object] | bool:
+# The noqa suppresses F811 for this multipledispatch overload redefinition
+# (it replaces the bare-name-statement hack that previously silenced it).
+def unify(u: object, v: object) -> dict[Var, object] | bool:  # noqa: F811
     return unify(u, v, {})

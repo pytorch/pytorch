@@ -249,10 +249,17 @@ def get_plain_tensors(
     return out
 
 
+def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
+    # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return True
+    return isinstance(x, Tensor) and torch._C._is_fake_tensor(x)
+
+
 def is_fake(x: object) -> TypeGuard[Tensor]:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(x, FakeTensor):
+    if is_fake_tensor(x):
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
@@ -287,7 +294,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(t, FakeTensor):
+    if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
@@ -316,6 +323,24 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    return None
+
+
+def maybe_get_real_tensor(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.real_tensor
+    return None
+
+
+def maybe_get_fake_device(x: object) -> torch.device | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.fake_device
+    return None
+
+
+def maybe_get_fake_constant(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.constant
     return None
 
 
@@ -389,7 +414,12 @@ class FakeTensorConverter:
         # when you have a constant, aliased tensor:
         # const_tensor.add_(torch.rand([1]))
         # all aliases of it must become no longer const
-        if not isinstance(fake_tensor, FakeTensor) or fake_tensor.constant is None:
+        if (
+            not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                fake_tensor, FakeTensor
+            )
+            or fake_tensor.constant is None
+        ):
             raise AssertionError("fake_tensor must be a FakeTensor with a constant")
         weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
 
@@ -401,7 +431,7 @@ class FakeTensorConverter:
         self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
 
     def invalidate_constant_aliases(self, tensor: Tensor) -> None:
-        if isinstance(tensor, FakeTensor):
+        if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("Expected a real tensor, not a FakeTensor")
 
         weak_st = StorageWeakRef(tensor._typed_storage())
@@ -764,22 +794,25 @@ class SymNumberMemoDescriptor:
             return None
 
         # Version counter based tracking isn't 100% sound but it's close
-        # enough
-        if not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version:
-            setattr(obj, self._memo(obj), None)
-            return None
+        # enough.  Inference tensors don't track version counters, so
+        # skip that check for them.
+        if not self._is_nested_int and not obj.is_inference():
+            if getattr(obj, self._memo_vc(obj), None) != obj._version:
+                setattr(obj, self._memo(obj), None)
+                return None
 
-        # Backed SymFloats are stable across retracing epochs. Keep this after
-        # the version check so tensor mutation still invalidates the memo.
+        # Backed SymFloats are stable across retracing epochs, but tensor
+        # mutation (version counter check above) still invalidates the memo.
         if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
         if (
             not self._is_nested_int
-            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            and getattr(obj, self._memo_epoch(obj), None) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
             return None
+
         return r
 
     def __set__(
@@ -791,9 +824,9 @@ class SymNumberMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not obj.is_inference() or self._is_nested_int:
+        else:
             setattr(obj, self._memo(obj), value)
-            if not self._is_nested_int:
+            if not self._is_nested_int and not obj.is_inference():
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
@@ -1023,7 +1056,7 @@ class FakeTensor(Tensor):
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
-        if isinstance(real_tensor, FakeTensor):
+        if isinstance(real_tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
         self.nonzero_memo = None
@@ -1081,7 +1114,7 @@ class FakeTensor(Tensor):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
         if func is torch.ops.prim.device.default:
-            if len(args) != 1 or not isinstance(args[0], FakeTensor):
+            if len(args) != 1 or not isinstance(args[0], FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError(
                     "Expected exactly one FakeTensor argument for prim.device.default"
                 )
@@ -1118,7 +1151,7 @@ class FakeTensor(Tensor):
 
         fake_mode = None
         for arg in pytree.arg_tree_leaves(*args, **kwargs):
-            if isinstance(arg, FakeTensor):
+            if isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 fake_mode = arg.fake_mode
                 break
 
@@ -1190,7 +1223,7 @@ class FakeTensor(Tensor):
         def merge_devices(t: object) -> None:
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, FakeTensor):
+            if not isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 return
 
             if common_device is None:
@@ -1344,28 +1377,33 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format = suggest_memory_format(t)
+    # Read layout/sparseness once (hot-path Python properties on FakeTensor).
+    layout = t.layout
+    _is_sparse_any: bool = is_sparse_any(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
-    # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or is_sparse_any(t)
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
-        memory_format = None  # type: ignore[assignment]
+    # will go badly (guards will be messed up?). suggest_memory_format walks
+    # sizes and strides, which is symbolic arithmetic for such a tensor, so
+    # skip it too rather than computing a value we are about to discard.
+    memory_format: torch.memory_format | None
+    if t._has_symbolic_sizes_strides or _is_sparse_any:
+        memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 
     return TensorMetadata(
         t.dtype,
         t.shape,
-        t.stride() if t.layout == torch.strided else (),
+        t.stride() if layout == torch.strided else (),
         t.device,
-        t.layout,
+        layout,
         memory_format,
         storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
-        t.untyped_storage().nbytes() if not is_sparse_any(t) else None,
+        t.untyped_storage().nbytes() if not _is_sparse_any else None,
         t.requires_grad,
         t.is_quantized,
         t.is_conj(),
@@ -1373,8 +1411,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
-        t.dense_dim() if is_sparse_any(t) else None,
-        t.sparse_dim() if is_sparse_any(t) else None,
+        t.dense_dim() if _is_sparse_any else None,
+        t.sparse_dim() if _is_sparse_any else None,
     )
 
 
@@ -1620,7 +1658,12 @@ class FakeTensorMode(TorchDispatchMode):
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
     def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
-        return isinstance(t, FakeTensor) and t.fake_mode is self
+        return (
+            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                t, FakeTensor
+            )
+            and t.fake_mode is self
+        )
 
     # If we should avoid device init. This changes the behavior of various APIs:
     # - We avoid constant-prop on Tensors with ops that move them to another device
@@ -1798,12 +1841,15 @@ class FakeTensorMode(TorchDispatchMode):
 
             # We have a cache entry.
 
-            output = self._output_from_cache_entry(state, entry, key, func, args)
+            output = self._output_from_cache_entry(state, entry, key, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
-                with disable_fake_tensor_cache(self):
+                with (
+                    disable_fake_tensor_cache(self),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
@@ -1939,8 +1985,8 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.inplace_view in func.tags:
             raise _BypassDispatchCache("inplace view")
 
-        if func is aten._unsafe_view.default:
-            raise _BypassDispatchCache("unsafe view")
+        if func is torch.ops.prims.as_strided.default:
+            raise _BypassDispatchCache("prims.as_strided")
 
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
@@ -1990,7 +2036,7 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         for arg in args:
-            if isinstance(arg, FakeTensor):
+            if isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
@@ -2052,7 +2098,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
-        if not isinstance(output, FakeTensor):
+        if not isinstance(output, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise _BypassDispatchCache("non-FakeTensor output")
 
         # Avoid caching FakeTensors with constants attached since those
@@ -2096,7 +2142,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Otherwise, create an entry that records the output tensor's metadata.
         view_idx = None
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        # _unsafe_view is a view in every way that matters here: its output
+        # shares the input's storage. It is only "unsafe" in that it does not
+        # record the view for autograd. Treat it like one, so the output
+        # synthesized on a hit aliases its input as the real op would - caching
+        # it as a plain op would hand back a fresh storage and quietly lose the
+        # aliasing.
+        if isinstance(func, torch._ops.OpOverload) and (
+            func.is_view or func is aten._unsafe_view.default
+        ):
             idxs = [i for i, t in enumerate(args) if isinstance(t, Tensor)]
             if len(idxs) != 1:
                 raise AssertionError(
@@ -2132,7 +2186,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         try:
             synth_output = self._output_from_cache_entry(
-                state, entry_for_synth_output, key, func, args
+                state, entry_for_synth_output, key, args
             )
         except GuardOnDataDependentSymNode:
             # This should probably never really happen. If it does it means that
@@ -2262,7 +2316,6 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheEntryOutputInfo,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None:
         if (
@@ -2278,7 +2331,7 @@ class FakeTensorMode(TorchDispatchMode):
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
-            if not isinstance(inplace_arg, FakeTensor):
+            if not isinstance(inplace_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("inplace_arg must be a FakeTensor")
             return inplace_arg
 
@@ -2314,10 +2367,15 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
+        # The set_ below replaces the size, stride and storage of the tensor
+        # created here, so for a view op don't pay to derive them twice. On
+        # symbolic shapes that derivation is the bulk of the cost of both calls.
+        is_view = entry.view_idx is not None
+
         with in_kernel_invocation_manager(self), maybe_suppress():
             empty = torch.empty_strided(
-                shape,
-                stride,
+                () if is_view else shape,
+                () if is_view else stride,
                 dtype=metadata.dtype,
                 layout=metadata.layout,
                 device="meta",
@@ -2329,10 +2387,10 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        if is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
-            if not isinstance(view_arg, FakeTensor):
+            if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("view_arg must be a FakeTensor")
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
@@ -2345,25 +2403,28 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheValidEntry,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None | tuple[FakeTensor | None, ...]:
         """
         Create a new FakeTensor from the cache entry.
         """
 
-        if entry.is_output_tuple:
-            outputs = [
-                self._get_output_tensor_from_cache_entry(
-                    state, output_info, key, func, args
+        # Reconstructing a cached FakeTensor may run symbolic checks inside
+        # empty_strided()/set_().  Those checks are cache internals, not user
+        # operations, so they must not be recorded by an active proxy tracer.
+        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+            if entry.is_output_tuple:
+                outputs = [
+                    self._get_output_tensor_from_cache_entry(
+                        state, output_info, key, args
+                    )
+                    for output_info in entry.output_infos
+                ]
+                return tuple(outputs)
+            else:
+                return self._get_output_tensor_from_cache_entry(
+                    state, entry.output_infos[0], key, args
                 )
-                for output_info in entry.output_infos
-            ]
-            return tuple(outputs)
-        else:
-            return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, func, args
-            )
 
     def _crosscheck_cache_output(
         self,
@@ -2830,7 +2891,7 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_to_real_tensor(
             t: T,
         ) -> T | Tensor | torch._C.ScriptObject | None:
-            if isinstance(t, FakeTensor):
+            if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 return t.real_tensor
             elif isinstance(t, py_sym_types):
                 if self.shape_env is None:
@@ -2920,7 +2981,7 @@ class FakeTensorMode(TorchDispatchMode):
             log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
-                if isinstance(t, FakeTensor):
+                if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                     # NB: unconditionally overwrite
                     log.debug(
                         "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
@@ -3230,10 +3291,13 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
-                    if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError(
-                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
-                        )
+                    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                        # pyrefly: ignore [missing-attribute]
+                        x_fake_mode = x.fake_mode
+                        if x_fake_mode is not self:
+                            raise AssertionError(
+                                f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={self}"
+                            )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
@@ -3267,7 +3331,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             (func is aten.alias.default or func is aten.detach.default)
             and len(flat_args) == 1
-            and isinstance(flat_args[0], FakeTensor)
+            and isinstance(flat_args[0], FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         ):
             input_dispatch_keys = flat_args[0].dispatch_keys
             preserve_dispatch_keys = input_dispatch_keys is not None
@@ -3355,6 +3419,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+        aten.stack.default,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(
@@ -3413,7 +3478,7 @@ class FakeTensorMode(TorchDispatchMode):
         trace: bool = True,
     ) -> FakeTensor:
         if (
-            isinstance(tensor, FakeTensor)
+            isinstance(tensor, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and tensor.fake_mode is self
             and static_shapes is None
             and source is None
@@ -3635,7 +3700,7 @@ def _device_handler(args: Sequence[object]) -> torch.device:
     # to return NotImplemented here, in which case the FakeTensor
     # handler on args[0] would handle it, but we're being nice and
     # short-circuiting quickly.
-    if len(args) != 1 or not isinstance(args[0], FakeTensor):
+    if len(args) != 1 or not isinstance(args[0], FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         raise AssertionError(
             "Expected exactly one FakeTensor argument for _device_handler"
         )
@@ -3660,7 +3725,7 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    if isinstance(x, FakeTensor):
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return False
     if not isinstance(x, Tensor):
         return False

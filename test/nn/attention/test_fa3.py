@@ -15,7 +15,12 @@ from torch.nn.attention.experimental._scaled_dot_product_attention_quantized imp
 )
 from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _fa3_dependencies_available() -> bool:
@@ -32,6 +37,8 @@ def _fa3_dependencies_available() -> bool:
 
 
 class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # Mixin configuration
     impl_name = "FA3"
     fwd_kernel_patterns = ["flash_attn_3::fwd"]
@@ -214,7 +221,7 @@ class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
         self.assertLessEqual(
             error,
             0.25,  # Relaxed tolerance for FP8
-            f"FP8 error {error:.4f} exceeds tolerance",
+            lambda msg: f"{msg}\nFP8 error {error:.4f} exceeds tolerance",
         )
 
     @unittest.skipUnless(_fa3_dependencies_available(), "FA3 backend unavailable")
@@ -367,7 +374,7 @@ class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
         # Values should be identical (deterministic)
         self.assertTrue(
             torch.allclose(out_eager, out_compiled),
-            f"Compiled output differs from eager. Max diff: {(out_eager - out_compiled).abs().max().item()}",
+            lambda msg: f"{msg}\nCompiled output differs from eager. Max diff: {(out_eager - out_compiled).abs().max().item()}",
         )
 
     # ==================== VARLEN TESTS ====================
