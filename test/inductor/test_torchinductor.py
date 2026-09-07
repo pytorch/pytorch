@@ -175,6 +175,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     skipCPUIf,
     skipCUDAIf,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _T = TypeVar("_T")
@@ -4127,8 +4128,7 @@ class CommonTemplate:
             self.assertEqual(cfn(x, i), fn(x, i))
 
     @skipCPUIf(True, "requires CUDA/Triton")
-    @skip_if_accelerator_not_cuda
-    @skip_if_no_accelerator_triton
+    @requires_cuda_and_triton
     def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -6252,7 +6252,7 @@ for dtype in (torch.int32, torch.int64):
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
-        device = accelerator_device(self.device)
+        device = torch.device(accelerator_device(self.device)).type
         x = torch.rand([4], device=device)
 
         def fn(x, y):
@@ -6266,7 +6266,7 @@ for dtype in (torch.int32, torch.int64):
     @recover_orig_fp32_precision
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
-        device = accelerator_device(self.device)
+        device = torch.device(accelerator_device(self.device)).type
 
         def gemm(x, y):
             return x @ y
@@ -18242,8 +18242,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
             return out
 
-        x = torch.randn(64, device=self.device)
-        y = torch.randn(64, device=self.device)
+        device = accelerator_device(self.device)
+        x = torch.randn(64, device=device)
+        y = torch.randn(64, device=device)
 
         opt_f = torch.compile(f, mode="lite")
         result, code = run_and_get_code(opt_f, x, y)
@@ -20349,6 +20350,13 @@ if RUN_CPU:
             FileCheck().check_not(".abs()").run(code_vec)
 
 
+class _AcceleratorTestCase(TestCase):
+    def setUp(self):
+        if torch.device(self.device).type != "mps":
+            _require_device_triton(self.device)
+        super().setUp()
+
+
 if RUN_GPU or HAS_MPS:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
@@ -20357,7 +20365,7 @@ if RUN_GPU or HAS_MPS:
 
     SweepInputsGPUTest.populate()
 
-    class GPUTests(TestCase):
+    class GPUTests(_AcceleratorTestCase):
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
@@ -20646,7 +20654,7 @@ if RUN_GPU or HAS_MPS:
 
 else:
 
-    class GPUTests(TestCase):
+    class GPUTests(_AcceleratorTestCase):
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
 
