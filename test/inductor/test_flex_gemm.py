@@ -1580,6 +1580,78 @@ class TestFlexGemmAnalysis(TestCase):
             FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
         )
 
+    @parametrize(
+        "case",
+        (
+            ("sum", lambda acc, t: (acc, acc.float().sum(-1)), "reduction aten.sum:"),
+            ("sum_all", lambda acc, t: (acc, acc.float().sum()), "reduction aten.sum:"),
+            ("sum_m", lambda acc, t: (acc, acc.float().sum(0)), "reduction aten.sum:"),
+            (
+                "mean",
+                lambda acc, t: (acc, acc.float().mean(-1)),
+                "reduction aten.mean:",
+            ),
+            (
+                "pow_sum",
+                lambda acc, t: (acc, acc.float().pow(2).sum(-1)),
+                "reduction aten.sum:",
+            ),
+            (
+                "amax_feed_main",
+                lambda acc, t: acc / acc.float().amax(-1, keepdim=True),
+                "reduction aten.amax:",
+            ),
+            # Inductor's post-grad pass rewrites softmax to prepare_softmax_online
+            # on CUDA only; make_fx keeps the decomposed amax on CPU.
+            (
+                "softmax",
+                lambda acc, t: torch.nn.functional.softmax(acc.float(), -1),
+                "reduction aten.amax:",
+            ),
+            (
+                "partials_reduced_again",
+                lambda acc, t: (acc, acc.float().view(4, -1, 4).sum(-1).sum(-1)),
+                "reduction aten.sum:",
+            ),
+            (
+                "topk",
+                lambda acc, t: (
+                    acc,
+                    acc.float().view(4, -1, 4).topk(2, dim=-1)[0].sum(-1),
+                ),
+                "unsupported FlexGEMM reduction op: aten.topk",
+            ),
+            (
+                "wrong_gather_source",
+                lambda acc, t: (acc, acc.float().gather(1, t[:, None]).squeeze(1)),
+                "must gather from the returned main output",
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_analysis_diagnoses_ungrouped_reductions(self, case):
+        from torch._inductor.decomposition import select_decomp_table
+        from torch._inductor.kernel.flex_gemm.epilogue import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, epilogue_fn, error = case
+
+        def body(a, b, t):
+            return epilogue_fn(torch.mm(a, b), t)
+
+        graph_module = make_fx(body, decomposition_table=select_decomp_table())(
+            torch.randn(4, 8, dtype=torch.bfloat16),
+            torch.randn(8, 16, dtype=torch.bfloat16),
+            torch.tensor([0, 7, 8, 15]),
+        )
+        with self.assertRaisesRegex(NotImplementedError, error):
+            analyze_flex_gemm_epilogue(
+                graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+            )
+
     def test_output_plan_rejects_invalid_state(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
@@ -3905,7 +3977,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(4, 8)
         b = torch.randn(8, 5)
 
-        with self.assertRaisesRegex(Exception, "partial-output contract"):
+        with self.assertRaisesRegex(Exception, "no grouped view splits"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_generated_tuple_aux_rejects_dbias_reduction_without_contract(self):
@@ -3920,7 +3992,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(4, 8)
         b = torch.randn(8, 5)
 
-        with self.assertRaisesRegex(Exception, "partial-output contract"):
+        with self.assertRaisesRegex(Exception, "no grouped view splits"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_generated_local_reduce_aux_rejects_addmm_scope(self):
@@ -4138,7 +4210,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(4, 8)
         b = torch.randn(8, 8)
 
-        with self.assertRaisesRegex(Exception, "does not map to a CuTe TensorSSA"):
+        with self.assertRaisesRegex(Exception, "unsupported FlexGEMM reduction op"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @parametrize(
@@ -4219,7 +4291,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     acc.float().view(-1, 4, 8).sum(1).view(1, -1, 4).sum(-1),
                 ),
                 (4, 8),
-                "local-reduce output contract",
+                "no grouped view splits",
             ),
             (
                 "n_then_m",
@@ -4228,7 +4300,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     acc.float().view(4, -1, 4).sum(-1).view(-1, 4, 2).sum(1),
                 ),
                 (4, 8),
-                "local-reduce output contract",
+                "no grouped view splits",
             ),
             (
                 "direct_block",
@@ -4237,7 +4309,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     acc.float().view(-1, 4, 2, 4).sum((1, 3)),
                 ),
                 (4, 8),
-                "local-reduce output contract",
+                "no grouped view splits",
             ),
         ),
         name_fn=lambda case: case[0],
@@ -5059,7 +5131,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(Exception, "does not map to a CuTe TensorSSA"):
+        with self.assertRaisesRegex(Exception, "unsupported FlexGEMM reduction op"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
