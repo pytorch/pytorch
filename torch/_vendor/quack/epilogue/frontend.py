@@ -381,6 +381,7 @@ class EpiMod:
         outs=None,
         prepass=None,
         prepass_outs=(),
+        prepass_mode=None,
         extra_ops=(),
         vectorize=None,
         fragmentwise=False,
@@ -440,13 +441,21 @@ class EpiMod:
         self.prepass_outs = tuple(prepass_outs)
         if (prepass is None) != (not self.prepass_outs):
             raise ValueError("prepass= and prepass_outs= come together")
-        if prepass is not None:
+        if prepass is None:
+            if prepass_mode is not None:
+                raise ValueError("prepass_mode= requires prepass=")
+            self.prepass_operand_names = ()
+        else:
             psig = list(inspect.signature(prepass).parameters)
             if not psig or psig[0] != "acc":
                 raise ValueError("prepass fn must take 'acc' first")
             self.prepass_operand_names = tuple(psig[1:])
-        else:
-            self.prepass_operand_names = ()
+            # The prepass loop is always element-domain, even when the main
+            # callback consumes accumulator pairs. Require that choice explicitly.
+            if self.mode == "acc_pair" and prepass_mode != "element":
+                raise ValueError("prepass + acc_pair requires explicit prepass_mode='element'")
+            if prepass_mode not in (None, "element"):
+                raise ValueError("prepass_mode only supports 'element'")
         for name, op in self.ops.items():
             if not isinstance(op, EpiOp) or op.name != name:
                 raise ValueError(f"op for {name!r} must be an EpiOp named {name!r}")
@@ -1951,6 +1960,7 @@ def gemm_epilogue(
     outs=None,
     prepass=None,
     prepass_outs=(),
+    prepass_mode=None,
     extra_ops=(),
     vectorize=None,
 ):
@@ -1993,6 +2003,7 @@ def gemm_epilogue(
             outs=outs,
             prepass=prepass,
             prepass_outs=prepass_outs,
+            prepass_mode=prepass_mode,
             extra_ops=extra_ops,
             vectorize=vectorize,
         )

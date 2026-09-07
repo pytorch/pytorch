@@ -21,6 +21,8 @@ LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
 # fit one logical TensorSSA fragment use QuACK's in-kernel accumulator prepass;
 # larger groups remain unsupported.
 LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+NESTED_TENSORSSA_PHYSICAL_SPAN = 2
+NESTED_TENSORSSA_PACKED_STORAGE_SPAN = 2
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -88,6 +90,12 @@ FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
     "FlexGEMM indexed outputs must gather from the returned main output (or the "
     "value whose dtype conversion is the main output) and keep its dtype: write "
     "main.gather(1, indices[:, None]).squeeze(1)"
+)
+FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR = (
+    "FlexGEMM nested TensorSSA composition does not support captured tensors"
+)
+FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR = (
+    "FlexGEMM nested TensorSSA composition requires complete physical lane coverage"
 )
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
