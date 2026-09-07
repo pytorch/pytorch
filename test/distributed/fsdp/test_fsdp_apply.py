@@ -82,13 +82,13 @@ class TestApply(FSDPTestContinuous):
     def test_nested_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on a
         non-FSDP-root nested FSDP-wrapped model."""
-        fsdp_kwargs = {"device_id": torch.device(device).type}
+        fsdp_kwargs = {"device_id": self.device_type}
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
             DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs=fsdp_kwargs,
-            device_id=torch.device(device).type,
+            device=self.device_type,
         )
         self._check_apply(nested_wrapped_module)
 
@@ -96,13 +96,13 @@ class TestApply(FSDPTestContinuous):
     def test_transformer_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on an
         FSDP-wrapped transformer model with shared parameters."""
-        fsdp_kwargs = {"device_id": torch.device(device).type}
+        fsdp_kwargs = {"device_id": self.device_type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
             DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs=fsdp_kwargs,
-            device_id=torch.device(device).type,
+            device=self.device_type,
         )
         self._check_apply(transformer)
 
@@ -110,13 +110,13 @@ class TestApply(FSDPTestContinuous):
     def test_apply_in_summon_raises_error(self, device):
         """Tests that calling ``apply()`` on an FSDP instance inside the
         ``summon_full_params()`` context raises an error."""
-        fsdp_kwargs = {"device_id": torch.device(device).type}
+        fsdp_kwargs = {"device_id": self.device_type}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
             DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs=fsdp_kwargs,
-            device_id=torch.device(device).type,
+            device=self.device_type,
         )
         with transformer.summon_full_params(transformer):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
