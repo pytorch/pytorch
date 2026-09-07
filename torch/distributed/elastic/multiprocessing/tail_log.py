@@ -32,21 +32,32 @@ def tail_logfile(
     interval_sec: float,
     log_line_filter: Callable[[str], bool] | None = None,
 ):
-    while not os.path.exists(file):
-        if finished.is_set():
+    # Sample ``finished`` before each look at the file. A producer that creates
+    # the file and exits in the window between the two checks is missed if the
+    # event is sampled afterwards, and the file is then never tailed at all.
+    while True:
+        producer_finished = finished.is_set()
+        if os.path.exists(file):
+            break
+        if producer_finished:
             return
         time.sleep(interval_sec)
 
     with open(file, errors="replace") as fp:
         while True:
+            # Same ordering as above: the producer may append its last lines and
+            # set the event after this read hits EOF but before the event is
+            # checked, which silently truncates the tailed output.
+            producer_finished = finished.is_set()
             line = fp.readline()
 
             if line:
                 if log_line_filter and log_line_filter(line):
                     dst.write(f"{header}{line}")
             else:  # reached EOF
-                if finished.is_set():
-                    # log line producer is finished
+                if producer_finished:
+                    # log line producer was already finished before this read,
+                    # so EOF here means there is nothing left to come
                     break
                 else:
                     # log line producer is still going
