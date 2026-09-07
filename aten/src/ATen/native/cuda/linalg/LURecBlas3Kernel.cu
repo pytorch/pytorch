@@ -35,8 +35,9 @@ namespace at::native {
 
 namespace {
 
-#define LinOff(i, j, lda) i + static_cast<size_t>(j) * lda
-
+constexpr auto LinOff(auto i, auto j, auto lda) {
+  return i + static_cast<size_t>(j) * lda;
+}
 // Small tile width for high occupancy (matches MAGMA's SWP_WIDTH=4)
 constexpr int SWP_WIDTH = 4;
 
@@ -197,11 +198,12 @@ void trailing_matrix_update(
 }
 
 // Argmax Abs helpers {
-#define AGGREGATE_ARGMAX(val, idx, other_val, other_idx) \
-  if ((other_val > val) || (other_val == val && other_idx < idx)) { \
-    val = other_val; \
-    idx = other_idx; \
+constexpr void AGGREGATE_ARGMAX(auto& val, auto& idx, auto& other_val, auto& other_idx) {
+  if ((other_val > val) || (other_val == val && other_idx < idx)) {
+    val = other_val;
+    idx = other_idx;
   }
+}
 
 template <typename real_t>
 __device__ __forceinline__ void warp_argmax(real_t& val, int& idx) {
@@ -448,8 +450,6 @@ batched_panel_register_resident_fused_kernel(
       ? A[LinOff(col_start + tid, col_start + i, lda)]
       : static_cast<scalar_t>(0);
   }
-
-  if (tid < nb) { sipiv[tid] = 0; };
 
   for (int i = 0, ir = i + tid, irows = blockDim.x; i < nb; ++i, ++ir, --irows) {
     // 1. Write abs value to shared memory using current logical row position
