@@ -1808,43 +1808,41 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       uint64_t aElemSize = A_.element_size();
       uint64_t bElemSize = B_.element_size();
 
-      MPSMatrixSolveTriangular* filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
-                                                                                     right:!left
-                                                                                     upper:upper
-                                                                                 transpose:transpose
-                                                                                      unit:unitriangular
-                                                                                     order:left ? bRows : bCols
-                                                                    numberOfRightHandSides:left ? bCols : bRows
-                                                                                     alpha:1.0f] autorelease];
+      auto filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
+                                                                right:!left
+                                                                upper:upper
+                                                            transpose:transpose
+                                                                 unit:unitriangular
+                                                                order:left ? bRows : bCols
+                                               numberOfRightHandSides:left ? bCols : bRows
+                                                                alpha:1.0f] autorelease];
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_}, mpsStream);
 
-      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                                    columns:aCols
-                                                                                   matrices:batchSize
-                                                                                   rowBytes:aCols * aElemSize
-                                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                                   dataType:getMPSDataType(A_)];
-      MPSMatrixDescriptor* rightHandSideMatrixDesc =
-          [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
-                                                columns:bCols
-                                               matrices:batchSize
-                                               rowBytes:bCols * bElemSize
-                                            matrixBytes:bRows * bCols * bElemSize
-                                               dataType:getMPSDataType(B_)];
+      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                    columns:aCols
+                                                                   matrices:batchSize
+                                                                   rowBytes:aCols * aElemSize
+                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                   dataType:getMPSDataType(A_)];
+      auto rightHandSideMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
+                                                                           columns:bCols
+                                                                          matrices:batchSize
+                                                                          rowBytes:bCols * bElemSize
+                                                                       matrixBytes:bRows * bCols * bElemSize
+                                                                          dataType:getMPSDataType(B_)];
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
-        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                          descriptor:sourceMatrixDesc] autorelease];
-        MPSMatrix* rightHandSideMatrix =
-            [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B_.storage_offset() + bBatchOffset) * bElemSize
-                                    descriptor:rightHandSideMatrixDesc] autorelease];
-        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                                offset:(out_.storage_offset() + bBatchOffset) * bElemSize
-                                                            descriptor:rightHandSideMatrixDesc] autorelease];
+        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
+                                                    descriptor:sourceMatrixDesc] autorelease];
+        auto rightHandSideMatrix = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                               offset:(B_.storage_offset() + bBatchOffset) * bElemSize
+                                                           descriptor:rightHandSideMatrixDesc] autorelease];
+        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
+                                                          offset:(out_.storage_offset() + bBatchOffset) * bElemSize
+                                                      descriptor:rightHandSideMatrixDesc] autorelease];
 
         [filter encodeToCommandBuffer:commandBuffer
                          sourceMatrix:sourceMatrix
