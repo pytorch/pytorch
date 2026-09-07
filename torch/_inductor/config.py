@@ -2188,6 +2188,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_EMIT_POINTER_RANGE_32", "1") == "1"
     )
 
+    # Enable xmask unswitch optimization for dynamic pointwise Triton kernels.
+    # Kernels with xmask-only loads/stores emit a full-block branch that sets
+    # xmask to True and a tail branch that uses the normal mask.
+    xmask_unswitch: bool = os.environ.get("TORCHINDUCTOR_XMASK_UNSWITCH", "1") == "1"
+
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256
