@@ -15,9 +15,9 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 # ``DynamoTracer`` takes several calls and produces a guarded multi-graph artifact
 # spanning graph breaks and recompilations, while ``MakeFxTracer`` takes a single
 # call and produces a self-contained Python source plus an acceleration cache.
-# ``precompile.accumulate(fn, ...)`` rewrites the on-disk artifact after every call
-# across the caller's own loop, and ``precompile.load(...)`` reloads one. Re-exported
-# from the private impl. Distinct from ``torch._dynamo.config.caching_precompile``
+# ``cap.save()`` inside the block checkpoints the on-disk artifact without ending
+# the capture, and ``precompile.load(...)`` reloads one. Re-exported from the
+# private impl. Distinct from ``torch._dynamo.config.caching_precompile``
 # (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
