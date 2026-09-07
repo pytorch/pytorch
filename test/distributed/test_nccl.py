@@ -1197,7 +1197,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
-    hw_classification = HardwareClassification.CUDA
     """NCCL symmetric memory over an nccl2-backed process group.
 
     Same flow as NCCLSymmetricMemoryTest, but the process group uses the in-tree
@@ -1207,6 +1206,7 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     on an nccl2 group raised "NCCL host communicator for group ... not found".
     """
 
+    hw_classification = HardwareClassification.CUDA
     backend_name = "nccl2"
 
     def _set_device(self, device: str) -> None:
@@ -1266,6 +1266,9 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
     hw_classification = HardwareClassification.CUDA
     backend_name = "nccl-lazy"
+    # Re-bind the inherited test because instantiate_device_type_tests collects
+    # tests from __dict__ only.
+    test_nccl_symmem_rendezvous = NCCLSymmetricMemoryNccl2Test.test_nccl_symmem_rendezvous
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
