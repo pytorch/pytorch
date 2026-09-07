@@ -26,8 +26,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
 )
 from torch.testing._internal.common_utils import (
-    TEST_CUDA,
-    TEST_XPU,
+    TEST_ACCELERATOR,
     torch_to_numpy_dtype_dict,
 )
 
@@ -51,9 +50,6 @@ EXTENSIBLE_DTYPE_DISPATCH = (
     all_types_and,
 )
 
-# Better way to acquire devices?
-DEVICES = ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["xpu"] if TEST_XPU else [])
-
 
 class _dynamic_dispatch_dtypes(_dispatch_dtypes):
     # Class to tag the dynamically generated types.
@@ -66,16 +62,9 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
         raise AssertionError(
             f"Expected device_type in ['cpu', 'cuda', 'xpu'], got {device_type!r}"
         )
-    if not TEST_CUDA and device_type == "cuda":
+    if not TEST_ACCELERATOR and device_type in ("cuda", "xpu"):
         warnings.warn(
-            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
-            stacklevel=2,
-        )
-        return _dynamic_dispatch_dtypes(())
-
-    if not TEST_XPU and device_type == "xpu":
-        warnings.warn(
-            "WARNING: XPU is not available, empty_dtypes dispatch will be returned!",
+            "WARNING: Accelerator is not available, empty_dtypes dispatch will be returned!",
             stacklevel=2,
         )
         return _dynamic_dispatch_dtypes(())
