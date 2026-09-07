@@ -4,7 +4,11 @@ import warnings
 
 from torch import nn
 from torch.ao.pruning import BaseScheduler, CubicSL, LambdaSL, WeightNormSparsifier
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class ImplementedScheduler(BaseScheduler):
@@ -16,6 +20,8 @@ class ImplementedScheduler(BaseScheduler):
 
 
 class TestScheduler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_constructor(self):
         model = nn.Sequential(nn.Linear(16, 16))
         sparsifier = WeightNormSparsifier()
@@ -98,6 +104,8 @@ class TestScheduler(TestCase):
 
 
 class TestCubicScheduler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.model_sparse_config = [
