@@ -1440,16 +1440,19 @@ class OutputGraph(OutputGraphCommon):
         # pending event reachable from either is observable outside.
         roots.extend(self.side_effects.store_attr_mutations.keys())
         roots.extend(self.side_effects._get_modified_vars())
-        # backward_state and tensor_hooks can also keep objects alive
-        # across the subgraph boundary; include them so the escape
-        # scan sees any event reachable from them.  local_generators is
-        # deliberately excluded: a paused generator's own stack/locals
-        # are not themselves externally visible, and every SideEffects
-        # entry point that makes a value externally visible (store_attr,
-        # store_cell, store_global, container mutations) already routes
-        # through store_attr_mutations or _get_modified_vars() above.
+        # backward_state, tensor_hooks, and save_for_backward can also
+        # keep objects alive across the subgraph boundary; include them
+        # so the escape scan sees any event reachable from them.
+        # save_for_backward args are codegen'd unconditionally by
+        # codegen_save_tempvars, independent of ctx's own modified state.
+        # local_generators is excluded: a returned generator is rewritten
+        # to a ListIteratorVariable before compile_subgraph (so its items
+        # are already in all_stack_values), and one surviving a graph
+        # break is itself in all_stack_values with remaining_items
+        # populated by codegen_suffix before the final scan.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
+        roots.extend(args for _, args in self.side_effects.save_for_backward)
         # visit_keys=True so events stored as set elements or dict
         # keys (wrapped in HashableTracker) are reached; the default
         # visit walks dicts via .values() only.

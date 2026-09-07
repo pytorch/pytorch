@@ -1677,6 +1677,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value: Any,
         cache: dict[int, Any] | None = None,
         side_effects: SideEffects | None = None,
+        *,
         visit_keys: bool = False,
     ) -> None:
         """

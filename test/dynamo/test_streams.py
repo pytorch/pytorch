@@ -2250,6 +2250,44 @@ class GraphModule(torch.nn.Module):
             "wait_event op not found in graph",
         )
 
+    def test_event_record_after_input_mutation_non_escaping_cross_stream_wait(
+        self, device
+    ):
+        # The premise the PR rests on is that an in-graph wait reads the
+        # functionalized dataflow and is therefore correct regardless of
+        # the input-mutation epilogue -- but that is only genuinely
+        # exercised by a wait issued from a stream other than the
+        # recording one; _get_stream_arg resolves a no-arg wait() to the
+        # ambient current (i.e. recording) stream, so the tests above
+        # never leave that stream.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            with s2:
+                e.wait()
+            return x + 1
+
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+        self.assertTrue(
+            any(node.target is torch.ops.streams.wait_event for node in nodes),
+            "wait_event op not found in graph",
+        )
+
     def test_event_record_after_input_mutation_non_escaping_generator_finally(
         self, device
     ):
