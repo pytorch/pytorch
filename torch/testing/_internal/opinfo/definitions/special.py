@@ -151,7 +151,7 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
         0.864,
         0.866,
     ]
-    yield SampleInput(torch.tensor(extremes, dtype=dtype, device=device))
+    yield SampleInput(torch.tensor(extremes, dtype=dtype, device=device, requires_grad=requires_grad))
 
 
 op_db: list[OpInfo] = [
