@@ -18,7 +18,10 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._C._dynamo.eval_frame import (
+    _debug_get_precompile_entries,
+    get_code_exec_strategy,
+)
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
@@ -35,6 +38,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.types import FrameAction
 from torch._dynamo.utils import CleanupManager, counters
 from torch._functorch import config as functorch_config
 from torch._inductor import cpu_vec_isa
@@ -603,18 +607,14 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
 
-        # A stale capture-time hook on __compiled_fn does not strip the fresh
-        # binding: _install_global calls CleanupHook.disown for every name it
-        # writes, dropping the old hook's ownership so its __call__ returns
-        # early instead of popping the name. It is an ownership handoff, not a
-        # rename -- install() binds backend_id verbatim.
-        #
-        # Observe the names install() actually placed in the live module dict,
-        # not its own bookkeeping: the stale hooks below run against the
-        # module, so the module is what must survive them.
-        installed = {name for name in scope if name.startswith(prefixes)}
-        installed -= preexisting
+        # The bindings install() is responsible for: its per-install names plus
+        # the builtins dict. The capture-time __compiled_fn global is not among
+        # them (install binds a renamed twin), so its hook popping it is fine.
+        installed = {
+            g.name for g in package._installed_globals[sys.modules[fn.__module__]]
+        }
         self.assertTrue(installed)
+        self.assertTrue(installed - preexisting)
 
         del pinned
         gc.collect()
@@ -1078,7 +1078,9 @@ def add(x, y):
         # object, deferred-refcounted there) may not have popped the previous
         # compile's name yet, so a diff can be empty.
         (name,) = [
-            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
+            g.name
+            for g in pkg._installed_globals[module]
+            if g.name.startswith("__compiled_fn")
         ]
         sentinel = object()
         module_dict[name] = sentinel
@@ -1181,6 +1183,46 @@ def add(x, y):
                 sys.modules.pop("_package_stale_hit", None)
                 sys.modules.pop("_package_stale_hit_renamed", None)
                 _MODULE_KEY_BY_FILE.pop(path, None)
+
+    def test_reserve_unique_id_through_skips_past_a_loaded_artifacts_counter(self):
+        from torch._dynamo.bytecode_transformation import (
+            _reserve_unique_id_through,
+            unique_id,
+        )
+
+        current = int(unique_id("probe").rsplit("_", 1)[1])
+        _reserve_unique_id_through(current + 50)
+        self.assertGreater(int(unique_id("probe").rsplit("_", 1)[1]), current + 50)
+        # Reserving below the counter must not move it backwards.
+        after = int(unique_id("probe").rsplit("_", 1)[1])
+        _reserve_unique_id_through(0)
+        self.assertGreater(int(unique_id("probe").rsplit("_", 1)[1]), after)
+
+    def test_abandoned_package_restores_skipped_frames_on_gc(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        # A frame with no guarded code is what install() skip_code()s.
+        entry = package.cache_entry().codes[0]
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        package.cached_backends.clear()
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        del package
+        gc.collect()
+
+        code = fn.__code__
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        del pkg, backends
+        gc.collect()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
         # The serialization filter and the capture mode are independent: a
