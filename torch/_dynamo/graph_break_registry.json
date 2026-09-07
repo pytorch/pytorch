@@ -2809,6 +2809,14 @@
     {
       "Gb_type": "async_op=True for distributed collectives",
       "Context": "{self.fn}, args={args}, kwargs={kwargs}",
+      "Explanation": "_ASYNC_OP_REMAP_ERROR",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "async_op=True for distributed collectives",
+      "Context": "{self.fn}, args={args}, kwargs={kwargs}",
       "Explanation": "`torch.compile` doesn't support `async_op=True for {self.fn}",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
