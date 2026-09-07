@@ -10596,24 +10596,31 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
+    # The outputs deliberately differ in rank. A 0-dim output pins down that the per-element
+    # predicate reaching torch.where is itself 0-dim: cond accepts any single-element pred, so
+    # with bdim == 1 below the per-element pred is shape (1,), which would broadcast a 0-dim
+    # branch output up to (1,) and give vmap a trailing dim that eager does not have.
+    @parametrize("nOutputs", [1, 2, 3, 4])
     @parametrize("bdim", [0, 1])
-    def test_cond_vmap_batched_pred(self, bdim):
+    def test_cond_vmap_batched_pred(self, nOutputs, bdim):
+        def true_fn(x):
+            return (x.sin(), x + 1, x.sum(), x.unsqueeze(-1) * 2)[:nOutputs]
+
+        def false_fn(x):
+            return (x.cos(), x - 1, x.sum() * 2, x.unsqueeze(-1) - 1)[:nOutputs]
+
         def fn(pred, x):
-            return torch.cond(
-                pred=pred,
-                true_fn=lambda x: (x.sin(),),
-                false_fn=lambda x: (x.cos(),),
-                operands=(x,),
-            )
+            return torch.cond(pred, true_fn, false_fn, (x,))
 
         pred = torch.tensor([True, False, True, False])
         x = torch.rand(4, 3)
         if bdim == 1:
             pred, x = pred.unsqueeze(0), x.movedim(0, 1)
-        expected = torch.stack(
-            [fn(pred.select(bdim, i), x.select(bdim, i))[0] for i in range(4)]
-        )
-        self.assertEqual(torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)[0], expected)
+        expected = [fn(pred.select(bdim, i), x.select(bdim, i)) for i in range(4)]
+        out = torch.vmap(fn, in_dims=(bdim, bdim))(pred, x)
+        self.assertEqual(len(out), nOutputs)
+        for i in range(nOutputs):
+            self.assertEqual(out[i], torch.stack([e[i] for e in expected]))
 
     @parametrize("boolcond", [True, False])
     def test_vmap_vmap(self, boolcond):
@@ -10631,6 +10638,67 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         a = torch.ones((3, 4, 5))
         res = torch.vmap(wrapper)(a)
         self.assertEqual(res, a + 1)
+
+    # test_vmap_vmap above nests two vmaps but closes over nothing batched, so it does not
+    # reach the case this covers: unwrap_batched is gated on the interpreter's level, so an
+    # operand or a predicate batched only at the *outer* level must stay wrapped and be passed
+    # to the inner vmap with in_dims=None. Unwrapping level-agnostically instead handed the
+    # outer batch dim to the inner vmap as an in_dims, which errors when the batch sizes differ
+    # and silently mixes up batch elements when they coincide.
+    @parametrize("pred_type", ["unbatched", "inner_batched", "outer_batched"])
+    def test_cond_vmap_nested_levels(self, pred_type):
+        B, N, D = 2, 4, 3
+        x, y = torch.rand(B, N, D), torch.rand(B, D)
+        pred = {
+            "unbatched": torch.tensor(True),
+            "inner_batched": torch.rand(B, N) > 0.5,
+            "outer_batched": torch.tensor([True, False]),
+        }[pred_type]
+        inner_dim = 0 if pred_type == "inner_batched" else None
+        outer_dim = None if pred_type == "unbatched" else 0
+
+        def outer(xs, ys, p):
+            # ys is batched at the outer level only, and so is p unless it is inner_batched.
+            def inner(xi, pi):
+                return torch.cond(pi, lambda a: (a + ys,), lambda a: (a - ys,), (xi,))
+
+            return torch.vmap(inner, in_dims=(0, inner_dim))(xs, p)
+
+        def taken(b, n):
+            if pred_type == "unbatched":
+                return pred
+            return pred[b, n] if pred_type == "inner_batched" else pred[b]
+
+        rows = [
+            [x[b, n] + y[b] if taken(b, n) else x[b, n] - y[b] for n in range(N)]
+            for b in range(B)
+        ]
+        expected = torch.stack([torch.stack(row) for row in rows])
+        out = torch.vmap(outer, in_dims=(0, 0, outer_dim))(x, y, pred)[0]
+        self.assertEqual(out, expected)
+
+    # cond_batch_rule opens its own vmap nesting for the branches, so it has to carry the
+    # caller's randomness mode through; the torch.vmap default of "error" made any random op
+    # inside a branch raise regardless of what the caller asked for.
+    @parametrize("randomness", ["same", "different", "error"])
+    @parametrize("batched_pred", [False, True])
+    def test_cond_vmap_randomness(self, randomness, batched_pred):
+        def fn(pred, x):
+            def true_fn(a):
+                return (a + torch.rand_like(a),)
+
+            return torch.cond(pred, true_fn, lambda a: (a.clone(),), (x,))
+
+        x = torch.zeros(3, 2)
+        pred = torch.tensor([True] * 3) if batched_pred else torch.tensor(True)
+        in_dims = (0, 0) if batched_pred else (None, 0)
+        if randomness == "error":
+            with self.assertRaisesRegex(RuntimeError, "randomness error mode"):
+                torch.vmap(fn, in_dims=in_dims, randomness="error")(pred, x)
+            return
+        out = torch.vmap(fn, in_dims=in_dims, randomness=randomness)(pred, x)[0]
+        # "same" draws one value shared by the whole batch, "different" draws per element.
+        self.assertEqual(torch.allclose(out[0], out[1]), randomness == "same")
 
     def test_cond_trace_set__and_mutate_input(self):
         def f(a, tmp):
