@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipMPS,
@@ -2230,12 +2229,7 @@ class TestIndexingDevice(TestCase):
 
         self.assertEqual(out, dst)
 
-
-class TestIndexingCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     @serialTest()
-    @onlyCUDA
     @toleranceOverride(
         {
             torch.float32: tol(atol=1e-5, rtol=1e-3),
@@ -2246,6 +2240,7 @@ class TestIndexingCUDA(TestCase):
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_index_add_fast_path(self, device, dtype):
+        # Originally test added for CUDA implementation:
         # Coverage for the index_add_ TMA fast path: one eligible case + five
         # fallback predicates per shape, asserted against a CPU reference.
         # Shapes keep n/m <= 1 so atomicAdd-order noise on bf16/half stays
@@ -2259,7 +2254,7 @@ class TestIndexingCUDA(TestCase):
             self.assertEqual(out.cpu(), expected)
 
         for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
-            torch.cuda.empty_cache()
+            torch.accelerator.empty_cache()
             for idx_dtype in (torch.int32, torch.int64):
                 src = make_tensor((n, D), device=device, dtype=dtype)
                 idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
@@ -2315,7 +2310,6 @@ class TestIndexingCUDA(TestCase):
         self.assertEqual(out, expected)
 
     @serialTest()
-    @onlyCUDA
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_fast_path: this shape does
@@ -2328,6 +2322,7 @@ class TestIndexingCUDA(TestCase):
     )
     @dtypes(torch.float32, torch.bfloat16)
     def test_index_add_smem_stage_alignment_regression(self, device, dtype):
+        # Originally test added for CUDA implementation:
         # Regression for SEV S664741: the original D104669063 was reverted
         # when this delegation surfaced a latent scatter_add TMA smem
         # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
@@ -2338,7 +2333,17 @@ class TestIndexingCUDA(TestCase):
         # prod shape (small D + high M_src) at the index_add layer so a
         # future refactor of the delegation re-exposing the same shape
         # class is caught here, not in prod.
-        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        device_type = torch.device(device).type
+
+        dp = torch.get_device_module(device_type).get_device_properties(0)
+
+        if device_type == "cuda":
+            sm = dp.multi_processor_count
+        elif device_type == "xpu":
+            sm = dp.gpu_subslice_count
+        else:
+            raise RuntimeError(f"Unsupported device type {device_type}")
+
         # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
         # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
         # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
@@ -2351,9 +2356,9 @@ class TestIndexingCUDA(TestCase):
         self.assertEqual(out.cpu(), expected)
 
     @serialTest()
-    @onlyCUDA
     @dtypes(torch.complex64, torch.complex128, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
+        # Originally test added for CUDA implementation:
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
         # fast-path delegation in index_add_cuda_impl excludes these dtypes
         # and lets them fall through to indexFunc{Small,Large}Index. Regression
@@ -2646,7 +2651,6 @@ class NumpyTestsDevice(TestCase):
 instantiate_device_type_tests(
     TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(TestIndexingCUDA, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
     NumpyTestsDevice, globals(), except_for="meta", allow_xpu=True
