@@ -3983,7 +3983,7 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
                      error_regex='pad should be at most half of effective kernel size')
 
     # error: unbatched input with 0 sized non-batch dims.
-    err_msg = r'Expected input\'s non-batch dimensions to have positive length'
+    err_msg = r'Expected input to have non-zero size for non-batch dimensions'
     yield ErrorInput(SampleInput(make_arg((0, 1, 2, 10)),
                                  kwargs={'kernel_size': 1}),
                      error_regex=err_msg)

@@ -1,8 +1,8 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/PoolingChecks.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/PoolingChecks.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pooling.h>
 
@@ -362,9 +362,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
     }
   }
 
-  for (const auto dim : c10::irange(static_cast<int>(leading_dims == 2), dims)) {
-    TORCH_CHECK(input.size(dim) > 0, op_name, ": Expected input's non-batch dimensions to have positive length");
-  }
+  check_non_empty_dims(input, /*first_dim=*/leading_dims == 2 ? 1 : 0, op_name.c_str(), "input");
 
   // According to the documentation, the output size of each pooling dimension
   // follows this basic formula:

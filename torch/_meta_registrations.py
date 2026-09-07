@@ -5254,9 +5254,8 @@ def pool3d_shape_check(
         torch._check(
             input.size(i) > 0,
             lambda: (
-                f"{fn_name}: Expected input's non-batch dimensions to have positive length,"
-                f" but input has a shape of {input.shape}"
-                f" and non-batch dimension {input.size(i)} has length zero!"
+                f"{fn_name}: Expected input to have non-zero size for non-batch dimensions,"
+                f" but input has sizes {input.shape} with dimension {i} being empty"
             ),
         )
 

@@ -10,6 +10,29 @@
 
 namespace at::native {
 
+// Every pooling family checks that the non-batch dimensions of a tensor are
+// non-empty; `first_dim` is 0 when the tensor is unbatched.
+inline void check_non_empty_dims(
+    const Tensor& t,
+    int64_t first_dim,
+    const char* fn_name,
+    const char* arg_name) {
+  for (const auto i : c10::irange(first_dim, t.ndimension())) {
+    TORCH_CHECK(t.size(i) > 0, fn_name,
+                ": Expected ", arg_name, " to have non-zero size for non-batch dimensions, but ",
+                arg_name, " has sizes ", t.sizes(), " with dimension ", i, " being empty");
+  }
+}
+
+// Checks the trailing `sizes.size()` dimensions of `t`, as the backward passes
+// do for gradOutput and indices.
+inline void check_trailing_dim_sizes(const Tensor& t, int64_t ndim, IntArrayRef sizes) {
+  const auto n = static_cast<int64_t>(sizes.size());
+  for (const auto i : c10::irange(n)) {
+    check_dim_size(t, ndim, ndim - n + i, sizes[i]);
+  }
+}
+
 // AveragePool2d/DilatedMaxPool2d (forward)
 inline void
 pool2d_shape_check(
@@ -59,12 +82,12 @@ pool2d_shape_check(
               "Output size is too small");
 }
 
-// DilatedMaxPool2d (backward)
+// DilatedMaxPool2d/AveragePool2d (backward); `indices` is only produced by max pooling
 inline void
-max_pool2d_backward_shape_check(
+pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
-  const Tensor& indices,
+  const std::optional<Tensor>& indices,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
@@ -76,47 +99,19 @@ max_pool2d_backward_shape_check(
     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
   const int64_t ndim = input.ndimension();
-  const int64_t nOutputPlane = nInputPlane;
+  const int64_t batchSize = ndim == 4 ? input.size(0) : 1;
 
-  check_dim_size(gradOutput, ndim, ndim-3, nOutputPlane);
-  check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
-  check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
-
-  check_dim_size(indices, ndim, ndim-3, nOutputPlane);
-  check_dim_size(indices, ndim, ndim-2, outputHeight);
-  check_dim_size(indices, ndim, ndim-1, outputWidth);
-
+  check_trailing_dim_sizes(gradOutput, ndim, {nInputPlane, outputHeight, outputWidth});
   if (ndim == 4) {
-    const int64_t batchSize = input.size(0);
     check_dim_size(gradOutput, ndim, 0, batchSize);
-    check_dim_size(indices, ndim, 0, batchSize);
   }
-}
 
-// AveragePool2d (backward)
-inline void
-avg_pool2d_backward_shape_check(
-  const Tensor& input,
-  const Tensor& gradOutput,
-  int64_t /*nbatch*/,
-  int kH, int kW, int dH, int dW, int padH, int padW,
-  int64_t nInputPlane,
-  int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth,
-  MemoryFormat memory_format)
-{
-  pool2d_shape_check(
-    input,
-    kH, kW, dH, dW, padH, padW, 1, 1,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-    memory_format);
-
-  const int64_t ndim = input.ndimension();
-  const int64_t nOutputPlane = nInputPlane;
-
-  check_dim_size(gradOutput, ndim, ndim-3, nOutputPlane);
-  check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
-  check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
+  if (indices.has_value()) {
+    check_trailing_dim_sizes(*indices, ndim, {nInputPlane, outputHeight, outputWidth});
+    if (ndim == 4) {
+      check_dim_size(*indices, ndim, 0, batchSize);
+    }
+  }
 }
 
 // AveragePool3d/DilatedMaxPool3d (forward)
@@ -148,21 +143,8 @@ pool3d_shape_check(
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
-  for (const auto i : c10::irange(ndim)) {
-    if (ndim == 5 && i == 0) {
-      // size of batch-dim can be 0.
-      continue;
-    }
-    TORCH_CHECK(
-        input.size(i) > 0,
-        fn_name,
-        ": Expected input's non-batch dimensions to have positive length,"
-        " but input has a shape of ",
-        input.sizes(),
-        " and non-batch dimension ",
-        input.size(i),
-        " has length zero!")
-  }
+  // size of batch-dim can be 0.
+  check_non_empty_dims(input, /*first_dim=*/ndim == 5 ? 1 : 0, fn_name, "input");
 
   if (check_input_size) { // AveragePool3d
     TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
@@ -182,11 +164,12 @@ pool3d_shape_check(
               "Output size is too small");
 }
 
+// AveragePool3d/DilatedMaxPool3d (backward); `indices` is only produced by max pooling
 inline void
-max_pool3d_backward_shape_check(
+pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
-  const Tensor& indices,
+  const std::optional<Tensor>& indices,
   int64_t nslices,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -194,7 +177,8 @@ max_pool3d_backward_shape_check(
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
   int64_t otime, int64_t oheight, int64_t owidth,
-  const char* fn_name)
+  const char* fn_name,
+  bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
 
@@ -206,48 +190,12 @@ max_pool3d_backward_shape_check(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth, fn_name);
+    otime, oheight, owidth, fn_name, check_input_size);
 
-  check_dim_size(gradOutput, ndim, ndim-4, nslices);
-  check_dim_size(gradOutput, ndim, ndim-3, otime);
-  check_dim_size(gradOutput, ndim, ndim-2, oheight);
-  check_dim_size(gradOutput, ndim, ndim-1, owidth);
-
-  check_dim_size(indices, ndim, ndim-4, nslices);
-  check_dim_size(indices, ndim, ndim-3, otime);
-  check_dim_size(indices, ndim, ndim-2, oheight);
-  check_dim_size(indices, ndim, ndim-1, owidth);
-}
-
-inline void
-avg_pool3d_backward_shape_check(
-  const Tensor& input,
-  const Tensor& gradOutput,
-  int64_t nslices,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth,
-  const char *fn_name)
-{
-  const int64_t ndim = input.ndimension();
-
-  pool3d_shape_check(
-    input,
-    nslices,
-    kT, kH, kW,
-    dT, dH, dW,
-    pT, pH, pW,
-    1, 1, 1,
-    itime, iheight, iwidth,
-    otime, oheight, owidth,
-    fn_name, true);
-
-  check_dim_size(gradOutput, ndim, ndim-4, nslices);
-  check_dim_size(gradOutput, ndim, ndim-3, otime);
-  check_dim_size(gradOutput, ndim, ndim-2, oheight);
-  check_dim_size(gradOutput, ndim, ndim-1, owidth);
+  check_trailing_dim_sizes(gradOutput, ndim, {nslices, otime, oheight, owidth});
+  if (indices.has_value()) {
+    check_trailing_dim_sizes(*indices, ndim, {nslices, otime, oheight, owidth});
+  }
 }
 
 // MaxUnpool2d/MaxUnpool3d
@@ -271,11 +219,7 @@ inline void max_unpooling2d_shape_check(
       "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
       ") but got indices tensor with shape: ", indices.sizes());
 
-  for (const auto i : c10::irange(1, input.ndimension())) {
-    TORCH_CHECK(input.size(i) > 0, fn_name,
-                ": Expected input to have non-zero size for non-batch dimensions, but got ",
-                input.sizes(), " with dimension ", i , " being empty.");
-  }
+  check_non_empty_dims(input, /*first_dim=*/1, fn_name, "input");
 
   int64_t oH = output_size[0];
   int64_t oW = output_size[1];
@@ -323,11 +267,7 @@ inline void max_unpooling3d_shape_check(
       "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
       ") but got indices tensor with shape: ", indices.sizes());
 
-  for (const auto i : c10::irange(1, input.ndimension())) {
-    TORCH_CHECK(input.size(i) > 0, fn_name,
-                ": Expected input to have non-zero size for non-batch dimensions, but got ",
-                input.sizes(), " with dimension ", i , " being empty.");
-  }
+  check_non_empty_dims(input, /*first_dim=*/1, fn_name, "input");
 
   TORCH_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
@@ -361,13 +301,8 @@ inline void max_unpooling3d_shape_check(
 
 // AdaptiveAvgPool/AdaptiveMaxPool (backward)
 inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, const char* arg_name) {
-  int64_t ndim = gradOutput_.ndimension();
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(gradOutput_.size(i) > 0,
-      arg_name, "(): Expected grad_output to have non-zero size for non-batch dimensions, "
-      "but grad_output has sizes ", gradOutput_.sizes(), " with dimension ", i,
-      " being empty");
-  }
+  const auto fn_name = c10::str(arg_name, "()");
+  check_non_empty_dims(gradOutput_, /*first_dim=*/1, fn_name.c_str(), "grad_output");
 }
 
 // FractionalMaxPool2d/FractionalMaxPool3d
