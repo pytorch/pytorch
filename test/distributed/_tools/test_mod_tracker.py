@@ -4,11 +4,18 @@ from copy import copy
 
 import torch
 from torch.distributed._tools.mod_tracker import ModTracker
-from torch.testing._internal.common_utils import run_tests, TestCase, xfailIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+    xfailIfTorchDynamo,
+)
 from torch.utils.checkpoint import checkpoint
 
 
 class TestModTracker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # "https://github.com/pytorch/pytorch/issues/127112
     @xfailIfTorchDynamo
     def test_module_hierarchy(self):
