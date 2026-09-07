@@ -223,9 +223,6 @@ def _load_events(trace_path):
 class _TraceValidatorE2EMixin:
     """Shared helpers for E2E trace validator test classes."""
 
-    def _events(self, payload):
-        return self._payloads[payload]
-
     @staticmethod
     def _fmt(violations, limit=5):
         lines = [f"  {v}" for v in violations[:limit]]
@@ -553,9 +550,8 @@ class TestTraceValidatorRules(TestCase):
 # ---------------------------------------------------------------------------
 
 
-# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
-# while all E2E tests are disabled. Re-enable alongside the per-test skips once
-# kineto's CPU/GPU timestamp clock-skew issue is fixed.
+# Re-enable alongside the per-test skips once kineto's CPU/GPU timestamp
+# clock-skew issue is fixed.
 @unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
@@ -571,35 +567,21 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     Instantiated per device type via ``instantiate_device_type_tests``.
     """
 
-    _trace_dir: str = ""
-    _payloads: dict = {}
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = torch.device(cls.device_type, 0)
-        activity = _activity_for_device_type(cls.device_type)
-        cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
-        cls._payloads = {
-            "training": _profile_training_payload(
-                os.path.join(cls._trace_dir, "training.json"),
-                device,
-                activity,
-            ),
-        }
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._trace_dir and os.path.isdir(cls._trace_dir):
-            shutil.rmtree(cls._trace_dir, ignore_errors=True)
-        super().tearDownClass()
-
     @unittest.skip(
         "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
     )
     def test_backward_seq_id_uniqueness(self, device):
-        v = _check_backward_seq_id_uniqueness(self._events("training"))
-        self.assertEqual(len(v), 0, self._fmt(v))
+        # Kept on failure so CI leaves the trace behind for inspection.
+        trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
+        trace_path = os.path.join(trace_dir, "training.json")
+        events = _profile_training_payload(
+            trace_path,
+            torch.device(device),
+            _activity_for_device_type(self.device_type),
+        )
+        v = _check_backward_seq_id_uniqueness(events)
+        self.assertEqual(len(v), 0, f"{self._fmt(v)}\ntrace kept at {trace_path}")
+        shutil.rmtree(trace_dir, ignore_errors=True)
 
 
 instantiate_device_type_tests(
@@ -632,6 +614,9 @@ class TestTraceValidatorE2ECUDA(_TraceValidatorE2EMixin, TestCase):
 
     _trace_dir: str = ""
     _payloads: dict = {}
+
+    def _events(self, payload):
+        return self._payloads[payload]
 
     @classmethod
     def setUpClass(cls):
