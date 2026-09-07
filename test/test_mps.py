@@ -19,6 +19,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
+
+# DO NOT MERGE: fail fast so the job reaches the post-job cleanup quickly while
+# iterating on the venv-cleanup fix (setup-python points at the fix branch).
+raise RuntimeError("Intentional fail-fast to reach venv cleanup step")
 import re
 from collections import defaultdict
 from torch import inf

@@ -120,7 +120,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@main
+        uses: pytorch/test-infra/.github/actions/setup-python@malfet/setup-python-cleanup-eacces
         with:
           python-version: ${{ inputs.python-version }}
           pip-requirements-file: .ci/docker/requirements-ci.txt
@@ -242,6 +242,8 @@ jobs:
         if: always()
         run: |
           echo "runner instance: $(hostname) ($(whoami))"
+          echo "== passwordless sudo available? =="
+          sudo -n true && echo "sudo -n: OK (passwordless)" || echo "sudo -n: NOT available"
           V="${VENV_PATH}/lib/python3.12/site-packages/torch/distributed"
           echo "== stat torch/distributed =="; stat "${V}" || true
           echo "== ls -le@ torch/distributed =="; ls -le@ "${V}" || true
