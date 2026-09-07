@@ -67,7 +67,10 @@ class CompileArtifacts:
 
     def check_compatibility(self) -> None:
         # The cached info is the receiver so mismatch messages label self
-        # "cached", matching _DynamoCacheEntry.check_versions.
+        # "cached", matching _DynamoCacheEntry.check_versions. This also sets
+        # which side the triton_version/gpu_name guards read off, so with the
+        # cached info as receiver those two exempt the current host, not the
+        # artifact -- the correct direction for a compatibility check.
         device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = emits_native_code(self.backend_name)
         current = SystemInfo.current(
@@ -599,7 +602,8 @@ class AOTCompiledModel:
                 lines.append(f"  [{i}] <guard check raised {type(e).__name__}: {e}>")
                 continue
             parts = reason.verbose_code_parts or [str(reason)]
-            lines.append(f"  [{i}] {'; '.join(str(p) for p in parts)}")
+            joined = "; ".join(str(p) for p in parts).replace("\n", " ")
+            lines.append(f"  [{i}] {joined}")
         lines.append(
             "Add a ModelInput covering this call, or check whether a guard that "
             "distinguishes it was dropped by guard_filter_fn."
@@ -640,10 +644,11 @@ class AOTCompiledModel:
             guard_globals = traced_fn.__globals__
         except (RuntimeError, AttributeError):
             log.warning(
-                "%s.forward is %r, which has no resolvable __globals__, so no "
-                "live guard scope could be resolved; global guards on this "
-                "artifact resolve against the scope reconstructed from the "
-                "serialized bytecode instead",
+                "%s.forward is %r, from which no live guard scope could be "
+                "resolved (not a plain function or a bound method with an "
+                "importable __globals__); global guards on this artifact "
+                "resolve against the scope reconstructed from the serialized "
+                "bytecode instead",
                 type(model).__name__,
                 forward,
             )
