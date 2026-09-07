@@ -42,6 +42,7 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from ..utils._sympy.functions import CeilDiv, Max, Min
 from . import config, ir
@@ -82,6 +83,7 @@ from .ops_handler import StoreMode
 from .runtime.hints import DeviceProperties, TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
+from .sizevars import statically_known_true as statically_known_true_with_axioms
 from .utils import (
     ceildiv,
     do_bench_using_profiling,
@@ -399,6 +401,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         mask: str | None,
         input_shapes: dict[str, tuple[str, ...]] | None = None,
         input_dtypes: dict[str, torch.dtype | str] | None = None,
+        input_ranges: dict[str, tuple[Any, Any]] | None = None,
+        bounds_check_indices: bool = False,
     ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
@@ -407,8 +411,12 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         self.mask = mask
         self.input_shapes = input_shapes or {}
         self.input_dtypes = input_dtypes or {}
+        self.input_ranges = input_ranges or {}
+        self.index_ranges: dict[sympy.Symbol, tuple[sympy.Expr, sympy.Expr]] = {}
+        self.bounds_check_indices = bounds_check_indices
         extra_input_shapes = self.input_shapes.keys() - self.fixed_inputs.keys()
         extra_input_dtypes = self.input_dtypes.keys() - self.fixed_inputs.keys()
+        extra_input_ranges = self.input_ranges.keys() - self.fixed_inputs.keys()
         if extra_input_shapes:
             raise AssertionError(
                 f"input_shapes keys must match fixed inputs: {extra_input_shapes}"
@@ -416,6 +424,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if extra_input_dtypes:
             raise AssertionError(
                 f"input_dtypes keys must match fixed inputs: {extra_input_dtypes}"
+            )
+        if extra_input_ranges:
+            raise AssertionError(
+                f"input_ranges keys must match fixed inputs: {extra_input_ranges}"
             )
 
     def load(self, name: str, index: sympy.Expr):
@@ -425,7 +437,18 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
-            line = f"tl.load({var} + {index_str})"
+            bounds_mask = (
+                self._bounds_check_mask(name, index, index_str)
+                if self.bounds_check_indices
+                else None
+            )
+            if bounds_mask is not None:
+                other = 0.0 if var_dtype.is_floating_point else 0
+                line = (
+                    f"tl.load({var} + {index_str}, mask={bounds_mask}, other={other})"
+                )
+            else:
+                line = f"tl.load({var} + {index_str})"
 
             if (
                 var_dtype in (torch.float16, torch.bfloat16)
@@ -443,12 +466,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             return out
 
         shape = self.input_shapes.get(name, ())
-        return self.kernel.cse.generate(
+        out = self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
+            bounds=self._fixed_input_bounds(name),
             dtype=self._fixed_input_dtype(name),
             shape=shape,
         )
+        if (index_range := self._fixed_input_index_range(name)) is not None:
+            self.index_ranges[sympy_index_symbol(str(out))] = index_range
+        return out
 
     def _index_dtype(self) -> torch.dtype:
         return torch.int64 if self.kernel.index_dtype == "tl.int64" else torch.int32
@@ -477,6 +504,26 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             return torch.float32
         return torch.float32
 
+    def _fixed_input_bounds(self, name: str) -> ValueRanges:
+        if (index_range := self._fixed_input_index_range(name)) is not None:
+            lower, upper = index_range
+            return self._static_value_range(lower, upper - 1)
+        match self.fixed_inputs[name]:
+            case CSEVariable() as value:
+                return value.bounds
+            case str() as value:
+                if (cse_value := self.kernel.cse.varname_map.get(value)) is not None:
+                    return cse_value.bounds
+        return ValueRanges.unknown()
+
+    def _fixed_input_index_range(
+        self, name: str
+    ) -> tuple[sympy.Expr, sympy.Expr] | None:
+        if name not in self.input_ranges:
+            return None
+        lower, upper = self.input_ranges[name]
+        return sympy.sympify(lower), sympy.sympify(upper)
+
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
@@ -496,10 +543,91 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
-        return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
+        mask = self.mask
+        if self.bounds_check_indices:
+            bounds_mask = self._bounds_check_mask(name, index, index_str)
+            if bounds_mask is not None:
+                mask = f"({mask}) & {bounds_mask}"
+        return (
+            f"tl.atomic_add({buf_name} + {index_str}, {value}, {mask}, sem='relaxed')"
+        )
 
     def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
+
+    def _bounds_check_mask(
+        self, name: str, index: sympy.Expr, index_str: str
+    ) -> str | None:
+        storage_size = V.graph.get_buffer(name).get_layout().storage_size()
+        if self._index_is_proven_in_bounds(index, storage_size):
+            return None
+        storage_size_str = self.kernel.kexpr(self.kernel.rename_indexing(storage_size))
+        return f"(({index_str}) >= 0) & (({index_str}) < {storage_size_str})"
+
+    def _index_is_proven_in_bounds(
+        self, index: sympy.Expr, storage_size: sympy.Expr
+    ) -> bool:
+        if (index_range := self._static_index_range(index)) is not None:
+            lower, upper = index_range
+            if V.graph.sizevars.statically_known_true(
+                sympy.Ge(lower, 0) & sympy.Lt(upper, storage_size)
+            ):
+                return True
+        return statically_known_true_with_axioms(
+            V.graph.sizevars.shape_env,
+            sympy.Ge(index, 0) & sympy.Lt(index, storage_size),
+            axioms=tuple(self._range_axioms()),
+        )
+
+    def _static_index_range(
+        self, index: sympy.Expr
+    ) -> tuple[sympy.Expr, sympy.Expr] | None:
+        index_range = bound_sympy(index, self._static_symbol_ranges())
+        if (
+            index_range == ValueRanges.unknown()
+            or index_range == ValueRanges.unknown_int()
+        ):
+            return None
+        return sympy.sympify(index_range.lower), sympy.sympify(index_range.upper)
+
+    def _range_axioms(self) -> list[sympy.Expr]:
+        axioms: list[sympy.Expr] = []
+        for symbol, (lower, upper) in self.index_ranges.items():
+            axioms.extend((sympy.Ge(symbol, lower), sympy.Lt(symbol, upper)))
+        for symbol, node in self.kernel.range_tree_nodes.items():
+            axioms.extend((sympy.Ge(symbol, 0), sympy.Lt(symbol, node.root.numel)))
+        for name, cse_var in self.kernel.cse.varname_map.items():
+            if cse_var.bounds != ValueRanges.unknown():
+                symbol = sympy_index_symbol(name)
+                axioms.extend(
+                    (
+                        sympy.Ge(symbol, cse_var.bounds.lower),
+                        sympy.Le(symbol, cse_var.bounds.upper),
+                    )
+                )
+        return axioms
+
+    def _static_symbol_ranges(self) -> dict[sympy.Symbol, ValueRanges]:
+        ranges: dict[sympy.Symbol, ValueRanges] = {}
+        for symbol, (lower, upper) in self.index_ranges.items():
+            value_range = self._static_value_range(lower, upper - 1)
+            if value_range != ValueRanges.unknown():
+                ranges[symbol] = value_range
+        for symbol, node in self.kernel.range_tree_nodes.items():
+            value_range = self._static_value_range(
+                sympy.Integer(0), sympy.sympify(node.root.numel) - 1
+            )
+            if value_range != ValueRanges.unknown():
+                ranges[symbol] = value_range
+        for name, cse_var in self.kernel.cse.varname_map.items():
+            if cse_var.bounds != ValueRanges.unknown():
+                ranges[sympy_index_symbol(name)] = cse_var.bounds
+        return ranges
+
+    def _static_value_range(self, lower: sympy.Expr, upper: sympy.Expr) -> ValueRanges:
+        if lower.free_symbols or upper.free_symbols:
+            return ValueRanges.unknown()
+        return ValueRanges(lower, upper)
 
     def _process_indexing(self, index: sympy.Expr) -> str:
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
@@ -1256,6 +1384,8 @@ class TritonTemplateKernel(TritonKernel):
         mask: str | None = None,
         input_shapes: dict[str, tuple[str, ...]] | None = None,
         input_dtypes: dict[str, torch.dtype | str] | None = None,
+        input_ranges: dict[str, tuple[Any, Any]] | None = None,
+        bounds_check_indices: bool = False,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -1270,6 +1400,10 @@ class TritonTemplateKernel(TritonKernel):
                 block shapes. Used for proper shape propagation during codegen.
             input_dtypes (Optional[dict[str, torch.dtype | str]]): Optional dtype
                 mapping. The string "index" resolves to the template index dtype.
+            input_ranges (Optional[dict[str, tuple[Any, Any]]]): Optional mapping of
+                input names to half-open value ranges for access-bounds analysis.
+            bounds_check_indices (bool): Whether captured tensor accesses are masked
+                to their storage bounds.
         """
         num = 0
         out = None
@@ -1285,6 +1419,8 @@ class TritonTemplateKernel(TritonKernel):
                 mask,
                 input_shapes,
                 input_dtypes,
+                input_ranges,
+                bounds_check_indices,
             )
             with V.set_ops_handler(modification_handler):
                 if not isinstance(subgraph, (ir.ComputedBuffer, list)):
