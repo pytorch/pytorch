@@ -48,6 +48,14 @@ decompose_custom_triton_ops = True
 
 static_weight_shapes = True
 
+# Backwards-compat escape hatch for the input-mutation replay onto a view a custom
+# autograd.Function returned as-is (stamped IN_CUSTOM_FUNCTION). Eager raises on such
+# an autograd-visible in-place write; the compiled region boundary cannot tell it from
+# a write that bypasses autograd (e.g. through .data), so by default it replays the
+# mutation invisibly and warns once. Set True to restore the pre-warning behavior of
+# raising a RuntimeError instead.
+error_on_custom_function_view_input_mutation = False
+
 # See https://github.com/pytorch/pytorch/issues/141881
 # Tells partitioner that parameters are free to save for backward.
 treat_parameters_as_free_to_save = True
