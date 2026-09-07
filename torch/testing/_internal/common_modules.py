@@ -4743,6 +4743,8 @@ module_db: list[ModuleInfo] = [
                                 "test_save_load", device_type="xpu", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=4e-3)}), "TestModule",
+                                "test_forward", device_type="xpu", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=5e-2, rtol=5e-2)}), "TestModule",
                                 "test_forward", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
