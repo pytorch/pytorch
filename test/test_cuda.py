@@ -2150,6 +2150,73 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
         # cached blocks in case it affects future tests.
         torch.cuda.empty_cache()
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC or IS_JETSON,
+        "test exercises the native CUDACachingAllocator OOM-recovery ladder",
+    )
+    @serialTest()
+    def test_caching_allocator_oom_pending_free_in_pool(self):
+        """A large-enough block whose free is pending on a stream event (via
+        record_stream) is returned to the pool by release_cached_blocks() ->
+        synchronize_and_free_events() during OOM recovery. The allocator must
+        re-search the pool and reuse that block instead of raising OOM.
+        Regression test for https://github.com/pytorch/pytorch/issues/189504."""
+        gc.collect()
+        torch.cuda.empty_cache()
+        device = torch.device("cuda:0")
+        MiB = 1024 * 1024
+
+        def alloc(mib):
+            return torch.empty(mib * MiB, dtype=torch.uint8, device=device)
+
+        # Build one segment holding [small live pin | big block]: seed a 1228
+        # MiB segment, free it (segment stays cached), then carve a 100 MiB pin
+        # and a 1024 MiB block out of the same cached segment. The pin keeps the
+        # segment from being cudaFree'd for the rest of the test.
+        seg_seed = alloc(1228)
+        del seg_seed
+        pin = alloc(100)
+        big = alloc(1024)
+
+        # Exhaust the rest of the device so no fresh 1 GiB segment can be
+        # cudaMalloc'd. If the device is too small to even set this up, skip.
+        filler = []
+        try:
+            for chunk in (512, 128, 32):
+                while True:
+                    free_b, _ = torch.cuda.mem_get_info(device)
+                    if free_b < (chunk + 64) * MiB:
+                        break
+                    filler.append(alloc(chunk))
+            free_b, _ = torch.cuda.mem_get_info(device)
+            if free_b >= 1024 * MiB:
+                self.skipTest("could not fill device below a 1 GiB free segment")
+
+            # Make big's free PEND on a side stream: enqueue a long sleep,
+            # mark big as used by the stream, then free it. Until the GPU
+            # reaches the tail event, the block is neither live nor reusable.
+            sleep_ms = 2000
+            side = torch.cuda.Stream(device)
+            with torch.cuda.stream(side):
+                torch.cuda._sleep(int(sleep_ms * get_cycles_per_ms()))
+            big.record_stream(side)
+            del big
+
+            # Request an allocation only the pending block can satisfy. Before
+            # the fix this raised OutOfMemoryError even though the failing call
+            # itself blocks in synchronize_and_free_events and returns the block
+            # to the pool; after the fix the allocator re-searches the pool and
+            # succeeds.
+            c = alloc(1024)
+            self.assertEqual(c.numel(), 1024 * MiB)
+            del c
+        finally:
+            del filler
+            torch.cuda.synchronize()
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
     # Tests for historic illegal memory access, see #17040.
     def test_reduction_gpu_memory_accessing(self):
         x = torch.ones(512, 8, dtype=torch.float32, device="cuda")
