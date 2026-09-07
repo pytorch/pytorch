@@ -267,13 +267,18 @@ class FunctionPicklerBase(pickle.Pickler):
         # the shared AOT path (AOTCompilePickler) does call it, so there an
         # empty scope surfaces as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
-        try:
-            # A <locals>/exec function can carry __module__ is None (bare
-            # globals with no __name__); import_module(None) raises
-            # AttributeError and import_module("") raises ValueError, neither
-            # of which is the ImportError below, so guard both into the empty scope.
-            f_globals = importlib.import_module(module).__dict__ if module else {}
-        except ImportError:
+        # __module__ need not be an importable string: a decorator can set it to
+        # a non-str (42), a <locals>/exec function can carry None or "" (bare
+        # globals with no __name__), and a relative name (".rel") or a module
+        # whose body raises fails import with something other than ImportError.
+        # None of those should fail the load, so require a non-empty str and
+        # swallow any import failure into the empty scope.
+        if isinstance(module, str) and module:
+            try:
+                f_globals = importlib.import_module(module).__dict__
+            except Exception:
+                f_globals = {}
+        else:
             f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
@@ -310,12 +315,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # rooted there rebakes, so restore what the reducer captured.
         fn.__doc__ = doc
         fn.__annotations__ = annotations
+        # Assign __dict__ before __type_params__: on Python < 3.12 the function
+        # has no __type_params__ slot, so that write lands in __dict__ and a
+        # wholesale __dict__ assignment afterwards would discard it. Assigning
+        # the dict wholesale (rather than copying entries in) also lets the AOT
+        # pickler, which passes obj.__dict__ verbatim, round-trip a helper that
+        # stashed `self.d is self.__dict__` as the same object; the guard pickler
+        # rebuilds a fresh dict, so that identity holds only on the AOT path.
+        fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
-        # Assign the dict wholesale rather than copy entries in: a helper that
-        # stashed `self.d is self.__dict__` round-trips as the same object only
-        # if the reconstructed __dict__ keeps the pickled dict's identity.
-        fn.__dict__ = attributes
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
 
@@ -610,6 +619,11 @@ class _DynamoCodeCacheEntry:
     bypass_reason: str | None = None
 
 
+# A bypass reason can embed repr() of user objects; cap it before it is
+# pickled into the artifact so a pathological repr cannot bloat the file.
+_BYPASS_REASON_MAX_CHARS = 2048
+
+
 def _resume_global_renames(
     entries: Iterable[_DynamoCodeCacheEntry], install_token: str
 ) -> dict[str, str]:
@@ -626,19 +640,15 @@ def _resume_global_renames(
     names carry nothing that distinguishes the artifact.
 
     The per-install token is what actually separates them: it is unique to the
-    loaded package. The code digest is only a readability hint so the name
-    still says which code it belongs to; it is NOT a stability guarantee
-    (pickling a code object is not byte-stable across processes -- constants
-    pass through by reference and a frozenset's byte order is
-    PYTHONHASHSEED-dependent), and nothing relies on it being one.
+    loaded package. The ``__resume_at_<offset>_<n>`` base name still says which
+    code the binding belongs to, so no extra per-code digest is carried.
     """
     renames: dict[str, str] = {}
     for entry in entries:
         if not entry.install_to_global:
             continue
-        digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
         for name in entry.function_names:
-            renames[name] = f"{name}_{digest}_{install_token}"
+            renames[name] = f"{name}_{install_token}"
     return renames
 
 
@@ -1465,7 +1475,17 @@ class CompilePackage:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
             # Written last so a failed load cannot leak into a cold-cache fallback.
             self._device_types = set(dynamo.device_types or (dynamo.device_type,))
-            self._system_info = dynamo.system_info
+            # A re-save runs on the CURRENT host, which check_versions() just
+            # confirmed is compatible with the loaded artifact, so stamp the
+            # live host identity and keep only the loaded CPU codegen target
+            # (its baked kernels are still the loaded ones; update_device_type
+            # backfills or warns if a new cpu compile drifts it). Otherwise
+            # host A's python/torch/gpu fingerprint rides into an artifact
+            # re-saved on host B under caching_precompile.
+            self._system_info = dataclasses.replace(
+                SystemInfo.current(cpu_codegen=False),
+                cpu_codegen_target=dynamo.system_info.cpu_codegen_target,
+            )
             # OR, never replace: a loaded entry that did not require native
             # backend compatibility must not relax a host that does, or the ISA
             # check fails open on a kernel built for another target.
@@ -1678,7 +1698,7 @@ class CompilePackage:
         # executed has no compile id and is not a gap; a frame that hit the
         # recompile limit has working variants and is reported as truncated.
         return frozenset(
-            code.co_name
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
             for code, entry in self._codes.items()
             if entry.has_compile_id and not entry.guarded_codes and not entry.bypassed
         )
@@ -1709,10 +1729,15 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        # A bypassed entry is never installed, so what it already registered
-        # would only be serialized for nothing.
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
+        if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
+            reason = reason[:_BYPASS_REASON_MAX_CHARS] + " ... (truncated)"
         self._current_entry.bypass_reason = reason
 
     def add_resume_function(
@@ -1732,6 +1757,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -1739,6 +1766,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
