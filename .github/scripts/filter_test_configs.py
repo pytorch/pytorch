@@ -11,7 +11,7 @@ import sys
 import warnings
 from enum import Enum
 from functools import cache
-from logging import info
+from logging import info, warning
 from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
@@ -166,7 +166,7 @@ def filter(
     If the PR has none of the test-config label, all tests are run as usual.
     """
     if ignore_test_config_labels:
-        logging.warning("Ignoring test-config/* PR labels by explicit request")
+        warning("Ignoring test-config/* PR labels by explicit request")
         return test_matrix
 
     filtered_test_matrix: dict[str, list[Any]] = {"include": []}
