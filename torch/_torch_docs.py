@@ -10214,6 +10214,8 @@ add_docstr(
 sigmoid(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.expit`.
+
+See :class:`torch.nn.Sigmoid` for the module form and formula.
 """,
 )
 

@@ -337,6 +337,10 @@ class ReLU6(Hardtanh):
 class Sigmoid(Module):
     r"""Applies the Sigmoid function element-wise.
 
+    This function is also available as :func:`torch.sigmoid`,
+    :meth:`torch.Tensor.sigmoid`, :func:`torch.nn.functional.sigmoid`, and
+    :func:`torch.special.expit`.
+
     .. math::
         \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
 
