@@ -1106,6 +1106,21 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigh(a, out=(out_w, out_v))
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @largeTensorTest("10GB", device="cpu")
+    @dtypes(torch.float32)
+    def test_eigh_lwork_int_overflow(self, device, dtype):
+        # The CPU LAPACK interface indexes the workspace with a 32-bit int. For a
+        # large enough matrix the required workspace (~2 * n**2 for syevd with
+        # eigenvectors) exceeds INT_MAX and used to silently overflow into a bogus
+        # size. It must instead raise an actionable error. See issue #92141.
+        # n is chosen so that 2 * n**2 > INT_MAX while the input still fits in RAM.
+        n = 33000
+        a = torch.eye(n, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "too large for the current LAPACK backend"):
+            torch.linalg.eigh(a)
+
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):
