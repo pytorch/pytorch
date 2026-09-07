@@ -86,7 +86,7 @@ class TestBits(TestCase):
         s = s + 1 - 1
         self.assertTrue(torch.allclose(s, torch.zeros(20, dtype=torch.bits16)))
 
-instantiate_device_type_tests(TestBits, globals())
+instantiate_device_type_tests(TestBits, globals(), allow_xpu=True)
 
 
 if __name__ == '__main__':
