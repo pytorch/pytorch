@@ -17,6 +17,9 @@ class GlobalStateGuard:
 class LeafGuard:
     def verbose_code_parts(self) -> list[str]: ...
 
+class LAMBDA_GUARD(LeafGuard):
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
 class RelationalGuard: ...
 
 class GuardDebugInfo:

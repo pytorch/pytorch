@@ -37,6 +37,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.precompile_package import precompile_capture, precompile_load
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.types import FrameAction
 from torch._dynamo.utils import CleanupManager, counters
@@ -1319,6 +1320,31 @@ def add(x, y):
         compiled(torch.randint(0, 5, (3,)))
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(pkg.cache_entry().codes[0].guarded_codes, [])
+
+    def test_serving_package_compiles_uncovered_calls_like_torch_compile(self):
+        # Outside serving() an uncovered call is an ordinary compile. The serve
+        # package is never saved, so its guards are neither serialized nor held
+        # to a capture's strictness: an unpicklable guarded value must not raise.
+        def fn(x, cfg=None):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            if cfg is not None and cfg.flag == 2.0:
+                y = y + 1
+            return y + x.cos()
+
+        x = torch.randn(3)
+        path = os.path.join(self.path(), "artifact")
+        session = precompile_capture(fn, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(x)
+        session.save(path)
+
+        torch._dynamo.reset()
+        loaded = precompile_load(fn, path, backend="eager", dynamic=False)
+        with loaded:
+            self.assertEqual(loaded(x), fn(x))
+            cfg = UnpicklableConfig()
+            self.assertEqual(loaded(x, cfg), fn(x, cfg))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))
