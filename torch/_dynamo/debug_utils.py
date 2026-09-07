@@ -1024,7 +1024,10 @@ class InputWriter:
         # runnable on a box with fewer GPUs than the rank that produced it.
         from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
-        if _coor_device_index_is_current(device):
+        # device may have been replaced by device_hint above, which is a
+        # DeviceLikeType and so can be an int or str; only a real torch.device
+        # carries the index this is about.
+        if isinstance(device, torch.device) and _coor_device_index_is_current(device):
             device = torch.device(device.type)
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"

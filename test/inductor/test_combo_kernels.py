@@ -508,9 +508,14 @@ class ComboKernelTests(TestCase):
         # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
         # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
         # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        # kineto_available: CI runs this file with TORCHINDUCTOR_CPP_WRAPPER=1, so on a
+        # USE_KINETO=0 build both halves above are true and the GPU-only profile below
+        # raises. Extending the condition rather than gating the whole method keeps the
+        # eager-path coverage above.
         if (
             torch._inductor.config.cpp_wrapper
             and self.combo_kernel_per_subkernel_blocks
+            and kineto_available()
         ):
             from torch.profiler import ProfilerActivity
 
