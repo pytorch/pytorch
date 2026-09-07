@@ -20,15 +20,15 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 
 torch._lazy.ts_backend.init()
-
-
-def get_test_device():
-    return "cuda" if "LTC_TS_CUDA" in os.environ else "cpu"
 
 
 def remove_suffixes(l):
@@ -121,17 +121,18 @@ def clone_move(t):
     return copy_t
 
 
-class TestLazyTensor(JitTestCase):
+class TestLazyTensorDevice(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip("Disable until autograd supports symints")
-    def testConvolutionBackward(self):
-        test_device = get_test_device()
-        inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
+    def testConvolutionBackward(self, device):
+        inp = torch.rand(1, 3, 128, 128, device=device, requires_grad=True)
         inp_copy = clone_move(inp)
-        grad = torch.rand(1, 32, 121, 121, device=test_device)  # no requires_grad
+        grad = torch.rand(1, 32, 121, 121, device=device)  # no requires_grad
         grad_copy = clone_move(grad)
-        weight = torch.rand(32, 3, 8, 8, device=test_device, requires_grad=True)
+        weight = torch.rand(32, 3, 8, 8, device=device, requires_grad=True)
         weight_copy = clone_move(weight)
-        bias = torch.rand(32, device=test_device, requires_grad=True)
+        bias = torch.rand(32, device=device, requires_grad=True)
         bias_copy = clone_move(bias)
 
         # run eager
@@ -152,9 +153,8 @@ class TestLazyTensor(JitTestCase):
         torch.testing.assert_close(weight_copy_grad.cpu(), weight_grad.cpu())
         torch.testing.assert_close(inp_copy_grad.cpu(), inp_grad.cpu())
 
-    def test_view_mark_step_preserved(self):
-        test_device = get_test_device()
-        inp = torch.rand(4, device=test_device)
+    def test_view_mark_step_preserved(self, device):
+        inp = torch.rand(4, device=device)
         inp_lazy = clone_move(inp)
 
         def foo(x, *, mark_step):
@@ -174,9 +174,8 @@ class TestLazyTensor(JitTestCase):
         # out will have some pending mutations, which will be synced by the .cpu() call.
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
-    def test_tensor_ctr(self):
-        test_device = get_test_device()
-        inp = torch.tensor([[1, 2, 3, 4, 5]], device=test_device)
+    def test_tensor_ctr(self, device):
+        inp = torch.tensor([[1, 2, 3, 4, 5]], device=device)
         inp_lazy = torch.tensor([[1, 2, 3, 4, 5]], device="lazy")
 
         def foo(x):
@@ -188,7 +187,9 @@ class TestLazyTensor(JitTestCase):
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
 
-class TestLazyOpInfo(TestCase):
+class TestLazyOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(
         [
             op
@@ -242,8 +243,6 @@ class TestLazyOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     def test_correctness(self, device, dtype, op):
-        test_device = get_test_device()
-
         def clone_to_device(input, dev):
             if isinstance(input, torch.Tensor):
                 return input.detach().clone().to(device=dev)
@@ -257,7 +256,7 @@ class TestLazyOpInfo(TestCase):
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
                     torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                        clone_to_device(a, device), b, atol=1e-4, equal_nan=True
                     )
                 )
 
@@ -271,7 +270,7 @@ class TestLazyOpInfo(TestCase):
 
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            copy_args = clone_to_device(args, test_device)
+            copy_args = clone_to_device(args, device)
 
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
@@ -290,7 +289,6 @@ class TestLazyOpInfo(TestCase):
     )
     def test_correctness_with_reusing_ir(self, device, dtype, op):
         torch._lazy.config.set_reuse_ir(True)
-        test_device = get_test_device()
 
         def clone_to_device(input, dev):
             if isinstance(input, torch.Tensor):
@@ -305,7 +303,7 @@ class TestLazyOpInfo(TestCase):
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
                     torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
+                        clone_to_device(a, device), b, atol=1e-4, equal_nan=True
                     )
                 )
 
@@ -319,7 +317,7 @@ class TestLazyOpInfo(TestCase):
 
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            copy_args = clone_to_device(args, test_device)
+            copy_args = clone_to_device(args, device)
 
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
@@ -331,12 +329,9 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.config.set_reuse_ir(False)
 
 
-# TODO: after we move to master, add Lazy as a new Device here:
-# https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
-instantiate_device_type_tests(TestLazyOpInfo, globals(), only_for="cpu")
+class TestLazyDynamicOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-
-class TestLazyDynamicOps(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Setup the dynamic shape mode
@@ -349,11 +344,10 @@ class TestLazyDynamicOps(TestCase):
         torch._C._lazy._set_symbolic_shape_mode(cls.old_ssa_mode)
         return super().tearDownClass()
 
-    def test_nonzero_dynamic(self):
+    def test_nonzero_dynamic(self, device):
         # Test that nonzero gives upper bounds sizes when symbolic shape mode is enabled
-        test_device = get_test_device()
         x1 = torch.tensor(
-            [[0, 1.0, 2.0], [3.0, 0, 0]], device=test_device, requires_grad=True
+            [[0, 1.0, 2.0], [3.0, 0, 0]], device=device, requires_grad=True
         )
         x1_lazy = clone_move(x1)
         x2_lazy = torch.nonzero(x1_lazy)
@@ -365,16 +359,34 @@ class TestLazyDynamicOps(TestCase):
         x2_eager = x2_lazy.cpu()
         self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
-    def test_adaptiveavgpool3d_dynamic(self):
+    def test_adaptiveavgpool3d_dynamic(self, device):
         # Test that adaptive_avg_pool3d gives correct shapes with lazy backend
         img_cpu = torch.zeros([2, 3, 4, 5, 6], device="cpu")
         out_cpu = torch.nn.AdaptiveAvgPool3d(2).to(device="cpu")(img_cpu)
 
-        test_device = get_test_device()
-        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=test_device)
-        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(test_device)(img_lazy)
+        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=device)
+        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(device)(img_lazy)
 
         self.assertEqual(out_cpu.shape, out_lazy.shape)
+
+
+instantiate_device_type_tests(
+    TestLazyTensorDevice,
+    globals(),
+    only_for=("cuda" if "LTC_TS_CUDA" in os.environ else "cpu", "xpu"),
+    allow_xpu=True,
+)
+# TODO: after we move to master, add Lazy as a new Device here:
+# https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
+instantiate_device_type_tests(
+    TestLazyOpInfoDevice, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestLazyDynamicOpsDevice,
+    globals(),
+    only_for=("cuda" if "LTC_TS_CUDA" in os.environ else "cpu", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

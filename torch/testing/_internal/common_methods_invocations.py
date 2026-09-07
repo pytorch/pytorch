@@ -12187,9 +12187,9 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
                # Lazy tensor failures
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfoDevice', 'test_dispatched_to_lazy'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfoDevice', 'test_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfoDevice', 'test_correctness_with_reusing_ir'),
 
                # Exception raised from analyzeImpl at ../torch/csrc/jit/ir/alias_analysis.cpp:608
                # We don't have an op for aten::arange but it isn't a special case.
@@ -12385,6 +12385,8 @@ op_db: list[OpInfo] = [
                # aten.uniform was not decomposed
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestLazyOpInfoDevice', 'test_correctness', device_type='xpu'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestLazyOpInfoDevice', 'test_correctness_with_reusing_ir', device_type='xpu'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
@@ -12400,7 +12402,7 @@ op_db: list[OpInfo] = [
                                      'test_type_promotion',
                                      device_type='xpu'),
                         # dispatch to lazy test failed
-                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfoDevice', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
@@ -12418,7 +12420,7 @@ op_db: list[OpInfo] = [
                                      'test_type_promotion',
                                      device_type='xpu'),
                         # dispatch to lazy test failed
-                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfoDevice', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
@@ -20215,8 +20217,8 @@ op_db: list[OpInfo] = [
                # FX failed to normalize op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Lazy tensor failures
-               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfoDevice', 'test_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfoDevice', 'test_correctness_with_reusing_ir'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCommon', 'test_variant_consistency_eager'),
@@ -20269,7 +20271,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                # Lazy tensor failures
-               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfoDevice'),
                # RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
                # memory location. Please clone() the tensor before performing the operation.
            )),
@@ -20307,7 +20309,7 @@ op_db: list[OpInfo] = [
                             'TestCommon',
                             'test_out_warning'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                            'TestLazyOpInfo'),
+                            'TestLazyOpInfoDevice'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -20375,7 +20377,7 @@ op_db: list[OpInfo] = [
                             'TestCommon',
                             'test_out_warning'),
                DecorateInfo(unittest.skip("Expected: empty_permuted is not comparable"),
-                            'TestLazyOpInfo'),
+                            'TestLazyOpInfoDevice'),
                DecorateInfo(unittest.skip("Expected: empty_permuted is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -21832,12 +21834,12 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         skips=(
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             # Lazy tensor failures
-            DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfoDevice', 'test_dispatched_to_lazy'),
             # These tests fail only when built with ASAN
-            DecorateInfo(unittest.skip("Fails with ASAN"), 'TestLazyOpInfo', 'test_correctness', active_if=TEST_WITH_ASAN),
+            DecorateInfo(unittest.skip("Fails with ASAN"), 'TestLazyOpInfoDevice', 'test_correctness', active_if=TEST_WITH_ASAN),
             DecorateInfo(
                 unittest.skip("Fails with ASAN"),
-                'TestLazyOpInfo',
+                'TestLazyOpInfoDevice',
                 'test_correctness_with_reusing_ir',
                 active_if=TEST_WITH_ASAN
             ),
