@@ -3373,7 +3373,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return VariableTracker.build(tx, self.python_type(), cls_source)
 
     # Overrides the base __class__ getset to add the cls_source fallback above.
-    tp_getset = {"__class__": GetSet(_class_vt, None)}
+    tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
     def generic_getattr(
         self, tx: "InstructionTranslatorBase", name: str
