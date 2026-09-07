@@ -2945,7 +2945,7 @@ class ErrorMessagesAcceleratorTest(LoggingTestCase):
         self.assertIn("Tensor device mismatch", msg)
         self.assertIn("Expected all tensors to be on the same device", msg)
         self.assertIn("cpu", msg)
-        self.assertIn(torch.device(device).type, msg)
+        self.assertIn(self.device_type, msg)
         self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
         self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
 
