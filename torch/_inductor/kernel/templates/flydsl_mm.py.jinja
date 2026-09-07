@@ -44,7 +44,6 @@ def _temporary_env(updates):
 {{def_kernel("mat1", "mat2")}}
     output = {{get_output()}}
     global _gemm_param
-    mat2_nk = mat2.transpose(0, 1)
     param = _gemm_param
     if param is None:
         with _gemm_param_lock:
@@ -59,14 +58,16 @@ def _temporary_env(updates):
                     GEMM_K,
                     {
                         "dtype_id": GEMM_DTYPE_ID,
-                        "block_m": TILE_M,
-                        "block_n": TILE_N,
-                        "block_k": TILE_K,
+                        "tile_m": TILE_M,
+                        "tile_n": TILE_N,
+                        "tile_k": TILE_K,
                         "stages": STAGES,
-                        "m_waves": BLOCK_M_WARPS,
-                        "n_waves": BLOCK_N_WARPS,
+                        "m_waves": M_WAVES,
+                        "n_waves": N_WAVES,
                         "group_m": GROUP_M,
                         "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                        "a_is_transposed": A_IS_TRANSPOSED,
+                        "b_is_transposed": B_IS_TRANSPOSED,
                         "has_bias": False,
                         "has_k_tail": has_k_tail,
                     },
@@ -81,7 +82,7 @@ def _temporary_env(updates):
     compile_args = (
         _inductor_tensor_arg(output),
         _inductor_tensor_arg(mat1),
-        _inductor_tensor_arg(mat2_nk),
+        _inductor_tensor_arg(mat2),
         param,
         stream,
     )
@@ -102,7 +103,7 @@ def _temporary_env(updates):
             *compile_args,
             constexpr_param=param,
             compiler=flyc.compile,
-            dispatch_args=(output, mat1, mat2_nk, param, stream),
+            dispatch_args=(output, mat1, mat2, param, stream),
         )
     return output
 

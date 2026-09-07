@@ -16,8 +16,8 @@ class FlyDSLGemmConfig:
     TILE_N: int = 128
     TILE_K: int = 64
     STAGES: int = 2
-    BLOCK_M_WARPS: int = 4
-    BLOCK_N_WARPS: int = 4
+    M_WAVES: int = 4
+    N_WAVES: int = 4
     GROUP_M: int = 0
     USE_HALF_TILE_INTERLEAVED: bool = False
 
@@ -27,8 +27,8 @@ class FlyDSLGemmConfigDict(TypedDict):
     TILE_N: int
     TILE_K: int
     STAGES: int
-    BLOCK_M_WARPS: int
-    BLOCK_N_WARPS: int
+    M_WAVES: int
+    N_WAVES: int
     GROUP_M: int
     USE_HALF_TILE_INTERLEAVED: bool
 
@@ -44,16 +44,19 @@ def _make_gemm_param(gemm_config: dict[str, int | bool]):
     )
 
     return make_gemm_gfx950_param(
-        block_m=int(gemm_config["TILE_M"]),
-        block_n=int(gemm_config["TILE_N"]),
-        block_k=int(gemm_config["TILE_K"]),
+        tile_m=int(gemm_config["TILE_M"]),
+        tile_n=int(gemm_config["TILE_N"]),
+        tile_k=int(gemm_config["TILE_K"]),
         stages=int(gemm_config["STAGES"]),
-        m_waves=int(gemm_config["BLOCK_M_WARPS"]),
-        n_waves=int(gemm_config["BLOCK_N_WARPS"]),
+        m_waves=int(gemm_config["M_WAVES"]),
+        n_waves=int(gemm_config["N_WAVES"]),
         group_m=int(gemm_config["GROUP_M"]),
         use_half_tile_interleaved=bool(
             gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
         ),
+        # Tile validation is layout-independent; runtime callers pass the layout.
+        a_is_transposed=False,
+        b_is_transposed=False,
     )
 
 
@@ -63,6 +66,9 @@ def is_gemm_config_valid_for_shape(
     k: int,
     dtype_id: int,
     gemm_config: dict[str, int | bool],
+    *,
+    a_is_transposed: bool,
+    b_is_transposed: bool,
 ) -> bool:
     """Return whether a FlyDSL config supports this concrete GEMM shape."""
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -70,14 +76,14 @@ def is_gemm_config_valid_for_shape(
         make_gemm_param_and_validate,
     )
 
-    block_k = int(gemm_config["TILE_K"])
+    tile_k = int(gemm_config["TILE_K"])
     stages = int(gemm_config["STAGES"])
     use_half_tile_interleaved = bool(
         gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
     )
-    has_k_tail = infer_has_k_tail(k, block_k, stages)
+    has_k_tail = infer_has_k_tail(k, tile_k, stages)
     if use_half_tile_interleaved:
-        k_tiles = (k + block_k - 1) // block_k
+        k_tiles = (k + tile_k - 1) // tile_k
         has_k_tail = has_k_tail or (k_tiles % 2 != 0)
 
     return (
@@ -87,14 +93,16 @@ def is_gemm_config_valid_for_shape(
             k,
             {
                 "dtype_id": dtype_id,
-                "block_m": int(gemm_config["TILE_M"]),
-                "block_n": int(gemm_config["TILE_N"]),
-                "block_k": block_k,
+                "tile_m": int(gemm_config["TILE_M"]),
+                "tile_n": int(gemm_config["TILE_N"]),
+                "tile_k": tile_k,
                 "stages": stages,
-                "m_waves": int(gemm_config["BLOCK_M_WARPS"]),
-                "n_waves": int(gemm_config["BLOCK_N_WARPS"]),
+                "m_waves": int(gemm_config["M_WAVES"]),
+                "n_waves": int(gemm_config["N_WAVES"]),
                 "group_m": int(gemm_config["GROUP_M"]),
                 "use_half_tile_interleaved": use_half_tile_interleaved,
+                "a_is_transposed": a_is_transposed,
+                "b_is_transposed": b_is_transposed,
                 "has_bias": False,
                 "has_k_tail": has_k_tail,
             },
@@ -113,8 +121,8 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "TILE_N": [16, 32, 64, 80, 96, 128, 256],
         "TILE_K": [64, 128, 256],
         "STAGES": list(range(2, 10)),
-        "BLOCK_M_WARPS": [1, 2, 4],
-        "BLOCK_N_WARPS": [1, 2, 4],
+        "M_WAVES": [1, 2, 4],
+        "N_WAVES": [1, 2, 4],
         "GROUP_M": [0, 4],
         "USE_HALF_TILE_INTERLEAVED": [False, True],
     }
@@ -124,8 +132,8 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     valid_configs: list[FlyDSLGemmConfig] = []
     for gemm_config in configs:
         if not gemm_config["USE_HALF_TILE_INTERLEAVED"]:
-            mma_m_iters = gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
-            mma_n_iters = gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
+            mma_m_iters = gemm_config["TILE_M"] // gemm_config["M_WAVES"] // 16
+            mma_n_iters = gemm_config["TILE_N"] // gemm_config["N_WAVES"] // 16
             if mma_m_iters > 4 or mma_n_iters > 4:
                 continue
         try:
