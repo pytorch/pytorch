@@ -50,6 +50,7 @@ from ..utils import (
     _use_cutlass_for_op,
     ceildiv,
     GPU_ALIGN_BYTES,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
@@ -136,10 +137,10 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
-    name="blackwell_ws_persistent_device_tma",
+blackwell_ws_persistent_tma_mm_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
 
@@ -458,6 +459,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     if out_dtype is not None:
         input_dtype = mat1.get_dtype()
         torch._check(
@@ -521,7 +523,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
+    if (
+        not use_bf16x9
+        and out_dtype is None
+        and _use_small_mm_pointwise(m, k, n, layout.device.type)
+    ):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -554,6 +560,21 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_handler = aten_mm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
+
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
     if use_aten_gemm_kernels():
@@ -580,7 +601,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
-                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
             elif use_triton_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
@@ -776,7 +797,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    if beta == 0 and mat1.get_device().type == "cuda":
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    if not use_bf16x9 and beta == 0 and mat1.get_device().type == "cuda":
         _check_addmm_input_metadata(inp, mat1, mat2)
         if alpha == 0:
             _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
@@ -835,8 +857,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
-    if (not is_nonzero) or (
-        not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
+    if (
+        use_bf16x9
+        or (not is_nonzero)
+        or (not (inductor_config.max_autotune or inductor_config.max_autotune_gemm))
     ):
         choices.extend(
             V.choices.get_template_configs(
@@ -873,7 +897,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_triton_blackwell_tma_template(
             mat1, mat2, output_layout=layout, add_guards=True
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             if torch.version.hip is None:
                 templates_to_use.append(persistent_tma_mm_template)
@@ -1269,10 +1293,8 @@ def tuned_scaled_mm_v2(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
@@ -1446,10 +1468,8 @@ def tuned_scaled_mm(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types

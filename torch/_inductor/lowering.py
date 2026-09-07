@@ -1807,6 +1807,31 @@ def as_strided(
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset),
     )
+    # aten.as_strided offsets are storage-relative, but a realized buffer holds only
+    # what was allocated for it: whatever else the original tensor aliased is simply
+    # not there, so reinterpreting past the buffer would codegen an unmasked
+    # out-of-bounds read. The bound is the allocation and not the layout, because
+    # inplace padding deliberately over-allocates and records that in
+    # buffer_to_padded_size, which is what codegen sizes the buffer by. InputBuffers
+    # are exempt -- their real storage may legitimately extend past the layout, and
+    # the adjustment above has already rebased the offset onto the incoming pointer.
+    needed = new_layout.storage_size()
+    buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
+    if buffer is not None and not isinstance(buffer, ir.InputBuffer):
+        allocated = V.graph.get_allocation_storage_size(buffer)
+        if V.graph.sizevars.statically_known_gt(needed, allocated):
+            raise NotImplementedError(
+                f"as_strided({size}, {stride}, {storage_offset}) requires {needed} "
+                f"elements but {buffer.get_name()} holds only {allocated}. This "
+                f"happens when a tensor aliasing a larger storage is realized as its own "
+                f"buffer; clone the base and re-derive the view instead."
+            )
+        # Symbolic extents are not always statically comparable: check_leq raises
+        # when the shape env can refute this, and otherwise defers a runtime
+        # assertion. A warm FX graph cache replays the artifact without re-running
+        # this lowering, so the deferred half does not survive a cache hit -- backed
+        # shapes fail loudly either way, an unbacked over-extent may not.
+        V.graph.sizevars.check_leq(needed, allocated)
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
@@ -5525,7 +5550,7 @@ def inplace_constant_pad_nd(
         return None
 
     npad = padding[1]
-    if npad == 0:
+    if not V.graph.sizevars.statically_known_gt(npad, 0):
         return None
 
     stride0 = strides[0]

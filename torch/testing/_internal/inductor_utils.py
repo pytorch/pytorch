@@ -23,7 +23,11 @@ from torch._inductor.utils import (
 )
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton, has_triton_block_ptr
+from torch.utils._triton import (
+    has_triton,
+    has_triton_block_ptr,
+    has_triton_cpu_backend,
+)
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -58,18 +62,12 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+# Respect triton_disable_device_detection when probing the CPU backend.
+TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
 HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
-
-if HAS_TRITON:
-    import triton
-
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
-
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
