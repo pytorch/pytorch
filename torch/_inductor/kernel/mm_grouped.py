@@ -218,19 +218,19 @@ def grouped_mm_args(
             else:
                 out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
         # Match the ATen extern output layout: CUDA pads grouped GEMM outputs for
-        # TMA alignment, while ROCm's ATen path returns contiguous tensors.
+        # TMA alignment, while ROCm and XPU ATen paths return contiguous tensors.
         # TODO: Revisit whether 16-byte alignment would be beneficial for gfx1250.
-        if torch.version.hip:
-            if len(out_size) == 2:
-                out_stride = [out_size[1], 1]
-            else:
-                out_stride = [out_size[1] * out_size[2], out_size[2], 1]
-        else:
+        if torch.version.cuda:
             size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
             if len(out_size) == 2:
                 out_stride = [size_padded, 1]
             else:
                 out_stride = [out_size[1] * size_padded, size_padded, 1]
+        else:
+            if len(out_size) == 2:
+                out_stride = [out_size[1], 1]
+            else:
+                out_stride = [out_size[1] * out_size[2], out_size[2], 1]
 
         layout = FixedLayout(
             mat1.get_device(),

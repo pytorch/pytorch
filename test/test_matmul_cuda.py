@@ -36,7 +36,9 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
     skipCUDAIfNotRocm,
+    skipXPU,
     tol as xtol,
     toleranceOverride,
 )
@@ -57,6 +59,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
+    TEST_XPU,
     TestCase,
     TemporaryFileName,
     decorateIf,
@@ -821,13 +824,13 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(TEST_CUDA and not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        device = "cuda"
+    def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -843,6 +846,8 @@ class TestMatmulCuda(InductorTestCase):
                     "max_autotune_gemm_backends": "TRITON",
                 }
             )
+            if TEST_XPU:
+                options["max_autotune_gemm_backends"] = "ATEN"
         f = torch.compile(
             f_ref,
             options=options,
@@ -1139,10 +1144,9 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B, offs)
         self.assertEqual(C, C_ref)
 
-    def test_grouped_gemm_doubly_non_contiguous(self):
+    def test_grouped_gemm_doubly_non_contiguous(self, device):
         # Verify that doubly-non-contiguous inputs (neither stride is 1)
         # are rejected by _grouped_mm_validate_inputs.
-        device = "cuda"
         dtype = torch.bfloat16
         k = 32
         ngroups = 5
@@ -1222,6 +1226,7 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    @skipXPU
     # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
         CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
@@ -1637,7 +1642,7 @@ class TestMixedDtypesLinearCuda(TestCase):
                 atol,
             )
 
-instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':
