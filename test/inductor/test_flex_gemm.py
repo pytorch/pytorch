@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import importlib
+import itertools
 import math
 import struct
 import sys
@@ -2025,7 +2026,7 @@ class TestFlexGemmAnalysis(TestCase):
 class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_supported_op_names_match_dense_scope(self):
         self.assertEqual(
-            _SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm/scaled_mm"
+            _SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm/scaled_mm/grouped_mm"
         )
 
     def test_scaled_mm_requires_functional_api(self):
@@ -2083,6 +2084,155 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, expected)
         torch.testing.assert_close(aux, expected_aux)
+
+    @staticmethod
+    def makeGroupedMm(seqlens=(24, 0, 40), k=32, n=16, device="cpu"):
+        """Return bf16 MoE-forward operands (x, w_t, offs) for ``sum(seqlens)`` tokens."""
+        offs = torch.tensor(seqlens, device=device).cumsum(0).to(torch.int32)
+        x = torch.randn(sum(seqlens), k, device=device, dtype=torch.bfloat16)
+        w = torch.randn(len(seqlens), n, k, device=device, dtype=torch.bfloat16)
+        return x, w.transpose(-2, -1), offs
+
+    @parametrize(
+        "case",
+        (
+            ("functional", torch.nn.functional.grouped_mm),
+            ("private", torch._grouped_mm),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_grouped_mm_default_backend_eager_matches_reference(self, case):
+        import torch.nn.functional as F
+
+        _, gemm_op = case
+        x, w_t, offs = self.makeGroupedMm()
+
+        actual = flex_gemm(
+            gemm_op, (x, w_t), lambda acc: acc.relu(), gemm_kwargs={"offs": offs}
+        )
+
+        torch.testing.assert_close(actual, F.grouped_mm(x, w_t, offs=offs).relu())
+
+    def test_grouped_mm_compiled_carries_offs_as_tensor_operand(self):
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import flex_gemm_hop
+
+        graphs = []
+
+        def record_backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"offs": offs},
+            )
+
+        x, w_t, offs = self.makeGroupedMm()
+        actual = torch.compile(fn, backend=record_backend, fullgraph=True)(x, w_t, offs)
+
+        torch.testing.assert_close(actual, F.grouped_mm(x, w_t, offs=offs).relu())
+        (graph,) = graphs
+        (hop_node,) = graph.graph.find_nodes(op="call_function", target=flex_gemm_hop)
+        self.assertIs(hop_node.args[0], torch.ops.aten._grouped_mm.default)
+        self.assertEqual(len(hop_node.args[2]), 3)
+        self.assertTrue(all(isinstance(arg, torch.fx.Node) for arg in hop_node.args[2]))
+        self.assertEqual(hop_node.args[3], {})
+        body = getattr(graph, hop_node.args[1].target)
+        (gemm_node,) = body.graph.find_nodes(
+            op="call_function", target=torch.ops.aten._grouped_mm.default
+        )
+        self.assertEqual(len(gemm_node.args), 3)
+
+    def test_grouped_mm_rejects_unsupported_forms(self):
+        import torch.nn.functional as F
+
+        x, w_t, offs = self.makeGroupedMm()
+        cases = (
+            (
+                "bias",
+                F.grouped_mm,
+                (x, w_t),
+                {"offs": offs, "bias": x[:1, :16]},
+                "bias",
+            ),
+            (
+                "out_dtype",
+                F.grouped_mm,
+                (x, w_t),
+                {"offs": offs, "out_dtype": torch.float32},
+                "out_dtype",
+            ),
+            ("no_offs", F.grouped_mm, (x, w_t), {}, "offs=None"),
+            (
+                "3d_a",
+                F.grouped_mm,
+                (x.view(2, 32, 32), w_t.transpose(0, 1)[:2]),
+                {"offs": offs},
+                "3-D A",
+            ),
+            (
+                "2d_b",
+                F.grouped_mm,
+                (x.transpose(0, 1), x),
+                {"offs": offs},
+                "weight-gradient",
+            ),
+            (
+                "scaled",
+                torch._scaled_grouped_mm,
+                (x, w_t),
+                {"offs": offs},
+                "scaled grouped GEMMs",
+            ),
+        )
+        for name, gemm_op, gemm_args, gemm_kwargs, error in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(NotImplementedError, error):
+                    flex_gemm(
+                        gemm_op, gemm_args, lambda acc: acc, gemm_kwargs=gemm_kwargs
+                    )
+        with self.assertRaisesRegex(RuntimeError, "gemm_kwargs={'offs': offs}"):
+            flex_gemm(
+                torch.ops.aten._grouped_mm.default, (x, w_t, offs), lambda acc: acc
+            )
+
+    def test_grouped_mm_quack_pinned_config_rejects_varlen_gaps(self):
+        import torch.nn.functional as F
+
+        x, w_t, offs = self.makeGroupedMm()
+        residual = torch.randn(x.shape[0], w_t.shape[-1], dtype=torch.bfloat16)
+
+        def tile_capture(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                lambda acc: acc + residual,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": False}},
+            )
+
+        def grouped_reduce(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                lambda acc: (acc, acc.float().view(x.shape[0], -1, 8).sum(-1)),
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": False}},
+            )
+
+        for fn, error in (
+            (tile_capture, "captured tensors of the full"),
+            (grouped_reduce, "grouped reductions or grouped-main"),
+        ):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaisesRegex(
+                    Exception, f"grouped_mm \\(varlen\\) .*{error}"
+                ):
+                    torch.compile(fn, backend="inductor", fullgraph=True)(x, w_t, offs)
 
     def test_fake_tensor_mode_tuple_aux_returns_fake_tensors(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -8695,6 +8845,166 @@ class TestFlexGemmFastMathDevice(FlexGemmTestCase):
 
 
 instantiate_device_type_tests(TestFlexGemmFastMathDevice, globals(), only_for="cuda")
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
+    """MoE-forward ``F.grouped_mm`` through QuACK's varlen-M path."""
+
+    K, N = 256, 384
+
+    def makeGroupedMm(self, seqlens, device, *, total_m=None):
+        """Return (x, w_t, offs) where ``offs`` are int32 end offsets over ``seqlens``."""
+        offs = torch.tensor(seqlens, device=device).cumsum(0).to(torch.int32)
+        x = self.makeTensor(total_m or sum(seqlens), self.K, device=device)
+        w = self.makeTensor(len(seqlens), self.N, self.K, device=device)
+        return x, w.transpose(-2, -1), offs
+
+    def groupedReference(self, x, w_t, offs, epilogue_fn):
+        """Per-group fp64 GEMM plus epilogue over the rows ``offs`` covers."""
+        starts = [0, *offs.tolist()]
+        acc = torch.cat(
+            [
+                x[start:end].double() @ w_t[group].double()
+                for group, (start, end) in enumerate(itertools.pairwise(starts))
+            ]
+        )
+        return epilogue_fn(acc)
+
+    def assertGroupedMmMatches(self, actual, x, w_t, offs, epilogue_fn):
+        import torch.nn.functional as F
+
+        valid = offs[-1].item()
+        expected = self.groupedReference(x, w_t, offs, epilogue_fn)
+        eager = epilogue_fn(F.grouped_mm(x, w_t, offs=offs))[:valid]
+        self.assertEqual(actual.shape, (x.shape[0], self.N))
+        self.assertEqual(actual.dtype, eager.dtype)
+        self.assertTrue(actual[:valid].isfinite().all())
+        self.assertMatchesLowPrecisionEager(actual[:valid], eager, expected, self.K)
+
+    def assertGroupedMmQuackCode(self, code):
+        self.assertIn("flex_gemm_runtime", code)
+        self.assertIn("cu_seqlens_m=", code)
+        self.assertNotIn("extern_kernels._grouped_mm(", code)
+
+    @parametrize(
+        "case",
+        (
+            # An empty group and groups that are not tile multiples.
+            ("ragged", (200, 0, 130, 182), None),
+            # Rows past offs[-1] are ignored by both grouped_mm and QuACK.
+            ("tail_rows", (256, 96, 0, 32), 512),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_grouped_mm_silu_matches_reference(self, device, case):
+        import torch.nn.functional as F
+
+        _, seqlens, total_m = case
+        x, w_t, offs = self.makeGroupedMm(seqlens, device, total_m=total_m)
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                F.silu,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
+        )
+
+        self.assertGroupedMmQuackCode(code)
+        self.assertGroupedMmMatches(actual, x, w_t, offs, F.silu)
+
+    def test_grouped_mm_captures_and_aux_match_reference(self, device):
+        import torch.nn.functional as F
+
+        x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
+        bias = torch.randn(self.N, device=device, dtype=torch.float32)
+        scale = torch.rand(x.shape[0], device=device, dtype=torch.float32) + 0.5
+        gain = torch.tensor(1.5, device=device, dtype=torch.float32)
+
+        def epilogue_fn(acc):
+            shifted = acc * scale[:, None] + bias[None, :]
+            return (F.gelu(shifted) * gain).to(acc.dtype), shifted
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
+        )
+
+        self.assertGroupedMmQuackCode(code)
+        for kind in ("'row'", "'col'", "'scalar'"):
+            self.assertIn(kind, code)
+        self.assertIn("aux_outs=(", code)
+        self.assertGroupedMmMatches(
+            actual, x, w_t, offs, lambda acc: epilogue_fn(acc)[0]
+        )
+        self.assertGroupedMmMatches(aux, x, w_t, offs, lambda acc: epilogue_fn(acc)[1])
+
+    def test_grouped_mm_tuned_matches_reference(self, device):
+        import torch.nn.functional as F
+
+        x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        with self.limitEpiModAutotune():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
+            )
+
+        self.assertGroupedMmQuackCode(code)
+        self.assertIn("config=", code)
+        self.assertGroupedMmMatches(actual, x, w_t, offs, torch.relu)
+
+    def test_grouped_mm_tile_capture_falls_back(self, device):
+        import torch.nn.functional as F
+
+        x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
+        residual = self.makeTensor(x.shape[0], self.N, device=device)
+
+        def epilogue_fn(acc):
+            return (acc + residual).relu()
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
+        )
+
+        self.assertIn("extern_kernels._grouped_mm(", code)
+        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
+
+
+instantiate_device_type_tests(TestFlexGemmGroupedMmDevice, globals(), only_for="cuda")
 
 
 @skipIfNoCuteDSL
