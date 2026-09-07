@@ -8,6 +8,7 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 from __future__ import annotations
 
 import dataclasses
+import functools
 import importlib.util
 from typing import Any, TYPE_CHECKING
 
@@ -24,7 +25,13 @@ from torch.utils._ordered_set import OrderedSet
 
 from ... import config, ir
 from ...ir import IRNode, TensorBox
-from ...lowering import empty_strided, process_subgraph_nodes, register_lowering, view
+from ...lowering import (
+    constant_pad_nd,
+    empty_strided,
+    process_subgraph_nodes,
+    register_lowering,
+    view,
+)
 from ...utils import _IntLike, ceildiv
 from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape_equal
 from .configs import flex_gemm_search_space
@@ -83,8 +90,16 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
         graph_module.recompile()
 
 
-class QuackScaledMmUnsupported(NotImplementedError):
+class QuackFallbackUnsupported(NotImplementedError):
     """Request ordinary lowering before FlexGEMM mutates the graph or realizes IR."""
+
+
+class QuackScaledMmUnsupported(QuackFallbackUnsupported):
+    """Scaled-mm contract QuACK's block-scaled main loop does not cover."""
+
+
+class QuackGroupedMmUnsupported(QuackFallbackUnsupported):
+    """Grouped-mm contract QuACK's varlen-M path does not cover."""
 
 
 def has_flex_gemm_quack() -> bool:
@@ -93,9 +108,14 @@ def has_flex_gemm_quack() -> bool:
 
 
 # QuACK epilogue captures, aux outputs and local reductions are validated for
-# these 2-D, bias-free GEMMs only.
+# these 2-D, bias-free GEMMs only; grouped_mm additionally rejects the
+# features QuACK's varlen-M path lacks (see quack_grouped_mm_contract).
 QUACK_EPILOGUE_FEATURE_OPS = frozenset(
-    (torch.ops.aten.mm.default, torch.ops.aten._scaled_mm_v2.default)
+    (
+        torch.ops.aten.mm.default,
+        torch.ops.aten._scaled_mm_v2.default,
+        torch.ops.aten._grouped_mm.default,
+    )
 )
 
 _BLOCKWISE_1X16 = torch.nn.functional.ScalingType.BlockWise1x16.value
@@ -202,6 +222,60 @@ def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledC
                 "FlexGEMM NVFP4 TensorWise scales must be scalar Float32 tensors"
             )
     return QuackBlockScaledContract(format_name, gemm_inputs, tensorwise_scales)
+
+
+def quack_grouped_mm_contract(
+    gemm_fx_node: torch.fx.Node,
+) -> tuple[tuple[torch.fx.Node, torch.fx.Node], torch.fx.Node]:
+    """Resolve the varlen-M grouped GEMM operands or request ordinary lowering.
+
+    QuACK's varlen path is the MoE forward form: k-major bf16/fp16 A
+    ``[total_m, K]``, per-group B ``[E, K, N]`` and int32 ``offs[E]`` end offsets,
+    which the runtime turns into ``cu_seqlens_m = [0, *offs]``.
+    """
+    normalized = normalize_function(
+        torch.ops.aten._grouped_mm.default,
+        gemm_fx_node.args,
+        gemm_fx_node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if normalized is None:
+        raise AssertionError("aten._grouped_mm arguments must bind to its schema")
+    call = normalized.kwargs
+    mat_a, mat_b, offs = call["input"], call["mat2"], call["offs"]
+    if offs is None or call["bias"] is not None or call["out_dtype"] is not None:
+        raise QuackGroupedMmUnsupported(
+            "FlexGEMM QUACK grouped_mm requires offs and no bias or out_dtype"
+        )
+    a_meta, b_meta, offs_meta = (node.meta["val"] for node in (mat_a, mat_b, offs))
+    if (
+        a_meta.ndim != 2
+        or a_meta.stride(-1) != 1
+        or b_meta.ndim != 3
+        or a_meta.dtype not in (torch.bfloat16, torch.float16)
+        or b_meta.dtype is not a_meta.dtype
+        or offs_meta.dtype is not torch.int32
+    ):
+        raise QuackGroupedMmUnsupported(
+            "FlexGEMM QUACK grouped_mm supports only bf16/fp16 k-major 2-D A "
+            "[total_m, K], 3-D B [E, K, N] and int32 offs"
+        )
+    return (mat_a, mat_b), offs
+
+
+def flex_gemm_cu_seqlens_benchmark_input(
+    node: IRNode, total_m: _IntLike
+) -> torch.Tensor:
+    """Build evenly spaced ``[0, ..., total_m]`` boundaries for autotune benchmarks."""
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+    return torch.linspace(
+        0,
+        sizevars.optimization_hint(total_m),
+        sizevars.optimization_hint(node.get_size()[0]),
+        device=node.get_device_or_error(),
+    ).to(torch.int32)
 
 
 def flex_gemm_tensor_placeholders(
@@ -504,32 +578,41 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     mat1_index = op_spec.mat1_index
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
     scaled_mm = gemm_op is torch.ops.aten._scaled_mm_v2.default
+    grouped_mm = gemm_op is torch.ops.aten._grouped_mm.default
+    indexed_output_fallback = None
+    if scaled_mm or grouped_mm:
+        fallback_type = (
+            QuackScaledMmUnsupported if scaled_mm else QuackGroupedMmUnsupported
+        )
+        indexed_output_fallback = fallback_type(
+            f"FlexGEMM QUACK {op_spec.name} does not yet support indexed outputs"
+        )
     try:
         indexed_store = flex_gemm_indexed_output_plan(
             *flex_gemm_output_values(subgraph.graph_module)
         )
     except NotImplementedError as exc:
-        if scaled_mm:
-            raise QuackScaledMmUnsupported(
-                "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
-            ) from exc
+        if indexed_output_fallback is not None:
+            raise indexed_output_fallback from exc
         raise
-    if scaled_mm and indexed_store is not None:
-        raise QuackScaledMmUnsupported(
-            "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
-        )
+    if indexed_output_fallback is not None and indexed_store is not None:
+        raise indexed_output_fallback
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
     ]
     placeholder_args = dict(zip(placeholders, args, strict=True))
-    if gemm_op is torch.ops.aten._scaled_mm_v2.default:
+    blockscaled = None
+    mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
+    offs_node = None
+    if scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
         gemm_nodes = blockscaled.gemm_inputs
         mainloop_scale_nodes = blockscaled.tensorwise_scales
         alpha, beta = 1.0, 0.0
+    elif grouped_mm:
+        gemm_nodes, offs_node = quack_grouped_mm_contract(gemm_fx_node)
+        alpha, beta = 1.0, 0.0
     else:
-        blockscaled = None
-        mainloop_scale_nodes = ()
         unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(
             ["alpha", "beta"]
         )
@@ -610,6 +693,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
+    if grouped_mm and (
+        epilogue_analysis.required_geometries
+        or outputs.local_reduce is not None
+        or outputs.main_transform is not None
+    ):
+        raise QuackGroupedMmUnsupported(
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped "
+            "reductions or grouped-main outputs"
+        )
     indexed_output = outputs.indexed_output
     indexed_input = None
     if indexed_output is not None:
@@ -662,6 +754,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM generic main outputs support only floating-point and bool dtypes"
         )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
+    cu_seqlens_input_nodes = []
+    if offs_node is not None:
+        # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
+        # the buffer instead of the runtime allocating during CUDA graph capture.
+        cu_seqlens_input_nodes.append(
+            ir.TemplateBuffer.realize_template_input(
+                constant_pad_nd(placeholder_args[offs_node], [1, 0])
+            )
+        )
     output_stride = ir.convert_shape_to_inductor(output_meta.stride())
     if main_transform is not None:
         # Grouped main outputs use TMA stores, whose outer stride must preserve
@@ -705,6 +806,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ]
     input_nodes: list[IRNode] = []
     gemm_input_indices = append_flex_gemm_template_inputs(input_nodes, gemm_input_nodes)
+    cu_seqlens_indices = append_flex_gemm_template_inputs(
+        input_nodes, cu_seqlens_input_nodes
+    )
     epilogue_arg_indices = append_flex_gemm_template_inputs(
         input_nodes, epilogue_input_nodes
     )
@@ -733,6 +837,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             output_size,
         ),
     )
+    if grouped_mm and "tile" in epilogue_arg_kinds:
+        raise QuackGroupedMmUnsupported(
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support captured "
+            "tensors of the full [total_m, N] output shape"
+        )
     epimod_source = materialize_flex_gemm_epimod(
         subgraph.graph_module,
         epilogue_analysis,
@@ -807,6 +916,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         quack_config_constraints=tuple(sorted(quack_config_constraints.items())),
         quack_config=None,
+        cu_seqlens_index=cu_seqlens_indices[0] if cu_seqlens_indices else None,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         aux_out_indices=aux_out_indices,
@@ -848,6 +958,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         for index, input_node in enumerate(input_nodes)
         if isinstance(input_node, ir.ReinterpretView)
     }
+    for index in cu_seqlens_indices:
+        input_gen_fns[index] = functools.partial(
+            flex_gemm_cu_seqlens_benchmark_input, total_m=output_size[0]
+        )
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",
         choices,
@@ -890,7 +1004,12 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             return lower_quack_flex_gemm(
                 body_gemm_op, subgraph, args, gemm_kwargs, kernel_options
             )
-        except QuackScaledMmUnsupported as error:
+        except QuackFallbackUnsupported as error:
+            if (
+                isinstance(error, QuackGroupedMmUnsupported)
+                and "config" in kernel_options
+            ):
+                raise
             fallback_reason = str(error)
             log_flex_gemm_artifact(
                 "fallback",
