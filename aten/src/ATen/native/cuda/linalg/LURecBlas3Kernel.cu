@@ -198,7 +198,7 @@ void trailing_matrix_update(
 }
 
 // Argmax Abs helpers {
-constexpr void AGGREGATE_ARGMAX(auto& val, auto& idx, auto& other_val, auto& other_idx) {
+constexpr void AGGREGATE_ARGMAX(auto& val, auto& idx, const auto& other_val, const auto& other_idx) {
   if ((other_val > val) || (other_val == val && other_idx < idx)) {
     val = other_val;
     idx = other_idx;
