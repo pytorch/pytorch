@@ -21,6 +21,7 @@ from torch.profiler._trace_validator import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -251,6 +252,8 @@ class TestTraceValidatorRules(TestCase):
     These tests verify rule logic using hand-crafted event dictionaries.
     No profiling or device operations — runs on any machine.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     # --- _check_nccl_metadata ---
 
@@ -573,6 +576,8 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     Instantiated per device type via ``instantiate_device_type_tests``.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skip(
         "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
     )
@@ -616,6 +621,8 @@ class TestTraceValidatorE2ECUDA(_TraceValidatorE2EMixin, TestCase):
     They use CUDA-specific profiling payloads including multi-stream
     and CUDA event synchronization.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     _trace_dir: str = ""
     _payloads: dict = {}
