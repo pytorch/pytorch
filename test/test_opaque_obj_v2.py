@@ -1178,12 +1178,21 @@ def forward(self, x_1, cfg_1):
         x = TensorWithCounter(a, b, counter, size)
 
         import io
+        import pickle
 
         buf = io.BytesIO()
         pickler = GuardsStatePickler({id(x): x}, {}, {}, buf)
-        func, args = pickler.reducer_override(x)
+        # The reduce tuple's tail may carry pickle STATE (guard-traversed
+        # tensor attributes travel there); only the (func, args) head rebuilds
+        # the object.
+        reduced = pickler.reducer_override(x)
+        func, args = reduced[0], reduced[1]
         obj = func(*args)
         self.assertIsInstance(obj, torch.Tensor)
+        # And the contract that matters: the full pickle round-trips.
+        pickler.dump(x)
+        out = pickle.loads(buf.getvalue())
+        self.assertIsInstance(out, torch.Tensor)
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):

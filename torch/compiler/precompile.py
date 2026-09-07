@@ -14,6 +14,7 @@ import typing
 
 from torch._precompile import (
     Capture,
+    capture,
     DynamoTracer,
     load,
     MakeFxTracer,
@@ -52,6 +53,7 @@ del typing  # not part of the public surface
 # its __module__ is "torch.compiler". It is re-exported here only so
 # ``torch.compiler.precompile.PrecompileError`` also resolves.
 __all__ = [
+    "capture",
     "load",
     "Capture",
     "MakeFxTracer",
