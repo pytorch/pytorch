@@ -391,10 +391,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
+    explicit_swap_ab = (
+        explicit_config is not None and explicit_config.get("swap_ab") is True
+    )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
-        expand_epimod_prepare_softmax_online,
         flex_gemm_indexed_output_plan,
         flex_gemm_output_values,
         gemm_node as flex_gemm_node,
@@ -491,8 +493,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ),
         lowering_name=subgraph.name,
     )
-    # Normalize supported online-softmax forms before shared analysis.
-    expand_epimod_prepare_softmax_online(subgraph.graph_module)
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module, gemm_fx_node)
     log_flex_gemm_artifact(
         "analysis",
@@ -642,6 +642,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         float(beta),
         epilogue_arg_kinds,
         fast_math=fast_math,
+        swap_ab=explicit_swap_ab,
         mainloop_scale_count=mainloop_scale_count,
     )
     log_flex_gemm_artifact(
@@ -685,7 +686,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         store_finalize=epimod_source.local_reduce_store_finalize,
         prepass_combine=epimod_source.local_reduce_prepass_combine,
         prepass_finalize=epimod_source.local_reduce_prepass_finalize,
+        reduce_planes=epimod_source.local_reduce_planes,
+        fragment_reduced=epimod_source.local_reduce_fragment_reduced,
     )
+    quack_config_constraints = {} if explicit_config is None else dict(explicit_config)
+    if epimod_source.local_reduce_fragment_reduced:
+        # Fragment partials are lowered for the unswapped accumulator geometry.
+        quack_config_constraints["swap_ab"] = False
     template_config = FlexGemmEpilogueConfig(
         epilogue_name=epimod_source.name,
         epilogue_source=epimod_source.source,
@@ -699,11 +706,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 blockscaled.format, *gemm_input_indices[2:]
             )
         ),
-        quack_config_constraints=(
-            tuple(sorted(explicit_config.items()))
-            if explicit_config is not None
-            else ()
-        ),
+        quack_config_constraints=tuple(sorted(quack_config_constraints.items())),
         quack_config=None,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
