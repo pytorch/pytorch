@@ -15,6 +15,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_assert_async.h>
+#include <ATen/ops/amax.h>
+#include <ATen/ops/amin.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
 #include <ATen/ops/binary_cross_entropy_with_logits_native.h>
@@ -347,6 +350,13 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  if (target.numel() > 0) {
+    // Use amin/amax rather than aminmax because DTensor has no sharding strategy for aminmax.
+    at::_assert_async(
+        (at::amin(target) >= 0).logical_and_(at::amax(target) <= 1),
+        "all elements of target should be between 0 and 1");
+  }
+
   auto log_sigmoid_input = at::log_sigmoid(input);
   if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
       // pos_weight need to be broadcasted, thus mul(target) is not inplace.
