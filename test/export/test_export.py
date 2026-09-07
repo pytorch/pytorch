@@ -98,9 +98,9 @@ from torch.testing._internal.custom_tensor import (
     ConstantExtraMetadataTensor,
     CustomTensorPlainOut,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     register_constant,
@@ -2635,26 +2635,6 @@ graph():
         self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
-
-    @requires_cuda_and_triton
-    def test_export_raw_triton_kernel_non_strict_error(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.empty_like(x)
-                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
-                return out
-
-        args = (
-            torch.randn(3, device="cuda"),
-            torch.randn(3, device="cuda"),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Raw Triton kernel calls are not supported by non-strict torch.export",
-        ):
-            export(M(), args, strict=False)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
@@ -10928,99 +10908,6 @@ def forward(self, b_a_buffer, x):
                 continue
             self.assertEqual(
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
-            )
-
-    @requires_cuda_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_dim(self):
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 2, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_cuda_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_scandim(self):
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_cuda_and_triton
-    def test_export_associative_scan_lifted_buffers(self):
-        if "cpp_runtime_nonstrict" in self.id():
-            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
-
-        device = torch.device("cuda")
-        combine_mode = "pointwise"
-
-        class A(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
-
-            def forward(self):
-                return self.buffer.cos()
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = A()
-
-            def combine_fn(self, x, y):
-                return (x + y) * self.a()
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        inp = torch.ones(3, 10, 2, device=device)
-        ep = export(M(), (inp,))
-        epm = ep.module()
-
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
-
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
-                1,
             )
 
     # associative_scan is not supported by the cpp (NativeRT) runtime yet
@@ -19351,6 +19238,112 @@ def forward(self, x):
                     {"x": torch.randn(4, 4, 4, device=device_type)},
                     strict=False,
                 ).module()
+
+    @onlyAccelerator
+    @requires_triton()
+    def test_export_raw_triton_kernel_non_strict_error(self, device):
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
+
+    @onlyAccelerator
+    @requires_triton()
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_dim(self, device):
+        combine_mode = "pointwise"
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 2, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @onlyAccelerator
+    @requires_triton()
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_scandim(self, device):
+        combine_mode = "pointwise"
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @onlyAccelerator
+    @requires_triton()
+    def test_export_associative_scan_lifted_buffers(self, device):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
+        combine_mode = "pointwise"
+
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = A()
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.a()
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        inp = torch.ones(3, 10, 2, device=device)
+        ep = export(M(), (inp,))
+        epm = ep.module()
+
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
+                1,
+            )
 
 
 instantiate_device_type_tests(TestExportDevice, globals(), allow_xpu=True)
