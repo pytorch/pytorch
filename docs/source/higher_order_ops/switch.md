@@ -131,8 +131,7 @@ print(ep)
 
 `torch.switch` supports `torch.vmap` as long as the index is not batched, i.e. all batch
 elements take the same branch. The switch is then preserved, the batching is pushed into the
-branches and only the selected branch runs. A batched index is not supported, because
-running a different branch for every batch element cannot be expressed by a single switch.
+branches and only the selected branch runs. A batched index is not yet supported.
 
 ## Invariants of torch.ops.higher_order.switch
 
