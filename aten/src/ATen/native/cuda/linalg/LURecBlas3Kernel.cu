@@ -501,7 +501,7 @@ batched_panel_register_resident_fused_kernel(
     }
 
     // 5. Scale and rank-1 update (in registers)
-    if (curr_row > i) {
+    if (curr_row > i && abs_max != static_cast<real_t>(0)) {
       rA[i] /= spivrow[i];
       #pragma unroll
       for (int j = i + 1; j < nb; ++j) {
@@ -566,7 +566,7 @@ batched_panel_register_resident_nopiv_fused_kernel(
     linfo = (spivrow[i] == static_cast<scalar_t>(0) && linfo == 0) ? (col_start + i + 1) : linfo;
 
     // 2. Scale and rank-1 update
-    if (tid > i) {
+    if (tid > i && spivrow[i] != static_cast<scalar_t>(0)) {
       rA[i] /= spivrow[i];
       #pragma unroll
       for (int j = i + 1; j < nb; ++j) {
