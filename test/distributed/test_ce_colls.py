@@ -4,13 +4,18 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_ver_atleast_multiprocess,
 )
-from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    requires_cuda_p2p_access,
+    run_tests,
+)
 
 
 if not dist.is_available() or not dist.is_nccl_available():
@@ -24,6 +29,8 @@ if not dist.is_available() or not dist.is_nccl_available():
 @requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
 @requires_cuda_p2p_access()
 class NCCLCopyEngineCollectives(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str | None:
         return "nccl"
@@ -61,7 +68,7 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
 
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
-    def test_ce_allgather(self):
+    def test_ce_allgather(self, device):
         group_name, prof = self._init()
         dtype = torch.float
         numel = 1024 * 1024 * 32
@@ -105,7 +112,7 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
 
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
-    def test_ce_alltoall(self):
+    def test_ce_alltoall(self, device):
         group_name, prof = self._init()
         dtype = torch.float
         numel = 1024 * 1024 * self.world_size
@@ -141,6 +148,8 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
         self.assertEqual(out, out_golden)
         self.assertEqual(out2, out_golden)
 
+
+instantiate_device_type_tests(NCCLCopyEngineCollectives, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
