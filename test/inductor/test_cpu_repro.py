@@ -5009,6 +5009,10 @@ class CPUReproTests(TestCase):
         x = torch.rand(4, 5)
         self.common(f, (x,))
 
+    @unittest.skipIf(
+        IS_S390X,
+        "s390x uses a lot of FMA, and combined it can lead to considerable difference in result",
+    )
     def test_broadcast_scalar_cpp_tile_2d_kernel(self):
         # Based on detectron2_maskrcnn backbone (conv2d -> max_pool2d)
         s0 = 12
