@@ -98,13 +98,13 @@ TF32 is opt-in on ROCm. Until they are set explicitly,
 ``torch.backends.cudnn.conv.fp32_precision`` is ``"none"``, so convolutions
 run in full fp32 by default.
 
-Deterministic convolution interacts with TF32. MIOpen < 3.6.1 has no
-deterministic TF32 backward solver, so setting
-``torch.backends.cudnn.deterministic = True`` there forces convolutions back
-to full fp32 and ``allow_tf32`` has no effect. MIOpen >= 3.6.1 lifts that
-restriction and TF32 is permitted alongside deterministic, but MIOpen may
-still pick a non-TF32 solver because its deterministic filter excludes some
-TF32 kernels.
+Deterministic convolution interacts with TF32. MIOpen < 3.6.1 can hang while
+auto-tuning the grouped xdlops solvers in deterministic mode once TF32 narrows
+the candidate list, so setting ``torch.backends.cudnn.deterministic = True``
+there forces convolutions back to full fp32 and ``allow_tf32`` has no effect.
+MIOpen >= 3.6.1 fixes that hang (ROCm/rocm-libraries#10240) and TF32 is
+permitted alongside deterministic, but MIOpen may still pick a non-TF32 solver
+because its deterministic filter excludes some TF32 kernels.
 
 The TF32 path on MI300 has hardware-level numerical differences from the
 NVIDIA implementation; see :ref:`tf32_on_mi300` for details.
