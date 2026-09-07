@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
@@ -39,6 +38,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     parametrize,
     run_tests,
     serialTest,
@@ -50,6 +50,38 @@ from torch.testing._internal.common_utils import (
 
 
 class TestIndexing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_errors_index_copy(self):
+        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
+        device = "cpu"
+
+        idx_dim = 8
+        tgt_dim = 5
+        batch_dim = 3
+
+        # Too large of an index
+        a = torch.randn(batch_dim, tgt_dim, device=device)
+        idx = torch.full((idx_dim,), tgt_dim, device=device)
+        c = torch.zeros(batch_dim, idx_dim, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (negative indices)
+        idx = torch.full((idx_dim,), -1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (very negative indices) - they should be unsupported even
+        # when support for negative indices is implemented for index_copy_
+        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+
+class TestIndexingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -1060,8 +1092,9 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
-        # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
-        # and verifies consistency with CPU result
+        # Checks the issue (originally found on cuda) on gpu:
+        # https://github.com/pytorch/pytorch/issues/39227, and verifies
+        # consistency with the CPU result.
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
         indices = [torch.tensor([0, 1, 2, 3]), torch.tensor([1])]
@@ -1069,13 +1102,13 @@ class TestIndexing(TestCase):
         values0d = torch.tensor(1.0)
         values1d = torch.tensor([1.0])
 
-        out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values0d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(4, 3, 2)
         t_dev = t.to(device)
@@ -1089,13 +1122,13 @@ class TestIndexing(TestCase):
         values1d = torch.tensor([-1.0, -2.0])
         values2d = torch.tensor([[-1.0, -2.0]])
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
     @skipMPS
@@ -1162,12 +1195,12 @@ class TestIndexing(TestCase):
         indices = [torch.tensor([0, 1])]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
-        out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+        out_gpu = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
         self.assertTrue(not t1.is_contiguous())
         self.assertTrue(not t2.is_contiguous())
 
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
     @skipMPS
@@ -1192,18 +1225,18 @@ class TestIndexing(TestCase):
         values2d = torch.randn(n, 1)
 
         for val in (value0d, value1d, values2d):
-            out_cuda = func(t_dev, indices_dev, val.to(device))
+            out_gpu = func(t_dev, indices_dev, val.to(device))
             out_cpu = func(t, indices, val)
-            self.assertEqual(out_cuda.cpu(), out_cpu)
+            self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros((5, 4))
         t_dev = t.to(device)
         indices = torch.tensor([1, 4, 3])
         indices_dev = indices.to(device)
         val = torch.randn(4)
-        out_cuda = func1(t_dev, indices_dev, val.to(device))
+        out_gpu = func1(t_dev, indices_dev, val.to(device))
         out_cpu = func1(t, indices, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(2, 3, 4)
         ind = torch.tensor([0, 1])
@@ -1215,9 +1248,9 @@ class TestIndexing(TestCase):
             func(t.to(device), ind.to(device), val.to(device))
 
         val = torch.randn(2, 3, 1)
-        out_cuda = func1(t.to(device), ind.to(device), val.to(device))
+        out_gpu = func1(t.to(device), ind.to(device), val.to(device))
         out_cpu = func1(t, ind, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
@@ -1341,6 +1374,8 @@ class TestIndexing(TestCase):
         torch.long,
         torch.bool,
         torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
@@ -1799,7 +1834,7 @@ class TestIndexing(TestCase):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
     @onlyAccelerator
-    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+    def test_gpu_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
@@ -1991,31 +2026,6 @@ class TestIndexing(TestCase):
             target.index_copy_(0, idx, source)
             self.assertEqual(target.item(), source.item())
 
-    @onlyCPU
-    def test_errors_index_copy(self, device):
-        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
-        idx_dim = 8
-        tgt_dim = 5
-        batch_dim = 3
-
-        # Too large of an index
-        a = torch.randn(batch_dim, tgt_dim, device=device)
-        idx = torch.full((idx_dim,), tgt_dim, device=device)
-        c = torch.zeros(batch_dim, idx_dim, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (negative indices)
-        idx = torch.full((idx_dim,), -1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (very negative indices) - they should be unsupported even
-        # when support for negative indices is implemented for index_copy_
-        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -2073,6 +2083,156 @@ class TestIndexing(TestCase):
                 for _ in range(3):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
+
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
+    def test_index_put_non_accumulate_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            for i in range(3):
+                m = random.randint(10, 20)
+                elems = random.randint(20000, 30000)
+                values = torch.rand(elems, device=device)
+                indices = torch.randint(m, (elems,), device=device)
+                input = torch.rand(m, device=device)
+                output = input.index_put((indices,), values, accumulate=False)
+
+                input_list = input.tolist()
+                indices_list = indices.tolist()
+                values_list = values.tolist()
+                for i, v in zip(indices_list, values_list):
+                    input_list[i] = v
+
+                self.assertEqual(output, input_list)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex() and device != "meta":
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
+        # Make sure that the result stays 0-dim while applied to
+        # a 0-dim input
+        x = torch.tensor(1, dtype=dtype, device=device)
+        self.assertEqual(0, x.index_fill(0, index, -1).dim())
+        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
+
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyNativeDeviceTypes
+    @dtypes(
+        *all_types_complex_float8_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    @dtypesIfXPU(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
+    def test_index_select(self, device, dtype):
+        num_src, num_out = 3, 5
+
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(
+                size_arg,
+                dtype=dtype,
+                device=device,
+                low=None,
+                high=None,
+                noncontiguous=not contig,
+            )
+
+        def ref_index_select(src, dim, idx):
+            # some types not supported on numpy
+            not_np_dtypes = (
+                torch.bfloat16,
+                torch.float8_e5m2,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            )
+            if dtype in not_np_dtypes:
+                src = src.float()
+            out = torch.from_numpy(
+                np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim)
+            )
+            if dtype in not_np_dtypes:
+                out = out.to(device=device, dtype=dtype)
+            return out
+
+        for src_contig, idx_contig in product([True, False], repeat=2):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor(
+                        (num_out,),
+                        dtype=torch.int64,
+                        device=device,
+                        low=0,
+                        high=num_src,
+                        noncontiguous=not idx_contig,
+                    )
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor(
+                (num_out,),
+                dtype=idx_type,
+                device=device,
+                low=0,
+                high=num_src,
+                noncontiguous=False,
+            )
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = (
+            (
+                make_tensor(size_s, dtype=dtype, device=device),
+                torch.zeros(size_i, dtype=torch.int64, device=device),
+            )
+            for size_s, size_i in product([(), (1,)], repeat=2)
+        )
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
+
+    def test_index_add_empty_index_1d(self, device):
+        dst = torch.arange(5, dtype=torch.float, device=device)
+        index = torch.empty((0,), dtype=torch.int64, device=device)
+        source = torch.empty((0,), dtype=torch.float, device=device)
+
+        out = dst.clone()
+        out.index_add_(0, index, source, alpha=2.0)
+
+        self.assertEqual(out, dst)
+
+    def test_index_add_empty_index_2d(self, device):
+        dst = torch.arange(12, dtype=torch.float, device=device).reshape(3, 4)
+        index = torch.empty((0,), dtype=torch.int64, device=device)
+        source = torch.empty((0, 4), dtype=torch.float, device=device)
+
+        out = dst.clone()
+        out.index_add_(0, index, source, alpha=2.0)
+
+        self.assertEqual(out, dst)
+
+
+class TestIndexingCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @serialTest()
     @onlyCUDA
@@ -2210,132 +2370,6 @@ class TestIndexing(TestCase):
         out.index_add_(0, idx, src)
         self.assertEqual(out.cpu(), expected)
 
-    @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
-    def test_index_put_non_accumulate_deterministic(self, device) -> None:
-        with DeterministicGuard(True):
-            for i in range(3):
-                m = random.randint(10, 20)
-                elems = random.randint(20000, 30000)
-                values = torch.rand(elems, device=device)
-                indices = torch.randint(m, (elems,), device=device)
-                input = torch.rand(m, device=device)
-                output = input.index_put((indices,), values, accumulate=False)
-
-                input_list = input.tolist()
-                indices_list = indices.tolist()
-                values_list = values.tolist()
-                for i, v in zip(indices_list, values_list):
-                    input_list[i] = v
-
-                self.assertEqual(output, input_list)
-
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here
-    def test_index_fill(self, device, dtype):
-        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
-        index = torch.tensor([0], device=device)
-        x.index_fill_(1, index, 0)
-        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
-        if not x.is_complex() and device != "meta":
-            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
-                x.index_fill_(1, index, 1 + 1j)
-        # Make sure that the result stays 0-dim while applied to
-        # a 0-dim input
-        x = torch.tensor(1, dtype=dtype, device=device)
-        self.assertEqual(0, x.index_fill(0, index, -1).dim())
-        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
-
-    # The test fails for zero-dimensional tensors on XLA
-    @onlyNativeDeviceTypes
-    @dtypes(
-        *all_types_complex_float8_and(
-            torch.half,
-            torch.bool,
-            torch.bfloat16,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        )
-    )
-    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
-    def test_index_select(self, device, dtype):
-        num_src, num_out = 3, 5
-
-        def make_arg(batch_sizes, n, dim, contig):
-            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(
-                size_arg,
-                dtype=dtype,
-                device=device,
-                low=None,
-                high=None,
-                noncontiguous=not contig,
-            )
-
-        def ref_index_select(src, dim, idx):
-            # some types not supported on numpy
-            not_np_dtypes = (
-                torch.bfloat16,
-                torch.float8_e5m2,
-                torch.float8_e5m2fnuz,
-                torch.float8_e4m3fn,
-                torch.float8_e4m3fnuz,
-            )
-            if dtype in not_np_dtypes:
-                src = src.float()
-            out = torch.from_numpy(
-                np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim)
-            )
-            if dtype in not_np_dtypes:
-                out = out.to(device=device, dtype=dtype)
-            return out
-
-        for src_contig, idx_contig in product([True, False], repeat=2):
-            for other_sizes in ((), (4, 5)):
-                for dim in range(len(other_sizes)):
-                    src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor(
-                        (num_out,),
-                        dtype=torch.int64,
-                        device=device,
-                        low=0,
-                        high=num_src,
-                        noncontiguous=not idx_contig,
-                    )
-                    out = torch.index_select(src, dim, idx)
-                    out2 = ref_index_select(src, dim, idx)
-                    self.assertEqual(out, out2)
-
-        for idx_type in (torch.int32, torch.int64):
-            other_sizes = (3, 2)
-            dim = 1
-            src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor(
-                (num_out,),
-                dtype=idx_type,
-                device=device,
-                low=0,
-                high=num_src,
-                noncontiguous=False,
-            )
-            out = torch.index_select(src, dim, idx)
-            out2 = ref_index_select(src, dim, idx)
-            self.assertEqual(out, out2)
-
-        # Create the 4 possible combinations of scalar sizes for index / source
-        scalars = (
-            (
-                make_tensor(size_s, dtype=dtype, device=device),
-                torch.zeros(size_i, dtype=torch.int64, device=device),
-            )
-            for size_s, size_i in product([(), (1,)], repeat=2)
-        )
-        for source, idx in scalars:
-            out = source.index_select(0, idx)
-            self.assertEqual(out.item(), source.item())
-
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -2372,7 +2406,9 @@ class TestIndexing(TestCase):
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-class NumpyTests(TestCase):
+class NumpyTestsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.0]]], device=device)
 
@@ -2608,9 +2644,13 @@ class NumpyTests(TestCase):
 
 
 instantiate_device_type_tests(
-    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
+instantiate_device_type_tests(TestIndexingCUDA, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    NumpyTestsDevice, globals(), except_for="meta", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
