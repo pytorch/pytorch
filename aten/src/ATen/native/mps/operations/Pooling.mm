@@ -338,16 +338,19 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   const auto dilation_expanded = dilation_opt.has_value() ? copy_and_maybe_expand(dilation_opt.value(), pooling_dims)
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
-  check_non_empty_dims(input, /*first_dim=*/leading_dims == 2 ? 1 : 0, op_name.c_str(), "input");
-
   std::vector<int64_t> output_pooling_size(pooling_dims);
   for (const auto dim : c10::irange(pooling_dims)) {
     output_pooling_size[dim] = pooling_output_shape<int64_t>(input.size(leading_dims + dim),
-                                                            kernel_size_expanded[dim],
-                                                            padding_expanded[dim],
-                                                            stride_expanded[dim],
-                                                            dilation_expanded[dim],
-                                                            ceil_mode);
+                                                             kernel_size_expanded[dim],
+                                                             padding_expanded[dim],
+                                                             stride_expanded[dim],
+                                                             dilation_expanded[dim],
+                                                             ceil_mode);
+  }
+
+  // pool2d/pool3d_shape_check below check the non-batch dimensions themselves
+  if (pooling_dims == 1) {
+    check_non_empty_dims(input, /*first_dim=*/leading_dims == 2 ? 1 : 0, op_name.c_str(), "input");
   }
 
   std::vector<int64_t> output_size(dims);
