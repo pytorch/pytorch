@@ -12,7 +12,12 @@ from torch.export import Dim, draft_export, export
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -21,6 +26,8 @@ from torch.utils._pytree import tree_leaves
 
 
 class TestDraftExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
