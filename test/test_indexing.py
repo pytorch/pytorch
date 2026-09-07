@@ -2230,6 +2230,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out, dst)
 
     @serialTest()
+    @onlyAccelerator
     @toleranceOverride(
         {
             torch.float32: tol(atol=1e-5, rtol=1e-3),
@@ -2310,6 +2311,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out, expected)
 
     @serialTest()
+    @onlyAccelerator
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_fast_path: this shape does
@@ -2356,6 +2358,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out.cpu(), expected)
 
     @serialTest()
+    @onlyAccelerator
     @dtypes(torch.complex64, torch.complex128, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # Originally test added for CUDA implementation:
