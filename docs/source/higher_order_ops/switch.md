@@ -137,8 +137,9 @@ print(ep)
   express. All branches are evaluated on the whole batch and their outputs are selected
   element-wise. Every branch must therefore be safe to evaluate for every batch element: in
   particular, branches that are not selected can still contribute `inf` or `nan` to the
-  gradients. Non-tensor branch outputs cannot be selected element-wise, so `int` leaves must
-  have the same value in every branch.
+  gradients. Selecting element-wise also requires the branches to agree on the dtype, device
+  and shape of every output, and it cannot merge non-tensor leaves: `None` leaves pass
+  through, but `int` leaves must have the same value in every branch.
 
 ## Invariants of torch.ops.higher_order.switch
 
