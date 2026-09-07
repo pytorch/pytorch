@@ -67,12 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import (
-    DictKeySetVariable,
-    FrozensetVariable,
-    OrderedSetVariable,
-    SetVariable,
-)
+from .sets import DictKeySetVariable, FrozensetVariable, OrderedSetVariable, SetVariable
 
 
 if TYPE_CHECKING:
