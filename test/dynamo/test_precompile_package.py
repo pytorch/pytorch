@@ -337,9 +337,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.device_type, "cuda")
 
         # "mtia" is not in CHECK_GPUS, so had it survived it would have waved
-        # this artifact onto any host; what survives instead is gated.
+        # this artifact onto any host; what survives instead is gated. The
+        # GPU-name check keys off the artifact (self), not the host, so pin a
+        # recorded GPU on this one -- the build host may have none -- and load
+        # it against a different one.
+        artifact = dataclasses.replace(entry.system_info, gpu_name="Artifact GPU")
         other_host = dataclasses.replace(entry.system_info, gpu_name="Some Other GPU")
-        entry.system_info.check_compatibility(other_host, "mtia")
+        artifact.check_compatibility(other_host, "mtia")
         self.assertIn(entry.device_type, SystemInfo.CHECK_GPUS)
         # The GPU-name check is what a surviving "mtia" would have skipped; it
         # sits behind the availability check, so a cpu host reaches it mocked.
@@ -347,7 +351,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             mock.patch.object(torch.cuda, "is_available", return_value=True),
             self.assertRaisesRegex(RuntimeError, "different GPU"),
         ):
-            entry.system_info.check_compatibility(other_host, entry.device_type)
+            artifact.check_compatibility(other_host, entry.device_type)
 
     @parametrize("interference", sorted(_BINDING_STACK_CASES))
     def test_unload_rebinds_a_global_through_the_binding_stack(self, interference):
