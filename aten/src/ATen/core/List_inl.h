@@ -366,11 +366,8 @@ void List<T>::unsafeSetElementType(TypePtr t) {
 
 }
 
-// ListElementReference and T are unrelated types, so common_reference's
-// "simple common reference" rule never applies; indirectly_readable needs
-// common_reference_with<ListElementReference&&, T&>, which some standard
-// libraries' fallback satisfies via the proxy's conversion operator and
-// others don't. This specialization makes the outcome the same everywhere.
+// Lets indirectly_readable's common_reference_with<ListElementReference&&,
+// T&> hold consistently, instead of depending on each stdlib's own fallback.
 namespace std {
 template <
     class T,
