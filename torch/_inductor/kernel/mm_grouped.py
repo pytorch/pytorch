@@ -6,12 +6,14 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
-from ..ir import ChoiceCaller, Layout, TensorBox
+from ..codegen.wrapper import PythonWrapperCodegen
+from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -24,14 +26,17 @@ from ..utils import (
     _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
+    GPU_ALIGN_BYTES,
     has_free_symbols,
     is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     check_supported_striding,
     load_kernel_template,
@@ -128,6 +133,131 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
     name="grouped_gemm_cutedsl",
     source=load_kernel_template("cutedsl_mm_grouped"),
 )
+
+flydsl_grouped_mm_template = FlyDSLTemplate(
+    name="grouped_gemm_flydsl",
+    source=load_kernel_template("flydsl_grouped_mm"),
+)
+
+
+def use_flydsl_grouped_mm_template(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: TensorBox | None,
+    bias: TensorBox | None,
+    is_nonzero: bool,
+    scaled: bool,
+) -> bool:
+    """Return whether grouped MM can use the FlyDSL gfx950 template."""
+    if scaled:
+        return False
+    if not is_nonzero or not use_flydsl_gemm_template(layout):
+        return False
+    if not (a_is_2d and not b_is_2d and offs is not None):
+        return False
+    if bias is not None:
+        return False
+    if mat_a.get_dtype() != mat_b.get_dtype() or layout.dtype != mat_a.get_dtype():
+        return False
+
+    sizevars = V.graph.sizevars
+    mat1_stride = mat_a.get_stride()
+    mat2_stride = mat_b.get_stride()
+    out_stride = layout.stride
+    if not sizevars.statically_known_equals(mat1_stride[-1], 1):
+        return False
+    if not sizevars.statically_known_equals(out_stride[-1], 1):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-1], 1):
+        return False
+
+    dtype = mat_a.get_dtype()
+    if dtype not in (torch.float16, torch.bfloat16):
+        return False
+
+    n = mat_b.get_size()[-1]
+    k = mat_a.get_size()[-1]
+    g = mat_b.get_size()[0]
+    if not sizevars.statically_known_equals(mat1_stride[-2], k):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-2], n):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-3], k * n):
+        return False
+    if not sizevars.statically_known_equals(out_stride[-2], n):
+        return False
+
+    itemsize = dtype.itemsize
+    aligned_byte_offsets = (
+        mat_a.get_layout().offset * itemsize,
+        mat_b.get_layout().offset * itemsize,
+    )
+    if (
+        is_unaligned(mat_a)
+        or is_unaligned(mat_b)
+        or any(
+            not sizevars.statically_known_multiple_of(offset, GPU_ALIGN_BYTES)
+            for offset in aligned_byte_offsets
+        )
+    ):
+        return False
+
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
+    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
+    if m_static is None or n_static is None or k_static is None or g_static is None:
+        return False
+    if n_static % 32 != 0 or k_static % 32 != 0:
+        return False
+    tensor_spans = (
+        (m_static, k_static, k_static),
+        (g_static, k_static * n_static, k_static * n_static),
+        (m_static, n_static, n_static),
+    )
+    return all(
+        _fits_int32_buffer_span(rows, stride, cols, itemsize)
+        for rows, stride, cols in tensor_spans
+    )
+
+
+def get_flydsl_grouped_mm_template_kwargs(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+) -> list[dict[str, object]]:
+    """Return supported FlyDSL template configs for grouped matrix multiplication."""
+    from ..heuristics.template.flydsl import (
+        get_grouped_gemm_configs,
+        is_grouped_gemm_config_valid_for_shape,
+    )
+
+    dtype = mat_a.get_dtype()
+    n = mat_b.get_size()[-1]
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[-1])
+    if m_static is None or n_static is None or k_static is None:
+        return []
+
+    from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
+
+    dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
+    return [
+        {
+            **gemm_config,
+            "GEMM_DTYPE_ID": dtype_id,
+            "GEMM_M": m_static,
+            "GEMM_N": n_static,
+            "GEMM_K": k_static,
+        }
+        for gemm_config in get_grouped_gemm_configs()
+        if is_grouped_gemm_config_valid_for_shape(
+            m_static, n_static, k_static, dtype_id, gemm_config
+        )
+    ]
 
 
 def has_grouped_mm_triton_support() -> bool:
@@ -485,6 +615,25 @@ def _tuned_grouped_mm_common(
                 layout=layout,
                 **kwargs,
                 **asdict(config),
+            )
+
+    if use_flydsl_grouped_mm_template(
+        mat_a,
+        mat_b,
+        layout,
+        a_is_2d,
+        b_is_2d,
+        offs,
+        bias,
+        is_nonzero,
+        scaled,
+    ):
+        for flydsl_kwargs in get_flydsl_grouped_mm_template_kwargs(mat_a, mat_b):
+            flydsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **flydsl_kwargs,
             )
 
     if (

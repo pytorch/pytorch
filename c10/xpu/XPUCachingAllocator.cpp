@@ -3,6 +3,7 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -106,23 +107,19 @@ struct Block {
 
 bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
   if (a->size != b->size) {
     return a->size < b->size;
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Represents a contiguous virtual memory segment mapped for allocation.
