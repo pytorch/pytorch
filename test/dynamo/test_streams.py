@@ -466,6 +466,25 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
+    def test_stream_none(self):
+        def fn(x):
+            with torch.cuda.stream(None):
+                return x + 1
+
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_stream_context_none_as_input(self):
+        def fn(x, ctx):
+            with ctx:
+                return x + 1
+
+        x = torch.ones(2)
+        ctx = torch.cuda.stream(None)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, ctx), fn(x, ctx)
+        )
+
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
