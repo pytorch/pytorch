@@ -2518,24 +2518,32 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         opt_a = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
         opt_b = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        # Two distinct static shapes give region A two entries, so the clear
+        # has to drop both and decrement the total by their full count.
         opt_a(torch.randn(3))
+        opt_a(torch.randn(4))
         opt_b(torch.randn(3))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
         code = f.__code__
         region_a = opt_a._isolate_recompiles_id
         region_b = opt_b._isolate_recompiles_id
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 2)
 
         with self.assertRaisesRegex(TypeError, "expected a code object"):
             _clear_cache_entries_for_region(f, region_a)
         with self.assertRaisesRegex(ValueError, "default cache region"):
             _clear_cache_entries_for_region(code, -1)
 
+        total_before = _get_total_cache_entry_count(code)
         _clear_cache_entries_for_region(code, region_a)
+        # The whole region is gone and the total drops by exactly its size: a
+        # dropped C++ count decrement or a partial clear fails here.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 0)
+        self.assertEqual(_get_total_cache_entry_count(code), total_before - 2)
         # The neighbour region is untouched and still serves its entry.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
         opt_b(torch.randn(3))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
         # Clearing an already-empty region is a no-op.
         _clear_cache_entries_for_region(code, region_a)
 
