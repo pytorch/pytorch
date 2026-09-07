@@ -22155,7 +22155,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.all),
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
     ),
     ReductionOpInfo(
@@ -22167,7 +22167,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.any),
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
     ),
     ReductionOpInfo(
@@ -22180,13 +22180,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22202,16 +22197,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64],
-            ),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22225,18 +22212,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -22245,18 +22220,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
@@ -22269,15 +22232,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_reduction_numpy(np.count_nonzero),
         skips=(
             # FIXME: count_nonzero does not accept keepdim kwarg
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_unsorted_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_offbounds_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_single_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_unsorted_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_offbounds_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
         ),
     ),
     ReductionOpInfo(
@@ -22300,27 +22263,19 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type=('cuda', 'xpu'), dtypes=[torch.float32]),
             # FIXME: mean does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
             # Skipped on XPU because complex mean with extremal values (Inf/NaN) exhibits backend-dependent
             # IEEE-754 behavior that differs from the CPU reference.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='xpu', dtypes=[torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128],
-            ),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a
             # result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
@@ -22343,22 +22298,17 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Failure in testing nodes' autodifferentiation.
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: prod reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          device_type='cuda', dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22378,20 +22328,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         generate_args_kwargs=generate_std_var_kwargs,
         skips=(
             # FIXME: cannot specify keepdim without dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=(torch.float16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22413,8 +22358,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
@@ -22434,15 +22379,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         generate_args_kwargs=generate_std_var_kwargs,
         skips=(
             # FIXME: cannot specify keepdim without dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_large_input'),
             # NotImplementedError: The operator 'aten::var.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22464,8 +22409,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
@@ -22486,25 +22431,20 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=prod_numpy,
         skips=(
             # FIXME: prod does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: prod reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: prod does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16, torch.complex64]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=[torch.uint8, torch.float16, torch.complex64]),
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float16]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128, torch.int8, torch.int16, torch.int32, torch.int64]),
         ),
     ),
     ReductionOpInfo(
@@ -22526,22 +22466,17 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_default_keepdim'),
             # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22561,19 +22496,14 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: nansum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: flaky test so skipped instead of xfailed
             # possibly bad low precision reference in numpy
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
@@ -22588,8 +22518,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ref=reference_hash_tensor,
         skips=(
             # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # aten::hash_tensor hit the vmap fallback which is currently disabled
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
@@ -22600,7 +22530,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # Error: The operator 'aten::hash_tensor.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
             # NotImplementedError: aten::hash_tensor.out
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_default', device_type='mps'),
         )
     ),
     OpInfo(
@@ -26299,7 +26229,7 @@ python_ref_db = [
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype',
                 dtypes=[torch.uint8]),
         ),
     ),
@@ -26310,14 +26240,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26329,14 +26254,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26347,7 +26267,7 @@ python_ref_db = [
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_result_dtype',
                 dtypes=[torch.uint8]),
         ),
     ),
@@ -26357,21 +26277,21 @@ python_ref_db = [
         skips=(
             # FIXME: count_nonzero does not accept keepdim kwarg
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_dim_default_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_none_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_single_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_single_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_multi_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_multi_keepdim'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_dim_multi_unsorted_keepdim'),
             # FIXME: dim=[] reduces all dimensions
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26382,14 +26302,9 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26399,22 +26314,17 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=(torch.float16,)),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_ref_duplicate_values',
                 dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
@@ -26430,25 +26340,20 @@ python_ref_db = [
             # FIXME: doesn't test out behavior properly for this operator
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
             # FIXME: mean reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=[torch.float16]),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions',
+                unittest.skip("Skipped!"), 'TestReductionsDevice',
                 'test_ref_duplicate_values',
                 dtypes=[torch.float16]),
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                 dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
 
         ),
     ),
@@ -26485,18 +26390,13 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input',
                 dtypes=[torch.float16, torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64, torch.int8, torch.int16, torch.int32, torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26506,14 +26406,14 @@ python_ref_db = [
         skips=(
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty'),
             DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+                unittest.expectedFailure, 'TestReductionsDevice', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_small_input'),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
+                unittest.skip("Skipped!"), 'TestReductionsDevice', 'test_ref_duplicate_values'),
         ),
     ),
     PythonRefInfo(
