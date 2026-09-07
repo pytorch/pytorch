@@ -18576,13 +18576,13 @@ class MiscTestsCUDA(torch._inductor.test_case.TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable(self, device):
+    def test_torch_cudnn_is_acceptable(self):
         def fn(x):
             if torch.backends.cudnn.is_acceptable(tensor=x):
                 return x + 1
             return x
 
-        x = torch.rand(4).to(device)
+        x = torch.rand(4).to("cuda")
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
@@ -18590,7 +18590,7 @@ class MiscTestsCUDA(torch._inductor.test_case.TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
-    def test_torch_cudnn_is_acceptable_bad_inputs(self, device):
+    def test_torch_cudnn_is_acceptable_bad_inputs(self):
         def fn1(x):
             if torch.backends.cudnn.is_acceptable("invalid"):
                 return x + 1
@@ -18604,20 +18604,20 @@ class MiscTestsCUDA(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(
             AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
         ):
-            x1 = torch.rand(4).to(device)
+            x1 = torch.rand(4).to("cuda")
             opt_fn1 = torch.compile(fn1, backend="eager", fullgraph=True)
             res1 = opt_fn1(x1)
 
         with self.assertRaisesRegex(
             AssertionError, "Expect 1 input to cudnn.is_acceptable"
         ):
-            x2 = torch.rand(4).to(device)
+            x2 = torch.rand(4).to("cuda")
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
     @onlyCUDA
     @torch._dynamo.config.patch(recompile_limit=999)
-    def test_legacy_cuda_tensor(self, device):
+    def test_legacy_cuda_tensor(self):
         typs = [
             torch.cuda.FloatTensor,
             torch.cuda.DoubleTensor,
@@ -18688,7 +18688,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             9,
             0,
         ):
-            self.skipTest("requires Hopper+ (SM >= 9.0) for TMA, or XPU")
+            self.skipTest("requires Hopper+ (SM >= 9.0) for TMA")
 
         @triton.jit
         def tma_copy_kernel(
