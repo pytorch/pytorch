@@ -532,6 +532,77 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_lookup_races_with_concurrent_clear(self):
+        """
+        The local cache root is shared by every process of this user, so another
+        process can clear it while we are looking a key up. That must degrade to
+        a miss rather than raising out of the compile.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        real_listdir = os.listdir
+        aotautograd_dir = AOTAutogradCache._get_tmp_dir()
+
+        def clear_then_listdir(path, *args, **kwargs):
+            # Stands in for another process rmtree'ing the cache root after we
+            # resolved the subdir for this key but before we list it. Only the
+            # AOTAutograd cache root is raced; everything else lists normally.
+            if os.fspath(path).startswith(aotautograd_dir):
+                AOTAutogradCache.clear()
+            return real_listdir(path, *args, **kwargs)
+
+        with patch("torch._inductor.codecache.os.listdir", clear_then_listdir):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_save_races_with_concurrent_clear(self):
+        """
+        A local cache write can lose the same race, with the key's subdir going
+        away between write_atomic()'s temp write and its rename. Skipping the
+        save is not a bypass and must not fail the compile, even in strict mode.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        def raise_missing_dir(path, content, make_dirs=False, encode_utf_8=False):
+            raise FileNotFoundError(f"No such file or directory: {path}")
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        with patch.object(autograd_cache, "write_atomic", raise_missing_dir):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")

@@ -1456,15 +1456,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     def _write_to_local_cache(key: str, content: bytes) -> None:
         """Write an entry to the local cache."""
         subdir = AOTAutogradCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
 
         # Use a hash of the serialized entry to get a unique file
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         log.info("Writing AOTAutograd cache entry to %s", path)
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
 
     @staticmethod
     def _find_unpicklable_field(
@@ -1551,6 +1549,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
+            return None
+        except OSError as e:
+            # The local cache root is shared across processes, so a concurrent
+            # AOTAutogradCache.clear() can remove the key's subdir between the
+            # temp write and the rename inside write_atomic(). Losing that race
+            # means we don't save the entry; it is not a bypass, and it is not a
+            # reason to fail the compile, so don't re-raise even in strict mode.
+            log.warning("AOTAutograd cache unable to write compiled graph: %s", e)
             return None
         except Exception as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)
