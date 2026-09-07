@@ -287,14 +287,16 @@ struct IndexReduceOp {
     return a + b;
   }
 
+  // Qualified so these resolve to the NaN-propagating c10 helpers rather than
+  // metal::min/max, which drop NaN and would disagree with CPU.
   template <typename T>
   static T amin(T a, T b) {
-    return min(a, b);
+    return ::c10::metal::min(a, b);
   }
 
   template <typename T>
   static T amax(T a, T b) {
-    return max(a, b);
+    return ::c10::metal::max(a, b);
   }
 };
 
