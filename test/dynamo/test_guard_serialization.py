@@ -168,9 +168,9 @@ def keep_globals_length(func):
 
 
 def keep_annotations(func):
-    # A guard reading an annotation value rebakes a TYPE_MATCH on the
-    # __annotations__ dict and an ID_MATCH on the value type; the by-value
-    # function reconstruction must restore __annotations__ for both to hold.
+    # A guard reading an annotation value reads through the __annotations__
+    # dict and bakes an ID_MATCH on the value, so the by-value function
+    # reconstruction must restore __annotations__.
     func.__annotations__ = {"x": int}
 
     @functools.wraps(func)
