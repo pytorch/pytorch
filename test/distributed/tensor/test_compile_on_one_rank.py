@@ -529,6 +529,33 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(graph0, graph1)
         self.assertNotIn("index=0", graph0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_rng_ops_compile_under_coor(self):
+        # Not a divergence -- a hard failure, and it covers every RNG op, not just
+        # dropout:
+        #
+        #   RuntimeError: prims::inductor_seed() Expected a value of type 'Device'
+        #                 for argument 'device' but instead found type 'Node'
+        #
+        # replace_random/replace_randint run on the joint graph, where a factory's
+        # device operand is still a coor current_device() node (respecialize does not
+        # concretise those until post_grad). The handler takes that kwarg straight off
+        # the matched node and hands it to inductor_prims.seed(), whose schema declares
+        # Device and cannot accept a graph node. rand, randn and randint all reach it.
+        cases = {
+            "dropout": lambda x: torch.nn.functional.dropout(x, 0.5, True).sum(),
+            "rand_like": lambda x: (torch.rand_like(x) * x).sum(),
+            "randn_like": lambda x: (torch.randn_like(x) + x).sum(),
+            "randint_like": lambda x: (torch.randint_like(x, 0, 10) * x).sum(),
+        }
+        for name, fn in cases.items():
+            with self.subTest(op=name):
+                torch._dynamo.reset()
+                x = torch.randn(64, 128, device="cuda", requires_grad=True)
+                out = torch.compile(fn, backend="inductor")(x)
+                self.assertEqual(out.shape, torch.Size([]))
+
     # ---- tensor guards must be rank-invariant without losing their teeth ----
     # A TENSOR_MATCH guard records the device as two independent pieces: the type
     # rides in the DispatchKeySet, and the index is a separate scalar rendered as
