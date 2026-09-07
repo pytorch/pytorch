@@ -1,12 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -256,7 +256,8 @@ __global__ void atomicadaptivemaxgradinput(
   int d = o_plane / osizeT;     // output slice/feature
 
   // gradInput offset by slice/feature
-  T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
+  const int64_t isize_dhw = static_cast<int64_t>(isizeT) * isizeH * isizeW;
+  T *gradInput_d = gradInput + d * isize_dhw;
   // gradOutput offset by slice/feature and frame/otme
   const T *gradOutput_dt = gradOutput + o_plane*osizeH*osizeW;
   // indices offset by slice/feature and frame/otme
@@ -270,7 +271,8 @@ __global__ void atomicadaptivemaxgradinput(
       const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      gpuAtomicAddNoReturn(&(gradInput_d[argmax]), grad_delta);
+      // numel is the slice the base pointer addresses, not the whole tensor.
+      fastAtomicAdd(gradInput_d, argmax, isize_dhw, grad_delta, true);
     }
   }
 }

@@ -5,12 +5,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/macros/Macros.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -192,6 +192,8 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
+  const int64_t gradInput_numel =
+      static_cast<int64_t>(obatch) * features * itime * iheight * iwidth;
   int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t oRow = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -223,13 +225,18 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
     }
     int64_t maxIndex = indicesData[out_index];
     if (maxIndex != -1) {
+      int64_t gradInputIndex;
       if (!channels_last) {
-        gpuAtomicAddNoReturn(&gradInputData[slice * itime  * iheight * iwidth + maxIndex],
-          gradOutputData[out_index]);
+        gradInputIndex = slice * itime * iheight * iwidth + maxIndex;
       } else {
-        gpuAtomicAddNoReturn(&gradInputData[((int64_t) batch * itime * iheight * iwidth + maxIndex) * features + channel],
-          gradOutputData[out_index]);
+        gradInputIndex = ((int64_t) batch * itime * iheight * iwidth + maxIndex) * features + channel;
       }
+      fastAtomicAdd(
+        gradInputData,
+        gradInputIndex,
+        gradInput_numel,
+        gradOutputData[out_index],
+        true);
     }
   }
 }
