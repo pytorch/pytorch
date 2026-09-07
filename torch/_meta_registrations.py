@@ -1734,6 +1734,7 @@ def linalg_qr_piv_meta(
     # --- Allocate Q ---
     if compute_q:
         Q_shape = list(A.shape)
+        # pyrefly: ignore [unsupported-operation]
         Q_shape[-1] = k if reduced_mode else m
         Q = A.new_empty(Q_shape)
         Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
@@ -1743,6 +1744,7 @@ def linalg_qr_piv_meta(
     # --- Allocate R ---
     R_shape = list(A.shape)
     # Same logic as linalg_qr_meta
+    # pyrefly: ignore [unsupported-operation]
     R_shape[-2] = k if reduced_mode or not compute_q else m
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))

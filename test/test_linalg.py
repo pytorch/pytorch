@@ -4220,6 +4220,7 @@ class TestLinalg(TestCase):
     @onlyCPU
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfTorchDynamo("fails in tracing scipy.linalg.qr")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_piv_vs_scipy(self, device, dtype):
         """
@@ -4235,6 +4236,11 @@ class TestLinalg(TestCase):
         ]
         torch_to_scipy_mode = {'reduced': 'economic', 'complete': 'full'}
         for size in sizes_to_test:
+            if size[0] == 0 and version.parse(scipy.__version__) < version.parse('1.14.1'):
+                # scipy < 1.14.1 has a bug in geqp3's LDA computation for
+                # zero-row matrices (LDA=0 instead of max(1, M)), which LAPACK
+                # rejects during the workspace-size query.
+                continue
             t = torch.randn(size, device=device, dtype=dtype)
             np_t = t.cpu().numpy()
             for mode in ['reduced', 'complete']:
