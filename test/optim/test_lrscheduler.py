@@ -880,15 +880,15 @@ class TestLRScheduler(TestCase):
         return lrs
 
     def test_nested_sequentiallr_does_not_skip_an_epoch(self):
-        nested_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        nested_scheduler = SequentialLR(
-            nested_optimizer,
+        two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        two_level_scheduler = SequentialLR(
+            two_level_optimizer,
             [
                 SequentialLR(
-                    nested_optimizer,
+                    two_level_optimizer,
                     [
-                        ConstantLR(nested_optimizer, factor=0.5, total_iters=2),
-                        ConstantLR(nested_optimizer, factor=0.2, total_iters=10),
+                        ConstantLR(two_level_optimizer, factor=0.5, total_iters=2),
+                        ConstantLR(two_level_optimizer, factor=0.2, total_iters=10),
                     ],
                     milestones=[2],
                 ),
@@ -896,48 +896,50 @@ class TestLRScheduler(TestCase):
             milestones=[],
         )
 
-        standalone_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        standalone_scheduler = SequentialLR(
-            standalone_optimizer,
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        # Same schedule as above, with one composite level instead of two.
+        one_level_scheduler = SequentialLR(
+            one_level_optimizer,
             [
-                ConstantLR(standalone_optimizer, factor=0.5, total_iters=2),
-                ConstantLR(standalone_optimizer, factor=0.2, total_iters=10),
+                ConstantLR(one_level_optimizer, factor=0.5, total_iters=2),
+                ConstantLR(one_level_optimizer, factor=0.2, total_iters=10),
             ],
             milestones=[2],
         )
 
-        nested_lrs = self._get_lrs(nested_scheduler)
-        standalone_lrs = self._get_lrs(standalone_scheduler)
-        self.assertEqual(nested_lrs, standalone_lrs)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
+        one_level_lrs = self._get_lrs(one_level_scheduler)
+        self.assertEqual(two_level_lrs, one_level_lrs)
 
     def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
-        nested_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        nested_scheduler = SequentialLR(
-            nested_optimizer,
+        two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        two_level_scheduler = SequentialLR(
+            two_level_optimizer,
             [
                 ChainedScheduler(
                     [
-                        ConstantLR(nested_optimizer, factor=0.5, total_iters=2),
-                        ExponentialLR(nested_optimizer, gamma=0.9),
+                        ConstantLR(two_level_optimizer, factor=0.5, total_iters=2),
+                        ExponentialLR(two_level_optimizer, gamma=0.9),
                     ],
-                    optimizer=nested_optimizer,
+                    optimizer=two_level_optimizer,
                 ),
             ],
             milestones=[],
         )
 
-        standalone_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        standalone_scheduler = ChainedScheduler(
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        # Same schedule as above, with one composite level instead of two.
+        one_level_scheduler = ChainedScheduler(
             [
-                ConstantLR(standalone_optimizer, factor=0.5, total_iters=2),
-                ExponentialLR(standalone_optimizer, gamma=0.9),
+                ConstantLR(one_level_optimizer, factor=0.5, total_iters=2),
+                ExponentialLR(one_level_optimizer, gamma=0.9),
             ],
-            optimizer=standalone_optimizer,
+            optimizer=one_level_optimizer,
         )
 
-        nested_lrs = self._get_lrs(nested_scheduler)
-        standalone_lrs = self._get_lrs(standalone_scheduler)
-        self.assertEqual(nested_lrs, standalone_lrs)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
+        one_level_lrs = self._get_lrs(one_level_scheduler)
+        self.assertEqual(two_level_lrs, one_level_lrs)
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
