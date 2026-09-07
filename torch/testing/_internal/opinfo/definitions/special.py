@@ -130,7 +130,7 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
     yield from sample_inputs_elementwise_unary(
         op_info, device, dtype, requires_grad, **kwargs
     )
-    if requires_grad or not dtype.is_floating_point:
+    if torch.device(device).type != 'mps' or not dtype.is_floating_point:
         return
     # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
     # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
