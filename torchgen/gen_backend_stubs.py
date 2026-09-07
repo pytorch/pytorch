@@ -405,15 +405,19 @@ def error_on_missing_kernels(
     # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
     # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
     # here, then we get a nicer error message. If we miss it, you get a linker error.
-    kernel_defn_regex = rf"(.*){class_name}::\s*([\w\d]*)\("
+    # A structured kernel is defined as `Class::structured_<kernel>::impl(`; count it
+    # under <kernel>, the name the backend index expects.
+    kernel_defn_regex = (
+        rf"(.*){class_name}::\s*(?:structured_([\w\d]+)::impl|([\w\d]*))\("
+    )
     actual_backend_kernel_name_counts = Counter(
         # A bit unwieldy (this could probably be moved into regex),
         # but we don't want to include kernel names that come from function calls,
         # like "return torch_xla::XLANativeFunctions::empty_strided_symint(...)".
         # Easy check is to ignore any lines with colons before the class name.
         [
-            y
-            for (x, y) in re.findall(kernel_defn_regex, backend_defns)
+            structured or plain
+            for (x, structured, plain) in re.findall(kernel_defn_regex, backend_defns)
             if not x.endswith(":")
         ]
     )
