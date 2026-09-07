@@ -194,6 +194,18 @@ class CPUOffloadPolicy(OffloadPolicy):
             and for the copies to overlap with compute. However, the pinned
             memory cannot be used by other processes. Set this to ``False`` if
             you have insufficient CPU memory. (Default: ``True``)
+        offload_after_forward (bool): Whether to stash the sharded parameter
+            back to CPU after forward (freeing device memory during the
+            forward-to-backward window). If ``False``, the sharded parameter
+            is kept on the compute device after forward. (Default: ``True``)
+        offload_after_backward (bool): Whether to offload the sharded
+            parameter and gradient to CPU after backward, so the optimizer
+            step runs on CPU. If ``False``, the sharded parameter and gradient
+            are kept on the compute device after backward, so the optimizer
+            step runs on the compute device (e.g. to use a device-only fused
+            optimizer). (Default: ``True``)
     """
 
     pin_memory: bool = True
+    offload_after_forward: bool = True
+    offload_after_backward: bool = True
