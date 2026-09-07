@@ -6747,7 +6747,18 @@ def normal(
     if layout is not None and layout != torch.strided:
         raise AssertionError(f"layout must be None or torch.strided, got {layout}")
 
-    if not isinstance(std, TensorLike):
+    if isinstance(std, TensorLike):
+        # Mirrors CHECK_NORMAL_TENSOR_STD (aten DistributionTemplates.h). Type
+        # promotion above makes std complex when mean is complex; the values
+        # are still real, so check the real part. _assert_async is
+        # side-effectful so it won't be DCE'd, and is a no-op on meta tensors,
+        # deferring the check to runtime when tracing.
+        real_std = std.real if utils.is_complex_dtype(std.dtype) else std
+        aten._assert_async.msg(
+            torch.all(real_std >= 0),
+            "normal expects all elements of std >= 0.0",
+        )
+    else:
         torch._check(
             std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
         )
