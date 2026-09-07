@@ -3902,7 +3902,7 @@ def nonzero(self):
 
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
-    torch._check(bool(indices), lambda: "at least one index must be provided")
+    torch._check_index(bool(indices), lambda: "at least one index must be provided")
     has_index = any(index is not None for index in indices)
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
@@ -3932,7 +3932,7 @@ def meta_index_Tensor(self, indices):
         else:
             result.append(index)
     indices = result
-    torch._check(
+    torch._check_index(
         len(indices) <= self.ndim,
         lambda: f"too many indices for tensor of dimension {self.ndim} (got {len(indices)})",
     )

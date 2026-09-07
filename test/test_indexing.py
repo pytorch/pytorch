@@ -993,6 +993,23 @@ class TestIndexing(TestCase):
             torch.ops.aten.index_put_.default(source, [None], values)
 
     @onlyCPU
+    @parametrize("index_count", [0, 1, 2, 3])
+    def test_invalid_index_lists_fake(self, device, index_count):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        message = (
+            "at least one index must be provided"
+            if index_count == 0
+            else "too many indices"
+            if index_count > 2
+            else "at least one index tensor must be provided"
+        )
+        with FakeTensorMode():
+            source = torch.empty(2, 2, device=device)
+            with self.assertRaisesRegex(IndexError, message):
+                torch.ops.aten.index.Tensor(source, [None] * index_count)
+
+    @onlyCPU
     def test_index_put_all_none_indices_quantized(self, device):
         source = torch.quantize_per_tensor(
             torch.arange(4, dtype=torch.float32).reshape(2, 2),
