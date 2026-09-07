@@ -4,7 +4,10 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyOn,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -609,10 +612,10 @@ class GraphModule(torch.nn.Module):
 
 
 @xfailIfNoAcceleratorTriton
-class TestDynamoDecompositionsNumerics(TestCase):
+class TestDynamoDecompositionsNumericsDevice(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -861,6 +864,49 @@ class TestDynamoDecompositionsNumerics(TestCase):
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
+    @onlyOn(["cuda", "xpu"])
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv_scalar_value(self, device):
+        """Compiled addcdiv_ with scalar value matches eager on CUDA/XPU.
+
+        Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
+        """
+        torch.manual_seed(42)
+        x = torch.randn(64, 64, device=device)
+        t1 = torch.randn(64, 64, device=device)
+        t2 = torch.randn(64, 64, device=device) + 0.1
+
+        def fn(x, t1, t2):
+            return x.addcdiv_(t1, t2, value=-0.01)
+
+        expected = fn(x.clone(), t1, t2)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(expected, actual)
+
+    @onlyOn(["cuda", "xpu"])
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv_tensor_value(self, device):
+        """Compiled addcdiv_ with tensor value matches eager on CUDA/XPU.
+
+        Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
+        """
+        torch.manual_seed(42)
+        x = torch.randn(64, 64, device=device)
+        t1 = torch.randn(64, 64, device=device)
+        t2 = torch.randn(64, 64, device=device) + 0.1
+        value = torch.tensor(-0.01, device=device)
+
+        def fn(x, t1, t2, value):
+            return x.addcdiv_(t1, t2, value=value)
+
+        expected = fn(x.clone(), t1, t2, value)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(expected, actual)
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_add_scalar_alpha(self, device):
@@ -877,62 +923,8 @@ class TestDynamoDecompositionsNumerics(TestCase):
         self.assertEqual(expected, actual)
 
 
-@xfailIfNoAcceleratorTriton
-class TestDynamoDecompositionsNumericsDevice(TestCase):
-    """Accelerator numerics tests for dynamo decompositions."""
-
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @skipIfCrossRef
-    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    def test_addcdiv_scalar_value(self, device):
-        """Compiled addcdiv_ with scalar value matches eager on accelerators.
-
-        Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
-        """
-        torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device) + 0.1
-
-        def fn(x, t1, t2):
-            return x.addcdiv_(t1, t2, value=-0.01)
-
-        expected = fn(x.clone(), t1, t2)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(expected, actual)
-
-    @skipIfCrossRef
-    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    def test_addcdiv_tensor_value(self, device):
-        """Compiled addcdiv_ with tensor value matches eager on accelerators.
-
-        Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
-        """
-        torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device) + 0.1
-        value = torch.tensor(-0.01, device=device)
-
-        def fn(x, t1, t2, value):
-            return x.addcdiv_(t1, t2, value=value)
-
-        expected = fn(x.clone(), t1, t2, value)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(expected, actual)
-
-
 instantiate_device_type_tests(
-    TestDynamoDecompositionsNumerics, globals(), allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestDynamoDecompositionsNumericsDevice,
-    globals(),
-    only_for=("cuda", "xpu"),
-    allow_xpu=True,
+    TestDynamoDecompositionsNumericsDevice, globals(), allow_xpu=True
 )
 
 if __name__ == "__main__":
