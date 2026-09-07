@@ -880,62 +880,51 @@ class TestLRScheduler(TestCase):
         return lrs
 
     def test_nested_sequentiallr_does_not_skip_an_epoch(self):
+        def make_scheduler(optimizer):
+            """Construct the SequentialLR used at both nesting depths."""
+            return SequentialLR(
+                optimizer,
+                [
+                    ConstantLR(optimizer, factor=0.5, total_iters=2),
+                    ConstantLR(optimizer, factor=0.2, total_iters=10),
+                ],
+                milestones=[2],
+            )
+
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
         two_level_scheduler = SequentialLR(
             two_level_optimizer,
-            [
-                SequentialLR(
-                    two_level_optimizer,
-                    [
-                        ConstantLR(two_level_optimizer, factor=0.5, total_iters=2),
-                        ConstantLR(two_level_optimizer, factor=0.2, total_iters=10),
-                    ],
-                    milestones=[2],
-                ),
-            ],
+            [make_scheduler(two_level_optimizer)],
             milestones=[],
         )
 
         one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        # Same schedule as above, with one composite level instead of two.
-        one_level_scheduler = SequentialLR(
-            one_level_optimizer,
-            [
-                ConstantLR(one_level_optimizer, factor=0.5, total_iters=2),
-                ConstantLR(one_level_optimizer, factor=0.2, total_iters=10),
-            ],
-            milestones=[2],
-        )
+        one_level_scheduler = make_scheduler(one_level_optimizer)
 
         two_level_lrs = self._get_lrs(two_level_scheduler)
         one_level_lrs = self._get_lrs(one_level_scheduler)
         self.assertEqual(two_level_lrs, one_level_lrs)
 
     def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
+        def make_scheduler(optimizer):
+            """Construct the ChainedScheduler used at both nesting depths."""
+            return ChainedScheduler(
+                [
+                    ConstantLR(optimizer, factor=0.5, total_iters=2),
+                    ExponentialLR(optimizer, gamma=0.9),
+                ],
+                optimizer=optimizer,
+            )
+
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
         two_level_scheduler = SequentialLR(
             two_level_optimizer,
-            [
-                ChainedScheduler(
-                    [
-                        ConstantLR(two_level_optimizer, factor=0.5, total_iters=2),
-                        ExponentialLR(two_level_optimizer, gamma=0.9),
-                    ],
-                    optimizer=two_level_optimizer,
-                ),
-            ],
+            [make_scheduler(two_level_optimizer)],
             milestones=[],
         )
 
         one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        # Same schedule as above, with one composite level instead of two.
-        one_level_scheduler = ChainedScheduler(
-            [
-                ConstantLR(one_level_optimizer, factor=0.5, total_iters=2),
-                ExponentialLR(one_level_optimizer, gamma=0.9),
-            ],
-            optimizer=one_level_optimizer,
-        )
+        one_level_scheduler = make_scheduler(one_level_optimizer)
 
         two_level_lrs = self._get_lrs(two_level_scheduler)
         one_level_lrs = self._get_lrs(one_level_scheduler)
