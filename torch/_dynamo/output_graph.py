@@ -2649,6 +2649,9 @@ class OutputGraph(OutputGraphCommon):
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
         current_global_state: dict[str, tuple[Any, bool]] = {}
         self.save_global_state(out=current_global_state)
+        prior_saved_tensors_hooks_error_message = (
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        )
         try:
             # Set to state prior to tracing the graph
             self.tracing_context.global_context.restore_graphstate(prior_global_state)
@@ -2658,6 +2661,12 @@ class OutputGraph(OutputGraphCommon):
             self.tracing_context.global_context.restore_graphstate(
                 GlobalContextCheckpointState(current_global_state)
             )
+            if prior_saved_tensors_hooks_error_message is None:
+                torch._C._autograd._saved_tensors_hooks_enable()
+            else:
+                torch._C._autograd._saved_tensors_hooks_disable(
+                    prior_saved_tensors_hooks_error_message
+                )
 
     def run_compiler_collective(self) -> None:
         tx = self.root_tx
