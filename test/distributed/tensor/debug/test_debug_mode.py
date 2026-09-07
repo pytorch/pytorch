@@ -609,7 +609,7 @@ class TestDTensorDebugMode(TestCase):
       aten::view(t: f32[8, 8, 8], [64, 8])
       aten::t(t: f32[8, 8])
       aten::addmm(t: f32[8], t: f32[64, 8], t: f32[8, 8])
-      aten::view(t: f32[64, 8], [8, 8, 8])
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])
   <method 'sum' of 'torch._C.TensorBase' objects>(t: f32[8, 8, 8])
       aten::sum(t: f32[8, 8, 8])""",
         )

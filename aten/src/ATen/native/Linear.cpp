@@ -16,6 +16,7 @@
 #else
 #include <ATen/ops/_trilinear.h>
 #include <ATen/ops/_trilinear_native.h>
+#include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/bilinear_native.h>
@@ -77,7 +78,10 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
   // Unflatten flattened row dims
   auto result_sizes = c10::SymDimVector{input_sizes.begin(), input_sizes.end()};
   result_sizes.back() = result_flattened.sym_size(1);
-  return result_flattened.view_symint(result_sizes);
+  // result_flattened is a non-escaping temporary, so no differentiable-view alias
+  // tracking is needed; a plain view here sends a later in-place op on the result
+  // through CopySlices, which copies in backward.
+  return at::_unsafe_view_symint(result_flattened, result_sizes);
 }
 
 
