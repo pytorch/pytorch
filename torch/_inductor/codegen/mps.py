@@ -558,6 +558,10 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    # Device that generated kernels are launched on. Subclasses reusing the
+    # Metal-style call plumbing for another device can override this instead of
+    # copying call_kernel().
+    device_type = "mps"
     pexpr = PythonPrinter().doprint
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
@@ -1158,7 +1162,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("mps"),
+            device=torch.device(self.device_type),
             triton=False,
             arg_types=arg_types,
         )
