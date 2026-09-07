@@ -232,13 +232,13 @@ def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
 def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     """
     Build a per-node peak-memory profile of the original graph.
-    Returns None when CUDA is unavailable or the profile can't be built; the
-    pass then runs unconstrained by the memory budget.
+    Returns None when no supported accelerator is available or the profile
+    can't be built; the pass then runs unconstrained by the memory budget.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return None
 
-    _, total_gpu = torch.cuda.mem_get_info()
+    _, total_gpu = torch.accelerator.get_memory_info()
 
     floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
     allowed_peak = max(0, total_gpu - floor_bytes)
