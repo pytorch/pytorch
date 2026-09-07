@@ -6105,6 +6105,12 @@ class Scheduler:
         """Populate node_to_mempool and buff_to_mempool from IR node metadata."""
         self.node_to_mempool.clear()
         self.buff_to_mempool.clear()
+        # Common case: no user CUDA MemPool regions in this graph.
+        # node_to_mempool.get() returns None for missing keys, matching what
+        # explicit None-valued entries would return, so callers are unaffected.
+        if not any(self._get_node_mempool(node) is not None for node in self.nodes):
+            self._mempool_nodes = False
+            return
         for node in self.nodes:
             mempool = self._get_node_mempool(node)
             self.node_to_mempool[node] = mempool

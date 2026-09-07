@@ -110,7 +110,9 @@ def fx_graph_cse(
         return True
 
     def custom_context_key(node: fx.Node) -> tuple[int, int | None, int | None]:
-        custom = node.meta.get("custom", {})
+        custom = node.meta.get("custom")
+        if not custom:
+            return (0, None, None)
         return (
             custom.get("stream", 0),
             custom.get("mempool"),
@@ -175,7 +177,21 @@ def fx_graph_cse(
             n.op == "placeholder"
             or n.op == "output"
             or n.op == "get_attr"
-            or n.is_impure()
+            # do not CSE away mempool markers, nondeterministic ops not covered
+            # by rand_ops above, or ops in the side-effectful set
+            or (
+                n.op == "call_function"
+                and (
+                    n.target in torch.fx.node._side_effectful_functions
+                    or (
+                        isinstance(n.target, torch._ops.OpOverload)
+                        and (
+                            n.target.namespace == "mempool"
+                            or getattr(n.target, "_nondeterministic_seeded", False)
+                        )
+                    )
+                )
+            )
             or get_aten_target(n) in rand_ops
             # aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
