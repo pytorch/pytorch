@@ -1846,7 +1846,10 @@ class FakeTensorMode(TorchDispatchMode):
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
-                with disable_fake_tensor_cache(self):
+                with (
+                    disable_fake_tensor_cache(self),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
@@ -2406,16 +2409,22 @@ class FakeTensorMode(TorchDispatchMode):
         Create a new FakeTensor from the cache entry.
         """
 
-        if entry.is_output_tuple:
-            outputs = [
-                self._get_output_tensor_from_cache_entry(state, output_info, key, args)
-                for output_info in entry.output_infos
-            ]
-            return tuple(outputs)
-        else:
-            return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, args
-            )
+        # Reconstructing a cached FakeTensor may run symbolic checks inside
+        # empty_strided()/set_().  Those checks are cache internals, not user
+        # operations, so they must not be recorded by an active proxy tracer.
+        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+            if entry.is_output_tuple:
+                outputs = [
+                    self._get_output_tensor_from_cache_entry(
+                        state, output_info, key, args
+                    )
+                    for output_info in entry.output_infos
+                ]
+                return tuple(outputs)
+            else:
+                return self._get_output_tensor_from_cache_entry(
+                    state, entry.output_infos[0], key, args
+                )
 
     def _crosscheck_cache_output(
         self,

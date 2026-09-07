@@ -185,7 +185,6 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   const int head_size_og = sizes[3];
   const int seqlen_k = k.size(1);
   const int num_heads_k = k.size(2);
-  TORCH_CHECK(batch_size > 0, "batch size must be positive");
   TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
   TORCH_CHECK(head_size_og <= 512, "FlashAttention on ROCm forward only supports head dimension at most 512");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
@@ -254,6 +253,13 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   at::Tensor atomic_counter;
   if (is_causal) {
     atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
+  }
+
+  // An empty batch has no work: the tensors allocated above are already the correct
+  // empty result, so skip the launch rather than reject it.
+  if (batch_size == 0) {
+    return {out, q_padded, k_padded, v_padded,
+            M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
   }
 
   hipError_t err; // TODO: Error handling

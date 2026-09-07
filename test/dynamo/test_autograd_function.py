@@ -3416,6 +3416,41 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
 
+    def test_reverse_mode_custom_backward_compiled(self):
+        """The custom backward must survive compiling a torch.func reverse-mode
+        transform. https://github.com/pytorch/pytorch/issues/193279
+        """
+
+        class SinWithZeroBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return torch.sin(x)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(*inputs)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.zeros_like(grad)
+
+        def loss(x):
+            return SinWithZeroBackward.apply(x).sum()
+
+        def vjp_fn(x):
+            return torch.func.vjp(loss, x)[1](torch.ones(()))[0]
+
+        x = torch.randn(4)
+        for fn, expected in (
+            (torch.func.grad(loss), torch.zeros(4)),
+            (vjp_fn, torch.zeros(4)),
+            (torch.func.jacrev(SinWithZeroBackward.apply), torch.zeros(4, 4)),
+        ):
+            torch._dynamo.reset()
+            self.assertEqual(fn(x), expected)
+            opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), expected)
+
 
 instantiate_parametrized_tests(AutogradFunctionTests)
 

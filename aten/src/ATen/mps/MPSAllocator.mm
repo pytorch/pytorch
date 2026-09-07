@@ -493,8 +493,7 @@ bool MPSHeapAllocatorImpl::insert_available_buffer(BufferPool& pool, BufferBlock
   bool inserted = pool.available_buffers.insert(buffer_block).second;
   auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
   if (it == pool.available_buffers_by_stream.end()) {
-    it = pool.available_buffers_by_stream
-             .emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>(BufferBlock::Comparator))
+    it = pool.available_buffers_by_stream.emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>())
              .first;
   }
   it->second.insert(buffer_block);
@@ -522,7 +521,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_active_bytes.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
-    buffer_block->event.reset(nullptr);
+    buffer_block->event.reset();
   }
   buffer_block->in_use = false;
   HeapBlock* heap = buffer_block->heap;

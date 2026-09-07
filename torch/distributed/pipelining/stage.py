@@ -13,6 +13,7 @@ import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
+from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
@@ -140,6 +141,18 @@ class _RecvInfo:
 _PP_DIRECTION_GROUP_CACHE: "weakref.WeakKeyDictionary[dist.ProcessGroup, tuple[dist.ProcessGroup, dist.ProcessGroup]]" = weakref.WeakKeyDictionary()
 
 
+def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
+    if dist.get_backend(group) not in {"nccl", "nccl2"}:
+        return
+    warning_once(
+        logger,
+        "Pipeline parallelism is using an eager NCCL communicator. Consider "
+        'creating its process group with backend="nccl-lazy" so peer '
+        "communicators are initialized lazily and traffic to different peers "
+        "can overlap.",
+    )
+
+
 def _build_p2p_direction_groups(
     group: dist.ProcessGroup | None,
 ) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
@@ -226,6 +239,8 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        _warn_if_eager_nccl(group)
 
         # Downstream (data flowing r -> r+1: forward activations) and upstream
         # (r -> r-1: backward gradients) P2P communicators. Auto-enabled when

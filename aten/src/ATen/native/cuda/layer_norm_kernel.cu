@@ -1031,25 +1031,27 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor dbeta_blocks;
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
+    // The kernel writes N columns per row via dg[thread_y * N + thread_x];
+    // dgamma->size(-1) is only the last normalized dim, and is 0 for an
+    // undefined tensor.
     if (dgamma->defined()) {
-      auto options = dgamma->options();
-      dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dgamma_blocks = at::empty({blocks.y * threads.y, N}, dgamma->options());
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
     if (dbeta->defined() && !rms_norm) {
-      auto options = dbeta->options();
-      dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dbeta_blocks = at::empty({blocks.y * threads.y, N}, dbeta->options());
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
+    // sum(0) is flat {N}; the gradient itself may be multi-dim.
     if (dgamma_blocks.defined()) {
-      *dgamma = dgamma_blocks.sum(0);
+      *dgamma = dgamma_blocks.sum(0).view_as(*dgamma);
     }
     if constexpr (!rms_norm){
       if (dbeta_blocks.defined()) {
-        *dbeta = dbeta_blocks.sum(0);
+        *dbeta = dbeta_blocks.sum(0).view_as(*dbeta);
       }
     }
   } else {

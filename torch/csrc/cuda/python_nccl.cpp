@@ -1,16 +1,12 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
-#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
