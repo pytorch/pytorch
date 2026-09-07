@@ -1862,9 +1862,12 @@ class DeviceCachingAllocator {
             // expensive memory freeing operations.
             try_mempool_fallback(
                 params, size, stream, device_id, alloc_size, stats)
-            // Free enough available cached blocks to satisfy alloc and retry
-            // alloc.
-            || (release_available_cached_blocks(params, context) &&
+            // release_available_cached_blocks can call cudaFree (via
+            // release_block), which is illegal during CUDA graph capture; skip
+            // it under capture, matching the release_cached_blocks branch
+            // below.
+            || (C10_LIKELY(!is_capture_context()) &&
+                release_available_cached_blocks(params, context) &&
                 alloc_block(params, false, context, lock))
             // Free all non-split cached blocks and retry alloc.
             // Only skip this during actual graph capture; user mempools

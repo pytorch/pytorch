@@ -3019,6 +3019,74 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(TEST_WITH_ROCM, "CUDA-specific graph capture behavior")
+    def test_graph_capture_oom_no_cudafree_during_capture(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/159594.
+        # max_split_size_mb is read at import time, so use a subprocess.
+        script = """\
+import torch
+
+MB = 1024 * 1024
+OVERSIZE = 64 * MB  # >= max_split_size (32 MB): an oversize cached block
+SMALL = 16 * MB  # cannot reuse the oversize block
+LIMIT = 72 * MB  # OVERSIZE fits; OVERSIZE (still reserved) + SMALL does not
+
+dev = "cuda"
+torch.cuda.init()
+torch.cuda.empty_cache()
+base = torch.cuda.memory_reserved()
+total = torch.cuda.get_device_properties(0).total_memory
+torch.cuda.set_per_process_memory_fraction((base + LIMIT) / total, 0)
+
+g = torch.cuda.CUDAGraph()
+stage = "START"
+marker = "NO_ERROR"
+try:
+    with torch.cuda.graph(g):
+        # The oversize block is freed into the capture pool; the smaller request
+        # cannot reuse it and forces the allocator's release-and-retry chain.
+        stage = "BEFORE_OVERSIZE"
+        a = torch.empty(OVERSIZE, dtype=torch.uint8, device=dev)
+        stage = "AFTER_OVERSIZE"
+        del a
+        stage = "BEFORE_SMALL"
+        b = torch.empty(SMALL, dtype=torch.uint8, device=dev)
+        stage = "AFTER_SMALL"
+        del b
+except torch.OutOfMemoryError:
+    marker = "OOM_CLEAN_AT_" + stage
+except Exception as e:
+    marker = "OTHER:" + type(e).__name__ + "_AT_" + stage
+print(marker)
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"subprocess failed\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+        # Before the fix: capture corrupted (cudaErrorStreamCaptureInvalidated,
+        # surfaced as a CUDA/AcceleratorError). After the fix: a clean OOM, and
+        # it must occur at the smaller request (after the oversize block was
+        # cached) -- i.e. on the release-and-retry path the fix guards.
+        lines = proc.stdout.strip().splitlines()
+        marker = lines[-1] if lines else ""
+        self.assertEqual(
+            marker,
+            "OOM_CLEAN_AT_BEFORE_SMALL",
+            f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_capture_simple(self):
         s = torch.cuda.Stream()
 
