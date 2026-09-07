@@ -445,6 +445,14 @@ deprecation cycle.
       Whether the capture covers everything it exercised: false if any frame produced no
       guarded code, hit the recompile limit, was bypassed, or a capture call raised.
 
+   .. py:method:: dropped_guard_types()
+
+      Count omitted guards by guard type.
+
+   .. py:method:: kept_guard_types()
+
+      Count serialized guards by guard type.
+
 .. py:class:: precompile.FrameInvariants
 
    Per-frame guard classification, returned by ``invariants()``. Frozen dataclass with the
@@ -457,6 +465,10 @@ deprecation cycle.
    One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
    ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
    artifact still checks it). ``render()`` returns one stable, human-readable line.
+
+   .. py:method:: render()
+
+      Render the guard as one stable, human-readable line.
 
 
 ```
