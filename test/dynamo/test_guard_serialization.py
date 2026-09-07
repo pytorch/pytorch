@@ -1109,6 +1109,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__annotations__["x"], _Missing)
         self.assertIs(out.__annotations__["y"], int)
 
+    def test_reduce_sentinels_an_unpicklable_doc(self):
+        # __doc__ prunes like an annotation: a doc no guard reads can be an
+        # unpicklable object (here a lock reassigned onto __doc__), so it must
+        # sentinel rather than fail the whole dump. A guarded doc is carried
+        # through verbatim -- see test_guard_rooted_at_wrapper_preserves_copied_doc.
+        def fn(x):
+            return x
+
+        fn.__doc__ = threading.Lock()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__doc__, _Missing)
+
     def test_function_reaching_itself_through_its_dict(self):
         # wrapper.me = wrapper, and wrapper is its own free variable; identity
         # has to survive the round trip through both.
