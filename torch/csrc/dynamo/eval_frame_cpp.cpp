@@ -33,15 +33,20 @@ struct DebugContextGuard {
     ctx.attr("__enter__")();
   }
 
-  ~DebugContextGuard() {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  ~DebugContextGuard() noexcept {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
     } catch (py::error_already_set& e) {
       e.restore();
+      PyErr_Clear();
+    } catch (...) {
       PyErr_Clear();
     }
     if (exc_type != nullptr) {
@@ -51,11 +56,13 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -307,6 +314,10 @@ int32_t dynamo_get_c_recursion_limit() {
 struct CRecursionLimitRAII {
   PyThreadState* tstate;
   int32_t old_recursion_remaining;
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
     auto limit = dynamo_get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
@@ -404,7 +415,9 @@ PyObject* dynamo__custom_eval_frame(
   // callback to run on recursively invoked frames
   py::handle recursive_callback = callback; // borrowed
   PyCodeObject* cached_code = nullptr; // borrowed
-  const char* trace_annotation = "";
+  // Owned copy: the CacheEntry whose annotation this came from can be
+  // destroyed by a concurrent unload before eval_custom() consumes it.
+  std::string trace_annotation;
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -473,7 +486,7 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation, throw_flag);
+        tstate, frame, cached_code, trace_annotation.c_str(), throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -513,8 +526,30 @@ PyObject* dynamo__custom_eval_frame(
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
-  recursive_callback =
-      _callback_from_action(recursive_callback, strategy.recursive_action);
+  // Keep the marker lookup off the ordinary run-only path: torch._dynamo.run()
+  // and the eager_on_recompile stance both arrive here with callback ==
+  // Py_False on every frame, and only a real callback object can carry the
+  // marker. lookup_optional (interned name, no raise) keeps the common miss --
+  // every call of every recompile-limited frame -- off the exception path.
+  bool force_callback_on_cache_miss = false;
+  if ((strategy.cur_action == FrameAction::RUN_ONLY ||
+       strategy.recursive_action == FrameAction::RUN_ONLY) &&
+      !callback.is_none() && callback.ptr() != Py_False) {
+    static PyObject* force_callback_marker_name =
+        PyUnicode_InternFromString("_torchdynamo_force_callback_on_cache_miss");
+    // Presence-only: the marker's VALUE is not read, so setting the attribute
+    // to anything (including False) forces the callback. This matches the
+    // hasattr convention for the marker.
+    force_callback_on_cache_miss = static_cast<bool>(
+        lookup_optional(callback, force_callback_marker_name));
+  }
+  // The marker also keeps a RUN_ONLY recursive action from demoting callees to
+  // Py_False: their misses must reach the same callback rather than run eager.
+  if (!force_callback_on_cache_miss ||
+      strategy.recursive_action != FrameAction::RUN_ONLY) {
+    recursive_callback =
+        _callback_from_action(recursive_callback, strategy.recursive_action);
+  }
 
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
@@ -522,7 +557,10 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
-  PyObject* backend = get_backend(callback.ptr()); // borrowed
+  // get_backend hands back an OWNED reference; keep it alive across the cache
+  // lookups below, which read the backend to match entries.
+  py::object backend_obj = get_backend(callback.ptr());
+  PyObject* backend = backend_obj.ptr();
 
   // We don't run the current custom_eval_frame behavior for guards.
   // So we temporarily set the callback to Py_None to drive the correct behavior
@@ -554,10 +592,15 @@ PyObject* dynamo__custom_eval_frame(
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
+  // The lookups hand back an OWNED reference: the entry that owns the code
+  // object can be evicted the moment the cache lock drops.
+  py::object cached_code_owner =
+      py::reinterpret_steal<py::object>(maybe_cached_code);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
+  bool run_only = (strategy.cur_action == FrameAction::RUN_ONLY &&
+                   !force_callback_on_cache_miss) ||
       callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
@@ -572,11 +615,11 @@ PyObject* dynamo__custom_eval_frame(
   // NB: We only do guard collectives when there are compiled code entries
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
-  if (guard_complete_hook != nullptr && has_relevant_entries) {
+  // time we've seen a frame in this region. Only the hook consumes this and
+  // computing it takes the cache lock, so it is not worth paying for -- nor
+  // worth opening a GIL-release window for -- on every intercepted frame.
+  if (guard_complete_hook != nullptr &&
+      extra->has_relevant_entries(isolate_recompiles_id)) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
@@ -615,7 +658,8 @@ PyObject* dynamo__custom_eval_frame(
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
+  py::object frame_state = py::reinterpret_steal<py::object>(
+      extract_frame_state(extra, isolate_recompiles_id));
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -630,7 +674,7 @@ PyObject* dynamo__custom_eval_frame(
     }
     PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback, frame, locals.get(), cache_entry, frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
@@ -675,16 +719,15 @@ PyObject* dynamo__custom_eval_frame(
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
-
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    // The extra object owns the CacheEntry; it is cleaned up when
+    // set_extra_state is called. The entry's code (owned) and annotation come
+    // back filled under the cache lock: eval_custom() can run Python
+    // (fullgraph nested-compile handling, the bytecode debugger), and once the
+    // lock released a concurrent clear can destroy the entry, so nothing here
+    // dereferences the returned pointer.
+    create_cache_entry(
+        extra, guarded_code, backend, &cached_code_owner, &trace_annotation);
+    cached_code = (PyCodeObject*)cached_code_owner.ptr();
     eval_custom();
   } else {
     eval_default();

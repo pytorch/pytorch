@@ -2,14 +2,24 @@
 
 #include <Python.h>
 
+#ifdef __cplusplus
+#include <cstdint>
+#else
+#include <stdint.h>
+#endif
+
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
 #ifdef __cplusplus
 
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <atomic>
 #include <list>
+#include <mutex>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -52,8 +62,19 @@ typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
   void* root_mgr;
+  int64_t isolate_recompiles_id;
+  // Opaque token identifying who installed this entry. Several packages may
+  // legitimately hold entries for one code object in one region -- a library
+  // frame two loaded models both reach -- so teardown has to remove what THIS
+  // installer put here and nothing else. Compared by identity; py::none() for
+  // callers that do not track ownership.
+  py::object owner;
 
-  PrecompileEntry(py::object gm, py::object c);
+  PrecompileEntry(
+      py::object gm,
+      py::object c,
+      int64_t region_id,
+      py::object owner_token);
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
@@ -66,22 +87,144 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // All cache entries live in this map — there is no separate default list.
   std::unordered_map<int64_t, std::list<CacheEntry>> cache_entry_map;
   // Total cache entries across all compile scopes (for O(1)
-  // has_any_cache_entries)
+  // _get_total_cache_entry_count)
   size_t total_cache_entry_count{0};
-  // Frame state to detect dynamic shape dims
+  // Lock ordering: a thread that needs both convert_frame.compile_lock and
+  // this cache_mutex must take compile_lock FIRST (reset()/remove_from_cache
+  // do). cache_mutex is recursive and drops the GIL while waiting. What keeps
+  // this sound is that lookup() releases cache_mutex before guard evaluation
+  // (see extra_state.cpp), so the hot path runs no Python under the lock. Sites
+  // that DO run Python while holding cache_mutex are knowingly exempt because
+  // they run only at compile/debug time, not on the hot path:
+  // drain_pending_invalidations (from lookup()/_debug_get_cache_entry_list),
+  // try_lookup_without_guard_eval's backend_match, and create_cache_entry's
+  // CacheEntry ctor. A second cycle needs no compile_lock at all:
+  // create_cache_entry (and the py::cast bindings) can hold cache_mutex(X)
+  // while a __del__ calls a compiled function that blocks on cache_mutex(Y);
+  // invalidate() and _reset_precompile_entries_for_owner park rather than block
+  // for that reason, but those sites do not.
+  mutable std::recursive_mutex cache_mutex;
+  // Frame-id source for the default compile scope: holds only "_id", the
+  // counter behind CompileId.frame_id for this code object. Dynamic-shape
+  // generalization moved to PGO's process-global code state, so despite the
+  // name this no longer tracks dynamic dims.
   py::dict frame_state;
-  // Actions to apply to all frames with this code object (non-isolated)
-  FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Per-region frame_state, so an isolated compile's frame_id numbers
+  // independently of the default scope. That also makes the frame_compile_id
+  // fallback in exceeds_recompile_limit (cache_size.py) per-region: it caps
+  // frame_compile_id at accumulated_recompile_limit to catch a cache that
+  // stops growing, and a per-region counter gives each region its own cap
+  // instead of one global cap. The primary accumulated check stays global
+  // (total_cache_entries_all_regions).
+  std::unordered_map<int64_t, py::dict> region_frame_state_map;
+  // Guards frame_state and region_frame_state_map alike: the module runs
+  // without the GIL on free-threaded builds, so the default dict's move in
+  // clear_in_place and its read in extract_frame_state need the same exclusion
+  // the region map already has.
+  std::mutex region_frame_state_mutex;
+  // Actions to apply to all frames with this code object (non-isolated).
+  // Read on every intercepted frame, so the default-region read is a lock-free
+  // atomic load: an 8-byte trivially-copyable struct, lock-free on every
+  // platform PyTorch builds for (static_assert below). Written only under
+  // strategy_mutex, which also covers strategy_generation and
+  // region_strategy_map, so compare_and_set still moves strategy and
+  // generation together.
+  std::atomic<FrameExecStrategy> strategy{FrameExecStrategy{DEFAULT, DEFAULT}};
+  static_assert(std::atomic<FrameExecStrategy>::is_always_lock_free);
+  std::mutex strategy_mutex;
+  // Monotonic token for the last global strategy write. Tokens come from a
+  // process-wide counter, so resetting a code object's ExtraState cannot make
+  // a stale owner appear current again.
+  uint64_t strategy_generation{0};
   // Per-region strategies for isolated compiles. When an isolated region
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
+  // Invalidations that arrived while cache_mutex was contended. invalidate()
+  // must never BLOCK on cache_mutex: it is reached from weakref.finalize,
+  // which GC can fire while ANOTHER ExtraState's cache_mutex is held during
+  // its guard evaluation, and two threads doing that against each other's
+  // states deadlock (CacheLock releases only the GIL, not the peer's lock).
+  // Parked requests are applied by the next holder of cache_mutex.
+  std::mutex pending_invalidation_mutex;
+  std::vector<std::pair<py::object, py::object>> pending_invalidations;
+  // Cheap early-out for drain_pending_invalidations, so the hot lookup paths
+  // do not take pending_invalidation_mutex when nothing is parked.
+  std::atomic<bool> has_pending_invalidations{false};
+  // Cache evictions that could not run where they were requested. Two ways
+  // that happens: an owner-scoped uninstall reached from weakref.finalize (a
+  // dead CompilePackage) must never BLOCK on cache_mutex, for exactly the
+  // ABBA reason invalidate() must not; and ANY eviction arriving on a thread
+  // whose own lookup is mid-guard-evaluation -- the recursive cache_mutex
+  // admits it -- must not free or relink nodes that lookup is iterating
+  // (reset_code from Python run BY A GUARD is the same-thread use-after-free
+  // this closes). Guarded by pending_invalidation_mutex; applied by the next
+  // cache_mutex holder whose cache_python_depth is zero. Known limit: an
+  // eviction parked from inside a lookup is applied AFTER entries that same
+  // Python then installs or compiles, and takes them too unless they are keyed
+  // apart from it -- e.g. an OWNER-scoped park spares an install whose
+  // caller-supplied owner token differs.
+  struct PendingEviction {
+    enum Kind : uint8_t {
+      CLEAR_ALL, // every cache and precompile entry
+      OWNER, // precompile entries of (region_id, owner)
+      PRECOMPILE_REGION, // precompile entries of region_id
+      PRECOMPILE_ALL, // every precompile entry
+      CACHE_REGION, // cache entries of region_id
+    };
+    Kind kind;
+    int64_t region_id;
+    py::object owner;
+  };
+  std::vector<PendingEviction> pending_evictions;
+  std::atomic<bool> has_pending_evictions{false};
+  // Count of live lookup() snapshots iterating raw entry pointers with
+  // cache_mutex released for guard evaluation. lookup() raises it under the
+  // lock at depth 0, then drops the lock; another thread that takes cache_mutex
+  // sees a non-zero count and parks every destroy/relink
+  // (apply_pending_evictions, drain_pending_invalidations, invalidate,
+  // clear_in_place) so those snapshots stay valid. It is thus a cross-thread
+  // signal decremented on lookup()'s return paths after the lock is dropped, so
+  // it is atomic rather than cache_mutex-guarded.
+  std::atomic<size_t> cache_python_depth{0};
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
-  bool has_any_cache_entries() const;
+  bool has_relevant_entries(int64_t isolate_recompiles_id);
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
+  // live_guard_manager is the wrapper that OWNS the entry to invalidate
+  // (CacheEntry's own guard_manager); the entry is re-located by its identity
+  // under the lock, never by an address read before the lock.
+  void invalidate(
+      py::object deleted_guard_manager,
+      py::object live_guard_manager);
+  // The identity-search body of invalidate. Caller must hold cache_mutex at
+  // cache_python_depth zero: this relinks the entry's list.
+  void invalidate_locked(
+      const py::object& deleted_guard_manager,
+      const py::object& live_guard_manager);
+  // Apply invalidations parked while cache_mutex was contended. No-op unless
+  // cache_python_depth is zero, as for apply_pending_evictions. Caller must
+  // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
+  void drain_pending_invalidations();
+  // Park an eviction for the next depth-zero cache_mutex holder.
+  void park_eviction(PendingEviction eviction);
+  // Apply parked evictions, moving the evicted nodes into the caller's
+  // containers, which the caller destroys AFTER cache_mutex releases. No-op
+  // unless cache_python_depth is zero: an in-flight same-thread lookup's
+  // iterators must see its lists untouched until it finishes. dead_evictions
+  // receives the drained PendingEviction records so their owner py::objects
+  // are destroyed by the caller after the lock too, never under it. Caller
+  // must hold cache_mutex (and must NOT hold pending_invalidation_mutex).
+  void apply_pending_evictions(
+      std::list<PrecompileEntry>& dead_precompile,
+      std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache,
+      std::vector<PendingEviction>& dead_evictions);
+  // Empty this state back to freshly-constructed contents WITHOUT freeing it.
+  // reset_code uses this instead of destroy: destroying while another thread
+  // is blocked on cache_mutex (CacheLock releases the GIL while it waits)
+  // would delete the very mutex the waiter is parked on.
+  void clear_in_place();
 } ExtraState;
 
 #else
@@ -102,19 +245,37 @@ CacheEntry* extract_cache_entry(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id);
 
-// Returns either the previously stored frame state or an empty dict.
+// Returns either the previously stored frame state for this compile scope or an
+// empty dict.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
+//  - isolate_recompiles_id: Compile scope (-1 = default)
 // return
-//  - extra_state->frame_state: Borrowed.
-FrameState* extract_frame_state(ExtraState* extra_state);
+//  - frame state: New reference.
+FrameState* extract_frame_state(
+    ExtraState* extra_state,
+    int64_t isolate_recompiles_id);
 
 // Returns the FrameExecStrategy stored in extra_state.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
+
+uint64_t extra_state_get_exec_strategy_token(
+    ExtraState* extra_state,
+    FrameExecStrategy* strategy);
+
+uint64_t extra_state_set_exec_strategy_with_token(
+    ExtraState* extra_state,
+    FrameExecStrategy strategy,
+    FrameExecStrategy* prior_strategy);
+
+bool extra_state_compare_and_set_exec_strategy(
+    ExtraState* extra_state,
+    uint64_t expected_generation,
+    FrameExecStrategy strategy);
 
 // Set the FrameExecStrategy to be done to all frames with code object
 // corresponding to this extra_state. Ownership contract
@@ -154,6 +315,22 @@ ExtraState* get_extra_state(PyCodeObject* code);
 // this function, consider if set_extra_state should be called.
 void destroy_extra_state(void* obj);
 
+// Empties the code object's ExtraState in place, without freeing it. This is
+// what torch._dynamo.reset_code must use: destroying the state (via
+// set_extra_state(code, NULL)) while another thread is blocked on its
+// cache_mutex -- CacheLock releases the GIL while waiting, so reset can run
+// concurrently -- deletes the mutex under the waiter. The husk stays attached
+// to the still-alive code object and behaves like a fresh state; the real
+// destroy happens only from the code object's dealloc, when no frame of that
+// code can be mid-lookup. Callers racing an in-flight COMPILE (which holds a
+// Python-side snapshot of this code's cache entries) must additionally hold
+// convert_frame.compile_lock, as torch._dynamo.reset() and remove_from_cache
+// do; this function only makes the reset safe against concurrent lookups.
+// Ownership contract
+// args
+//  - code: Borrowed
+void reset_extra_state(PyCodeObject* code);
+
 // Clears the existing object sitting on the extra scratch spance and sets it
 // up with the new state. Note that _PyCode_SetExtra calls the
 // destroy_extra_state deleter internally, and therefore we don't call it
@@ -185,34 +362,31 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// Lookup the cache held by extra_state.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// return:
-//   - Py_None or PyCodeObject: Borrowed reference.
-//   - Py_None or PyObject: Trace id of the compiled code.
-void lookup(
-    ExtraState* extra_state,
-    FrameLocalsMapping* f_locals,
-    PyObject* backend,
-    int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+// Turn on the cache-key lookup inside get_backend. Called once, when the first
+// backend carrying one is constructed; see cache_entry.cpp.
+void enable_precompile_cache_keys();
 
-// Try to resolve a cache lookup without materializing frame locals or running
-// guard managers. Returns true when the lookup is complete (hit or miss), and
-// false when the caller must fall back to lookup().
-bool try_lookup_without_guard_eval(
-    ExtraState* extra_state,
-    PyObject* backend,
-    int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+#ifdef __cplusplus
 
-// Create a new cache entry at extra_state holding on to guarded_code.
+} // extern "C"
+
+// Extracts the backend fn from the callback. Returns an OWNED reference; lives
+// outside the extern "C" block because it returns a py::object. Only called
+// from C++ (cache_entry.cpp, the frame evaluator).
+py::object get_backend(PyObject* callback);
+
+// Attribute lookup that returns an owned reference on success and an empty
+// py::object when absent, WITHOUT raising; name must be an interned str.
+// Defined in cache_entry.cpp; use this instead of py::hasattr on hot frame
+// paths.
+py::object lookup_optional(py::handle handle, PyObject* name);
+
+// Create a new cache entry at extra_state holding on to guarded_code. Only
+// called from C++ (the frame evaluator), so it lives outside the extern "C"
+// block: the new entry's code (owned) and trace annotation are filled into the
+// caller's py::object / std::string under the cache lock, and the returned
+// pointer must not be dereferenced after this returns -- a concurrent clear
+// can destroy the entry the moment the lock drops.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
@@ -222,14 +396,42 @@ bool try_lookup_without_guard_eval(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guraded_code,
-    PyObject* callback);
+    PyObject* callback,
+    py::object* code_out,
+    std::string* trace_annotation_out);
 
-// Extracts the backend fn from the callback.
-PyObject* get_backend(PyObject* callback);
+// Lookup the cache held by extra_state. Only called from C++ (the frame
+// evaluator), so it lives outside the extern "C" block: trace_annotation is
+// copied out under the cache lock into the caller's std::string, because the
+// entry that owns the original may be destroyed as soon as this returns. The
+// code object is handed back as a NEW reference for the same reason: the entry
+// that owns it can be evicted the moment the cache lock drops.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+// return:
+//   - Py_None or PyCodeObject: New reference; caller owns. nullptr on a guard
+//     error.
+void lookup(
+    ExtraState* extra_state,
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    std::string* trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
-#ifdef __cplusplus
-
-} // extern "C"
+// Try to resolve a cache lookup without materializing frame locals or running
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup(). On true, *maybe_cached_code
+// is a NEW reference the caller owns (as for lookup()); on false, untouched.
+bool try_lookup_without_guard_eval(
+    ExtraState* extra_state,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    std::string* trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
@@ -239,13 +441,31 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 py::list _get_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
+size_t _get_cache_entry_count_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+void _clear_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 size_t _get_total_cache_entry_count(const py::handle& code_obj);
 void _reset_precompile_entries(const py::handle& code_obj);
+void _reset_precompile_entries_for_owner(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id,
+    const py::handle& owner);
+void _reset_precompile_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code);
+    py::object dynamo_code,
+    int64_t isolate_recompiles_id,
+    py::object owner);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(py::object boolean);
+bool _has_precompile_entries(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+void _set_lru_cache(const py::object& boolean);
 
 #endif
