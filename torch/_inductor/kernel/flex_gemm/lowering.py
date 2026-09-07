@@ -23,13 +23,8 @@ from ... import config, ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from ...utils import _IntLike, ceildiv
-from .constraints import (
-    is_flex_gemm_partial_reduction_shape,
-    LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
-    LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
-    LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
-    statically_known_shape_equal,
-)
+from ..gemm_epilogue_utils import statically_known_shape_equal
+from .constraints import aux_output_shape_error, LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
 from .debug import (
     format_flex_gemm_analysis,
     format_flex_gemm_analysis_details,
@@ -172,9 +167,7 @@ def validate_flex_gemm_aux_outputs(
             )
         aux_size = ir.convert_shape_to_inductor(aux_meta.shape)
         if not statically_known_shape_equal(aux_size, output_size):
-            if is_flex_gemm_partial_reduction_shape(aux_size, output_size):
-                raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
-            raise NotImplementedError(LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR)
+            raise aux_output_shape_error(aux_size, output_size)
         aux_metas.append(aux_meta)
     return tuple(aux_metas)
 
