@@ -366,6 +366,7 @@ def flex_gemm_epimod(
             if kind == "scalar"
             else op_types[kind](name, dtype=dtype)
         )
+    aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
     if main_transform is not None:
         min_fragment_n = (
             local_reduce.group
@@ -380,9 +381,10 @@ def flex_gemm_epimod(
                 main_transform.group,
                 min_fragment_n=min_fragment_n,
             ),
+            *aux_output_names,
         )
     else:
-        outputs = tuple(f"output{index}" for index in range(aux_output_count))
+        outputs = aux_output_names
     sinks: dict[str, Any] = {}
     extra_ops = ()
     if indexed_dtypes is not None:
@@ -609,19 +611,16 @@ def gemm_epimod(
 
     from torch._vendor.quack.cache import cache_dir_override
 
-    output_buffers = (
-        {"main": quack_epilogue_arg(out)}
-        if main_transform is not None
-        else {
-            "D": quack_epilogue_arg(out),
-            **dict(
-                zip(
-                    epimod.outputs,
-                    (quack_epilogue_arg(aux_out) for aux_out in aux_outs),
-                    strict=True,
-                )
-            ),
-        }
+    output_names = (
+        "main" if main_transform is not None else "D",
+        *(f"output{index}" for index in range(len(aux_outs))),
+    )
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
     )
     main_name = "main" if main_transform is not None else "D"
     concat_layout = None if main_transform is None else main_transform.concat_layout
