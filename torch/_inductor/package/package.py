@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 import os
 import tempfile
@@ -35,11 +34,8 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     file_name = os.path.splitext(cpp_file)[0]
 
     # Parse compile flags and build the .o file
-    with open(file_name + "_compile_flags.json") as f:
-        compile_flags = json.load(f)
-
-    compile_options = BuildOptionsBase(
-        **compile_flags, use_relative_path=config.is_fbcode()
+    compile_options = BuildOptionsBase.load_flags_from_json(
+        file_name + "_compile_flags.json", use_relative_path=config.is_fbcode()
     )
     object_builder = CppBuilder(
         name=file_name,
@@ -50,11 +46,8 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     object_builder.build()
 
     # Parse linker flags and build the .so file
-    with open(file_name + "_linker_flags.json") as f:
-        linker_flags = json.load(f)
-
-    linker_options = BuildOptionsBase(
-        **linker_flags, use_relative_path=config.is_fbcode()
+    linker_options = BuildOptionsBase.load_flags_from_json(
+        file_name + "_linker_flags.json", use_relative_path=config.is_fbcode()
     )
     so_builder = CppBuilder(
         name=os.path.split(so_path)[-1],
