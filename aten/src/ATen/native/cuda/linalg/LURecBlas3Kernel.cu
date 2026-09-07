@@ -91,7 +91,7 @@ inline LUTuning get_tuning() {
 // pivinfo: absolute permutation vector (one per batch, size m).
 template <typename scalar_t>
 struct LUWorkspace {
-  LUWorkspace(const Tensor& input, int nb, bool compute_pivots) {
+  LUWorkspace(const Tensor& input, bool compute_pivots) {
     int batch_count = cuda_int_cast(batchCount(input), "batchCount");
     int m = cuda_int_cast(input.size(-2), "input.size(-2)");
 
@@ -850,7 +850,7 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
     }
 
     int nb = (n >= tuning.nb_crossover_n) ? nbc.nb_large : nbc.nb_small;
-    auto ws = LUWorkspace<scalar_t>(input, nb, compute_pivots);
+    auto ws = LUWorkspace<scalar_t>(input, compute_pivots);
     auto min_mn = std::min(m, n);
     auto ipiv_stride = min_mn;
 
