@@ -15662,7 +15662,7 @@ if __name__ == '__main__':
         self.assertEqual(grad_cpu, grad_device, atol=1e-4, rtol=0)
 
     @skipMPS
-    @onlyAccelerator
+    @onlyCUDA
     @dtypes(torch.float, torch.double)
     def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
         # Exercises maximum thread block sizes (768 for double, 1024 for float)
