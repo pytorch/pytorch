@@ -1610,7 +1610,7 @@ class PythonKeyTracer(Tracer):
     enable_thunkify: bool = False
 
     def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
-        super().__init__(autowrap_modules=autowrap_modules)  # type: ignore[arg-type]
+        super().__init__(autowrap_modules=autowrap_modules)
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
