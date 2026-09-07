@@ -4752,13 +4752,19 @@ class GuardsStatePickler(FunctionPicklerBase):
             closure = tuple(self._prune_cell(cell) for cell in closure)
         # An unregistered __dict__ drops its unguarded keys outright: unlike a
         # signature, it holds whatever a decorator happened to stash, and no
-        # guard can read a structure nothing registered.
-        keep_attributes = self._keep(obj.__dict__)
-        attributes = {
-            name: self._prune(value, "unguarded function attribute")
-            for name, value in obj.__dict__.items()
-            if keep_attributes or self._keep(value)
-        }
+        # guard can read a structure nothing registered. A __dict__ a guard IS
+        # rooted at (a TYPE_MATCH on a dict subclass assigned to it) takes the
+        # same _keep(container) escape as __annotations__/__defaults__: carry it
+        # verbatim so its type and identity survive, rather than rebuild a plain
+        # dict the guard would reject.
+        if self._keep(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+                if self._keep(value)
+            }
         # An annotation or type param nothing guards can be an unpicklable local
         # class; prune it rather than let it fail the whole dump. __annotations__
         # takes the same _keep(container) escape as __defaults__/__kwdefaults__:
@@ -5628,20 +5634,26 @@ class CheckFunctionManager:
                     True,
                     guard_filter_fn=serialization_filter,
                 )
+            self.guard_manager = guard_manager
+            self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
+
+            if separate_save_build:
                 # Value pruning keys off the guard tree: anything the tree does
                 # not reach is replaced by a placeholder. Dropping a guard must
                 # not drop the VALUE it named, because the rest of the state
                 # still refers to it -- a pruned tensor comes back with no
-                # dtype. So prune against the unfiltered tree. Known limitation:
-                # missing_values is keyed by id(), so one unguarded attribute
-                # holding e.g. torch.bfloat16 stands in for every reference to
-                # that dtype in the pickle; this merge masks that, not fixes it.
+                # dtype. So prune against the unfiltered tree. Merge AFTER
+                # compile_check_fn: DuplicateInputs/StorageOverlap register
+                # their tensor values on the runtime builder in there, and the
+                # serialization builder must inherit them or they prune away.
+                # Known limitation: missing_values is keyed by id(), so one
+                # unguarded attribute holding e.g. torch.bfloat16 stands in for
+                # every reference to that dtype in the pickle; this merge masks
+                # that, not fixes it.
                 serialization_builder.guard_tree_values = {
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,
                 }
-            self.guard_manager = guard_manager
-            self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
