@@ -36,7 +36,6 @@ if torch.backends.mps.is_available():
             "linalg.ldl_solve",
             "linalg.matrix_power",
             "linalg.matrix_sqrth",
-            "linalg.solve_triangular",
             "linalg.tensorinv",
             "log_softmaxwith_dtype",
             "nn.functional.channel_shuffle",
@@ -46,7 +45,6 @@ if torch.backends.mps.is_available():
             "renorm",
             "sparse.sampled_addmm",
             "to_sparse",
-            "triangular_solve",
         }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
