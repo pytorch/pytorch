@@ -219,6 +219,217 @@ def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     )
 
 
+# Sentinel for a multi-output node that hands some of its arguments back
+# unchanged in a layout this pass cannot read; callers must then assume every
+# tensor argument is aliased.
+_UNRESOLVED_ALIASES = object()
+
+
+def _flat_node_args(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """Every fx Node in node's args/kwargs, looking inside containers."""
+    flat_args = pytree.tree_leaves((node.args, node.kwargs))
+    return [arg for arg in flat_args if isinstance(arg, torch.fx.Node)]
+
+
+def _as_alias_nodes(value: Any) -> list[torch.fx.Node]:
+    if isinstance(value, torch.fx.Node):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [v for v in value if isinstance(v, torch.fx.Node)]
+    return []
+
+
+def _auto_functionalized_result_offset(mutable_op: Any) -> int | None:
+    """Where the mutated arguments start in an auto_functionalized{,_v2} result.
+
+    Both dense implementations return the wrapped op's own result followed by
+    the new value of each mutated argument (v1) or base (v2). An op returning
+    nothing, or a single value, still occupies exactly one leading slot.
+    """
+    if not isinstance(mutable_op, torch._ops.OpOverload):
+        return None
+    return max(1, len(mutable_op._schema.returns))
+
+
+def _multi_output_aliases(node: torch.fx.Node) -> Any:
+    """Which elements of a multi-output node alias one of its arguments.
+
+    Returns a dict mapping the index (or, for the Triton wrapper, the key) of
+    each aliasing element to the argument it aliases; None when node's result
+    is not such a container; and _UNRESOLVED_ALIASES when it is one whose
+    layout cannot be read here.
+
+    Everything is read off the graph as the pass has already rewritten it, so
+    an in-place target, a narrowed only_clone_these_tensors or a narrowed
+    tensors_to_clone is what decides whether an element aliases.
+    """
+    target = node.target
+    if node.op != "call_function" or isinstance(target, str):
+        return None
+
+    if target is operator.getitem:
+        # An element that is itself a list of tensors (a Tensor(a!)[] argument
+        # handed back by auto_functionalized) is a container in its own right.
+        parent = node.args[0]
+        if not isinstance(parent, torch.fx.Node):
+            return None
+        parent_aliases = _multi_output_aliases(parent)
+        if not isinstance(parent_aliases, dict):
+            return None
+        element = parent_aliases.get(node.args[1])
+        return dict(enumerate(element)) if isinstance(element, (list, tuple)) else None
+
+    if target is _WAIT_TENSORS_OP:
+        waited = node.args[0] if node.args else None
+        return dict(enumerate(waited)) if isinstance(waited, (list, tuple)) else None
+
+    if (mutated_args := _INPLACE_OP_TO_MUTATED_ARGS.get(target)) is not None:
+        # An op the pass reinplaced over a list of tensors -- the coalesced
+        # collectives and the foreach ops -- returns each element in place.
+        arg = node.args[mutated_args[0]] if mutated_args[0] < len(node.args) else None
+        return dict(enumerate(arg)) if isinstance(arg, (list, tuple)) else None
+
+    if target is torch.ops.higher_order.auto_functionalized:
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        offset = _auto_functionalized_result_offset(node.args[0])
+        to_clone = node.meta.get("only_clone_these_tensors")
+        if offset is None or to_clone is None:
+            return _UNRESOLVED_ALIASES
+        names, _ = get_mutable_args(node.args[0])  # type: ignore[arg-type]
+        return {
+            offset + i: node.kwargs[name]
+            for i, name in enumerate(names)
+            if name not in to_clone and node.kwargs.get(name) is not None
+        }
+
+    if target is torch.ops.higher_order.auto_functionalized_v2:
+        offset = _auto_functionalized_result_offset(node.args[0])
+        to_clone = node.meta.get("only_clone_these_tensors")
+        all_bases = node.kwargs.get("_all_bases")
+        if (
+            offset is None
+            or to_clone is None
+            or not isinstance(all_bases, (list, tuple))
+        ):
+            return _UNRESOLVED_ALIASES
+        return {
+            offset + i: base
+            for i, base in enumerate(all_bases)
+            if i not in to_clone  # type: ignore[operator]
+        }
+
+    if target is torch.ops.higher_order.with_effects:
+        # with_effects(token, op, *args) -> (token, *results). Once the pass
+        # swaps in the mutating op, result i is its i-th mutated argument.
+        inner_op = node.args[1] if len(node.args) > 1 else None
+        inner_mutated_args = _INPLACE_OP_TO_MUTATED_ARGS.get(inner_op)  # type: ignore[arg-type]
+        if inner_mutated_args is None:
+            return {}
+        return {
+            position + 1: node.args[idx + 2]
+            for position, idx in enumerate(inner_mutated_args)
+            if idx + 2 < len(node.args)
+        }
+
+    if target in inplaceable_triton_ops:
+        # The wrapper only returns the tensors it cloned. Dropping a name from
+        # tensors_to_clone makes the matching getitem the kwarg itself.
+        kernel_kwargs = node.kwargs.get("kwargs") or {}
+        tensors_to_clone = node.kwargs.get("tensors_to_clone") or ()
+        return {
+            name: value
+            for name, value in kernel_kwargs.items()  # type: ignore[union-attr]
+            if name not in tensors_to_clone  # type: ignore[operator]
+        }
+
+    return None
+
+
+def _alias_sources(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """The nodes whose result node's result aliases in the rewritten graph.
+
+    This is the one place the pass' copy-removal mechanisms are turned into
+    alias edges: view chains, ops already rewritten in place (whose result is
+    their mutated arg), the collectives' wait_tensor(s), and the elements a
+    multi-output node hands back untouched.
+    """
+    target = node.target
+    if node.op != "call_function" or isinstance(target, str):
+        return []
+
+    if target is operator.getitem:
+        parent = node.args[0]
+        if not isinstance(parent, torch.fx.Node):
+            return []
+        # getitem only aliases parent when parent is a multi-output view
+        if _is_view_op(parent.target):
+            return [parent]
+        parent_aliases = _multi_output_aliases(parent)
+        if parent_aliases is _UNRESOLVED_ALIASES:
+            return _flat_node_args(parent)
+        if isinstance(parent_aliases, dict):
+            return _as_alias_nodes(parent_aliases.get(node.args[1]))
+        return []
+
+    if node.args and (_is_view_op(target) or target is _WAIT_TENSOR_OP):
+        return _as_alias_nodes(node.args[0])
+
+    if (mutated_args := _INPLACE_OP_TO_MUTATED_ARGS.get(target)) is not None:
+        if mutated_args[0] < len(node.args):
+            return _as_alias_nodes(node.args[mutated_args[0]])
+
+    return []
+
+
+def _carries_alias(node: torch.fx.Node, known: OrderedSet[torch.fx.Node]) -> bool:
+    """Whether node's result is, or contains, an alias of a node in known."""
+    if any(source in known for source in _alias_sources(node)):
+        return True
+    aliases = _multi_output_aliases(node)
+    if aliases is _UNRESOLVED_ALIASES:
+        return any(arg in known for arg in _flat_node_args(node))
+    if isinstance(aliases, dict):
+        return any(
+            source in known
+            for element in aliases.values()
+            for source in _as_alias_nodes(element)
+        )
+    return False
+
+
+def _result_escapes_graph(node: torch.fx.Node) -> bool:
+    """Whether node's result, or an alias of it, is returned from the graph."""
+    aliases = OrderedSet([node])
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        for user in cur.users:
+            if user.op == "output":
+                return True
+            if user in aliases:
+                continue
+            if _carries_alias(user, aliases):
+                aliases.add(user)
+                stack.append(user)
+    return False
+
+
+def _aliases_graph_input(node: torch.fx.Node) -> bool:
+    """Whether node is a graph input or aliases one."""
+    seen = OrderedSet([node])
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if cur.op in ("placeholder", "get_attr"):
+            return True
+        for source in _alias_sources(cur):
+            if source not in seen:
+                seen.add(source)
+                stack.append(source)
+    return False
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -228,6 +439,14 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
     """
     inp, _src, _view_ops = node.args
+
+    # Reinplacing makes the result the same tensor as inp. When inp is a graph
+    # input, or aliases one, reinplacing here is paired with dropping the copy_
+    # back into it, so the caller holds inp itself; returning the result as well
+    # would hand back an alias of inp where the functional scatter returns a
+    # fresh tensor.
+    if _aliases_graph_input(inp) and _result_escapes_graph(node):  # type: ignore[arg-type]
+        return False
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -392,6 +611,11 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
     aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
 }
 
+# wait_tensor / wait_tensors are not reinplacing decisions: their lowering
+# hands back the collective's own buffer, so they are plain alias edges.
+_WAIT_TENSOR_OP: Any = None
+_WAIT_TENSORS_OP: Any = None
+
 try:
     c10d_functional = torch.ops._c10d_functional
     inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
@@ -403,14 +627,26 @@ try:
         ),
     }
     inplaceable_ops.update(inplaceable_collective_ops)
+    _WAIT_TENSOR_OP = c10d_functional.wait_tensor.default
+    _WAIT_TENSORS_OP = c10d_functional.wait_tensors.default
 except AttributeError:
     # _c10d_functional ops are only available when torch
     # is built with USE_DISTRIBUTED=1.
     pass
 
+_INPLACE_OP_TO_MUTATED_ARGS = {
+    op.inplace_op: op.mutated_args for op in inplaceable_ops.values()
+}
+
 inplaceable_foreach_ops: dict[torch._ops.OpOverload, InplaceableOp] = {}
 for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
+
+# The alias walks read node.target after this pass rewrote it, so they need the
+# mutated-argument layout of every op the pass can swap in, foreach included.
+_INPLACE_OP_TO_MUTATED_ARGS.update(
+    {op.inplace_op: op.mutated_args for op in inplaceable_foreach_ops.values()}
+)
 
 
 inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
@@ -816,17 +1052,37 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         )
         return tensors_to_clone
 
+    def reinplace_registry_op(node, inplaceable_op) -> None:
+        # Check if ALL mutated args can be inplaced
+        # Only convert if we don't need to clone any tensor
+        mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
+        if all_can_inplace(node, mutated_args) and inplaceable_op.extra_check(node):
+            for mutated_arg in mutated_args:
+                copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
+                if copy_node is not None:
+                    replace_dict[copy_node] = copy_node.args[0]
+            node.target = inplaceable_op.inplace_op
+
+    # Scatters are decided in a second sweep, once every other decision in this
+    # graph has been taken. should_reinplace_scatter has to know whether the
+    # scatter's result can escape as an alias of a graph input, and that
+    # depends on which of the other copy-removal mechanisms here fired -- the
+    # in-place rewrites, only_clone_these_tensors, tensors_to_clone. Deferring
+    # lets the alias walks read the answer off the rewritten graph instead of
+    # predicting it, which no prediction can do exactly.
+    #
+    # No decision below depends on a scatter's own decision: can_inplace and
+    # the copy_ bookkeeping read storage, node_order, meta["val"] and the users
+    # of a node, none of which reinplacing a scatter changes; the only targets
+    # they compare against (view ops and aten.copy_) are never rewritten here.
+    deferred_scatters: list[tuple[torch.fx.Node, InplaceableOp]] = []
+
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
-            # Check if ALL mutated args can be inplaced
-            # Only convert if we don't need to clone any tensor
-            mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
-            if all_can_inplace(node, mutated_args) and inplaceable_op.extra_check(node):
-                for mutated_arg in mutated_args:
-                    copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
-                    if copy_node is not None:
-                        replace_dict[copy_node] = copy_node.args[0]
-                node.target = inplaceable_op.inplace_op
+            if node.target is _generalized_scatter:
+                deferred_scatters.append((node, inplaceable_op))
+            else:
+                reinplace_registry_op(node, inplaceable_op)
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
@@ -1052,6 +1308,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
+
+    # Second sweep: the scatters, in graph order. Every node upstream of a
+    # scatter has been decided, so its input walk is exact; the only undecided
+    # nodes its escape walk can reach are later scatters, and each of those
+    # re-runs the input walk with this decision in place before it can build an
+    # alias of its own.
+    for node, inplaceable_op in deferred_scatters:
+        reinplace_registry_op(node, inplaceable_op)
+
     for node, replacement in replace_dict.items():
         while replacement in replace_dict:
             replacement = replace_dict[replacement]
