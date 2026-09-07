@@ -19,10 +19,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
-
-# DO NOT MERGE: intentional early failure to reproduce venv cleanup EACCES on
-# the m1-14 runner (Post Setup Python step). See pytorch/test-infra cleanup.js.
-raise RuntimeError("Intentional failure to reproduce venv cleanup issue")
 import re
 from collections import defaultdict
 from torch import inf
@@ -404,6 +400,19 @@ class TestCaseMPS(TestCase):
     # checks for leaks even if TEST_MPS_MEM_LEAK_CHECK is 0
     def wrap_with_mps_memory_check(self, method):
         return super().wrap_method_with_policy(method, self.assertLeaksNoMpsTensors)
+
+# DO NOT MERGE: intentional failure raised in setUp (not at import) so pytest
+# actually runs the rest of the MPS suite and exercises the machinery before
+# the job goes red, to reproduce the venv cleanup EACCES on the m1-14 runner.
+# See pytorch/test-infra setup-python/cleanup.js.
+class TestReproVenvCleanup(TestCaseMPS):
+    def setUp(self):
+        super().setUp()
+        raise RuntimeError("Intentional setup failure to reproduce venv cleanup issue")
+
+    def test_repro(self):
+        pass
+
 
 class TestMemoryLeak(TestCaseMPS):
     @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/160550")
