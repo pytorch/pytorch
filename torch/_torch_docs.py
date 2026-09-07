@@ -14033,8 +14033,8 @@ on the exact semantic that applies to all devices.
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Stream.
         If not given, the current :ref:`accelerator<accelerators>` type will be used.
-    priority (int, optional): priority of the stream, should be 0 or negative, where negative
-        numbers indicate higher priority. By default, streams have priority 0.
+    priority (int, optional): priority of the stream, lower number represents higher priority.
+        By default, streams have priority 0.
 
 Returns:
     Stream: An torch.Stream object.
@@ -14164,6 +14164,26 @@ Example::
     >>> s1_cuda = torch.Stream(device='cuda')
     >>> s2_cuda = torch.Stream(device='cuda')
     >>> s2_cuda.wait_stream(s1_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Stream.priority_range,
+    r"""
+Stream.priority_range() -> tuple[int, int]
+
+Get the range of valid priorities for streams.
+
+Returns:
+    tuple[int, int]: A tuple containing the lowest and highest valid priorities.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> low, high = torch.Stream.priority_range()
+    >>> s1 = torch.Stream(priority=low)
+    >>> s2 = torch.Stream(priority=high)
 """,
 )
 
