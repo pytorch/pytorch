@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -252,8 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
         "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
     TORCH_CHECK(
-        !is_nested || max_q > 128,
-        "cuDNN varlen attention does not support query sequence length <= 128.");
+        !is_nested || max_q > 128 ||
+            at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
+        "cuDNN varlen attention requires cuDNN >= 9.24 for query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
