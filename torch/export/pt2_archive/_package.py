@@ -1063,7 +1063,11 @@ def _load_aoti(
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     from torch._inductor.codecache import get_device_information
 
-    current_device_info = get_device_information(device)
+    # check_build=False: this check only describes the host for the advisory
+    # mismatch warning below; nothing is compiled on the load path, so the
+    # toolchain dry-compile probes would add seconds of load time for no
+    # signal (https://github.com/pytorch/pytorch/issues/191715).
+    current_device_info = get_device_information(device, check_build=False)
 
     for k, v in current_device_info.items():
         if k in loaded_metadata:
