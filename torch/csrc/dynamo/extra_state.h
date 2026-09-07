@@ -96,9 +96,10 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // (see extra_state.cpp), so the hot path runs no Python under the lock. Sites
   // that DO run Python while holding cache_mutex are knowingly exempt because
   // they run only at compile/debug time, not on the hot path:
-  // drain_pending_invalidations (from lookup()/_debug_get_cache_entry_list),
-  // try_lookup_without_guard_eval's backend_match, and create_cache_entry's
-  // CacheEntry ctor. A second cycle needs no compile_lock at all:
+  // drain_pending_invalidations (from lookup()/_debug_get_cache_entry_list)
+  // and create_cache_entry's CacheEntry ctor (try_lookup_without_guard_eval,
+  // like lookup(), releases cache_mutex before backend_match). A second cycle
+  // needs no compile_lock at all:
   // create_cache_entry (and the py::cast bindings) can hold cache_mutex(X)
   // while a __del__ calls a compiled function that blocks on cache_mutex(Y);
   // invalidate() and _reset_precompile_entries_for_owner park rather than block
