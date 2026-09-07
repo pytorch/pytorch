@@ -25,6 +25,7 @@ from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
+from torch._higher_order_ops.utils import materialize_bdim_at_front
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -176,6 +177,24 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+class TestBdimMaterialization(TestCase):
+    def test_materialize_bdim_at_front_strides(self):
+        cases = (
+            ("canonical", torch.randn(3, 5), 0, 3),
+            ("size_one", torch.randn(3, 1, 5), 1, 1),
+            ("broadcast", torch.randn(3, 5), None, 3),
+        )
+        for name, tensor, bdim, batch_size in cases:
+            with self.subTest(name=name):
+                result = materialize_bdim_at_front(tensor, bdim, batch_size)
+                self.assertEqual(
+                    result.stride(),
+                    torch._prims_common.make_contiguous_strides_for(result.shape),
+                )
+                if name == "canonical":
+                    self.assertEqual(result.data_ptr(), tensor.data_ptr())
 
 
 def _fake_vmap_switch(index, branches, operands):
@@ -10723,9 +10742,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 [5 if case == "clamped_index" else 0 if case == "index_0" else 1]
             )
         )
-        x_bdim = (
-            1 if case in {"nonzero_in_dim", "batched_index_nonzero_in_dim"} else 0
-        )
+        x_bdim = 1 if case in {"nonzero_in_dim", "batched_index_nonzero_in_dim"} else 0
         out_dim = 1 if case == "out_dim_1" else -1 if case == "out_dim_last" else 0
 
         def fn(i, x, y):
@@ -10733,7 +10750,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         batch_size = 3
         x = torch.randn(batch_size, 5)
-        y = torch.randn(5) if case == "unbatched_operand" else torch.randn(batch_size, 5)
+        y = (
+            torch.randn(5)
+            if case == "unbatched_operand"
+            else torch.randn(batch_size, 5)
+        )
         x_input = x.movedim(0, x_bdim)
         y_bdim = None if case == "unbatched_operand" else 0
         index_bdim = 0 if case == "batched_index_nonzero_in_dim" else None
@@ -10925,7 +10946,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             x.add_(1)
             return x.clone()
 
-        with self.assertRaisesRegex(RuntimeError, "does not support branches that mutate"):
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support branches that mutate"
+        ):
             torch.vmap(
                 lambda i, x: switch_op(i, (mutating_branch, lambda x: x * 2), (x,))
             )(
@@ -11739,26 +11762,37 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     @parametrize("case", ["input", "nested_input", "output_int", "output_bool"])
     def test_while_loop_vmap_non_tensor_carry_error(self, case):
         if case == "input":
-            fn = lambda it, x: torch.ops.higher_order.while_loop(
-                lambda i, c: i < 3, lambda i, c: (i + 1, c + 1), (it, x), ()
-            )
+
+            def fn(it, x):
+                return torch.ops.higher_order.while_loop(
+                    lambda i, c: i < 3, lambda i, c: (i + 1, c + 1), (it, x), ()
+                )
+
             args, in_dims = (0, torch.rand(4, 3)), (None, 0)
             error = r"carried_inputs.*\[\(0, 'int'\)\]"
         elif case == "nested_input":
-            fn = lambda it, x: torch.while_loop(
-                lambda i, c: i["it"] < 3,
-                lambda i, c: ({"it": i["it"] + 1}, c + 1),
-                ({"it": it}, x),
-            )
+
+            def fn(it, x):
+                return torch.while_loop(
+                    lambda i, c: i["it"] < 3,
+                    lambda i, c: ({"it": i["it"] + 1}, c + 1),
+                    ({"it": it}, x),
+                )
+
             args, in_dims = (0, torch.rand(4, 3)), (None, 0)
             error = r"carried_inputs.*\[\(0, 'int'\)\]"
         else:
             output = 0 if case == "output_int" else False
-            fn = lambda x: torch.ops.higher_order.while_loop(
-                lambda c: c.sum() < 1, lambda c: (output,), (x,), ()
-            )
+
+            def fn(x):
+                return torch.ops.higher_order.while_loop(
+                    lambda c: c.sum() < 1, lambda c: (output,), (x,), ()
+                )
+
             args, in_dims = (torch.zeros(4, 3),), (0,)
-            error = rf"body_fn returned non-tensor.*\[\(0, '{type(output).__name__}'\)\]"
+            error = (
+                rf"body_fn returned non-tensor.*\[\(0, '{type(output).__name__}'\)\]"
+            )
 
         with self.assertRaisesRegex(RuntimeError, error):
             torch.vmap(fn, in_dims=in_dims)(*args)
