@@ -708,6 +708,70 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_rendezvous_after_strict_subgroup(self) -> None:
+        """Rendezvous on a subgroup that leaves a rank out, then on the world.
+
+        test_subgroup above partitions the world, so every rank rendezvouses
+        exactly one subgroup and any per-process sequencing stays in step. Here
+        the last rank sits out, which is what exposes a store key that depends
+        on how many rendezvous a process happens to have performed rather than
+        on the group being rendezvoused.
+        """
+        self._init_process()
+
+        world = dist.group.WORLD
+        subgroup = dist.new_group(list(range(world.size() - 1)))
+
+        t0 = symm_mem.empty(64, device="cuda")
+        if world.rank() < world.size() - 1:
+            symm_mem.rendezvous(t0, group=subgroup)
+
+        t1 = symm_mem.empty(64, device="cuda")
+        hdl = symm_mem.rendezvous(t1, group=world)
+        self.assertEqual(hdl.world_size, world.size())
+        self.assertEqual(hdl.rank, world.rank())
+
+        t1.fill_(world.rank())
+        hdl.barrier()
+        peer_rank = (world.rank() + 1) % world.size()
+        buf = hdl.get_buffer(peer_rank, (64,), torch.float32)
+        self.assertTrue(buf.eq(peer_rank).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(3)
+    def test_rendezvous_on_overlapping_subgroups(self) -> None:
+        """Two subgroups sharing a rank, neither containing every rank.
+
+        The rank in both rendezvouses twice while its peer in the second
+        subgroup has rendezvoused once, so any sequencing shared between the
+        two groups leaves them reading different keys.
+        """
+        self._init_process()
+
+        ranks = list(range(self.world_size))
+        group_a = dist.new_group(ranks[0:2])
+        group_b = dist.new_group(ranks[1:3])
+        rank = dist.group.WORLD.rank()
+
+        t_a = symm_mem.empty(64, device="cuda")
+        if rank in ranks[0:2]:
+            symm_mem.rendezvous(t_a, group=group_a)
+
+        t_b = symm_mem.empty(64, device="cuda")
+        if rank in ranks[1:3]:
+            t_b.fill_(rank)
+            hdl = symm_mem.rendezvous(t_b, group=group_b)
+            hdl.barrier()
+            peer = (hdl.rank + 1) % hdl.world_size
+            buf = hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(ranks[1:3][peer]).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_get(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name

@@ -31,7 +31,7 @@ namespace c10d::symmetric_memory {
 /* Start of CUDASymmetricMemory implementation */
 
 // A set of exchange methods with prefix "CUDASymmetricMemory"
-static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
+static StoreExchange storeExchange{"CUDASymmetricMemory"};
 
 AllocationRef::AllocationRef(
     void* ptr,
@@ -776,7 +776,8 @@ static void init_multicast_for_block(
     auto flag = static_cast<uint8_t>(local_success);
     auto rank_flags = use_pg
         ? pg_all_gather(group, block->device_idx, flag)
-        : storeExchange.all_gather(store, rank, world_size, flag);
+        : storeExchange.all_gather(
+              store, rank, world_size, flag, group->getGroupName());
     bool all_succeed = true;
     for (int r = 0; r < world_size; ++r) {
       all_succeed &= (rank_flags[r] != 0);
@@ -802,7 +803,8 @@ static void init_multicast_for_block(
   } else {
     // TODO implement storeExchange.broadcast
     auto gathered_handles =
-        storeExchange.all_gather(store, rank, world_size, exported_handle);
+        storeExchange.all_gather(
+            store, rank, world_size, exported_handle, group->getGroupName());
     recv_handle = std::move(gathered_handles[0]);
   }
   if (memcmp(&recv_handle, &invalidator, sizeof(McHandleType)) == 0) {
@@ -905,7 +907,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
   std::vector<RendezvousRequest> reqs = use_pg
       ? pg_all_gather(group, block->device_idx, local_req)
-      : storeExchange.all_gather(store, rank, world_size, local_req);
+      : storeExchange.all_gather(
+            store, rank, world_size, local_req, group_name);
   validate_nvlink_fabric_support(reqs, world_size);
   validate_rendezvous_requests(reqs, world_size);
 
@@ -920,7 +923,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   } else {
     imported_handles = use_pg
         ? pg_all_gather(group, block->device_idx, block_handle)
-        : storeExchange.all_gather(store, rank, world_size, block_handle);
+        : storeExchange.all_gather(
+            store, rank, world_size, block_handle, group_name);
   }
 
   std::vector<HandleType> handles(world_size);
@@ -985,7 +989,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   if (use_pg) {
     pg_barrier(group, block->device_idx);
   } else {
-    storeExchange.barrier(store, rank, world_size);
+    storeExchange.barrier(store, rank, world_size, group_name);
   }
   if constexpr (!use_fabric_handle) {
     close(block_handle);
