@@ -66,9 +66,9 @@ backend = dist.get_default_backend_for_device(device_type)
 
 
 def _requires_multi_gpu(fn):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ devices"
     )
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -102,8 +102,8 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self):
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if device_type != "cpu":
+            torch.get_device_module(device_type).set_device(self.device)
 
     # -----------------------------------------------------------------
     # Shared helpers
