@@ -25,10 +25,8 @@ from torch.utils._triton import has_triton
 class TestTritonWrapper(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
+    def setUp(self):
+        device = self.get_primary_device()
         try:
             device_interface = get_interface_for_device(torch.device(device).type)
         except NotImplementedError as exc:
@@ -40,7 +38,6 @@ class TestTritonWrapper(TestCase):
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
 
-    def setUp(self):
         super().setUp()
         PyCodeCache.cache_clear()
 
