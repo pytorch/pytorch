@@ -1711,7 +1711,7 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
-        elif self.device.type == "privateuse1":
+        elif torch_device_type == torch._C._get_privateuse1_backend_name():
             device_type = DLDeviceType.kDLExtDev
         elif torch_device_type == "xla":
             import torch_xla
