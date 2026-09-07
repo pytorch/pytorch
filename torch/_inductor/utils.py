@@ -108,15 +108,37 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
+# GPU_TYPES is derived from the device interface registry so that a backend
+# advertising BackendFeature.GPU is included automatically. Late-binding
+# (module __getattr__) so backends registered after import are picked up.
+def _gpu_types() -> list[str]:
+    from torch._dynamo.device_interface import (
+        BackendFeature,
+        get_registered_device_interfaces,
+    )
+
+    return [
+        name
+        for name, iface in get_registered_device_interfaces()
+        if ":" not in name and BackendFeature.GPU in iface.backend_features(None)
+    ]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "GPU_TYPES":
+        return _gpu_types()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 T = TypeVar("T")
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
+from torch._dynamo.device_interface import get_interface_for_device
+
+
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    avail_gpus = [x for x in _gpu_types() if get_interface_for_device(x).is_available()]
     if not len(avail_gpus) <= 1:
         raise AssertionError(
             f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
@@ -125,7 +147,6 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -3784,7 +3805,7 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 
 def is_gpu(device: str | None) -> bool:
-    return device in GPU_TYPES
+    return device in _gpu_types()
 
 
 def is_rocm() -> bool:
