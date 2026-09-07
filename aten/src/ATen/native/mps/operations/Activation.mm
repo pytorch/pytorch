@@ -1,20 +1,14 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/ceil_div.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/Gelu.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/kernels/LogSoftmax.h>
-#include <c10/util/TypeCast.h>
-#include <c10/util/accumulate.h>
-#include <bit>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_log_softmax_backward_data_native.h>
-#include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_prelu_kernel_backward_native.h>
 #include <ATen/ops/_prelu_kernel_native.h>
 #include <ATen/ops/empty.h>
@@ -32,122 +26,6 @@ using namespace at::mps;
 
 namespace at::native {
 using namespace mps;
-
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
-#else
-#include <ATen/native/mps/LogSoftmax_metallib.h>
-#endif
-
-static LogSoftmaxParams<uint32_t> narrow_params(const LogSoftmaxParams<uint64_t>& params) {
-  LogSoftmaxParams<uint32_t> result{.dim_size = c10::checked_convert<uint32_t>(params.dim_size, "uint32_t"),
-                                    .num_rows = c10::checked_convert<uint32_t>(params.num_rows, "uint32_t"),
-                                    .inner_size = c10::checked_convert<uint32_t>(params.inner_size, "uint32_t"),
-                                    .chunk_size = c10::checked_convert<uint32_t>(params.chunk_size, "uint32_t"),
-                                    .n_chunks = c10::checked_convert<uint32_t>(params.n_chunks, "uint32_t"),
-                                    .ndim = params.ndim,
-                                    .dim = params.dim};
-  for (const auto d : c10::irange(params.ndim)) {
-    result.sizes[d] = c10::checked_convert<uint32_t>(params.sizes[d], "uint32_t");
-    result.strides[d] = c10::checked_convert<uint32_t>(params.strides[d], "uint32_t");
-  }
-  return result;
-}
-
-template <typename... Tensors>
-static void run_log_softmax(MPSStream* stream,
-                            const std::string& kernel,
-                            const Tensor& self,
-                            bool use_u32,
-                            MTLSize grid,
-                            MTLSize group,
-                            const LogSoftmaxParams<uint64_t>& params,
-                            const Tensors&... tensors) {
-  auto encoder = stream->commandEncoder();
-  auto pso =
-      lib.getPipelineStateForFunc(fmt::format("{}_{}{}", kernel, scalarToMetalTypeString(self), mtlIdxSuffix(use_u32)));
-  getMPSProfiler().beginProfileKernel(pso, kernel, {self}, stream);
-  [encoder setComputePipelineState:pso];
-  if (use_u32) {
-    mtl_setArgs(encoder, tensors..., narrow_params(params));
-  } else {
-    mtl_setArgs(encoder, tensors..., params);
-  }
-  [encoder dispatchThreadgroups:grid threadsPerThreadgroup:group];
-  getMPSProfiler().endProfileKernel(pso, stream);
-}
-
-TORCH_IMPL_FUNC(log_softmax_mps_out)
-(const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
-  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
-  if (self.numel() == 0) {
-    return;
-  }
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      supportedFloatingType(self), "log_softmax not implemented on MPS for ", self.scalar_type());
-
-  const auto self_ = self.dim() == 0 ? self.view(1) : self;
-  const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
-  const auto dim_size = static_cast<uint64_t>(self_.size(wrapped_dim));
-  const auto inner_size = static_cast<uint64_t>(c10::multiply_integers(self_.sizes().slice(wrapped_dim + 1)));
-  const auto num_rows = static_cast<uint64_t>(self_.numel()) / dim_size;
-  const bool use_u32 = offsetsFitIn<int32_t>(self_, out);
-  const bool contiguous_rows = self_.is_contiguous() && wrapped_dim == self_.dim() - 1;
-  // one simdgroup per row stops paying off past this width
-  constexpr uint64_t row_kernel_max_dim = 2048;
-  // rows wider than this need many rows to fill the GPU
-  constexpr uint64_t row_kernel_solo_dim = 1024;
-  constexpr uint64_t row_kernel_min_rows = 128;
-  const bool row_dim_fits = dim_size <= row_kernel_solo_dim || num_rows >= row_kernel_min_rows;
-  const bool use_row_kernel = contiguous_rows && dim_size <= row_kernel_max_dim && row_dim_fits;
-  // split long rows into enough chunks to occupy the GPU
-  constexpr uint64_t split_target_groups = 512;
-  // below this width a chunk cannot amortize the second pass
-  constexpr uint64_t split_min_chunk = 2048;
-  const auto n_chunks = std::clamp(split_target_groups / num_rows, uint64_t(1), ceil_div(dim_size, split_min_chunk));
-  const auto chunk_size = ceil_div(dim_size, n_chunks);
-  const bool use_split = contiguous_rows && !use_row_kernel && n_chunks > 1;
-  LogSoftmaxParams<uint64_t> params{.dim_size = dim_size,
-                                    .num_rows = num_rows,
-                                    .inner_size = inner_size,
-                                    .chunk_size = chunk_size,
-                                    .n_chunks = n_chunks,
-                                    .ndim = static_cast<uint32_t>(self_.dim()),
-                                    .dim = static_cast<uint32_t>(wrapped_dim)};
-  for (const auto d : c10::irange(self_.dim())) {
-    params.sizes[d] = self_.size(d);
-    params.strides[d] = self_.size(d) == 1 ? 0 : self_.stride(d);
-  }
-  const auto partials = use_split
-      ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(n_chunks), 2}, self.options().dtype(kFloat))
-      : Tensor();
-
-  MPSStream* stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      if (use_row_kernel) {
-        constexpr auto rows_per_group = kLogSoftmaxThreads / c10::metal::simdgroup_size;
-        const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(rows_per_group)), 1, 1);
-        const auto group = MTLSizeMake(kLogSoftmaxThreads, 1, 1);
-        run_log_softmax(stream, "log_softmax_row", self, use_u32, grid, group, params, self_, out);
-      } else if (use_split) {
-        const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
-        const auto group = MTLSizeMake(kLogSoftmaxThreads, 1, 1);
-        run_log_softmax(stream, "log_softmax_partial", self, use_u32, grid, group, params, self_, partials);
-        run_log_softmax(stream, "log_softmax_finalize", self, use_u32, grid, group, params, self_, out, partials);
-      } else {
-        // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
-        const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
-        const auto tg_x = std::min(inner_size, max_tg_x);
-        const auto tg_y = std::min(
-            {std::bit_ceil(dim_size), uint64_t(kLogSoftmaxThreads), std::bit_floor(kLogSoftmaxMaxThreads / tg_x)});
-        const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
-        const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_log_softmax(stream, "log_softmax", self, use_u32, grid, group, params, self_, out);
-      }
-    }
-  });
-}
 
 TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
 (const Tensor& grad_output, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& out) {
