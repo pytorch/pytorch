@@ -5,9 +5,12 @@ import contextlib
 
 import torch
 import torch._inductor.test_case
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestDequeReconstruct(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     UNSET = object()
 
     @contextlib.contextmanager
