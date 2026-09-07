@@ -4760,20 +4760,23 @@ class GuardsStatePickler(FunctionPicklerBase):
             if keep_attributes or self._keep(value)
         }
         # An annotation or type param nothing guards can be an unpicklable local
-        # class; prune it rather than let it fail the whole dump. Unlike
-        # __defaults__/__kwdefaults__ these prune per value with no
-        # _keep(container) escape: no guard ever bakes the values of the
-        # __annotations__ dict or __type_params__ tuple (EQUALS_MATCH's ok_types
-        # excludes dict, DICT_KEYS_MATCH bakes only keys, and a TypeVar is not a
-        # literal so the tuple never takes CONSTANT_MATCH), so there is no
-        # verbatim-carry case a rebaked container guard would need preserved. On
-        # 3.14 __annotations__ is a fresh dict per call, so a _keep on it would
-        # be dead there regardless.
+        # class; prune it rather than let it fail the whole dump. __annotations__
+        # takes the same _keep(container) escape as __defaults__/__kwdefaults__:
+        # a guard rooted at the container itself (a TYPE_MATCH on a dict subclass
+        # assigned to __annotations__) needs it carried verbatim, so keep it when
+        # kept and prune per value otherwise. Below 3.14 the escape reads
+        # obj.__annotations__ directly (id-stable); on 3.14 _read_raw_annotations
+        # hands back a fresh dict per call, so _keep is always False there and the
+        # per-value prune is taken. __type_params__ has no such escape: a TypeVar
+        # is not a literal, so the tuple never takes a value-baking guard.
         raw_annotations = self._read_raw_annotations(obj)
-        annotations = {
-            name: self._prune(value, "unguarded function annotation")
-            for name, value in raw_annotations.items()
-        }
+        if self._keep(raw_annotations):
+            annotations = raw_annotations
+        else:
+            annotations = {
+                name: self._prune(value, "unguarded function annotation")
+                for name, value in raw_annotations.items()
+            }
         type_params = getattr(obj, "__type_params__", None)
         if type_params is not None:
             type_params = tuple(
@@ -4786,6 +4789,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             closure=closure,
             attributes=attributes,
             annotations=annotations,
+            doc=self._prune(obj.__doc__, "unguarded function doc"),
             type_params=type_params,
             globals_snapshot=snapshot,
         )
@@ -5023,9 +5027,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if resolved is not obj:
                 # See Note [Reconstructing a function a guard is rooted at].
                 # A module absent from sys.modules (an exec-created function, or
-                # __module__ is None) is an fqn mismatch too: reference-pickling
-                # would fail, so rebuild a guarded function by value and prune an
-                # unguarded one, rather than fall through and fail the dump.
+                # __module__ is None) is an fqn mismatch too: pickling by
+                # reference imports __module__ and re-reads the qualname, which
+                # would not round back to this object -- it fails to resolve, or
+                # resolves to a different one -- so rebuild a guarded function by
+                # value and prune an unguarded one, rather than fall through and
+                # mis-serialize.
                 if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
                 return self._reduce_function_by_value(obj)
