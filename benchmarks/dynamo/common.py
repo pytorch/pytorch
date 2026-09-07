@@ -3022,9 +3022,7 @@ class BenchmarkRunner:
                     eager_model = self.deepcopy_and_maybe_parallelize(model)
                     if not hasattr(eager_model, name):
                         eager_model.name = name
-                    self.init_optimizer(
-                        name, current_device, eager_model.parameters()
-                    )
+                    self.init_optimizer(name, current_device, eager_model.parameters())
                     try:
                         eager_latency, eager_peak_mem, _ = warmup(
                             self.model_iter_fn,
