@@ -522,9 +522,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     # ===== Basic isolation: independent caches per compile call =====
 
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
-        """lookup() takes the ExtraState cache lock only to snapshot the
-        cache entries -- brief, but it touches Python objects, so the GIL can
-        drop under it -- then releases the lock before evaluating guards. A
+        """lookup() takes the ExtraState cache lock to snapshot the cache
+        entries and drain any pending evictions and invalidations -- brief,
+        but it touches Python objects, so the GIL can drop under it -- then
+        releases the lock before evaluating guards. A
         thread that blocks on that lock while HOLDING the GIL wedges the
         owner, who needs the GIL to finish. The lock therefore has to release
         the GIL before it waits. A short switch interval makes the handoff
@@ -761,12 +762,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
 
     def test_reset_code_from_python_run_by_lookup_is_safe(self):
-        """try_lookup_without_guard_eval() holds the recursive cache lock
-        across the backend comparison it runs -- Python, which can call
-        torch._dynamo back in on the SAME thread. reset_code arriving there
-        used to free the very list nodes the interrupted lookup was walking
-        (a same-thread use-after-free); it must instead land as if it ran
-        just after that lookup."""
+        """try_lookup_without_guard_eval() snapshots its candidates under the
+        recursive cache lock, raises cache_python_depth, then releases the
+        lock and runs the backend comparison -- Python, which can call
+        torch._dynamo back in on the SAME thread -- with the depth still
+        raised. reset_code arriving there used to free the very list nodes the
+        interrupted lookup was walking (a same-thread use-after-free); the
+        raised depth now parks it so it lands as if it ran just after that
+        lookup."""
         from torch._C._dynamo.eval_frame import reset_code
 
         def f(x):
@@ -795,8 +798,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt1(x), f(x))
         self.assertEqual(_get_total_cache_entry_count(code), 1)
         # A second-but-equal backend makes try_lookup_without_guard_eval
-        # compare it against the saved one under the fast-path lock; that
-        # __eq__ resets this code object, parking the eviction.
+        # compare it against the saved one lock-free (depth raised, cache
+        # lock released); that __eq__ resets this code object, parking the
+        # eviction until the depth returns to zero.
         opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
         # The fast path bails (the entry is guarded), so the fallback lookup
         # runs at depth 0, drains the parked reset, and compiles fresh -- all
@@ -807,14 +811,17 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt2(x), f(x))
         self.assertEqual(_get_total_cache_entry_count(code), 1)
 
-    def test_invalidation_racing_a_held_cache_lock_parks_and_drains(self):
-        """invalidate() reached from weakref.finalize must never block on
-        cache_mutex (GC can fire it while ANOTHER state's lock is held; two
-        threads doing that against each other's states deadlock ABBA-style).
-        This pins the contended path itself: the very call finalize runs,
-        arriving while a lookup holds the lock, must return promptly
-        (parked), and the parked invalidation must be applied by a later
-        lock holder rather than serve forever."""
+    def test_invalidation_racing_an_in_flight_lookup_parks_and_drains(self):
+        """invalidate() reached from weakref.finalize must never block behind
+        an in-flight lookup (GC can fire it while another thread is deep in a
+        lock-free backend comparison with cache_python_depth raised; blocking
+        there risks a same-thread reset deadlock). This pins the contended
+        path itself: the very call finalize runs, arriving while a lookup is
+        mid-comparison at raised depth, must return promptly (parked on
+        cache_python_depth > 0 -- the cache lock is free here, so it is the
+        depth and not a failed try-lock that parks it), and the parked
+        invalidation must be applied by a later lock holder rather than serve
+        forever."""
         from torch._dynamo.guards import DeletedGuardManagerWrapper
 
         def f(x):
@@ -871,9 +878,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(thread.is_alive(), "caller exited before __eq__")
                 now = time.monotonic()
                 self.assertLess(now, deadline, "caller never reached __eq__")
-            # The caller thread is inside lookup, holding the cache lock.
+            # The caller thread is inside lookup, mid-backend-comparison with
+            # cache_python_depth raised (the cache lock is released here).
             # This is exactly what a guarded object's weakref.finalize runs;
-            # it must park rather than block behind that lock.
+            # it must park on the raised depth rather than serve the eviction
+            # underneath the in-flight lookup.
             invalidator_done = threading.Event()
 
             def invalidator():
