@@ -830,7 +830,7 @@ class TestCuteDSLReadOnlyWrapperCUDA(TestCase):
     is consumed fine. read_only requires the versioned protocol, so the bare
     path is unusable for cuteDSL until cuteDSL fixes its versioned-struct
     parsing. The capsule itself is valid; see, in test_dlpack.py,
-    TestTorchDlPack.test_read_only_wrapper_export_preserves_cow (torch consumes
+    TestTorchDlPack.test_readonly_wrapper_bare_capsule_is_valid (torch consumes
     it, COW preserved) and
     TestReadOnlyDLPack.test_wrapper_numpy_export_is_read_only (numpy honors the
     read-only flag). The tvm-ffi path avoids all of this by going through the C
