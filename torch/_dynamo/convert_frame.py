@@ -159,6 +159,7 @@ from .utils import (
     CleanupManager,
     CompileTimeInstructionCounter,
     counters,
+    deferred_full_gc,
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
@@ -1731,6 +1732,7 @@ def _compile(
             # flag itself via _compiling_state_context, so skip there.
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
+            stack.enter_context(deferred_full_gc())
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
                     CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())

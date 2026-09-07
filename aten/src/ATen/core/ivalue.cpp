@@ -898,8 +898,8 @@ IValue IValue::deepcopy(std::optional<at::Device> device) const {
 IValue IValue::deepcopy(
     IValue::HashIdentityIValueMap& memo,
     std::optional<at::Device> device) const {
-  if (memo.contains(*this)) {
-    return memo.at(*this);
+  if (auto it = memo.find(*this); it != memo.end()) {
+    return it->second;
   }
   IValue copy;
   switch(tag) {

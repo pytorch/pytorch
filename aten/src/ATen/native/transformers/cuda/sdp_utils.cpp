@@ -4,11 +4,9 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
@@ -163,14 +161,19 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 #if USE_ROCM_ATTENTION
 inline int aotriton_max_hdim() {
   static const int max_hdim = []() {
-#if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
-    // gfx11xx only support hdim <= 256 on AOTriton 0.11/0.12
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
+    // gfx11xx is capped at hdim <= 256 from AOTriton 0.11 onward, and this is a
+    // standing decision rather than a version workaround: 0.11/0.12 ship no
+    // larger kernels, and the 0.13 hdim 512 kernels are miscompiled under
+    // register/LDS pressure and silently return saturated results (#189849).
+    // Do not lift the cap on an AOTriton bump alone; hdim > 256 has to be
+    // revalidated on gfx11xx hardware first.
     auto dprops = at::cuda::getCurrentDeviceProperties();
     const c10::basic_string_view<char> arch(dprops->gcnArchName);
     if (arch.starts_with("gfx11")) {
       return 256;
     }
-#endif // AOTriton 0.11
+#endif // AOTriton >= 0.11
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
     return 512;
 #else
@@ -182,7 +185,7 @@ inline int aotriton_max_hdim() {
 #endif // USE_ROCM_ATTENTION
 
 // For AOTriton <= 0.11:
-// On ROCM, ME and FA share the backend, and hence they share the checking
+// On ROCm, ME and FA share the backend, and hence they share the checking
 // function for fundamental limitations by the GPU kernel
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 //
@@ -268,9 +271,11 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   if (!supported_head_dim) {
     if (debug) {
 #if USE_ROCM_ATTENTION
-      const char* requirement = caller_is_meff
-          ? "Efficient attention on ROCM requires q,k,v to have the same last dimension and to be less than or equal to 256."
-          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+      const std::string requirement = c10::str(
+          caller_is_meff ? "Efficient attention on ROCm" : "Flash attention",
+          " requires q,k,v to have the same last dimension and to be less than or equal to ",
+          max_size,
+          ".");
 #else
       const char* requirement = at::globalContext().userEnabledFA4SDP()
           ? "FA4 does not support the provided head dimensions."
@@ -327,7 +332,7 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
     if (debug) {
       TORCH_WARN(
           "For NestedTensor inputs,",
-          caller_is_meff ? " Efficient attention on ROCM " : " Flash attention",
+          caller_is_meff ? " Efficient attention on ROCm " : " Flash attention",
           " requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
@@ -381,7 +386,7 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
   if (!(query_size_last <= max_size && value_size_last <= max_size)) {
     if (debug) {
       TORCH_WARN(
-          "Mem efficient attention on ROCM requires last dimension of inputs to less or equal than ",
+          "Mem efficient attention on ROCm requires last dimension of inputs to less or equal than ",
           max_size,
           ". ",
           "Got Query.size(-1): ",
@@ -1196,7 +1201,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
-#ifndef USE_ROCM  // ME and FA share the backend on ROCM and thus support training
+#ifndef USE_ROCM  // ME and FA share the backend on ROCm and thus support training
         check_requires_grad_and_nested,
 #endif
         check_batch_size_nested,
@@ -1231,7 +1236,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     const auto q_dtype = params.query.dtype();
     const auto bias_dtype = params.attn_mask.value().dtype();
     if (bias_dtype != at::kBool && bias_dtype != q_dtype) {
-      TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
+      TORCH_WARN("Efficient attention on ROCm requires attn_mask be boolean, or has the same datatype as of q,k,v");
       return false;
     }
   }

@@ -24,7 +24,7 @@ from torch._dynamo import reset
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import counters, same
+from torch._dynamo.utils import counters, identity, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -70,6 +70,7 @@ from torch._inductor.select_algorithm import (
     clear_feedback_savers,
     clear_preprocessing_fns,
     ExternKernelCaller,
+    GeneratedCodeCache,
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
@@ -860,7 +861,7 @@ class TestMaxAutotune(TestCase):
         torch._dynamo.maybe_mark_dynamic(a, 0)
 
         choice_name_regex = (
-            "blackwell_ws_persistent_device_tma"
+            "blackwell_ws_persistent_tma"
             if has_datacenter_blackwell_tma_device()
             else "mm_persistent_tma"
         )
@@ -1127,7 +1128,7 @@ class TestMaxAutotune(TestCase):
         torch._dynamo.maybe_mark_dynamic(a, 0)
 
         choice_name_regex = (
-            "blackwell_ws_persistent_device_tma"
+            "blackwell_ws_persistent_tma"
             if has_datacenter_blackwell_tma_device()
             else "mm_persistent_tma"
         )
@@ -2557,6 +2558,7 @@ class TestMaxAutotune(TestCase):
                         'input_nodes':[
                             "[[10,22],[22,1],torch.float32,device(type='cuda',index=0),0]",
                             "[[22,30],[30,1],torch.float32,device(type='cuda',index=0),0]"],
+                        'input_aliasing':(0,1),
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2599,6 +2601,7 @@ class TestMaxAutotune(TestCase):
                     'input_nodes':[
                         "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                    'input_aliasing':(0,1),
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2766,6 +2769,82 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
+
+    def test_generated_code_cache_key_input_aliasing(self):
+        """make_key must distinguish aliased inputs, e.g. mm(x, x), from
+        distinct inputs with identical layouts, and stay name-insensitive."""
+
+        def make_layout():
+            return FixedLayout(torch.device("cpu"), torch.float32, [8, 8], [8, 1])
+
+        a = Buffer(name="buf_a", layout=make_layout())
+        b = Buffer(name="buf_b", layout=make_layout())
+
+        def key(*input_nodes):
+            return GeneratedCodeCache().make_key(
+                input_nodes=input_nodes,
+                num_stages=1,
+                num_warps=4,
+                call_sizes=[8, 8],
+                prefix_args=0,
+                suffix_args=0,
+                epilogue_fn=identity,
+                epilogue_fn_hash=None,
+                tma_store=False,
+                tma_load_for_template_epilogue=False,
+                transpose_discontiguous_tensor_descriptors_override=None,
+                subgraphs=None,
+                workspace_arg=None,
+                layout=make_layout(),
+                num_consumer_groups=0,
+                num_buffers_warp_spec=0,
+                kwargs={},
+            )
+
+        # Identical layouts but different aliasing must not collide.
+        self.assertNotEqual(key(a, a), key(a, b))
+        # The aliasing pattern is insensitive to buffer names.
+        self.assertEqual(key(a, a), key(b, b))
+        self.assertEqual(key(a, b), key(b, a))
+        self.assertIn("'input_aliasing': (0, 1)", key(a, b))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_bmm_template_cache_aliased_then_distinct_inputs(self):
+        """A bmm whose operands alias one buffer must not share generated-code
+        cache entries with a bmm over distinct operands of identical layouts.
+
+        def_kernel collapses aliased operands into a single kernel argument,
+        so before the aliasing-aware cache key the distinct-operand bmm
+        reused the one-argument cached kernels; the class-level
+        TritonTemplate.test_cache patch turns that reuse into a hard error.
+        See https://github.com/pytorch/pytorch/issues/188069.
+        """
+
+        def f(x, a, b):
+            return torch.bmm(x, x), torch.bmm(a, b)
+
+        B, N = 2, 128
+        with fresh_cache():
+            x = torch.randn(B, N, N, device=GPU_TYPE)
+            a = torch.randn(B, N, N, device=GPU_TYPE)
+            b = torch.randn(B, N, N, device=GPU_TYPE)
+
+            compiled = torch.compile(
+                f,
+                fullgraph=True,
+                dynamic=False,
+                mode="max-autotune-no-cudagraphs",
+            )
+            aliased, distinct = compiled(x, a, b)
+
+            self.assertEqual(aliased, torch.bmm(x, x), atol=0.1, rtol=0.05)
+            self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
 
     @fresh_cache()
     @unittest.skipIf(

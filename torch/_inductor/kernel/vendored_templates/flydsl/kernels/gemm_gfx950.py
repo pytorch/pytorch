@@ -247,15 +247,20 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
 
 
 class BlockSwizzle:
-    def __init__(self, NUM_XCDS, NUM_PIDS_THRESHOLD, GROUP_M):
+    def __init__(self, NUM_XCDS, NUM_PIDS_THRESHOLD, GROUP_M, N_MAJOR_FALLBACK=False):
         self.NUM_XCDS = NUM_XCDS
         self.NUM_PIDS_THRESHOLD = NUM_PIDS_THRESHOLD
         self.GROUP_M = GROUP_M
+        self.N_MAJOR_FALLBACK = N_MAJOR_FALLBACK
 
     @flyc.jit
     def swizzle(self, num_pid_m, num_pid_n, pid):
-        simple_m = pid // num_pid_n
-        simple_n = pid % num_pid_n
+        if const_expr(self.N_MAJOR_FALLBACK):
+            simple_m = pid % num_pid_m
+            simple_n = pid // num_pid_m
+        else:
+            simple_m = pid // num_pid_n
+            simple_n = pid % num_pid_n
         if const_expr(self.GROUP_M <= 0):
             return simple_m, simple_n
         num_xcds = self.NUM_XCDS
@@ -472,6 +477,28 @@ def async_load_operand(
         buffer_load_lds_inline(operand.rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < operand.load_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
+
+
+def _make_gemm_gfx950_tiled_mma(param: GemmGfx950Param):
+    mma_atom = fx.make_mma_atom(
+        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, _elem_dtype(param))
+    )
+    k_per_mfma_group = param.mma_k // 4
+    return fx.make_tiled_mma(
+        mma_atom,
+        fx.make_layout(
+            (param.m_waves, param.n_waves, 1),
+            (param.n_waves, 1, 0),
+        ),
+        fx.make_tile(
+            None,
+            None,
+            fx.make_layout(
+                (k_per_mfma_group, 4),
+                (1, k_per_mfma_group),
+            ),
+        ),
+    )
 
 
 @flyc.kernel
@@ -1111,26 +1138,7 @@ def gemm_gfx950(
     b_leading_stride = fx.Int32(
         fx.get_scalar(b.stride[1] if const_expr(param.b_is_transposed) else b.stride[0])
     )
-    elem_dtype = _elem_dtype(param)
-    mma_atom = fx.make_mma_atom(
-        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, elem_dtype)
-    )
-    k_per_mfma_group = param.mma_k // 4
-    tiled_mma = fx.make_tiled_mma(
-        mma_atom,
-        fx.make_layout(
-            (param.m_waves, param.n_waves, 1),
-            (param.n_waves, 1, 0),
-        ),
-        fx.make_tile(
-            None,
-            None,
-            fx.make_layout(
-                (k_per_mfma_group, 4),
-                (1, k_per_mfma_group),
-            ),
-        ),
-    )
+    tiled_mma = _make_gemm_gfx950_tiled_mma(param)
     num_pid_m = (m - 1) // param.block_m + 1
     num_pid_n = (n - 1) // param.block_n + 1
     kernel_impl = (
