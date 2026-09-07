@@ -437,8 +437,8 @@ batched_panel_register_resident_fused_kernel(
   extern __shared__ char smem_raw[];
   scalar_t* spivrow = reinterpret_cast<scalar_t*>(smem_raw);
   real_t* sabsval = reinterpret_cast<real_t*>(spivrow + nb);
-  int* sargmax = reinterpret_cast<int*>(sabsval + nrows);
-  int* sipiv = reinterpret_cast<int*>(sargmax + nrows);
+  int* sargmax = reinterpret_cast<int*>(sabsval + blockDim.x);
+  int* sipiv = reinterpret_cast<int*>(sargmax + blockDim.x);
 
   // Each thread owns its full row stored in registers
   scalar_t rA[MAX_RECNB];
@@ -451,13 +451,13 @@ batched_panel_register_resident_fused_kernel(
 
   if (tid < nb) { sipiv[tid] = 0; };
 
-  for (int i = 0, ir = i + tid, irows = nrows; i < nb; ++i, ++ir, --irows) {
+  for (int i = 0, ir = i + tid, irows = blockDim.x; i < nb; ++i, ++ir, --irows) {
     // 1. Write abs value to shared memory using current logical row position
     sabsval[curr_row] = std::abs(rA[i]);
     sargmax[tid] = tid;
     __syncthreads();
 
-    // 2. Parallel reduction for argmax over rows [i, nrows)
+    // 2. Parallel reduction for argmax over rows [i, blockDim.x)
     if (irows > 512) { if (tid < 512 && tid + 512 < irows) { AGGREGATE_ARGMAX(sabsval[ir], sargmax[ir], sabsval[ir + 512], sargmax[ir + 512]); } __syncthreads(); }
     if (irows > 256) { if (tid < 256 && tid + 256 < irows) { AGGREGATE_ARGMAX(sabsval[ir], sargmax[ir], sabsval[ir + 256], sargmax[ir + 256]); } __syncthreads(); }
     if (irows > 128) { if (tid < 128 && tid + 128 < irows) { AGGREGATE_ARGMAX(sabsval[ir], sargmax[ir], sabsval[ir + 128], sargmax[ir + 128]); } __syncthreads(); }
@@ -604,18 +604,17 @@ bool try_launch_fused_panel_register_resident(
   using real_t = c10::scalar_value_type<scalar_t>::type;
 
   dim3 grid(batch_count);
-  dim3 threads(nrows);
-
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (compute_pivots) {
-    size_t shmem = nb * sizeof(scalar_t) + nrows * sizeof(real_t) + nrows * sizeof(int) + nb * sizeof(int);
-    batched_panel_register_resident_fused_kernel<<<grid, threads, shmem, stream>>>(
+    int padded_nrows = std::max(32, nrows);
+    size_t shmem = nb * sizeof(scalar_t) + padded_nrows * sizeof(real_t) + padded_nrows * sizeof(int) + nb * sizeof(int);
+    batched_panel_register_resident_fused_kernel<<<grid, padded_nrows, shmem, stream>>>(
       dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
     );
   } else {
     size_t shmem = nb * sizeof(scalar_t);
-    batched_panel_register_resident_nopiv_fused_kernel<<<grid, threads, shmem, stream>>>(
+    batched_panel_register_resident_nopiv_fused_kernel<<<grid, nrows, shmem, stream>>>(
       dA, matrix_stride, lda, m, col_start, nb, dinfo
     );
   }
@@ -730,7 +729,7 @@ void lu_batched_panel_recursive(
       recnb = tuning.recnb_reg.nb_float;
     } else if constexpr (std::is_same_v<double, scalar_t>) {
       recnb = tuning.recnb_reg.nb_double;
-    } else if constexpr (std::is_same_v<std::complex<float>, scalar_t>) {
+    } else if constexpr (std::is_same_v<c10::complex<float>, scalar_t>) {
       recnb = tuning.recnb_reg.nb_cfloat;
     } else {
       recnb = tuning.recnb_reg.nb_cdouble;
