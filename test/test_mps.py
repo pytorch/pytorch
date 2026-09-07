@@ -5216,14 +5216,28 @@ class TestMPS(TestCaseMPS):
     def test_activation_checkpoint_does_not_error(self):
         from torch.utils.checkpoint import checkpoint
 
+        def fn(x):
+            return x.sin().cos().exp()
+
+        # Recompute must replay the RNG state stashed during the forward,
+        # otherwise the gradient below is silently wrong rather than noisy.
+        def dropout_fn(x):
+            return (x * (torch.rand_like(x) > 0.5)).sum()
+
         for use_reentrant in (True, False):
             a = torch.tensor(1., device="mps", requires_grad=True)
-
-            def fn(x):
-                return x.sin().cos().exp()
-
             out = checkpoint(fn, a, use_reentrant=use_reentrant)
             out.backward()
+
+            x = torch.randn(64, device="mps", requires_grad=True)
+            torch.manual_seed(2024)
+            dropout_fn(x).backward()
+            expected_grad = x.grad.clone()
+
+            x.grad = None
+            torch.manual_seed(2024)
+            checkpoint(dropout_fn, x, use_reentrant=use_reentrant).backward()
+            self.assertEqual(x.grad, expected_grad)
 
     def test_as_strided(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
