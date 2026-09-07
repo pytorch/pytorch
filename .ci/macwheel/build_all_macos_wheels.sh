@@ -25,6 +25,9 @@ export BINARY_ENV_FILE="${BINARY_ENV_FILE:-${RUNNER_TEMP}/env}"
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
+# shellcheck disable=SC1091
+source "${PYTORCH_ROOT}/.ci/pytorch/setup_cmake.sh"
+
 iter=0
 for desired in ${DESIRED_PYTHONS}; do
     # Wrap each iteration in a GHA log group so long logs collapse nicely

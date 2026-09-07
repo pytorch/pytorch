@@ -28,6 +28,9 @@ SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PARENT_OUT_DIR="${PYTORCH_FINAL_PACKAGE_DIR}"
 mkdir -p "${PARENT_OUT_DIR}"
 
+# shellcheck disable=SC1091
+source "${PYTORCH_ROOT}/.ci/pytorch/setup_cmake.sh"
+
 iter=0
 for desired in ${DESIRED_PYTHONS}; do
     echo "::group::Build wheel for Python ${desired}"
