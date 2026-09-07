@@ -234,6 +234,24 @@ jobs:
         run: |
           cat test/**/*_toprint.log || true
 
+      # DO NOT MERGE: capture who/what makes the temp venv undeletable so the
+      # Post Setup Python cleanup EACCES can be diagnosed (owner/mode/leftover
+      # procs). See pytorch/test-infra setup-python/cleanup.js.
+      - name: Debug venv perms (repro)
+        shell: bash
+        if: always()
+        run: |
+          echo "runner instance: $(hostname) ($(whoami))"
+          V="${VENV_PATH}/lib/python3.12/site-packages/torch/distributed"
+          echo "== stat torch/distributed =="; stat "${V}" || true
+          echo "== ls -le@ torch/distributed =="; ls -le@ "${V}" || true
+          echo "== files not owned by current user under venv =="
+          find "${VENV_PATH}" ! -user "$(id -un)" -print 2>/dev/null | head -50 || true
+          echo "== non-writable dirs under venv =="
+          find "${VENV_PATH}" -type d ! -perm -u+w -print 2>/dev/null | head -50 || true
+          echo "== leftover python/compile_worker procs =="
+          ps aux | grep -iE "compile_worker|python" | grep -v grep | head -50 || true
+
       - name: Run OP benchmark
         shell: bash
         if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}

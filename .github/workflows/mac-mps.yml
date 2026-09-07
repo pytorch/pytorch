@@ -2,6 +2,7 @@
 name: Mac MPS
 
 on:
+  pull_request:
   push:
     tags:
       - ciflow/mps/*
