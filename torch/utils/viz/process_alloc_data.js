@@ -81,6 +81,11 @@
 //     - Segment snapshot data (segments array) is NOT affected by ring buffer overflow.
 //     - The segment snapshot is always complete regardless of overflow.
 
+// Point budget for a single stacked-area <polygon>. Chrome/Skia stops
+// rasterizing a polygon somewhere under ~2 million points; series longer than
+// this are decimated before rendering (see process_alloc_data).
+const MAX_POLYGON_POINTS = 100000;
+
 /**
  * Returns true if pool_id represents a private (user-created) memory pool,
  * as opposed to the default pool [0, 0].
@@ -1089,6 +1094,42 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
   data.push(summarized_mem);
+
+  // Chrome/Skia silently fails to rasterize an SVG <polygon> past roughly two
+  // million points. A band live across the whole trace gains a point per
+  // timestep (most notably the summarized band), so long traces make it exceed
+  // that limit and render as nothing. Decimate any over-long series to a safe
+  // budget, keeping the extremes of both the lower (offset) and upper
+  // (offset+size) edges in each bucket so peaks survive.
+  for (const d of data) {
+    const n = d.timesteps.length;
+    if (n <= MAX_POLYGON_POINTS) continue;
+    const size_is_array = Array.isArray(d.size);
+    const n_buckets = Math.floor(MAX_POLYGON_POINTS / 4);
+    const bucket = n / n_buckets;
+    const keep = new Set([0, n - 1]);
+    for (let b = 0; b < n_buckets; b++) {
+      const start = Math.floor(b * bucket);
+      const end = Math.min(n, Math.floor((b + 1) * bucket));
+      let lo_i = -1, hi_i = -1, lo = Infinity, hi = -Infinity;
+      let top_lo_i = -1, top_hi_i = -1, top_lo = Infinity, top_hi = -Infinity;
+      for (let i = start; i < end; i++) {
+        const bottom = d.offsets[i];
+        const top = bottom + (size_is_array ? d.size[i] : d.size);
+        if (bottom < lo) { lo = bottom; lo_i = i; }
+        if (bottom > hi) { hi = bottom; hi_i = i; }
+        if (top < top_lo) { top_lo = top; top_lo_i = i; }
+        if (top > top_hi) { top_hi = top; top_hi_i = i; }
+      }
+      for (const i of [lo_i, hi_i, top_lo_i, top_hi_i]) {
+        if (i >= 0) keep.add(i);
+      }
+    }
+    const idx = Array.from(keep).sort((a, b) => a - b);
+    d.timesteps = idx.map(i => d.timesteps[i]);
+    d.offsets = idx.map(i => d.offsets[i]);
+    if (size_is_array) d.size = idx.map(i => d.size[i]);
+  }
 
   return {
     max_size,
