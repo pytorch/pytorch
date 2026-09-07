@@ -9257,6 +9257,15 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
     @onlyCUDA
+    def test_batch_norm_mismatched_running_stats_dtype(self, device):
+        input = torch.ones((2, 1), dtype=torch.bfloat16, device=device)
+        running_mean = torch.zeros(1, dtype=torch.float64, device=device)
+        running_var = torch.ones(2, dtype=torch.float32, device=device)[1:]
+
+        with self.assertRaisesRegex(RuntimeError, "running_mean and running_var must have the same dtype"):
+            F.batch_norm(input, running_mean, running_var, training=True)
+
+    @onlyCUDA
     @largeTensorTest('16GB')
     def test_prelu_backward_32bit_indexing(self, device):
         m = torch.nn.PReLU().cuda().half()
