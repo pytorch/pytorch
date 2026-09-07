@@ -34,6 +34,7 @@ struct TriangularSolveParams {
   uint32_t transpose; // op transposes A
   uint32_t conj; // op conjugates A (adjoint when combined with transpose)
   uint32_t unit; // unit (implicit 1) diagonal
+  uint32_t stage; // keep the solved prefix in threadgroup memory
 };
 
 template <unsigned N = c10::metal::max_ndim>

@@ -1689,10 +1689,11 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   return result;
 }
 
-// Complex triangular solve runs a custom Metal substitution kernel because
-// MPSMatrixSolveTriangular is float-only. conjugate selects adjoint (A^H)
-// instead of plain transpose (A^T) when transpose is set; it is a no-op for
-// real inputs.
+// Metal substitution kernel. MPSMatrixSolveTriangular is float-only, and even
+// for float it is built around having many right-hand sides: with few of them
+// its fixed overhead dominates, so this kernel wins there too (see the caller
+// for the cutoff). conjugate selects adjoint (A^H) instead of plain transpose
+// (A^T) when transpose is set; it is a no-op for real inputs.
 static void triangular_solve_metal(const Tensor& A_,
                                    const Tensor& B_,
                                    bool upper,
@@ -1717,6 +1718,7 @@ static void triangular_solve_metal(const Tensor& A_,
   params.conj = conjugate;
   params.unit = unitriangular;
 
+  const uint64_t elem_size = A_.element_size();
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -1724,8 +1726,23 @@ static void triangular_solve_metal(const Tensor& A_,
       auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
       getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, A_, B_, out, params);
-      mtl_dispatch1DJob(encoder, pso, batchSize * k);
+      // Every substitution step reduces across the whole threadgroup, so don't
+      // spread a short row over more threads than it has work for.
+      const uint64_t maxThreads = std::min<uint64_t>(pso.maxTotalThreadsPerThreadgroup, 256);
+      const uint64_t tgSize = std::clamp<uint64_t>((n + 31) / 32 * 32, 32, maxThreads);
+      const uint64_t redBytes = tgSize / 32 * elem_size;
+      // Staging the solved prefix saves a device round-trip per substitution
+      // step, but only pays off if the whole vector fits next to the reduction
+      // buffer; past that the kernel reads the prefix back from out.
+      const uint64_t maxTGMem = [MPSDevice::getInstance()->device() maxThreadgroupMemoryLength];
+      const bool stage = n * elem_size + redBytes <= maxTGMem;
+      TriangularSolveParams tgParams = params;
+      tgParams.stage = stage;
+      mtl_setArgs(encoder, A_, B_, out, tgParams);
+      [encoder setThreadgroupMemoryLength:(stage ? n * elem_size : elem_size) atIndex:0];
+      [encoder setThreadgroupMemoryLength:redBytes atIndex:1];
+      [encoder dispatchThreads:MTLSizeMake(tgSize * batchSize * k, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(tgSize, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
@@ -1782,7 +1799,11 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   // It is fully overwritten, hence empty rather than a copy of out.
   Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
-  if (scalar_type == kComplexFloat) {
+  // MPSMatrixSolveTriangular only pulls ahead once there are enough right-hand
+  // sides to amortize its setup and feed its blocked inner loop; below that the
+  // substitution kernel is faster, and for complex it is the only option.
+  constexpr int64_t kMetalMaxRHS = 128;
+  if (scalar_type == kComplexFloat || (left ? B_.size(-1) : B_.size(-2)) <= kMetalMaxRHS) {
     triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out_);
     if (!out_.is_same(out)) {
       out.copy_(out_);
