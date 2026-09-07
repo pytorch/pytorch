@@ -247,7 +247,9 @@ class Vectorized16 {
     // returns an integer mask where all zero elements are translated to 1-bit
     // and others are translated to 0-bit
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
-    return _mm256_movemask_epi8(cmp);
+    __m128i packed = _mm_packs_epi16(
+        _mm256_castsi256_si128(cmp), _mm256_extracti128_si256(cmp, 1));
+    return _mm_movemask_epi8(packed);
   }
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size())
@@ -757,6 +759,23 @@ static inline Vectorized<T> binary_op_as_fp32(
   cvt_to_fp32<T>(__m256i(b), b_lo, b_hi);
   auto o1 = op(a_lo, b_lo);
   auto o2 = op(a_hi, b_hi);
+  return cvt_from_fp32<T>(o1, o2);
+}
+
+template <typename T, typename Op>
+static inline Vectorized<T> ternary_op_as_fp32(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c,
+    Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  __m256 c_lo, c_hi;
+  cvt_to_fp32<T>(__m256i(a), a_lo, a_hi);
+  cvt_to_fp32<T>(__m256i(b), b_lo, b_hi);
+  cvt_to_fp32<T>(__m256i(c), c_lo, c_hi);
+  auto o1 = op(a_lo, b_lo, c_lo);
+  auto o2 = op(a_hi, b_hi, c_hi);
   return cvt_from_fp32<T>(o1, o2);
 }
 

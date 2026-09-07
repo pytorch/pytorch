@@ -1012,6 +1012,42 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmadd) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fnmadd), RESOLVE_OVERLOAD(local_fnmadd),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fnmadd(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fnmsub) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fnmsub), RESOLVE_OVERLOAD(local_fnmsub),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fnmsub(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
     TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
         using VT = ValueType<TypeParam>;
         using vec = at::vec::VectorizedN<VT, 1>;

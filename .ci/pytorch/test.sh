@@ -2211,7 +2211,7 @@ test_vec256() {
     echo "Testing vec256 instructions"
     mkdir -p test/test-reports/vec256
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
     for vec256_exec in $vec256_tests
     do
       $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
