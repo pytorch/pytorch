@@ -3,12 +3,9 @@
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Any, Final
+from typing import Final
 
-from torch._inductor.kernel.gemm_epilogue_utils import (
-    statically_known,
-    statically_known_shape_equal,
-)
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known
 from torch._inductor.utils import _IntLike
 from torch.types import IntLikeType
 
@@ -52,21 +49,12 @@ LOCAL_REDUCE_TENSORSSA_FRAGMENT_MULTIPLE_ERROR = (
 LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR = (
     "FlexGEMM local reductions require group size to divide TensorSSA fragment width 32"
 )
-LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR = (
-    "unsupported FlexGEMM epilogue partial-output contract: FlexGEMM does not "
-    "support this local-reduce output contract yet. Please file an issue with "
-    "the FlexGEMM epilogue expression."
-)
 LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR = (
     "FlexGEMM local reductions do not support mixing grouped TensorSSA "
     "values with different grouped layouts"
 )
 LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR = (
     "FlexGEMM local reductions currently support only aten.mm"
-)
-LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR = (
-    "FlexGEMM does not support this aux output shape yet. Please file an issue "
-    "with the FlexGEMM epilogue expression."
 )
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
@@ -101,6 +89,16 @@ FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
     "FlexGEMM grouped main output shape must contract only the GEMM N dimension"
 )
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = "unsupported FlexGEMM epilogue: main output shape must equal the physical GEMM output shape"
+FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
+    "FlexGEMM indexed outputs must gather from the returned main output (or the "
+    "value whose dtype conversion is the main output) and keep its dtype: write "
+    "main.gather(1, indices[:, None]).squeeze(1)"
+)
+FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
+    "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
+    "[M, N] or broadcast as [1, N] / [M, 1] / [1, 1]; 1-D captures are read as "
+    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]"
+)
 FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR = (
     "FlexGEMM nested TensorSSA composition does not support captured tensors"
 )
@@ -121,50 +119,33 @@ def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) 
     return statically_known(value % divisor == 0)
 
 
-def is_flex_gemm_partial_reduction_shape(
+def aux_output_shape_error(
     aux_size: Sequence[_IntLike], output_size: Sequence[_IntLike]
-) -> bool:
-    """Recognize aux shapes that imply a final PyTorch reduction, not local reduce.
-
-    FlexGEMM's generic aux-output path supports one same-shape aux tensor beside
-    the main output. Reduced shapes such as ``[]``, ``[M]``, ``[N]``, ``[M, 1]``,
-    ``[1, N]``, or exact 2-D divisors of ``[M, N]`` mean the epilogue tried to
-    return a final PyTorch reduction/block reduction. Those are different from
-    QuACK local-reduce aux outputs, which are only accepted after the epilogue
-    exposes an explicit grouped view such as ``acc.view(M, -1, group).sum(-1)``.
-    """
-    if len(output_size) != 2:
-        return False
-    aux_shape = tuple(aux_size)
-    m, n = output_size
-    if any(
-        statically_known_shape_equal(aux_shape, candidate)
-        for candidate in ((), (m,), (n,), (1, 1), (m, 1), (1, n))
-    ):
-        return True
-    if len(aux_shape) != 2:
-        return False
-    aux_m, aux_n = aux_shape
-    return (
-        statically_known(aux_m > 0)
-        and statically_known(aux_n > 0)
-        and statically_known(aux_m <= m)
-        and statically_known(aux_n <= n)
-        and (statically_known(aux_m < m) or statically_known(aux_n < n))
-        and statically_known_multiple(m, aux_m)
-        and statically_known_multiple(n, aux_n)
+) -> NotImplementedError:
+    """Reject auxiliary outputs that are neither same-shape nor a known contract."""
+    return NotImplementedError(
+        f"unsupported FlexGEMM aux output shape {list(aux_size)}: auxiliary outputs "
+        f"must match the GEMM output shape {list(output_size)}, be the partials of "
+        "one grouped reduction, or be one indexed row gather"
     )
 
 
-def local_reduce_unsupported_tensorssa_error(
-    reduction: Any, *, value_only: bool = False
-) -> NotImplementedError:
-    """Explain why a grouped reduction is outside the current TensorSSA subset."""
-    suffix = " value-only reduction" if value_only else ""
+def ungrouped_reduction_error(op_name: str) -> NotImplementedError:
+    """Explain that FlexGEMM reduces the GEMM output only through one grouped view."""
     return NotImplementedError(
-        "FlexGEMM does not support this grouped local reduction yet: "
-        f"{reduction} does not map to a CuTe TensorSSA{suffix}. Please file "
-        "an issue with the FlexGEMM epilogue expression."
+        f"unsupported FlexGEMM epilogue reduction {op_name}: it reduces a GEMM "
+        "output dimension that no grouped view splits. Reduce through exactly one "
+        "acc.view(m, -1, group) (N axis) or acc.view(-1, group, n) (M axis), "
+        "return the grouped partials as an auxiliary output, and finalize them "
+        "outside flex_gemm"
+    )
+
+
+def unsupported_reduction_op_error(op_name: str) -> NotImplementedError:
+    """Name a reduction op that no FlexGEMM local-reduction path implements."""
+    return NotImplementedError(
+        f"unsupported FlexGEMM reduction op: {op_name}; grouped local reductions "
+        "support sum, mean, prod, amax, amin, and softmax/logsumexp state"
     )
 
 
