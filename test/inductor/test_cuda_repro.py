@@ -2828,6 +2828,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -2884,6 +2885,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
             return torch.index_add(x, -1, idx, src, alpha=0.5)
@@ -2908,6 +2910,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_scalar_index(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)
