@@ -2996,6 +2996,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -3006,6 +3007,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -3013,6 +3015,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -3306,7 +3310,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,
