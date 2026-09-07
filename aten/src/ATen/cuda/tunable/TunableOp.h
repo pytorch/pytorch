@@ -35,6 +35,14 @@ template <typename ParamsT>
 class Callable {
   public:
     virtual ~Callable() = default;
+    // Contract for implementers: decide the status *before* enqueueing any work
+    // that touches the output. A non-OK return means "I did nothing", and
+    // callers act on it by re-dispatching the whole GEMM on the non-tunable
+    // path -- which double-applies beta if C has already been written. So
+    // reject up front rather than mid-kernel: the TF32 guard returns early,
+    // hipBLASLt rejects via matmulIsAlgoSupported, and rocBLAS rejects via
+    // Tensile's ContractionSolution::canSolve, which runs before launchKernels
+    // and yields rocblas_status_invalid_value.
     virtual TuningStatus Call(const ParamsT* /*unused*/) {
       return FAIL;
     }
@@ -128,7 +136,18 @@ class TunableOp {
         op = GetOp(result.GetKey());
       }
       TORCH_CHECK(op != nullptr);
-      return op->Call(params);
+      // For a wildcard-served shape this is where the backend re-checks that
+      // the reused solution is valid for the new concrete dims. A non-OK status
+      // means nothing was enqueued (see the contract on Callable::Call), so the
+      // caller is free to re-dispatch the non-tunable kernel.
+      auto status = op->Call(params);
+      if (status != OK) {
+        TORCH_WARN(
+            "TunableOp kernel returned status ",
+            status,
+            "; falling back to the non-tunable kernel");
+      }
+      return status;
     }
 
     virtual std::string Signature() {
