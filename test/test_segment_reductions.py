@@ -2,12 +2,15 @@
 
 from itertools import product
 from functools import partial
+import subprocess
+import sys
 
 import numpy as np
 import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -15,6 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
+    slowTest,
 )
 
 
@@ -568,6 +572,54 @@ class TestSegmentReductions(TestCase):
         nd_data = torch.arange(12, dtype=torch.float, device=device).reshape(2, 6)
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
+
+    @onlyCUDA
+    @slowTest
+    @parametrize("direction", ("forward", "backward"))
+    def test_rejects_invalid_segment_bounds(self, device, direction):
+        script = f"""
+import torch
+
+data = torch.ones(5, dtype=torch.float64, device={device!r}, requires_grad=True)
+lengths = torch.tensor([1, 1, 1, 2], dtype=torch.int64, device={device!r})
+
+if {direction!r} == "forward":
+    lengths[-1] = data.numel() + 1
+    torch.segment_reduce(data, "max", lengths=lengths, unsafe=True)
+else:
+    lengths_alias = torch.from_dlpack(lengths)
+    output = torch.segment_reduce(data, "max", lengths=lengths, initial=1.0)
+    lengths_alias.fill_(torch.iinfo(torch.int64).min)
+    output.sum().backward()
+
+torch.cuda.synchronize()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        stderr = proc.stderr
+        expected_assert = (
+            "offset_start >= 0 && offset_start <= offset_end"
+            if direction == "forward"
+            else "segment_length >= 0"
+        )
+        has_cuda_assert = (
+            "device-side assert triggered" in stderr
+            and "SegmentReduce.cu" in stderr
+            and expected_assert in stderr
+        )
+        has_hip_assert = (
+            "hipErrorLaunchFailure" in stderr
+            or "unspecified launch failure" in stderr
+            or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
 
 
 
