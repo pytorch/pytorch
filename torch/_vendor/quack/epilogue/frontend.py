@@ -1341,7 +1341,9 @@ class EpiMod:
                 config.tile_n,
                 num_seqs=num_seqs if getattr(op, "dim", 0) == 1 else None,
             )
-            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
+            bufs[name] = epi_args[name] = torch.empty(
+                shape, dtype=op.sink_alloc_dtype(), device=device
+            )
         return bufs
 
     def _finalize_sink(self, name, buf, cu_seqlens_m, plan):
@@ -1616,9 +1618,9 @@ class EpiMod:
                 for name in self.outputs:
                     epi_values[name] = outs[name]
                 sink_bufs = {}
-                for name, shape in sink_shapes:
+                for name, shape, dtype in sink_shapes:
                     if epi_values.get(name) is None:
-                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
+                        buf = _t.empty(shape, dtype=dtype, device=A.device)
                         sink_bufs[name] = epi_values[name] = buf
                 B_w = B if b_kn_c else B.mT
                 sem = _t.zeros(1, dtype=_t.int32, device=A.device) if sem_dyn else None
@@ -1688,7 +1690,11 @@ class EpiMod:
                     cache[shape_key] = shapes
                 for name, shape in shapes.items():
                     if epi_args.get(name) is None:
-                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
+                        epi_args[name] = torch.empty(
+                            shape,
+                            dtype=self.sinks[name].sink_alloc_dtype(),
+                            device=A.device,
+                        )
                         owned_sinks[name] = True
             res = tuned_mod_gemm(
                 self,
@@ -1798,7 +1804,9 @@ class EpiMod:
                 if name not in provided_out
             )
             # tuned sink_bufs are already the winning config's exact slices
-            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
+            sink_shapes = tuple(
+                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()
+            )
             self._call_cache[ck] = (
                 plan_used,
                 recipes,

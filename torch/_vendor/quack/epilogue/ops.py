@@ -47,6 +47,11 @@ import torch._vendor.quack.copy_utils as copy_utils
 import torch._vendor.quack.layout_utils as layout_utils
 
 
+_CUTE_TO_TORCH_DTYPE = {
+    cute_dtype: torch_dtype for torch_dtype, cute_dtype in torch2cute_dtype_map.items()
+}
+
+
 def assume_stride_divisibility(tensor):
     """Assume all strides are divisible by 32 bits (except static strides).
 
@@ -406,6 +411,10 @@ class EpiOp:
     def host_call_arg(self, value, key):
         """Per-call runtime argument matching the compiled signature."""
         return value
+
+    def sink_alloc_dtype(self):
+        """Return the torch dtype for graph-owned sink storage."""
+        return torch.float32
 
     def arg_spec_type(self, const=False):
         """Type annotation for this op's EpilogueArguments field. ``const``
@@ -2915,9 +2924,20 @@ def _selp_pair_f16x2(
     )
 
 
+class _ColVecSelectParams(NamedTuple):
+    tensor: object
+    logical_n: object
+
+
 class ColVecSelect(EpiOp):
     """Per-row column selection ("gather along N"): out[m] = the fn value at
-    column idx[m], written directly to an (l, m) / (m,) f32 colvec.
+    column idx[m], written directly to an (l, m) / (m,) colvec.
+
+    By default this keeps the cross-entropy contract: the output is f32 and
+    out-of-range indices leave prefilled rows untouched. Setting ``output_dtype``
+    selects exact gather semantics: preserve every selected value, including
+    ``-inf``, trap on indices outside ``[0, N)``, and store directly in the
+    requested dtype.
 
     The fn returns the value under this op's name (a plain sink plane). The
     per-row column index arrives through a companion integer ColVecLoad
@@ -2976,7 +2996,7 @@ class ColVecSelect(EpiOp):
 
     fn_port = "sink"
 
-    def __init__(self, name, idx_op):
+    def __init__(self, name, idx_op, *, output_dtype=None):
         super().__init__(name)
         if not isinstance(idx_op, ColVecLoad):
             raise ValueError(
@@ -2984,9 +3004,18 @@ class ColVecSelect(EpiOp):
                 "staging the per-row column indices"
             )
         self.idx_op = idx_op
+        self.output_dtype = output_dtype
+        try:
+            self._sink_dtype = (
+                torch.float32 if output_dtype is None else _CUTE_TO_TORCH_DTYPE[output_dtype]
+            )
+        except KeyError:
+            raise ValueError(
+                f"ColVecSelect {name!r}: unsupported output dtype {output_dtype}"
+            ) from None
 
     def config_key(self):
-        return (self.idx_op.cache_key(),)
+        return (self.idx_op.cache_key(), self.output_dtype)
 
     def host_fake_arg(self, key, fctx):
         dtype, ndim = key
@@ -2997,12 +3026,23 @@ class ColVecSelect(EpiOp):
         return [(self.name, object, None)]
 
     def to_params(self, gemm, args):
-        return {self.name: assume_stride_divisibility(getattr(args, self.name))}
+        tensor = assume_stride_divisibility(getattr(args, self.name))
+        return {
+            self.name: (
+                _ColVecSelectParams(tensor, gemm.caller_n)
+                if self.output_dtype is not None
+                else tensor
+            )
+        }
 
     def sink_alloc_shape(self, lead, n, tile_m, tile_n, num_seqs=None):
         # Full colvec, not per-tile partials: config-independent (tiles
         # ignored), and there is no host_finalize — the buffer IS the result.
         return tuple(lead)
+
+    def sink_alloc_dtype(self):
+        """Return the requested exact-gather dtype, or Float32 for CE selection."""
+        return self._sink_dtype
 
     def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
         idx = epi_args.get(self.idx_op.name)
@@ -3011,12 +3051,25 @@ class ColVecSelect(EpiOp):
         if idx.dtype not in (torch.int32, torch.int64):
             raise ValueError(f"'{self.idx_op.name}' must be int32 or int64, got {idx.dtype}")
         expected = (m,) if varlen_m or batch is None else (batch, m)
+        index_shapes = (expected,) if len(expected) == 1 else ((m,), expected)
+        if tuple(idx.shape) not in index_shapes:
+            raise ValueError(
+                f"'{self.idx_op.name}' must have shape in {index_shapes}, got {tuple(idx.shape)}"
+            )
+        if idx.stride(-1) != 1:
+            raise ValueError(f"'{self.idx_op.name}' must have unit innermost stride")
         if tuple(value.shape) != expected:
             raise ValueError(
                 f"sink '{self.name}': expected shape {expected}, got {tuple(value.shape)}"
             )
-        if value.dtype != torch.float32:
-            raise ValueError(f"sink '{self.name}' must be float32, got {value.dtype}")
+        if value.stride(-1) != 1:
+            raise ValueError(f"sink '{self.name}' must have unit innermost stride")
+        expected_dtype = Float32 if self.output_dtype is None else self.output_dtype
+        actual_dtype = torch2cute_dtype_map.get(value.dtype)
+        if actual_dtype != expected_dtype:
+            raise ValueError(
+                f"sink '{self.name}' must have dtype {expected_dtype}, got {value.dtype}"
+            )
 
     def get_smem_tensor(self, gemm, params, storage_epi):
         # The COMPANION's staged index vector (the smem field is declared by
@@ -3027,6 +3080,8 @@ class ColVecSelect(EpiOp):
 
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
+        if const_expr(self.output_dtype is not None):
+            param = param.tensor
         # Reference colvec-broadcast partition: its zero-N-stride layout
         # groups aliased same-row elements in fn_sink_flush (layout only —
         # the tensor itself is never read or written, so it costs nothing).
@@ -3070,7 +3125,59 @@ class ColVecSelect(EpiOp):
         return (state[0], ref_cur, c_cur, *state[3:], epi_coord)
 
     @cute.jit
+    def end_loop_stage(
+        self,
+        gemm,
+        param,
+        state,
+        epi_coord,
+        epi_tile,
+        tiled_copy_t2r,
+        tiled_copy_r2s,
+        tidx,
+    ):
+        """Stage strict-gather bounds validation for the finish phase."""
+        if const_expr(self.output_dtype is None or epi_coord[1] != 0):
+            return None
+        return (False, (state, epi_coord))
+
+    @cute.jit
+    def end_loop_finish(self, gemm, param, staged, tile_coord_mnkl, varlen_manager):
+        """Trap strict-gather indices outside the logical output extent."""
+        state, epi_coord = staged
+        sIdx, _, coords, _, limit_m, n_off, _, _, _ = state
+        logical_n = param.logical_n
+        coordinates = cute.filter_zeros(coords[None, None, None, epi_coord[0], epi_coord[1]])
+        for i in cutlass.range(cute.size(coordinates), unroll_full=True):
+            row, column = coordinates[i][0], coordinates[i][1]
+            index = sIdx[row]
+            if row < limit_m and n_off == 0 and column == 0 and (index < 0 or index >= logical_n):
+                llvm.inline_asm(
+                    None,
+                    [],
+                    "trap;",
+                    "",
+                    has_side_effects=True,
+                    is_align_stack=False,
+                )
+
+    @cute.jit
+    def _flush_exact(self, gemm, state, frag):
+        """Implement exact tensor-gather semantics with direct predicated stores."""
+        sIdx, _, coords, gVec, limit_m, n_off, _, _, _, _ = state
+        values = cute.filter_zeros(frag)
+        coordinates = cute.filter_zeros(coords)
+        for i in cutlass.range(cute.size(values), unroll_full=True):
+            row, column = coordinates[i][0], coordinates[i][1]
+            index = sIdx[row]
+            if row < limit_m and n_off + column == index:
+                gVec[row] = values[i].to(gVec.element_type)
+
+    @cute.jit
     def fn_sink_flush(self, gemm, state, frag):
+        if const_expr(self.output_dtype is not None):
+            self._flush_exact(gemm, state, frag)
+            return
         sIdx, ref_frag, coords, gVec, limit_m, n_off, tMask, tRel0, etN, epi_coord = state
         ref = ref_frag.layout
         frag_g = layout_utils.convert_layout_zero_stride(frag, ref)

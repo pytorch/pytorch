@@ -1,0 +1,411 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 8fbc0a1..7a37683 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -1344 +1344,3 @@ class EpiMod:
+-            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
++            bufs[name] = epi_args[name] = torch.empty(
++                shape, dtype=op.sink_alloc_dtype(), device=device
++            )
+@@ -1619 +1621 @@ class EpiMod:
+-                for name, shape in sink_shapes:
++                for name, shape, dtype in sink_shapes:
+@@ -1621 +1623 @@ class EpiMod:
+-                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
++                        buf = _t.empty(shape, dtype=dtype, device=A.device)
+@@ -1691 +1693,5 @@ class EpiMod:
+-                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
++                        epi_args[name] = torch.empty(
++                            shape,
++                            dtype=self.sinks[name].sink_alloc_dtype(),
++                            device=A.device,
++                        )
+@@ -1801 +1807,3 @@ class EpiMod:
+-            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
++            sink_shapes = tuple(
++                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()
++            )
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index 85bf548..ed61d53 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -49,0 +50,5 @@ import quack.layout_utils as layout_utils
++_CUTE_TO_TORCH_DTYPE = {
++    cute_dtype: torch_dtype for torch_dtype, cute_dtype in torch2cute_dtype_map.items()
++}
++
++
+@@ -409,0 +415,4 @@ class EpiOp:
++    def sink_alloc_dtype(self):
++        """Return the torch dtype for graph-owned sink storage."""
++        return torch.float32
++
+@@ -2917,0 +2927,5 @@ def _selp_pair_f16x2(
++class _ColVecSelectParams(NamedTuple):
++    tensor: object
++    logical_n: object
++
++
+@@ -2920 +2934,7 @@ class ColVecSelect(EpiOp):
+-    column idx[m], written directly to an (l, m) / (m,) f32 colvec.
++    column idx[m], written directly to an (l, m) / (m,) colvec.
++
++    By default this keeps the cross-entropy contract: the output is f32 and
++    out-of-range indices leave prefilled rows untouched. Setting ``output_dtype``
++    selects exact gather semantics: preserve every selected value, including
++    ``-inf``, trap on indices outside ``[0, N)``, and store directly in the
++    requested dtype.
+@@ -2979 +2999 @@ class ColVecSelect(EpiOp):
+-    def __init__(self, name, idx_op):
++    def __init__(self, name, idx_op, *, output_dtype=None):
+@@ -2986,0 +3007,9 @@ class ColVecSelect(EpiOp):
++        self.output_dtype = output_dtype
++        try:
++            self._sink_dtype = (
++                torch.float32 if output_dtype is None else _CUTE_TO_TORCH_DTYPE[output_dtype]
++            )
++        except KeyError:
++            raise ValueError(
++                f"ColVecSelect {name!r}: unsupported output dtype {output_dtype}"
++            ) from None
+@@ -2989 +3018 @@ class ColVecSelect(EpiOp):
+-        return (self.idx_op.cache_key(),)
++        return (self.idx_op.cache_key(), self.output_dtype)
+@@ -3000 +3029,8 @@ class ColVecSelect(EpiOp):
+-        return {self.name: assume_stride_divisibility(getattr(args, self.name))}
++        tensor = assume_stride_divisibility(getattr(args, self.name))
++        return {
++            self.name: (
++                _ColVecSelectParams(tensor, gemm.caller_n)
++                if self.output_dtype is not None
++                else tensor
++            )
++        }
+@@ -3006,0 +3043,4 @@ class ColVecSelect(EpiOp):
++    def sink_alloc_dtype(self):
++        """Return the requested exact-gather dtype, or Float32 for CE selection."""
++        return self._sink_dtype
++
+@@ -3013,0 +3054,7 @@ class ColVecSelect(EpiOp):
++        index_shapes = (expected,) if len(expected) == 1 else ((m,), expected)
++        if tuple(idx.shape) not in index_shapes:
++            raise ValueError(
++                f"'{self.idx_op.name}' must have shape in {index_shapes}, got {tuple(idx.shape)}"
++            )
++        if idx.stride(-1) != 1:
++            raise ValueError(f"'{self.idx_op.name}' must have unit innermost stride")
+@@ -3018,2 +3065,8 @@ class ColVecSelect(EpiOp):
+-        if value.dtype != torch.float32:
+-            raise ValueError(f"sink '{self.name}' must be float32, got {value.dtype}")
++        if value.stride(-1) != 1:
++            raise ValueError(f"sink '{self.name}' must have unit innermost stride")
++        expected_dtype = Float32 if self.output_dtype is None else self.output_dtype
++        actual_dtype = torch2cute_dtype_map.get(value.dtype)
++        if actual_dtype != expected_dtype:
++            raise ValueError(
++                f"sink '{self.name}' must have dtype {expected_dtype}, got {value.dtype}"
++            )
+@@ -3029,0 +3083,2 @@ class ColVecSelect(EpiOp):
++        if const_expr(self.output_dtype is not None):
++            param = param.tensor
+@@ -3071,0 +3127,49 @@ class ColVecSelect(EpiOp):
++    @cute.jit
++    def end_loop_stage(
++        self,
++        gemm,
++        param,
++        state,
++        epi_coord,
++        epi_tile,
++        tiled_copy_t2r,
++        tiled_copy_r2s,
++        tidx,
++    ):
++        """Stage strict-gather bounds validation for the finish phase."""
++        if const_expr(self.output_dtype is None or epi_coord[1] != 0):
++            return None
++        return (False, (state, epi_coord))
++
++    @cute.jit
++    def end_loop_finish(self, gemm, param, staged, tile_coord_mnkl, varlen_manager):
++        """Trap strict-gather indices outside the logical output extent."""
++        state, epi_coord = staged
++        sIdx, _, coords, _, limit_m, n_off, _, _, _ = state
++        logical_n = param.logical_n
++        coordinates = cute.filter_zeros(coords[None, None, None, epi_coord[0], epi_coord[1]])
++        for i in cutlass.range(cute.size(coordinates), unroll_full=True):
++            row, column = coordinates[i][0], coordinates[i][1]
++            index = sIdx[row]
++            if row < limit_m and n_off == 0 and column == 0 and (index < 0 or index >= logical_n):
++                llvm.inline_asm(
++                    None,
++                    [],
++                    "trap;",
++                    "",
++                    has_side_effects=True,
++                    is_align_stack=False,
++                )
++
++    @cute.jit
++    def _flush_exact(self, gemm, state, frag):
++        """Implement exact tensor-gather semantics with direct predicated stores."""
++        sIdx, _, coords, gVec, limit_m, n_off, _, _, _, _ = state
++        values = cute.filter_zeros(frag)
++        coordinates = cute.filter_zeros(coords)
++        for i in cutlass.range(cute.size(values), unroll_full=True):
++            row, column = coordinates[i][0], coordinates[i][1]
++            index = sIdx[row]
++            if row < limit_m and n_off + column == index:
++                gVec[row] = values[i].to(gVec.element_type)
++
+@@ -3073,0 +3178,3 @@ class ColVecSelect(EpiOp):
++        if const_expr(self.output_dtype is not None):
++            self._flush_exact(gemm, state, frag)
++            return
+diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
+index 1da5f85..1af3171 100644
+--- a/quack/gemm_runtime/torch_op.py
++++ b/quack/gemm_runtime/torch_op.py
+@@ -219,2 +219,3 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
+-            outs.append(torch.empty(shape, dtype=torch.float32, device=A.device))
++            op = mod.sinks[name]
++            shape = op.sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
++            outs.append(torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device))
+@@ -359 +360 @@ def compile_call(
+-            partials[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
++            partials[name] = torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device)
+diff --git a/tests/test_gemm_epilogue.py b/tests/test_gemm_epilogue.py
+index bc46d70..b1b4688 100644
+--- a/tests/test_gemm_epilogue.py
++++ b/tests/test_gemm_epilogue.py
+@@ -8,0 +9 @@ import math
++import os
+@@ -9,0 +11,3 @@ import pickle
++import subprocess
++import sys
++import textwrap
+@@ -15 +19 @@ import cutlass.cute as cute
+-from cutlass import Float32, Int32
++from cutlass import BFloat16, Float32, Int32
+@@ -18,2 +22,10 @@ from quack import epi_math
+-from quack.epilogue.frontend import EpiMod, gemm_epilogue, pack, fragment_epilogue, unpack
+-from quack.epilogue.ops import ColVecReduce, OnlineLSEReduce, RowVecReduce, Scalar, TileLoad
++from quack.epilogue.frontend import EpiMod, fragment_epilogue, gemm_epilogue, pack, unpack
++from quack.epilogue.ops import (
++    ColVecLoad,
++    ColVecReduce,
++    ColVecSelect,
++    OnlineLSEReduce,
++    RowVecReduce,
++    Scalar,
++    TileLoad,
++)
+@@ -93,0 +106,42 @@ _cache_max_mod = gemm_epilogue(reduces={"stat": ColVecReduce("stat", combine="ma
++def test_colvec_select_exact_gather_changes_cache_key():
++    index = ColVecLoad("index")
++    ordinary = ColVecSelect("selected", idx_op=index)
++    strict = ColVecSelect("selected", idx_op=index, output_dtype=BFloat16)
++
++    assert ordinary.cache_key() != strict.cache_key()
++
++
++def test_colvec_select_exact_gather_validates_storage():
++    index_op = ColVecLoad("index")
++    select = ColVecSelect("selected", idx_op=index_op, output_dtype=BFloat16)
++    m = 8
++    valid_index = torch.arange(m, dtype=torch.int64)
++    valid_out = torch.empty(m, dtype=torch.bfloat16)
++    kwargs = {
++        "m": m,
++        "n": 16,
++        "tile_M": 128,
++        "tile_N": 128,
++        "batch": None,
++        "varlen_m": False,
++    }
++    select.host_validate(valid_out, epi_args={"index": valid_index}, **kwargs)
++    batched_kwargs = kwargs | {"batch": 2}
++    batched_out = torch.empty(2, m, dtype=torch.bfloat16)
++    select.host_validate(batched_out, epi_args={"index": valid_index}, **batched_kwargs)
++    select.host_validate(
++        batched_out,
++        epi_args={"index": valid_index.repeat(2, 1)},
++        **batched_kwargs,
++    )
++
++    cases = (
++        (torch.arange(m - 1, dtype=torch.int64), valid_out, "must have shape"),
++        (torch.arange(2 * m, dtype=torch.int64)[::2], valid_out, "index.*stride"),
++        (valid_index, torch.empty(2 * m, dtype=torch.bfloat16)[::2], "sink.*stride"),
++    )
++    for index, out, error in cases:
++        with pytest.raises(ValueError, match=error):
++            select.host_validate(out, epi_args={"index": index}, **kwargs)
++
++
+@@ -1586,0 +1641,164 @@ def test_epi_mod_lse_target(n, target_dtype):
++@pytest.mark.parametrize("target_dtype", [torch.int32, torch.int64])
++def test_epi_mod_exact_gather(target_dtype):
++    """The strict row selector preserves special values in the requested dtype."""
++    target_op = ColVecLoad("target")
++
++    @gemm_epilogue(
++        outs={
++            "selected": ColVecSelect(
++                "selected",
++                idx_op=target_op,
++                output_dtype=BFloat16,
++            )
++        },
++        extra_ops=(target_op,),
++    )
++    def indexed_epi(acc, bias):
++        value = acc + bias
++        return {"D": value, "selected": value}
++
++    device = "cuda"
++    torch.random.manual_seed(17)
++    m, n, k = 65, 512, 64
++    A = torch.randn((m, k), device=device, dtype=torch.bfloat16)
++    B = torch.randn((n, k), device=device, dtype=torch.bfloat16)
++    target = torch.arange(m, device=device, dtype=target_dtype) % n
++    target[:5] = torch.tensor([0, 127, 128, 256, n - 1], device=device)
++    bias = torch.zeros((m, n), device=device, dtype=torch.bfloat16)
++    bias[torch.arange(m, device=device), target.long()] = -torch.inf
++    D = torch.empty((m, n), device=device, dtype=torch.bfloat16)
++    selected = torch.empty((m,), device=device, dtype=torch.bfloat16)
++
++    indexed_epi.gemm(
++        A,
++        B,
++        D,
++        epi_args={"bias": bias, "target": target, "selected": selected},
++        tile_M=128,
++        tile_N=256,
++        cluster_M=1,
++        cluster_N=1,
++    )
++
++    expected = (A.float() @ B.float().mT + bias.float()).to(torch.bfloat16)
++    torch.testing.assert_close(D, expected)
++    torch.testing.assert_close(
++        selected,
++        expected.gather(1, target.long().unsqueeze(1)).squeeze(1),
++    )
++    assert torch.isneginf(selected).all()
++
++
++def test_epi_mod_exact_gather_allocates_requested_dtype():
++    """Eager, cached, and compiled calls allocate exact-gather sink dtype."""
++    target_op = ColVecLoad("target")
++
++    @gemm_epilogue(
++        outs={
++            "selected": ColVecSelect(
++                "selected",
++                idx_op=target_op,
++                output_dtype=BFloat16,
++            )
++        },
++        extra_ops=(target_op,),
++    )
++    def indexed_epi(acc):
++        return {"D": acc, "selected": acc}
++
++    m, n, k = 65, 512, 64
++    A = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
++    B = torch.randn((k, n), device="cuda", dtype=torch.bfloat16)
++    target = torch.arange(m, device="cuda", dtype=torch.int64) % n
++    constraints = {
++        "tile_m": 128,
++        "tile_n": 256,
++        "cluster_m": 1,
++        "cluster_n": 1,
++        "swap_ab": False,
++    }
++
++    def run(a, b, index):
++        result = indexed_epi(
++            a,
++            b,
++            target=index,
++            tuned=False,
++            config_constraints=constraints,
++        )
++        return result["D"], result["selected"]
++
++    outputs = (run(A, B, target), run(A, B, target))
++    outputs += (torch.compile(run, fullgraph=True)(A, B, target),)
++    expected = (A.float() @ B.float()).to(torch.bfloat16)
++    for D, selected in outputs:
++        assert selected.dtype is torch.bfloat16
++        torch.testing.assert_close(D, expected)
++        torch.testing.assert_close(
++            selected,
++            expected.gather(1, target[:, None]).squeeze(1),
++        )
++
++
++@pytest.mark.parametrize("invalid_index", [-1, 512])
++def test_epi_mod_exact_gather_traps_out_of_bounds(invalid_index, tmp_path):
++    """Strict row selection traps invalid indices without poisoning pytest CUDA."""
++    script = textwrap.dedent(
++        f"""
++        import torch
++        from cutlass import BFloat16
++        from quack.epilogue.frontend import gemm_epilogue
++        from quack.epilogue.ops import ColVecLoad, ColVecSelect
++
++        index_op = ColVecLoad("index")
++
++        @gemm_epilogue(
++            outs={{
++                "selected": ColVecSelect(
++                    "selected",
++                    idx_op=index_op,
++                    output_dtype=BFloat16,
++                )
++            }},
++            extra_ops=(index_op,),
++        )
++        def indexed_epi(acc):
++            return {{"D": acc, "selected": acc}}
++
++        m, n, k = 65, 512, 64
++        A = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
++        B = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
++        D = torch.empty((m, n), device="cuda", dtype=torch.bfloat16)
++        selected = torch.empty((m,), device="cuda", dtype=torch.bfloat16)
++        index = torch.arange(m, device="cuda", dtype=torch.int64) % n
++        index[0] = {invalid_index}
++        indexed_epi.gemm(
++            A,
++            B,
++            D,
++            epi_args={{"index": index, "selected": selected}},
++            tile_M=128,
++            tile_N=256,
++            cluster_M=1,
++            cluster_N=1,
++        )
++        torch.cuda.synchronize()
++        raise AssertionError("out-of-bounds exact gather did not trap")
++        """
++    )
++    env = os.environ.copy()
++    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path)
++    result = subprocess.run(
++        [sys.executable, "-c", script],
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=180,
++    )
++    output = result.stdout + result.stderr
++
++    assert result.returncode != 0, output
++    assert "out-of-bounds exact gather did not trap" not in output
++    assert "CUDA error" in output or "AcceleratorError" in output
++
++

@@ -216,8 +216,9 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
             named.get("SFA") is not None,
         )
         for name in m["sink_names"]:
-            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
-            outs.append(torch.empty(shape, dtype=torch.float32, device=A.device))
+            op = mod.sinks[name]
+            shape = op.sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
+            outs.append(torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device))
     return outs
 
 
@@ -356,7 +357,7 @@ def compile_call(
                 cfg.tile_n,
                 num_seqs=num_seqs if getattr(op, "dim", 0) == 1 else None,
             )
-            partials[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
+            partials[name] = torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device)
         outs = []
         if store_d:
             outs.append(out["D"])
