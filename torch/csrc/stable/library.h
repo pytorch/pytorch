@@ -146,7 +146,7 @@ class StableTorchLibraryInit final {
 };
 
 // type mapper: since to<HeaderOnlyArrayRef<T>> cannot exist,
-// we map that to std::vector<T> to preserve ownership semantics.
+// we map that to std::vector<T> to preserve ownership semantics. This comment is being tweaked for CI rerun.
 // note that unbox_type_t is used to convert ParamTypes, so that
 // the tuple holding the arguments will have proper ownership too.
 template <typename T>
