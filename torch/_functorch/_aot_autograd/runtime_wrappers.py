@@ -241,6 +241,7 @@ def _identity(x: Any) -> Any:
 def _replay_input_mutation(
     orig: torch.Tensor,
     updated: torch.Tensor,
+    *,
     idx: int,
     compile_id: str | None,
     warned: set[int],
@@ -249,46 +250,61 @@ def _replay_input_mutation(
 ) -> None:
     """Write functionalized input mutation ``idx`` back onto the caller's tensor.
 
-    A tracked ``copy_``, except under grad mode onto a requires-grad view stamped
-    IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
-    which autograd then refuses to modify in place: that write is replayed under
-    no_grad. With grad mode off eager itself writes such a view tracked, version
-    bump included, so the plain copy_ stands. Decided per call: nothing guards
-    the view's provenance. The invisible replay deliberately diverges from eager,
-    which raises on a visible write, and warns once per input (``warned`` is the
-    owning epilogue's set). ``hidden`` (the traced write bypassed autograd, e.g.
-    through ``.data``) replays with the version counter preserved and does not
-    warn; ``under_no_grad`` (the traced write ran under no_grad or inference
-    mode) replays as a plain no_grad ``copy_``, which bumps the version counter
-    as eager's write did so a stale saved tensor is still caught, and does not
-    warn either.
+    Mirrors the in-graph copy_ epilogue in ``graph_capture_wrappers``: ``hidden``
+    (the traced write bypassed autograd, e.g. through ``.data``) replays under
+    no_grad with the version counter preserved -- unless the tensor was created in
+    inference mode and has none; ``under_no_grad`` (the write ran under no_grad or
+    inference mode) replays under no_grad, letting the counter bump as eager's
+    write did so a stale saved tensor is still caught. Neither warns.
+
+    An autograd-visible write onto a requires-grad view stamped IN_CUSTOM_FUNCTION
+    (an input a custom autograd.Function returned as-is) is one autograd refuses in
+    place; the in-graph copy_ never sees such a view, but the replayed one might --
+    nothing guards the caller's provenance, so it is decided per call. It is
+    replayed invisibly (deliberately diverging from eager, which raises) and warned
+    once per input (``warned`` is the owning epilogue's set), unless
+    ``config.error_on_custom_function_view_input_mutation`` restores the raise.
     """
-    # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
-    if (
+    if hidden:
+        # Hidden from autograd: replay under no_grad and do not bump the version
+        # counter (a tensor created in inference mode has none).
+        if orig.is_inference():
+            maybe_preserve_vc = nullcontext()
+        else:
+            maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
+                orig  # type: ignore[assignment]
+            )
+        with torch.no_grad(), maybe_preserve_vc:
+            orig.copy_(updated)
+    elif under_no_grad:
+        # Under no_grad / inference mode: replay under no_grad, still bumping the VC.
+        with torch.no_grad():
+            orig.copy_(updated)
+    elif (
+        # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
         torch.is_grad_enabled()
-        and orig.requires_grad
+        and (orig.requires_grad or updated.requires_grad)
         and orig._is_view()
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
-        if not (hidden or under_no_grad) and idx not in warned:
+        graph = f" of compiled graph [{compile_id}]" if compile_id else ""
+        msg = (
+            f"torch.compile is writing mutated input {idx}{graph} back onto a "
+            "view created inside a custom autograd.Function (or an input it "
+            "returned as-is) without autograd tracking. Eager rejects an "
+            "autograd-visible in-place op on such a view; compile cannot tell "
+            "that apart from a write that bypasses autograd (e.g. through "
+            ".data), so it replays the mutation invisibly and gradients that "
+            "later flow through this input see its pre-mutation history only."
+        )
+        if config.error_on_custom_function_view_input_mutation:
+            raise RuntimeError(msg)
+        if idx not in warned:
             warned.add(idx)
-            graph = f" of compiled graph [{compile_id}]" if compile_id else ""
-            warnings.warn(
-                f"torch.compile is writing mutated input {idx}{graph} back onto a "
-                "view created inside a custom autograd.Function (or an input it "
-                "returned as-is) without autograd tracking. Eager rejects an "
-                "autograd-visible in-place op on such a view; compile cannot tell "
-                "that apart from a write that bypasses autograd (e.g. through "
-                ".data), so it replays the mutation invisibly and gradients that "
-                "later flow through this input see its pre-mutation history only."
-            )
-        with torch.no_grad():
-            if under_no_grad and not hidden:
-                orig.copy_(updated)
-            else:
-                with torch.autograd._unsafe_preserve_version_counter(orig):
-                    orig.copy_(updated)
+            warnings.warn(msg, stacklevel=2)
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
     else:
         orig.copy_(updated)
 
@@ -861,11 +877,11 @@ class _RuntimeForwardEpilogue:
                     _replay_input_mutation(
                         original_inpt,
                         updated_inpt,
-                        inpt_idx,
-                        self.runtime_metadata.compile_id_str,
-                        self.warned_inputs,
-                        meta.mutations_hidden_from_autograd,
-                        meta.mutations_under_no_grad_or_inference_mode,
+                        idx=inpt_idx,
+                        compile_id=self.runtime_metadata.compile_id_str,
+                        warned=self.warned_inputs,
+                        hidden=meta.mutations_hidden_from_autograd,
+                        under_no_grad=meta.mutations_under_no_grad_or_inference_mode,
                     )
 
     def _replay_output_aliases(
@@ -1045,10 +1061,15 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
-    if runtime_metadata.compile_id_str is None:
+    # Thread the compile id as a local instead of stamping runtime_metadata, which is
+    # pickled into the cached BundledAOTAutogradResult: writing it back would brand every
+    # deserialized cache entry with the compile id current at load time, defeating the
+    # {cid!r} the codegen'd epilogue bakes into its warning.
+    compile_id_str = runtime_metadata.compile_id_str
+    if compile_id_str is None:
         compile_id = CompileContext.current_compile_id()
         if compile_id is not None:
-            runtime_metadata.compile_id_str = str(compile_id)
+            compile_id_str = str(compile_id)
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
@@ -1217,10 +1238,11 @@ def _create_runtime_wrapper(
                     else:
                         hidden = meta.mutations_hidden_from_autograd
                         no_grad = meta.mutations_under_no_grad_or_inference_mode
-                        cid = runtime_metadata.compile_id_str
+                        cid = compile_id_str
                         args = (
-                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, "
-                            f"{hidden}, {no_grad}"
+                            f"{oi}, {ui}, idx={inpt_idx}, compile_id={cid!r}, "
+                            f"warned=_warned_inputs, hidden={hidden}, "
+                            f"under_no_grad={no_grad}"
                         )
                         write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:
@@ -3852,27 +3874,42 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             if tangent_idx is None:
                 return x, [x]
             from .descriptors import (
+                InputMutationAOTOutput,
                 IntermediateBaseAOTOutput,
+                PlainAOTInput,
                 PlainAOTOutput,
                 TangentAOTInput,
             )
 
-            which = tangent_desc.expr() if tangent_desc else "an unknown output"
+            which = (
+                tangent_desc.expr() if tangent_desc is not None else "an unknown output"
+            )
             if isinstance(tangent_desc, TangentAOTInput):
                 out, via = tangent_desc.output, ""
                 if isinstance(out, IntermediateBaseAOTOutput):
                     out, via = out.base_of, "the intermediate base behind "
                 if isinstance(out, PlainAOTOutput):
                     which = f"{via}forward output {out.idx}"
-            graph = f" in compiled graph [{compile_id_str}]" if compile_id_str else ""
+                elif isinstance(out, InputMutationAOTOutput):
+                    mutated = out.mutated_input
+                    if isinstance(mutated, PlainAOTInput):
+                        which = f"{via}the mutation of forward input {mutated.idx}"
+                    else:
+                        which = f"{via}the mutation of {mutated.expr()}"
+            graph = (
+                f" in compiled graph [{compile_id_str}]"
+                if compile_id_str is not None
+                else ""
+            )
             trace = ""
-            if tangent_stack_trace:
+            if tangent_stack_trace is not None:
                 trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
             raise RuntimeError(
                 f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
                 f"for tangent {tangent_idx}, the gradient of {which}. The backward "
                 "requires this tangent, so this is a bug in AOTAutograd or the backend "
-                f"(materialize_grads / mark_non_differentiable mismatch); please report it.{trace}"
+                "(materialize_grads / mark_non_differentiable mismatch); please report it "
+                f"at https://github.com/pytorch/pytorch/issues.{trace}"
             )
 
         if is_fake_tensor(x):

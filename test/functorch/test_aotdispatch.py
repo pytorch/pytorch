@@ -5527,6 +5527,108 @@ def forward(self, tangents_1):
             ).backward()
             self.assertIsNotNone(b2.grad)
 
+    def test_replay_input_mutation_hidden_on_multi_output_view(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _replay_input_mutation,
+        )
+
+        # A MULTI_OUTPUT_NODE view (from unbind) under grad mode: a tracked copy_
+        # raises, so the hidden path must replay under no_grad with the version
+        # counter preserved. Regression for the CreationMeta gate that previously
+        # only special-cased IN_CUSTOM_FUNCTION and did a bare tracked copy_ here.
+        base = torch.randn(3, 4, requires_grad=True)
+        view = base.unbind(0)[1]
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(view),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        updated = torch.arange(4, dtype=torch.float32)
+        v0 = view._version
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _replay_input_mutation(
+                view,
+                updated,
+                idx=1,
+                compile_id=None,
+                warned=set(),
+                hidden=True,
+                under_no_grad=False,
+            )
+        self.assertEqual(view.detach(), updated)
+        self.assertEqual(view._version, v0)
+        self.assertEqual(len(caught), 0)
+
+    def test_replay_input_mutation_no_grad_on_multi_output_view(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _replay_input_mutation,
+        )
+
+        # The no_grad path replays under no_grad but lets the version counter bump,
+        # again without crashing on a MULTI_OUTPUT_NODE view under grad mode.
+        base = torch.randn(3, 4, requires_grad=True)
+        view = base.unbind(0)[1]
+        updated = torch.arange(4, dtype=torch.float32)
+        v0 = view._version
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _replay_input_mutation(
+                view,
+                updated,
+                idx=1,
+                compile_id=None,
+                warned=set(),
+                hidden=False,
+                under_no_grad=True,
+            )
+        self.assertEqual(view.detach(), updated)
+        self.assertGreater(view._version, v0)
+        self.assertEqual(len(caught), 0)
+
+    def test_replay_input_mutation_error_config_restores_raise(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _replay_input_mutation,
+        )
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        view = Scale.apply(torch.randn(4, requires_grad=True) * 1.0)
+        updated = torch.randn(4)
+        with functorch_config.patch(error_on_custom_function_view_input_mutation=True):
+            with self.assertRaisesRegex(RuntimeError, "without autograd tracking"):
+                _replay_input_mutation(
+                    view,
+                    updated,
+                    idx=0,
+                    compile_id=None,
+                    warned=set(),
+                    hidden=False,
+                    under_no_grad=False,
+                )
+        # Default (flag off) warns instead of raising.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _replay_input_mutation(
+                view,
+                updated,
+                idx=0,
+                compile_id=None,
+                warned=set(),
+                hidden=False,
+                under_no_grad=False,
+            )
+        self.assertTrue(
+            any("without autograd tracking" in str(c.message) for c in caught)
+        )
+
     def test_input_mutation_on_nonleaf_view_matches_eager(self):
         # A plain non-leaf view accepts a tracked in-place edit in eager, so the
         # epilogue's tracked copy_ has to reproduce both the values and the
@@ -5687,6 +5789,8 @@ def forward(self, tangents_1):
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # Disabling the marking dedup puts a None back in the kept
         # intermediate-base slot (tangent 1; tangent 0 is x * 3).
+        # _dealias_marked_returns runs at backward time, so the backward below
+        # must stay inside the patch for the None to reach the kept-slot check.
         import torch._functorch._aot_autograd.runtime_wrappers as rw
 
         def f(x):
@@ -5709,6 +5813,7 @@ def forward(self, tangents_1):
         # subclass output forbids output aliasing, so the None comes from the
         # sibling-output dedup case instead: inductor returns one object for
         # h * 1.0 and h.detach(), so marking the detach slot marks the kept one.
+        # As in the plain test, the backward must run inside the patch.
         import torch._functorch._aot_autograd.runtime_wrappers as rw
 
         def f(x, z):
@@ -5750,14 +5855,62 @@ def forward(self, tangents_1):
             (outs[0].sum() + outs[1].sum() + outs[6].sum()).backward()
             return x.grad
 
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        orig = rw.AOTDispatchAutograd.process_runtime_tangent
+        kept_tangent_idxs = []
+
+        def spy(
+            x,
+            meta,
+            tangent_idx=None,
+            tangent_desc=None,
+            compile_id_str=None,
+            tangent_stack_trace=None,
+        ):
+            if tangent_idx is not None:
+                kept_tangent_idxs.append(tangent_idx)
+            return orig(
+                x, meta, tangent_idx, tangent_desc, compile_id_str, tangent_stack_trace
+            )
+
         torch._dynamo.reset()
         lengths = torch.arange(4)
         x_ref = torch.randn(8, requires_grad=True)
         grad_ref = run(f, x_ref, lengths)
 
         x = x_ref.detach().clone().requires_grad_(True)
-        grad = run(torch.compile(f, backend="inductor"), x, lengths)
+        with patch.object(rw.AOTDispatchAutograd, "process_runtime_tangent", spy):
+            grad = run(torch.compile(f, backend="inductor"), x, lengths)
         self.assertEqual(grad, grad_ref)
+        # Structural: the prologue keeps far fewer tangent slots than the seven
+        # returns (num_flat_bw_args_with_grads < expected_grad_outs), so the
+        # dropped None slots never reach the kept-slot check; the surviving
+        # indices process_runtime_tangent sees are never None.
+        self.assertTrue(kept_tangent_idxs)
+        self.assertLess(len(set(kept_tangent_idxs)), 7)
+
+    def test_none_tangent_names_a_mutated_input(self):
+        # Exercise the input-mutation arm of the kept-slot None check: the
+        # message must name the mutated input via its descriptor, not fall back
+        # to the opaque tangent_desc.expr(). An end-to-end None in a kept
+        # input-mutation slot is hard to force, so drive the renderer directly.
+        from torch._functorch._aot_autograd.descriptors import (
+            InputMutationAOTOutput,
+            PlainAOTInput,
+            TangentAOTInput,
+        )
+        from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
+
+        desc = TangentAOTInput(
+            output=InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=2))
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"handed None instead of a Tensor for tangent 0, "
+            r"the gradient of the mutation of forward input 2",
+        ):
+            AOTDispatchAutograd.process_runtime_tangent(None, None, 0, desc)
 
 
 def extract_graph(fx_g, _, graph_cell):
