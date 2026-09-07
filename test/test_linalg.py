@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -10734,6 +10734,36 @@ class TestLinalgCudaOnly(TestCase):
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
 
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @dtypes(torch.float)
+    def test_bfx9_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            a = torch.randn(37, 37, device=device, dtype=dtype)
+            b = torch.randn(37, 37, device=device, dtype=dtype)
+
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            torch.mm(a, b)
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            torch.mm(a, b)
+
+            results = torch.cuda.tunable.get_results()
+            signatures = (
+                ("GemmTunableOp_float_NN", "nn_37_37_37_ld_37_37_37"),
+                (
+                    "GemmTunableOp_bfx9_NN",
+                    "nn_37_37_37_ld_37_37_37_compute_bf16x9_r",
+                ),
+            )
+            for op_signature, params_signature in signatures:
+                self.assertIsNotNone(
+                    find_tunableop_result(results, op_signature, params_signature)
+                )
+
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
@@ -11652,7 +11682,7 @@ class TestGroupedMM(TestCase):
 
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestGroupedMM, globals())
+instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

@@ -40,10 +40,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf,wincanary,wincanarylf
 
   wheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
+    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
@@ -137,7 +148,7 @@ jobs:
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [wheel-build]
+    needs: [get-label-type, wheel-build]
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
