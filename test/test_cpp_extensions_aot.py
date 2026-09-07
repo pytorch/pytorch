@@ -10,6 +10,7 @@ import torch
 import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
+from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -107,8 +108,8 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@onlyCUDA
 class TestCppExtensionAOTCUDA(common.TestCase):
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
 
@@ -122,7 +123,6 @@ class TestCppExtensionAOTCUDA(common.TestCase):
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cublas_extension(self):
         from torch_test_cpp_extension import cublas_extension
 
@@ -132,7 +132,6 @@ class TestCppExtensionAOTCUDA(common.TestCase):
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cusolver_extension(self):
         from torch_test_cpp_extension import cusolver_extension
 
@@ -142,7 +141,6 @@ class TestCppExtensionAOTCUDA(common.TestCase):
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(
         os.getenv("USE_NINJA", "0") == "0",
         "cuda extension with dlink requires ninja to build",
@@ -158,8 +156,8 @@ class TestCppExtensionAOTCUDA(common.TestCase):
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
 class TestCppExtensionAOTMPS(common.TestCase):
-    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
     def test_mps_extension(self):
         import torch_test_cpp_extension.mps as mps_extension
 
@@ -174,12 +172,12 @@ class TestCppExtensionAOTMPS(common.TestCase):
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@unittest.skipIf(not TEST_XPU, "XPU not found")
+@unittest.skipIf(
+    os.getenv("USE_NINJA", "0") == "0",
+    "sycl extension requires ninja to build",
+)
 class TestCppExtensionAOTXPU(common.TestCase):
-    @unittest.skipIf(not TEST_XPU, "XPU not found")
-    @unittest.skipIf(
-        os.getenv("USE_NINJA", "0") == "0",
-        "sycl extension requires ninja to build",
-    )
     def test_sycl_extension(self):
         import torch_test_cpp_extension.sycl as sycl_extension
 
