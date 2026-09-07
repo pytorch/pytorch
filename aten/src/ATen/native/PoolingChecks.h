@@ -198,6 +198,37 @@ pool3d_backward_shape_check(
   }
 }
 
+// TODO(#196230): remove this shim once the torch-xpu-ops pin in
+// third_party/xpu.txt calls pool3d_backward_shape_check directly. Its
+// DilatedMaxPool3d kernel still uses the pre-merge name; torch-xpu-ops compiles
+// every TU with -DUSE_XPU (see its cmake/BuildFlags.cmake), while in-tree
+// USE_XPU is PRIVATE to torch_xpu, so this stays out of torch_cpu.
+#ifdef USE_XPU
+inline void
+max_pool3d_backward_shape_check(
+  const Tensor& input,
+  const Tensor& gradOutput,
+  const Tensor& indices,
+  int64_t nslices,
+  int kT, int kH, int kW,
+  int dT, int dH, int dW,
+  int pT, int pH, int pW,
+  int dilationT, int dilationH, int dilationW,
+  int64_t itime, int64_t iheight, int64_t iwidth,
+  int64_t otime, int64_t oheight, int64_t owidth,
+  const char* fn_name)
+{
+  pool3d_backward_shape_check(
+    input, gradOutput, indices, nslices,
+    kT, kH, kW,
+    dT, dH, dW,
+    pT, pH, pW,
+    dilationT, dilationH, dilationW,
+    itime, iheight, iwidth,
+    otime, oheight, owidth, fn_name);
+}
+#endif // USE_XPU
+
 // MaxUnpool2d/MaxUnpool3d
 inline void max_unpooling2d_shape_check(
     const Tensor& input,
