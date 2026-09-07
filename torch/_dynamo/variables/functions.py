@@ -807,13 +807,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return False
         return True
 
-    def get_source(self) -> Source:
-        source = self.source
-
-        if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn  # type: ignore[assignment]
-        return source  # type: ignore[return-value]
-
     def bind_args(
         self,
         parent: "InstructionTranslatorBase",
@@ -917,7 +910,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # the function to an instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
-        return UserMethodVariable(self.fn, obj, source_fn=self.source, source=source)
+        return UserMethodVariable(self, obj, source=source)
 
     def call_function(
         self,
@@ -1795,39 +1788,60 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(UserFunctionVariable):
+class UserMethodVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
+    # Mirrors PyMethodObject, which composes im_func/im_self rather than
+    # subclassing the function type (MethodType is not a FunctionType subclass).
     _cpython_type = types.MethodType
 
     def __init__(
         self,
-        fn: Callable[..., Any],
-        obj: VariableTracker,
-        source_fn: Source | None = None,
+        im_func: BaseUserFunctionVariable,
+        im_self: VariableTracker,
         **kwargs: Any,
     ) -> None:
-        super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
-        self.obj = obj
-        self.source_fn = source_fn
-        # Note on source and source_fn
-        # Be careful with `source` when delegating to UserFunctionVariable
-        # (base-class) methods. In this __init__, `source` is a *bound method*
-        # object, but the base class expects the underlying *function* object.
-        # One way is to simplly use `__func__` to unwrap it.
-        #
-        # For recursive dict-tag optimizations, it can be faster to fetch the
-        # function directly from `cls.__dict__`; that's why we pass on
-        # `source_fn`. Whenever it is possible to access the function from
-        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
-        # operates on the unbound function, most guards should target
-        # `source_fn` rather than the original `source`.
-        if source_fn is None and kwargs.get("source") is not None:
-            self.source_fn = AttrSource(kwargs.get("source"), "__func__")  # type: ignore[assignment, arg-type]
+        super().__init__(**kwargs)
+        # `source` denotes the bound method; im_func carries the source of the
+        # underlying function, which is what guards and bind_args operate on.
+        self.im_func = im_func
+        self.im_self = im_self
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.fn}, {self.obj})"
+        return f"{self.__class__.__name__}({self.im_func}, {self.im_self})"
+
+    # A method delegates to its function for everything the function object
+    # backs; ref method_getattro / method_call in CPython classobject.c.
+    def get_function(self) -> types.FunctionType:
+        return self.im_func.get_function()
+
+    def get_code(self) -> types.CodeType:
+        return self.im_func.get_code()
+
+    def get_globals(self) -> dict[str, Any]:
+        return self.im_func.get_globals()
+
+    def has_self(self) -> bool:
+        # Reports the *function's* __self__, not the binding: Dynamo decomposes
+        # method calls into function calls with an explicit self argument, and
+        # check_inlineable refuses to inline anything reporting True here.
+        return self.im_func.has_self()
+
+    def bind_args(
+        self,
+        parent: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> dict[str, VariableTracker]:
+        return self.im_func.bind_args(parent, args, kwargs)  # type: ignore[attr-defined]
+
+    def should_allow_nested_graph_breaks(self) -> bool:
+        return self.im_func.should_allow_nested_graph_breaks()
+
+    @property
+    def is_constant(self) -> bool:
+        return getattr(self.im_func, "is_constant", False)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython method_hash: hash(self) ^ hash(func)
@@ -1838,15 +1852,18 @@ class UserMethodVariable(UserFunctionVariable):
         # Sourceless: compute method_hash from components.
         from .object_protocol import generic_hash_impl
 
-        self_hash, self_fake = generic_hash_impl(tx, self.obj)
-        func_hash = hash(self.fn)
+        self_hash, self_fake = generic_hash_impl(tx, self.im_self)
+        func_hash = hash(self.get_function())
         h = self_hash ^ func_hash
         if h == -1:
             h = -2
         return h, self_fake
 
     def self_args(self) -> list[VariableTracker]:
-        return [self.obj]
+        return [self.im_self]
+
+    def get_source(self) -> Source | None:
+        return self.im_func.get_source()
 
     def python_type(self) -> type[types.MethodType]:
         return types.MethodType
@@ -1867,17 +1884,19 @@ class UserMethodVariable(UserFunctionVariable):
         # function/method wrapping code paths.
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
-        if is_nonstrict_trace_callable(self.fn):
+        func = self.get_function()
+
+        if is_nonstrict_trace_callable(func):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+                func, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
             return var.call_function(tx, call_args, kwargs)
 
-        if is_leaf_function(self.fn):
+        if is_leaf_function(func):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
+                func, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
 
@@ -1891,12 +1910,12 @@ class UserMethodVariable(UserFunctionVariable):
         # the module call so that Dynamo can see the underlying parameters and
         # buffers and raise them as inputs to the graph. The is_root_tracer
         # check bypasses the if condition for non-root tracers and directly
-        # calls the super().call_function at the end, which is basically
-        # equivalent of inlining the method.
+        # delegates to im_func at the end, which is basically equivalent of
+        # inlining the method.
         if tx.output.is_root_tracer() and isinstance(
-            self.obj, variables.NNModuleVariable
+            self.im_self, variables.NNModuleVariable
         ):
-            module_attr = getattr(self.fn, "__module__", "")
+            module_attr = getattr(func, "__module__", "")
             # inline torch.nn.utils.parametrize
             if (
                 module_attr is not None
@@ -1904,36 +1923,43 @@ class UserMethodVariable(UserFunctionVariable):
                 and module_attr != "torch.nn.utils.parametrize"
                 or self.is_constant
             ):
-                return self.obj.call_method(
-                    tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
+                return self.im_self.call_method(
+                    tx, func.__name__, list(args), kwargs, constant=self.is_constant
                 )
         elif (
             _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
+            and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
-            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
-                tx, [self.obj, *args], kwargs
+            return variables.TorchCtxManagerClassVariable(func).call_function(
+                tx, [self.im_self, *args], kwargs
             )
         if self.is_constant:
-            fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
+            fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
-        return super().call_function(tx, args, kwargs)
+        # method_call calls im_func with im_self prepended.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L61
+        return self.im_func.call_function(tx, [self.im_self, *args], kwargs)
 
-    def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # We might have a better way to access the function object, this
-        # information is stored in self.source_fn, use that to construct the
-        # variable tracker.
-        return VariableTracker.build(tx, self.fn, self.source_fn)  # type: ignore[arg-type]
+    def read_func_slot(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # method_getattro forwards slot reads to __func__, so __defaults__,
+        # __kwdefaults__, __closure__ and friends come off the function.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L269
+        return self.im_func.read_func_slot(tx, name)
 
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
+    tp_getset = {
+        "__get__": GetSet(lambda s, tx: s.im_func._get_dunder_get(tx), readonly_setter),  # type: ignore[attr-defined]
+    }
     tp_members = {
-        "__self__": Member(lambda s, _: s.obj, readonly_setter),
-        "__func__": Member(_get_func, readonly_setter),
+        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
+        "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
 
     def get_real_python_backed_value(self) -> Any:
-        return self.fn
+        return self.get_function()
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -1943,9 +1969,9 @@ class WrappedUserMethodVariable(UserMethodVariable):
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
-        kwargs.pop("fn", None)
-        kwargs.pop("obj", None)
-        super().__init__(wrapped.fn, wrapped.obj, **kwargs)
+        kwargs.pop("im_func", None)
+        kwargs.pop("im_self", None)
+        super().__init__(wrapped.im_func, wrapped.im_self, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -2624,9 +2650,7 @@ class SkipFunctionVariable(VariableTracker):
                 func_var = args[0]
                 obj_var = args[1]
                 if isinstance(func_var, UserFunctionVariable):
-                    return UserMethodVariable(
-                        func_var.fn, obj_var, source_fn=func_var.source
-                    )
+                    return UserMethodVariable(func_var, obj_var)
             unimplemented(
                 gb_type="unsupported function.__get__ call",
                 context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
@@ -3633,8 +3657,10 @@ class DynamoTritonHOPifier(TritonHOPifier):
         )
 
     def is_callable(self, maybe_callable: VariableTracker) -> bool:
+        # functions and methods are both valid triton grid callables
         return isinstance(
-            maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
+            maybe_callable,
+            (NestedUserFunctionVariable, UserFunctionVariable, UserMethodVariable),
         )
 
     def get_value(self, val: VariableTracker) -> Any:
@@ -4837,9 +4863,8 @@ class ClassMethodVariable(VariableTracker):
             else None
         )
         return UserMethodVariable(
-            self.descriptor.__func__,
+            UserFunctionVariable(self.descriptor.__func__, source=func_source),
             owner,
-            source_fn=func_source,
             source=bound_source,
         )
 

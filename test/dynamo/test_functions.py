@@ -5349,6 +5349,92 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_method_vt_not_a_function_vt(self):
+        """Methods must not subclass UserFunctionVariable (CPython parity).
+
+        In CPython, MethodType is not a subclass of FunctionType, and
+        PyMethodObject composes im_func/im_self rather than extending the
+        function type. The VTs mirror that.
+        """
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        self.assertFalse(issubclass(types.MethodType, types.FunctionType))
+        self.assertFalse(issubclass(UserMethodVariable, UserFunctionVariable))
+        self.assertTrue(issubclass(UserMethodVariable, BaseUserFunctionVariable))
+        self.assertTrue(issubclass(UserFunctionVariable, BaseUserFunctionVariable))
+
+    def test_method_vt_composes_im_func_im_self(self):
+        """UserMethodVariable holds im_func/im_self, mirroring PyMethodObject."""
+        from torch._dynamo.variables.functions import (
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+
+        def f(self, x):
+            return x
+
+        im_self = ConstantVariable.create(1)
+        im_func = UserFunctionVariable(f)
+        method = UserMethodVariable(im_func, im_self)
+
+        self.assertIs(method.im_func, im_func)
+        self.assertIs(method.im_self, im_self)
+        self.assertIs(method.get_function(), f)
+        self.assertIs(method.get_code(), f.__code__)
+        self.assertEqual(method.self_args(), [im_self])
+        # the function VT carries the source, so the method needs no source_fn
+        self.assertFalse(hasattr(method, "source_fn"))
+        self.assertIs(method.get_source(), im_func.get_source())
+
+    def test_method_still_inlines_after_vt_split(self):
+        """Method calls, attribute access and reconstruction survive the split."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def add(self, x):
+                return x + self.bias
+
+        obj = Counter(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            m = obj.add
+            return m(x), m.__name__, isinstance(m, types.MethodType)
+
+        x = torch.ones(3)
+        out, name, is_method = fn(x)
+        self.assertEqual(out, x + 3)
+        self.assertEqual(name, "add")
+        self.assertTrue(is_method)
+
+    def test_disable_on_method_still_graph_breaks(self):
+        """`torch.compiler.disable` on a method must keep skipping inlining.
+
+        This reached its gate in symbolic_convert only because UserMethodVariable
+        used to be a UserFunctionVariable subclass.
+        """
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class M(torch.nn.Module):
+            @torch.compiler.disable
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x) + 1
+
+        m = M()
+        x = torch.ones(3)
+        self.assertEqual(torch.compile(m, backend=cnt)(x), m(x))
+        with self.assertRaises(Unsupported):
+            torch.compile(m, backend="eager", fullgraph=True)(x)
+
 
 def udf_mul(x, y):
     return x * y

@@ -404,7 +404,10 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    getattribute_fn,
+                    variables.UserFunctionVariable(
+                        getattribute_fn,
+                        source=new_source and AttrSource(new_source, "__func__"),
+                    ),
                     self,
                     source=new_source,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
@@ -446,11 +449,15 @@ class NNModuleVariable(VariableTracker):
                 ],
             )
 
-        options = {"source": AttrSource(obj_source, "__getattr__")}
+        source = AttrSource(obj_source, "__getattr__")
 
-        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [VariableTracker.build(tx, name)], {}
-        )
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                getattr_fn, source=AttrSource(source, "__func__")
+            ),
+            self,
+            source=source,
+        ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -539,7 +546,10 @@ class NNModuleVariable(VariableTracker):
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    subobj.__func__,
+                    variables.UserFunctionVariable(
+                        subobj.__func__,
+                        source=source and AttrSource(source, "__func__"),
+                    ),
                     variables.UserDefinedObjectVariable(type(base)),
                     source=source,
                 )
@@ -549,7 +559,13 @@ class NNModuleVariable(VariableTracker):
                     source=source,
                 )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(subobj, self, source=source)
+                return variables.UserMethodVariable(
+                    variables.UserFunctionVariable(
+                        subobj, source=source and AttrSource(source, "__func__")
+                    ),
+                    self,
+                    source=source,
+                )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
