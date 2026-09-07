@@ -54,7 +54,13 @@ from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
@@ -62,9 +68,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     has_cpp_wrapper_for_device,
-    HAS_GPU,
+    requires_triton,
 )
 from torch.utils._import_utils import import_dill
 
@@ -452,6 +457,8 @@ class TensorWithCounter(torch.Tensor):
 
 
 class TestOpaqueObject(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         # Must run first: super().setUp() can raise SkipTest (e.g. under
         # PYTORCH_TEST_SKIP_FAST), and unittest skips tearDown when setUp
@@ -4075,22 +4082,6 @@ class GraphModule(torch.nn.Module):
         result = compiled([x, m, y])
         self.assertEqual(result, (x + y,))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_benchmark_harness_no_pickle_for_opaque_inputs(self):
-        """Opaque graph inputs must not be pickled in the benchmark harness."""
-        a = torch.randn(4, 4, device=GPU_TYPE)
-        b = torch.randn(4, 4, device=GPU_TYPE)
-        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
-
-        def fn(x):
-            return x + 1
-
-        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        _, codes = run_and_get_code(compiled_fn, twc)
-        self.assertGreater(len(codes), 0)
-        for code in codes:
-            self.assertNotIn("pickle", code)
-
     def test_opaque_object_state_in_graph_output(self):
         """When compile_fx_inner receives a graph where a raw opaque reference
         type appears in the outputs (not just inputs), inductor must handle it.
@@ -4332,9 +4323,55 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(TestOpaqueObject)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class TestOpaqueObjectDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @requires_triton()
+    def test_benchmark_harness_no_pickle_for_opaque_inputs(self, device):
+        """Opaque graph inputs must not be pickled in the benchmark harness."""
+        a = torch.randn(4, 4, device=device)
+        b = torch.randn(4, 4, device=device)
+        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(compiled_fn, twc)
+        self.assertGreater(len(codes), 0)
+        for code in codes:
+            self.assertNotIn("pickle", code)
+
+
+instantiate_device_type_tests(TestOpaqueObjectDevice, globals(), allow_xpu=True)
+
+
 class TestOpaqueGenerator(TestCase):
-    def test_make_fx_with_generator(self):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_set_generator_metaclass_is_idempotent(self):
+        """Calling _set_generator_metaclass twice is a no-op, not an error"""
+        from torch._custom_class_base import CustomClassBaseMeta
+
+        # Already called during import; second call should be a no-op.
+        torch._C._set_generator_metaclass(CustomClassBaseMeta)
+        self.assertIsInstance(torch._C.Generator, CustomClassBaseMeta)
+
+    def test_generator_metaclass_is_set(self):
+        """Generator's metaclass should be CustomClassBaseMeta after import"""
+        from torch._custom_class_base import CustomClassBaseMeta
+
+        self.assertIsInstance(torch._C.Generator, CustomClassBaseMeta)
+        self.assertEqual(torch._C.Generator.__module__, "torch._C")
+
+
+class TestOpaqueGeneratorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
+    def test_make_fx_with_generator(self, device):
         """make_fx should trace through Generator inputs as opaque values."""
         from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
@@ -4353,10 +4390,12 @@ class TestOpaqueGenerator(TestCase):
                 )
                 return out[0]
 
-        q = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        k = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        v = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        gen = torch.cuda.default_generators[0].clone_state()
+        device_type = torch.device(device).type
+
+        q = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        k = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        v = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        gen = torch.get_device_module(device_type).default_generators[0].clone_state()
 
         gm = make_fx(M(), tracing_mode="real")(q, k, v, gen)
 
@@ -4384,51 +4423,41 @@ class TestOpaqueGenerator(TestCase):
                 )
                 return out[0]
 
-        gen1 = torch.cuda.default_generators[0].clone_state()
-        gen2 = torch.cuda.default_generators[0].clone_state()
+        gen1 = torch.get_device_module(device_type).default_generators[0].clone_state()
+        gen2 = torch.get_device_module(device_type).default_generators[0].clone_state()
         gm0 = make_fx(M0(), tracing_mode="real")(q, k, v, gen1)
         expected = M0()(q, k, v, gen2)
-        gen3 = torch.cuda.default_generators[0].clone_state()
+        gen3 = torch.get_device_module(device_type).default_generators[0].clone_state()
         actual = gm0(q, k, v, gen3)
         self.assertEqual(actual, expected)
 
-    def test_make_fx_randn_with_generator(self):
+    @onlyAccelerator
+    def test_make_fx_randn_with_generator(self, device):
         """make_fx should trace torch.randn with a Generator input."""
 
         def fn(a, generator):
             return torch.randn([20, 20], generator=generator, device=a.device)
 
-        gen = torch.Generator("cuda")
-        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device="cuda"), gen)
+        gen = torch.Generator(device)
+        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device=device), gen)
 
         # Generator is baked in as a get_attr constant (not a placeholder input)
         # because torch.randn passes it directly to C++ without going through
         # proxy dispatch. The generator placeholder has 0 users.
+        device_type = torch.device(device).type
         self.assertExpectedInline(
             normalize_gm(gm.print_readable(False)),
-            """\
+            f"""\
 class fn(torch.nn.Module):
     def forward(self, a_1: "f32[4]", generator_1):
         _opaque_obj0 = self._opaque_obj0
-        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='cuda', index=0), pin_memory = False);  _opaque_obj0 = None
+        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='{device_type}', index=0), pin_memory = False);  _opaque_obj0 = None
         return randn
 """,
         )
 
-    def test_set_generator_metaclass_is_idempotent(self):
-        """Calling _set_generator_metaclass twice is a no-op, not an error"""
-        from torch._custom_class_base import CustomClassBaseMeta
 
-        # Already called during import; second call should be a no-op.
-        torch._C._set_generator_metaclass(CustomClassBaseMeta)
-        self.assertIsInstance(torch._C.Generator, CustomClassBaseMeta)
-
-    def test_generator_metaclass_is_set(self):
-        """Generator's metaclass should be CustomClassBaseMeta after import"""
-        from torch._custom_class_base import CustomClassBaseMeta
-
-        self.assertIsInstance(torch._C.Generator, CustomClassBaseMeta)
-        self.assertEqual(torch._C.Generator.__module__, "torch._C")
+instantiate_device_type_tests(TestOpaqueGeneratorDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
