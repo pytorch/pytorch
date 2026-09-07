@@ -11,6 +11,7 @@ import torch.testing
 
 # pyrefly: ignore [deprecated]
 from torch._vmap_internals import _vmap, vmap
+from torch.autograd.graph import get_gradient_edge
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrOptionalTensors, _TensorOrTensors
 
@@ -1395,6 +1396,68 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
+CHECKED_INPUT_DEPENDENCY_MSG = """
+The autograd graph contains a potential dependency from this input to another
+checked input. Numerical gradcheck perturbs one checked input at a time without
+recomputing the other explicit inputs from it, whereas backward mode autograd can
+additionally propagate through such a dependency and pick up extra chain rule
+terms. That can make the numerical and analytical checks disagree even when the
+backward implementation is correct. To check the composed function, build the
+dependency inside func, for example gradcheck(lambda x: func(x, g(x)), (x,)). To
+check local Jacobians, pass inputs that do not depend on each other, for example
+x.detach().requires_grad_().
+""".strip()
+
+
+def _has_potential_dependency_to_other_checked_input(inputs, candidate) -> bool:
+    # Reachability is over gradient edges rather than nodes alone: two checked inputs
+    # may be distinct outputs of one Node, which is not an ancestor relationship.
+    # Nodes are deduplicated during traversal, but each edge is matched as it is
+    # encountered, so distinct outputs of the same node stay distinguishable.
+    #
+    # This deliberately overapproximates. next_functions is a property of a Node, not
+    # of one of its outputs, so for a multi-output Node every output looks like it
+    # depends on all of the Node's inputs. Reachability also cannot know whether the
+    # resulting chain rule term is nonzero. The hint is worded as a possible cause.
+    candidate_edge = get_gradient_edge(candidate)
+    target = (candidate_edge.node, candidate_edge.output_nr)
+    for t in _iter_tensors(inputs, only_requiring_grad=True):
+        # _iter_tensors admits Tensor-likes that are not Tensor instances.
+        if not isinstance(t, torch.Tensor):
+            continue
+        edge = get_gradient_edge(t)
+        if (edge.node, edge.output_nr) == target:
+            # The same edge, e.g. an input passed twice, is not a dependency.
+            continue
+        seen = {edge.node}
+        queue = collections.deque([edge.node])
+        while queue:
+            for next_node, output_nr in queue.popleft().next_functions:
+                if next_node is None:
+                    continue
+                if (next_node, output_nr) == target:
+                    return True
+                if next_node not in seen:
+                    seen.add(next_node)
+                    queue.append(next_node)
+    return False
+
+
+def _checked_input_dependency_hint(inputs, checked_inputs, input_idx) -> str:
+    # Diagnostic for the input whose Jacobian actually mismatched; a dependency
+    # between two unrelated checked inputs cannot explain this mismatch. This runs
+    # while building a GradcheckError, so it must never raise and hide that error.
+    try:
+        candidate = checked_inputs[input_idx]
+        if not isinstance(candidate, torch.Tensor):
+            return ""
+        if not _has_potential_dependency_to_other_checked_input(inputs, candidate):
+            return ""
+    except Exception:
+        return ""
+    return "\n" + CHECKED_INPUT_DEPENDENCY_MSG
+
+
 def _get_notallclose_msg(
     analytical,
     numerical,
@@ -1655,9 +1718,11 @@ def _slow_gradcheck(
 
             for j, (a, n) in enumerate(zip(analytical, numerical[i])):
                 if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
-                    raise GradcheckError(
-                        _get_notallclose_msg(a, n, i, j, complex_indices, test_imag)
-                    )
+                    # j indexes the flattened list the analytical path used
+                    diff_inputs = list(_iter_tensors(tupled_inputs, True))
+                    msg = _get_notallclose_msg(a, n, i, j, complex_indices, test_imag)
+                    msg += _checked_input_dependency_hint(tupled_inputs, diff_inputs, j)
+                    raise GradcheckError(msg)
 
     return True
 
@@ -1915,12 +1980,17 @@ def _check_analytical_numerical_equal(
                 jacobians_str = _run_slow_mode_and_get_error(
                     func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
                 )
-                raise GradcheckError(
+                msg = (
                     _get_notallclose_msg(
                         a, n, j, i, complex_indices, test_imag, is_forward_ad
                     )
                     + jacobians_str
                 )
+                if not is_forward_ad:
+                    # i indexes the tensors all_u was built from
+                    inp_tensors = _get_inp_tensors(tupled_inputs)[1]
+                    msg += _checked_input_dependency_hint(tupled_inputs, inp_tensors, i)
+                raise GradcheckError(msg)
 
 
 def _fast_gradcheck(
@@ -2062,6 +2132,23 @@ def gradcheck(
        :func:`torch.Tensor.expand`), this check will likely fail because the numerical
        gradients computed by point perturbation at such indices will change
        values at all other indices that share the same memory address.
+
+    .. note::
+       Numerical differentiation perturbs one checked input at a time without
+       recomputing the other explicit inputs from it. Absent storage aliasing, this
+       corresponds to treating the checked inputs as independent coordinates when
+       computing the numerical derivatives. Backward mode autograd instead sees
+       whatever autograd graph already connects the checked inputs, so if one checked
+       input was computed from another (e.g. ``y = 3 * x`` passed as
+       ``gradcheck(func, (x, y))``) it can additionally propagate through that
+       dependency and pick up extra chain rule terms. The numerical and analytical
+       checks can then disagree even when the backward implementation is correct.
+
+       Which behavior is wanted depends on the function being tested. To check the
+       derivative of the composed function, build the dependency inside ``func``, e.g.
+       ``gradcheck(lambda x: func(x, g(x)), (x,))``. To check local Jacobians with
+       respect to independent coordinates, pass inputs that do not depend on each
+       other, e.g. ``x.detach().requires_grad_()``.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
