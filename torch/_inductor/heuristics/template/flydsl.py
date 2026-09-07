@@ -240,8 +240,8 @@ def _get_exhaustive_gfx950_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
         if is_grouped_gemm_gfx950_layout_valid(
             gemm_config.TILE_M,
             gemm_config.TILE_N,
-            gemm_config.BLOCK_M_WARPS,
-            gemm_config.BLOCK_N_WARPS,
+            gemm_config.M_WAVES,
+            gemm_config.N_WAVES,
             gemm_config.USE_HALF_TILE_INTERLEAVED,
         )
     ]
@@ -330,8 +330,8 @@ def is_grouped_gemm_config_valid_for_shape(
     tile_n = int(gemm_config["TILE_N"])
     tile_k = int(gemm_config["TILE_K"])
     stages = int(gemm_config["STAGES"])
-    m_waves = int(gemm_config["BLOCK_M_WARPS"])
-    n_waves = int(gemm_config["BLOCK_N_WARPS"])
+    m_waves = int(gemm_config["M_WAVES"])
+    n_waves = int(gemm_config["N_WAVES"])
     use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
     k_tiles = (k + tile_k - 1) // tile_k
     # The staged kernel prefetches stages-1 K tiles before the main loop.
@@ -347,7 +347,16 @@ def is_grouped_gemm_config_valid_for_shape(
         and is_grouped_gemm_gfx950_layout_valid(
             tile_m, tile_n, m_waves, n_waves, use_half_tile_interleaved
         )
-        and is_gemm_config_valid_for_shape(m, n, k, dtype_id, gemm_config)
+        # Grouped GEMM only accepts row-major A [M, K] and B [G, K, N].
+        and is_gemm_config_valid_for_shape(
+            m,
+            n,
+            k,
+            dtype_id,
+            gemm_config,
+            a_is_transposed=False,
+            b_is_transposed=False,
+        )
     )
 
 
