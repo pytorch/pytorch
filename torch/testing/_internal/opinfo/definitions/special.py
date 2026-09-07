@@ -130,13 +130,14 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
     yield from sample_inputs_elementwise_unary(
         op_info, device, dtype, requires_grad, **kwargs
     )
-    if not dtype.is_floating_point:
+    if requires_grad or not dtype.is_floating_point:
         return
     # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
     # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
     # (y < exp(-32)) and the +-inf / nan returns are never reached by them.
-    # The derivative is inf at 0 and 1 and nan outside [0, 1], which is why the
-    # backward comparison for this op carries a widened tolerance.
+    # Only generated without requires_grad: the derivative is inf at 0 and 1 and
+    # nan outside [0, 1], so gradcheck cannot use them (test_fn_grad fails with
+    # "max per-element difference (slow mode) is: nan").
     extremes = [
         0.0,
         1.0,
