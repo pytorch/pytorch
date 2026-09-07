@@ -112,6 +112,11 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
     "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
 
+// Whether a NCCL timeout tears the process down even when
+// TORCH_NCCL_RETHROW_CUDA_ERRORS is off (default false)
+static std::vector<std::string> TORCH_NCCL_TEARDOWN_ON_TIMEOUT = {
+    "TORCH_NCCL_TEARDOWN_ON_TIMEOUT"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -746,6 +751,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Whether the NCCL watchdog should rethrow CUDA errors.
     bool rethrowCUDAErrors_ = false;
+
+    // Opt-in for the timeout teardown below. Read once at construction.
+    bool tearDownOnTimeout_ = false;
+
+    // Whether a NCCL timeout exception should be rethrown in Watchdog::run()
+    // to terminate the process. Written in runLoop() and read in run()'s catch,
+    // which runs it, so both touch it from the single watchdog thread.
+    bool rethrowTimeoutException_ = false;
 
     std::exception_ptr watchDogException_ = nullptr;
 

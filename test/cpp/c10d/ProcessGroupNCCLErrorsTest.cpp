@@ -73,13 +73,15 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
-    return c10::make_intrusive<WorkNCCLSimulateErrors>(
+    auto work = c10::make_intrusive<WorkNCCLSimulateErrors>(
         device,
         simulateError_,
         rank,
         opType,
         isP2P ? seqP2P_ : seqCollective_,
         isP2P);
+    work->setException(std::exchange(presetException_, nullptr));
+    return work;
   }
 
   size_t getNCCLCommCacheSize() {
@@ -93,6 +95,18 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   void resetError() {
     simulateError_ = false;
   }
+
+  void presetError() {
+    presetException_ = std::make_exception_ptr(std::runtime_error("Error"));
+  }
+
+ protected:
+  // The watchdog keeps a sliced base-class copy of the work, so an overridden
+  // checkForNCCLErrors() never runs there. Presetting the exception is the only
+  // way to reach it, so every initWork override applies this. std::exchange
+  // makes it one-shot, so the next work, including an internal barrier's, is
+  // born clean.
+  std::exception_ptr presetException_;
 
  private:
   bool simulateError_{false};
@@ -140,13 +154,15 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
-    return c10::make_intrusive<WorkNCCLTimedoutErrors>(
+    auto work = c10::make_intrusive<WorkNCCLTimedoutErrors>(
         device,
         setTimedoutError_,
         rank,
         opType,
         isP2P ? seqP2P_ : seqCollective_,
         isP2P);
+    work->setException(std::exchange(presetException_, nullptr));
+    return work;
   }
 
   void setTimedoutError() {
@@ -276,6 +292,37 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 
   void TearDown() override {
     ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
+    // Unset rather than zero so each one falls back to its own default.
+    unsetenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str());
+    unsetenv(c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS[0].c_str());
+    unsetenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str());
+    unsetenv(c10d::TORCH_NCCL_PROPAGATE_ERROR[0].c_str());
+    unsetenv(c10d::TORCH_NCCL_TEARDOWN_ON_TIMEOUT[0].c_str());
+  }
+
+  // Shared by the timeout teardown tests. The watchdog throws from its own
+  // thread and the throw reaches std::terminate, so letting the process die is
+  // the only way to observe teardown.
+  void expectAllreduceTimeoutKillsProcess() {
+    // EXPECT_DEATH already requires the process to die. Matching the timeout
+    // message is what rules out a synchronous throw, which would die before the
+    // watchdog logged anything.
+    EXPECT_DEATH(
+        {
+          auto options = c10d::ProcessGroupNCCL::Options::create();
+          // The watchdog holds a sliced base copy of the work, so a fixture
+          // that overrides isCompleted() cannot stall it. A zero deadline is
+          // the only way to make it time out on an early visit.
+          options->timeout = std::chrono::milliseconds(0);
+          ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
+          pg.allreduce(tensors_);
+          // The queued work carries its own copy of that zero. The destructor
+          // reads this field again as the abort deadline, where zero throws and
+          // kills the process whatever the watchdog did, so widen it now.
+          options->timeout = std::chrono::milliseconds(30000);
+          std::this_thread::sleep_for(std::chrono::seconds(10));
+        },
+        "Watchdog caught collective operation timeout");
   }
 
   std::vector<at::Tensor> tensors_;
@@ -339,6 +386,105 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   // a NCCL ERROR happened before should stop the thread from passing the
   // barrier.
   EXPECT_THROW(pg.barrier()->wait(), std::runtime_error);
+}
+
+// Mode 3 with rethrow off. A communicator error there must stay swallowed, so
+// the main thread is the one that reports the original CUDA error. Only a
+// timeout may tear the process down. Surviving this test is the assertion.
+TEST_F(ProcessGroupNCCLErrorsTest, testCommErrorNotTornDownWithoutRethrow) {
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "3", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS[0].c_str(), "0", 1) == 0);
+  // The swallowed rethrow still runs the watchdog's debug dump on the way out.
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str(), "100", 1) ==
+      0);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  // Long, so nothing times out. This test is about communicator errors.
+  options->timeout = std::chrono::milliseconds(30000);
+  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
+
+  // Prove the group works before injecting. A real NCCL failure would also
+  // land as COMM_ERROR, so without this the test could pass for the wrong
+  // reason.
+  pg.allreduce(tensors_)->wait();
+
+  // initWork applies the preset when the work is constructed, so set it first.
+  pg.presetError();
+  pg.allreduce(tensors_);
+  std::this_thread::sleep_for(pg.getWatchdogSleepInterval() * 10);
+
+  EXPECT_EQ(pg.getError(), c10d::ErrorType::COMM_ERROR);
+}
+
+// The other half of the gate: a timeout must take the process down even with
+// rethrow off. Mode 3 skips cleanup, so the watchdog reaches the rethrow
+// without aborting the communicators. Needs the threadsafe death-test style:
+// the default forks, and a forked child inherits an unusable CUDA context.
+TEST_F(ProcessGroupNCCLErrorsTest, testTimeoutTearsDownWithoutRethrow) {
+  // Process-global. Nothing after these tests uses EXPECT_DEATH, so we leave
+  // it set.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "3", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS[0].c_str(), "0", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_TEARDOWN_ON_TIMEOUT[0].c_str(), "1", 1) == 0);
+  // runLoop() sleeps getDumpTimeout() * 4 before it throws, a minute at the
+  // 15s default.
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str(), "100", 1) ==
+      0);
+
+  expectAllreduceTimeoutKillsProcess();
+}
+
+// Same for mode 1, which also cleans up, so the watchdog aborts the
+// communicators on the way to the rethrow. That is a different path into the
+// line under test.
+TEST_F(
+    ProcessGroupNCCLErrorsTest,
+    testTimeoutTearsDownWithoutRethrowWithCleanUp) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "1", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS[0].c_str(), "0", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_TEARDOWN_ON_TIMEOUT[0].c_str(), "1", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str(), "100", 1) ==
+      0);
+
+  expectAllreduceTimeoutKillsProcess();
+}
+
+// The killswitch. With the flag off a timeout is swallowed exactly as it was
+// before this diff. Surviving this test is the assertion.
+TEST_F(ProcessGroupNCCLErrorsTest, testTimeoutDoesNotTearDownWhenDisabled) {
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "3", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS[0].c_str(), "0", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_TEARDOWN_ON_TIMEOUT[0].c_str(), "0", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str(), "100", 1) ==
+      0);
+
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  // Zero deadline then widen, exactly as the death tests do, so the killswitch
+  // is the only difference between them and this test.
+  options->timeout = std::chrono::milliseconds(0);
+  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
+  pg.allreduce(tensors_);
+  options->timeout = std::chrono::milliseconds(30000);
+  // Outlast the watchdog's shortened dump window.
+  std::this_thread::sleep_for(std::chrono::seconds(3));
+
+  EXPECT_EQ(pg.getError(), c10d::ErrorType::TIMEOUT);
 }
 
 // Function to read what we wrote to the local disk for validation.
