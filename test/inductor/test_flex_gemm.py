@@ -2120,17 +2120,17 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                lambda acc: acc * scale,
+                lambda acc: acc * scale[0],
                 kernel_options={"backend": "QUACK"},
             )
 
         a = torch.randn(4, 8)
         b = torch.randn(8, 5)
-        scale = torch.randn(5)
+        scale = torch.randn(2, 5)
 
         with self.assertRaisesRegex(
             Exception,
-            "captured tensor epilogue args currently must match",
+            r"captured tensor epilogue args must match .* got \[2, 5\]",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
 
@@ -7706,6 +7706,100 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "epilogue_args=",
             f"epilogue_arg_kinds=('{kind}',)",
         )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("row_broadcast", (128,), lambda acc, w: acc.float() + w, "row"),
+            ("row_unsqueeze", (128,), lambda acc, w: acc.float() * w[None, :], "row"),
+            ("col_unsqueeze", (128,), lambda acc, w: acc.float() + w[:, None], "col"),
+            ("scalar_1d", (1,), lambda acc, w: acc.float() * w, "scalar"),
+            ("scalar_0d", (), lambda acc, w: acc.float() * w, "scalar"),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_generated_code_reads_1d_captured_tensor_epilogue_arg(self, case):
+        """M == N so plain broadcasting reads [N] as a row while w[:, None] reads it as a column."""
+        _, shape, epilogue_fn, kind = case
+
+        def fn(a, b, w):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, w),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 128
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(shape, device="cuda", dtype=torch.float32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, w
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, w),
+            epilogue_fn(a.double() @ b.double(), w.double()),
+            a.shape[1],
+        )
+        self.assertFlexGemmGeneratedCode(
+            code,
+            "epilogue_args=",
+            f"epilogue_arg_kinds=('{kind}',)",
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_1d_capture_unsqueeze_inside_matches_hoisted(self):
+        import re
+
+        def inside(a, b, bias):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: torch.sigmoid(acc.float()) + bias[None, :],
+                kernel_options={"backend": "QUACK"},
+            )
+
+        def hoisted(a, b, bias):
+            bias2 = bias[None, :]
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: torch.sigmoid(acc.float()) + bias2,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        m, k, n = 128, 64, 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        bias = torch.randn(n, device="cuda", dtype=torch.float32)
+
+        inside_actual, (inside_code,) = run_and_get_code(
+            torch.compile(inside, backend="inductor", fullgraph=True), a, b, bias
+        )
+        hoisted_actual, (hoisted_code,) = run_and_get_code(
+            torch.compile(hoisted, backend="inductor", fullgraph=True), a, b, bias
+        )
+
+        torch.testing.assert_close(inside_actual, hoisted_actual)
+        torch.testing.assert_close(
+            inside_actual, inside(a, b, bias), atol=2e-2, rtol=2e-2
+        )
+        epimod_names = re.compile(r"flex_gemm_epimod_[0-9a-f]+")
+        self.assertEqual(
+            set(epimod_names.findall(inside_code)),
+            set(epimod_names.findall(hoisted_code)),
+        )
+        self.assertTrue(epimod_names.findall(inside_code))
+        self.assertIn("epilogue_arg_kinds=('row',)", inside_code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

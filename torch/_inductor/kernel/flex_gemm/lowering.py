@@ -24,11 +24,15 @@ from torch.utils._ordered_set import OrderedSet
 
 from ... import config, ir
 from ...ir import IRNode, TensorBox
-from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
+from ...lowering import empty_strided, process_subgraph_nodes, register_lowering, view
 from ...utils import _IntLike, ceildiv
-from ..gemm_epilogue_utils import statically_known_shape_equal
+from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape_equal
 from .configs import flex_gemm_search_space
-from .constraints import aux_output_shape_error, LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR
+from .constraints import (
+    aux_output_shape_error,
+    FLEX_GEMM_CAPTURE_SHAPE_ERROR,
+    LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
+)
 from .debug import (
     format_flex_gemm_analysis,
     format_flex_gemm_analysis_details,
@@ -260,10 +264,95 @@ def infer_flex_gemm_epilogue_arg_kinds(
             epilogue_arg_kinds.append("col")
         else:
             raise NotImplementedError(
-                "FlexGEMM captured tensor epilogue args currently must match "
-                "the GEMM output shape or broadcast as [1, N] / [M, 1] / [1, 1]"
+                f"{FLEX_GEMM_CAPTURE_SHAPE_ERROR}; got {list(epilogue_arg_size)} "
+                f"against GEMM output {list(output_size)}"
             )
     return tuple(epilogue_arg_kinds)
+
+
+CAPTURE_RESHAPE_TARGETS = frozenset(
+    (
+        torch.ops.aten.unsqueeze.default,
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+    )
+)
+
+
+def capture_reshape_shape(node: torch.fx.Node) -> tuple[Any, ...] | None:
+    """Return the shape a body reshape gives a captured tensor, else None."""
+    meta = node.meta.get("val")
+    if node.target not in CAPTURE_RESHAPE_TARGETS or not isinstance(meta, torch.Tensor):
+        return None
+    return tuple(meta.shape)
+
+
+def flex_gemm_1d_capture_shape(
+    node: torch.fx.Node, m: Any, n: Any
+) -> tuple[Any, Any] | None:
+    """Return the [1, N] / [M, 1] / [1, 1] reading of one 0-D or 1-D capture.
+
+    ``w[:, None]`` reads a length-M capture as a column; direct broadcasting and
+    ``w[None, :]`` read a length-N capture as a row, so an [N] capture with
+    M == N follows ``acc + w`` semantics. Return ``None`` when the length fits
+    neither reading, leaving the capture for the later shape check.
+    """
+    meta = node.meta["val"]
+    if meta.ndim > 1:
+        return None
+    length = meta.numel()
+    if statically_known_equal(length, 1):
+        return (1, 1)
+    column_uses = [
+        (shape := capture_reshape_shape(user)) is not None
+        and statically_known_shape_equal(shape, (length, 1))
+        for user in node.users
+    ]
+    if all(column_uses):
+        return (m, 1) if statically_known_equal(length, m) else None
+    if any(column_uses):
+        raise NotImplementedError(
+            f"FlexGEMM capture {node.name} is used as both a row and a column"
+        )
+    return (1, n) if statically_known_equal(length, n) else None
+
+
+def normalize_flex_gemm_1d_captures(
+    graph_module: torch.fx.GraphModule,
+    placeholders: Sequence[torch.fx.Node],
+    epilogue_args: list[TensorBox],
+    gemm_shape: Sequence[Any],
+    *,
+    indices: torch.fx.Node | None,
+) -> list[TensorBox]:
+    """Rewrite 0-D/1-D captures to the 2-D broadcast views QuACK binds.
+
+    The placeholder metadata and the realized template input become the 2-D
+    view, and body reshapes producing that view fold into the placeholder so
+    ``w[None, :]`` inside the epilogue lowers like a hoisted ``[1, N]`` capture.
+    Indexed-output ``indices`` stay 1-D for the gather store.
+    """
+    m, n = gemm_shape[-2:]
+    normalized = list(epilogue_args)
+    changed = False
+    for index, (node, arg) in enumerate(zip(placeholders, epilogue_args, strict=True)):
+        shape = None if node is indices else flex_gemm_1d_capture_shape(node, m, n)
+        if shape is None:
+            continue
+        for user in tuple(node.users):
+            user_shape = capture_reshape_shape(user)
+            if user_shape is not None and statically_known_shape_equal(
+                user_shape, shape
+            ):
+                user.replace_all_uses_with(node)
+                graph_module.graph.erase_node(user)
+        node.meta["val"] = node.meta["val"].view(shape)
+        normalized[index] = view(arg, ir.convert_shape_to_inductor(shape))
+        changed = True
+    if changed:
+        graph_module.graph.lint()
+        graph_module.recompile()
+    return normalized
 
 
 def validate_flex_gemm_aux_outputs(
@@ -414,19 +503,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     op_spec = FLEX_GEMM_OP_SPECS[gemm_op]
     mat1_index = op_spec.mat1_index
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
-    if gemm_op is torch.ops.aten._scaled_mm_v2.default:
-        try:
-            indexed_store = flex_gemm_indexed_output_plan(
-                *flex_gemm_output_values(subgraph.graph_module)
-            )
-        except NotImplementedError as exc:
+    scaled_mm = gemm_op is torch.ops.aten._scaled_mm_v2.default
+    try:
+        indexed_store = flex_gemm_indexed_output_plan(
+            *flex_gemm_output_values(subgraph.graph_module)
+        )
+    except NotImplementedError as exc:
+        if scaled_mm:
             raise QuackScaledMmUnsupported(
                 "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
             ) from exc
-        if indexed_store is not None:
-            raise QuackScaledMmUnsupported(
-                "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
-            )
+        raise
+    if scaled_mm and indexed_store is not None:
+        raise QuackScaledMmUnsupported(
+            "FlexGEMM QUACK scaled-mm does not yet support indexed outputs"
+        )
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
     ]
@@ -470,6 +561,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 "FlexGEMM lowering expects tensor epilogue operands"
             )
         epilogue_args.append(epilogue_arg)
+    capture_start = len(mainloop_scale_nodes)
+    epilogue_args[capture_start:] = normalize_flex_gemm_1d_captures(
+        subgraph.graph_module,
+        epilogue_arg_placeholders[capture_start:],
+        epilogue_args[capture_start:],
+        gemm_fx_node.meta["val"].shape,
+        indices=None if indexed_store is None else indexed_store.indices,
+    )
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
         for index, arg in enumerate(gemm_nodes)
