@@ -4588,11 +4588,29 @@ def empty_strided(
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     device = decode_device(device)
-    pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
+
+    should_fill_deterministic = (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    )
+    if should_fill_deterministic:
+        if is_float_dtype(dtype):
+            fill_value = float("nan")
+        elif is_boolean_dtype(dtype):
+            fill_value = True
+        elif is_integer_dtype(dtype):
+            fill_value = torch.iinfo(dtype).max
+        else:
+            fill_value = float("nan")
+    else:
+        fill_value = 0
+
+    pointwise = _full(fill_value=fill_value, device=device, dtype=dtype, size=size)
     pointwise.realize()
     buffer = pointwise.data.data
-    # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
+    if not should_fill_deterministic:
+        # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
+        buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     if not (isinstance(buffer, ir.ComputedBuffer)):
         raise AssertionError("expected: isinstance(buffer, ir.ComputedBuffer)")
     size = [sympy.expand(s) for s in size]
