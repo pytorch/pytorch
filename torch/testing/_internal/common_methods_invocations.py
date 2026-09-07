@@ -13169,8 +13169,6 @@ op_db: list[OpInfo] = [
     OpInfo('cholesky_solve',
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
-           dtypesIfMPS=custom_types(torch.float32),
-           backward_dtypesIfMPS=custom_types(torch.float32),
            sample_inputs_func=sample_inputs_cholesky_solve,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
@@ -14526,9 +14524,6 @@ op_db: list[OpInfo] = [
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           # complex64 backward needs solve_triangular, which is float32-only on
-           # MPS, so only the float forward+backward runs there.
-           backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14554,8 +14549,6 @@ op_db: list[OpInfo] = [
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
-           # complex64 backward needs solve_triangular, which is float32-only on MPS.
-           backward_dtypesIfMPS=floating_types(),
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
@@ -18954,9 +18947,6 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # RuntimeError: linalg.solve.triangular(); Only float is supported!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
