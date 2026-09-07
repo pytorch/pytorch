@@ -15,6 +15,7 @@ from torch._dynamo.testing import (
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
+    associative_scan_op,
 )
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
@@ -6733,6 +6734,431 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_simple(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_autograd(self, combine_mode):
+        # The stack's motivation is an efficient backward, so exercise autograd
+        # through vmap(associative_scan(...)): compare grads against the fake
+        # reference and run a full gradcheck in double precision.
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        x = torch.randn(3, 4, 2, device="cuda", requires_grad=True)
+        (grad,) = torch.autograd.grad(fn(x).sum(), x)
+        x_ref = x.detach().clone().requires_grad_(True)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x_ref[i], dim=0)
+                for i in range(x_ref.shape[0])
+            ]
+        )
+        (grad_exp,) = torch.autograd.grad(exp.sum(), x_ref)
+        self.assertEqual(grad, grad_exp)
+
+        xd = torch.randn(2, 3, 2, dtype=torch.double, device="cuda", requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(fn, (xd,)))
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_pytree(self, combine_mode):
+        xs = {
+            "a": torch.randn(3, 5, 2, device="cuda"),
+            "b": torch.randn(3, 5, 2, device="cuda"),
+        }
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["b"]}
+
+        def fn(a, b):
+            def inner_fn(a, b):
+                return associative_scan(
+                    combine_fn, {"a": a, "b": b}, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(a, b)
+
+        out = fn(xs["a"], xs["b"])
+        exp = {
+            k: torch.stack(
+                [
+                    _fake_associative_scan(
+                        combine_fn,
+                        {"a": xs["a"][i], "b": xs["b"][i]},
+                        dim=0,
+                    )[k]
+                    for i in range(xs["a"].shape[0])
+                ]
+            )
+            for k in ("a", "b")
+        }
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_reverse(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a * b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, reverse=True, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0, reverse=True)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nested(self, combine_mode):
+        x = torch.randn(2, 3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(torch.vmap(inner_fn, in_dims=0), in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                torch.stack(
+                    [
+                        _fake_associative_scan(combine_fn, x[i, j], dim=0)
+                        for j in range(x.shape[1])
+                    ]
+                )
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(3, 2, device="cuda")
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h[i], x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode):
+        x = torch.randn(3, 1, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
+    @requires_cuda
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_in_vmap_pointwise_compile_error(self):
+        from torch._inductor.exc import InductorError
+
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        with self.assertRaisesRegex(InductorError, "LoweringException"):
+            torch.compile(fn)(x)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
+        x = torch.randn(4, 3, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[:, i], dim=0)
+                for i in range(x.shape[1])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0, out_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0)
+                for i in range(x.shape[0])
+            ],
+            dim=1,
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_unbatched_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(2, device="cuda")
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, None))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_scan_dim(self, combine_mode):
+        # The frontend moves the scan dim to 0 (associative_scan.py movedim),
+        # while the batch rule parks the batch dim on the last axis; exercise the
+        # interaction with a scan dim that is neither 0 nor the batched axis.
+        x = torch.randn(3, 4, 5, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=1, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=1) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_zero_length_scan_dim(self, combine_mode):
+        # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0
+        # note in associative_scan) and each batch element returns its input.
+        x = torch.randn(3, 0, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_unbatched_xs_error(self):
+        # Batched additional_inputs (hi) with unbatched xs: the combine_fn outputs
+        # become batched while xs is not, so the outputs' batch dims diverge from
+        # xs on later scan levels. This is not supported yet; the batch rule detects
+        # it up front and raises a clear error rather than a cryptic broadcast one.
+        # JAX broadcasts here instead of erroring; see
+        # https://github.com/pytorch/pytorch/pull/192654 for the same treatment.
+        xs = torch.randn(4, 2)
+        h = torch.randn(3, 2)
+
+        def vmap_fn(xs, h):
+            def inner_fn(hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(h)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
+        ):
+            vmap_fn(xs, h)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_mixed_batched_pytree_error(self):
+        a = torch.randn(3, 5, 2)
+        b = torch.randn(5, 2)
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["a"]}
+
+        def fn(a, b):
+            def inner_fn(ai):
+                return associative_scan(
+                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode="pointwise"
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
+        ):
+            fn(a, b)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_op_in_vmap_eager(self):
+        x = torch.randn(3, 4, 2)
+
+        # The raw HOP receives the flattened operator: 2 * num_leaves args
+        # (lhs leaves, then rhs leaves), returning a list of num_leaves outputs.
+        def flat_combine_fn(lhs, rhs):
+            return [lhs + rhs]
+
+        def inner_fn(xi):
+            return associative_scan_op(flat_combine_fn, [xi], ())[0]
+
+        out = torch.vmap(inner_fn, in_dims=0)(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
@@ -12646,6 +13072,174 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    @parametrize("mutate_in", ["cond", "body", "both"])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_mutation(
+        self, device, dynamic, mutate_in
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    if mutate_in in ("cond", "both"):
+                        y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    if mutate_in in ("body", "both"):
+                        y.add_(1.0)
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_in_cond_zero_iter(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    y.mul_(0.5)
+                    return i < 0
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # cond_fn mutating a carried input alone is rejected by
+    # functionalization (auto-functionalization does not kick in because
+    # no captured tensor is mutated).
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_while_loop_cond_mutates_carry_raises(self, device):
+        def f(x):
+            def cond_fn(i, acc):
+                acc.mul_(0.99)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + 1.0
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x.clone()),
+            )
+
+        x = torch.ones(4, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_fn might be modifying the input"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    # cond_fn mutates both a carried input and a pre-mutated captured
+    # tensor: the captured-tensor mutation makes auto-functionalization
+    # kick in, so the carry mutation reaches Inductor's while_loop
+    # lowering instead of being rejected up front. The carry's final
+    # value must come from body_fn's output, not the pre-loop buffer.
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_cond_mutates_carry_and_pre_mutated_tensor(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    acc.mul_(0.99)
+                    y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_pre_mutated_tensor_in_cond_repeated_calls(
+        self, device, dynamic
+    ):
+        def f(state):
+            state.mul_(0.8)
+
+            def cond_fn(i, acc):
+                state.mul_(0.5)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + state
+
+            i, acc = while_loop(
+                cond_fn,
+                body_fn,
+                (
+                    torch.zeros((), dtype=torch.int64, device=state.device),
+                    torch.zeros_like(state),
+                ),
+            )
+            return i, acc, state.clone()
+
+        compiled = torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)
+        state_eager = torch.ones(4, device=device)
+        state_compiled = state_eager.clone()
+        with torch.no_grad():
+            for _ in range(3):
+                expected = f(state_eager)
+                actual = compiled(state_compiled)
+                self.assertEqual(expected, actual)
+                self.assertEqual(state_eager, state_compiled)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -12661,7 +13255,6 @@ _hop_schema_test_schema_types = [
 
 
 @skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
         from torch.fx.experimental.sym_node import SymNode

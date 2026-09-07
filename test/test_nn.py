@@ -7694,6 +7694,27 @@ class TestNNDeviceType(NNTestCase):
             c_cpu.backward(grad.cpu())
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyAccelerator   # CPU is the reference the results are compared against
+    @parametrize_test("mode,shape,padding", [
+        ("constant", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (0, 0, 2, 1)),
+        ("replicate", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("reflect", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+    ])
+    def test_pad_5d_large_inner_dims(self, device, mode, shape, padding):
+        # Padding a rank > 4 operand must not corrupt the copied input when the inner extent is large.
+        # https://github.com/pytorch/pytorch/issues/194922
+        x = torch.randn(shape, device=device, requires_grad=True)
+        ref_x = x.detach().cpu().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        out_cpu = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, out_cpu)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_cpu.backward(grad.cpu())
+        self.assertEqual(x.grad, ref_x.grad)
+
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")
@@ -8322,6 +8343,48 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_out.cpu())
 
         self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
+
+    @onlyCUDA
+    @parametrize_test("op,normalized_shape,has_weight", [
+        subtest(("layer_norm", [64], False), name="layer_norm_1d_no_weight"),
+        subtest(("layer_norm", [8, 16], True), name="layer_norm_multidim"),
+        subtest(("layer_norm", [8, 16], False), name="layer_norm_multidim_no_weight"),
+        subtest(("rms_norm", [8, 16], True), name="rms_norm_multidim"),
+    ])
+    def test_layer_norm_gamma_beta_backward_huge_M_buffers(self, device, op, normalized_shape, has_weight):
+        # The huge-M path (M > 64*1024 && N / warp_size < sm_count / 2,
+        # shared by layer_norm and rms_norm via
+        # LayerNormBackwardKernelImplInternal<..., rms_norm>) allocates
+        # scratch buffers sized by N. Undefined gamma (weight=None) and
+        # multi-dim normalized_shape are the cases where a size derived
+        # from gamma's own shape instead of N would go wrong. Both cases
+        # are covered alongside the plain defined-gamma case.
+        M = 100000
+        eps = 1e-5
+        x = torch.randn(M, *normalized_shape, dtype=torch.float32)
+        grad_out = torch.randn(M, *normalized_shape, dtype=torch.float32)
+        weight = torch.randn(normalized_shape, dtype=torch.float32) if has_weight else None
+        bias = torch.randn(normalized_shape, dtype=torch.float32) if op == "layer_norm" else None
+
+        grads = []
+        for dev in (device, "cpu"):
+            # detach() so the "cpu" iteration copies instead of flipping
+            # requires_grad on the shared source tensors in place.
+            w = weight.detach().to(dev).requires_grad_(True) if weight is not None else None
+            b = bias.detach().to(dev).requires_grad_(True) if bias is not None else None
+            if op == "layer_norm":
+                out = torch.nn.functional.layer_norm(x.to(dev), normalized_shape, w, b, eps)
+            else:
+                out = torch.nn.functional.rms_norm(x.to(dev), normalized_shape, w, eps)
+            out.backward(grad_out.to(dev))
+            grads.append((w.grad if w is not None else None, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+
+        for grad, ref, name in ((dgamma, dgamma_ref, "weight"), (dbeta, dbeta_ref, "bias")):
+            if ref is None:
+                continue
+            self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
+            self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
@@ -10649,6 +10712,58 @@ class TestNNDeviceType(NNTestCase):
 
         run_test(1024 * 256 + 1, 8192)  # https://github.com/pytorch/pytorch/issues/84144
 
+    @dtypes(torch.half)
+    @largeTensorTest("20GB")
+    def test_log_softmax_64bit_indexing(self, device, dtype):
+        # The last row begins exactly at element offset 2**32; 32-bit index
+        # math would wrap it back onto row 0.
+        x = torch.ones(2**22 + 1, 1024, device=device, dtype=dtype)
+        x[0] = torch.randn(1024, device=device, dtype=dtype)
+        x[-1] = torch.randn(1024, device=device, dtype=dtype)
+        y = F.log_softmax(x, dim=-1)
+        self.assertEqual(y[0], F.log_softmax(x[0].clone(), dim=-1))
+        self.assertEqual(y[-1], F.log_softmax(x[-1].clone(), dim=-1))
+
+    @onlyAccelerator
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test(
+        "layout,dim",
+        [
+            ("slice", -1),
+            ("slice", 1),
+            ("transpose_last", -1),
+            ("expanded_outer", -1),
+            ("outer_transpose", -1),
+        ],
+    )
+    def test_log_softmax_strided_input(self, device, dtype, layout, dim):
+        cpu_base = torch.randn(4, 6, 16, dtype=dtype)
+        device_base = cpu_base.to(device)
+
+        if layout == "slice":
+            cpu_input = cpu_base[..., ::2]
+            device_input = device_base[..., ::2]
+        elif layout == "transpose_last":
+            cpu_input = cpu_base.transpose(-2, -1)
+            device_input = device_base.transpose(-2, -1)
+        elif layout == "expanded_outer":
+            cpu_input = cpu_base[:1].expand(4, -1, -1)
+            device_input = device_base[:1].expand(4, -1, -1)
+        elif layout == "outer_transpose":
+            cpu_input = cpu_base.transpose(0, 1)
+            device_input = device_base.transpose(0, 1)
+        else:
+            raise AssertionError(f"unknown layout: {layout}")
+
+        self.assertFalse(device_input.is_contiguous())
+        atol = 4e-2 if dtype == torch.bfloat16 else 1e-3
+        rtol = 2e-2 if dtype == torch.bfloat16 else 2e-3
+        self.assertEqual(
+            F.log_softmax(device_input, dim=dim).cpu(),
+            F.log_softmax(cpu_input, dim=dim),
+            atol=atol,
+            rtol=rtol,
+        )
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.half)
@@ -11808,7 +11923,7 @@ class TestNNDeviceType(NNTestCase):
 
         input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
         target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
-        targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
+        targets = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
 
         ctc_loss = torch.nn.functional.ctc_loss(
             log_probs=log_probs,
@@ -12054,6 +12169,25 @@ class TestNNDeviceType(NNTestCase):
         for weight in invalid_weights:
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
+
+    @onlyAccelerator
+    def test_nll_loss_1d_input_backward(self, device):
+        # For 1D (no batch dim) input aten.nll_loss_backward uses only target[0].
+        # The MPS Metal kernel used to dispatch target.numel() threads, reading
+        # the single-element grad_output out of bounds and scattering garbage
+        # into grad_input. Back grad_output with a larger sentinel-filled tensor
+        # and view out a single element so any out-of-bounds read is a
+        # deterministic non-zero value. gh-195391
+        input = torch.randn(3, device=device)
+        target = torch.tensor([2, 0, 1], device=device)
+        total_weight = torch.tensor(1.0, device=device)
+        grad_output_storage = torch.full((4,), torch.finfo(torch.float32).max, device=device)
+        grad_output_storage[0] = torch.randn(())
+        grad_output = grad_output_storage[:1]
+        args = (grad_output, input, target, None, 0, 10, total_weight)
+        ref = torch.ops.aten.nll_loss_backward(*(a.cpu() if torch.is_tensor(a) else a for a in args))
+        out = torch.ops.aten.nll_loss_backward(*args)
+        self.assertEqual(out.cpu(), ref)
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
