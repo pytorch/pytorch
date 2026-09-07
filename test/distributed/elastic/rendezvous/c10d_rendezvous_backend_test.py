@@ -288,3 +288,54 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    def test_create_file_store_closes_mkstemp_fd(
+        self, mkstemp_mock, os_close_mock
+    ) -> None:
+        """mkstemp() fd must be closed after _create_file_store(), even on success."""
+        import tempfile as _tempfile
+
+        real_fd, real_path = _tempfile.mkstemp()
+        try:
+            mkstemp_mock.return_value = (real_fd, real_path)
+            self._params_filestore.endpoint = ""
+            # Should succeed; the real fd gets closed via our patched os.close
+            create_backend(self._params_filestore)
+            os_close_mock.assert_called_once_with(real_fd)
+        finally:
+            import os as _os
+            # Ensure cleanup even if os.close was mocked and did not close the fd
+            try:
+                _os.close(real_fd)
+            except OSError:
+                pass
+            _os.remove(real_path)
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    def test_create_file_store_closes_mkstemp_fd_on_filestore_failure(
+        self, mkstemp_mock, os_close_mock, filestore_mock
+    ) -> None:
+        """mkstemp() fd must be closed even when FileStore construction fails."""
+        import tempfile as _tempfile
+        import os as _os
+
+        real_fd, real_path = _tempfile.mkstemp()
+        try:
+            mkstemp_mock.return_value = (real_fd, real_path)
+            filestore_mock.side_effect = RuntimeError("store construction failed")
+            self._params_filestore.endpoint = ""
+            with self.assertRaises(RendezvousConnectionError):
+                create_backend(self._params_filestore)
+            os_close_mock.assert_called_once_with(real_fd)
+        finally:
+            try:
+                _os.close(real_fd)
+            except OSError:
+                pass
+            _os.remove(real_path)
