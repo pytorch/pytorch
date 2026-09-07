@@ -625,6 +625,8 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:
+        if step_size <= 0:
+            raise ValueError(f"step_size must be positive, but got {step_size}")
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -810,10 +812,8 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if factor > 1.0 or factor < 0:
-            raise ValueError(
-                "Constant multiplicative factor expected to be between 0 and 1."
-            )
+        if factor > 1.0 or factor <= 0:
+            raise ValueError(f"factor must be positive and at most 1, but got {factor}")
 
         self.factor = factor
         self.total_iters = total_iters
@@ -920,13 +920,16 @@ class LinearLR(LRScheduler):
     ) -> None:
         if start_factor > 1.0 or start_factor <= 0:
             raise ValueError(
-                "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
+                f"start_factor must be positive and at most 1, but got {start_factor}"
             )
 
         if end_factor > 1.0 or end_factor < 0:
             raise ValueError(
-                "Ending multiplicative factor expected to be between 0 and 1."
+                f"end_factor must be between 0 and 1, but got {end_factor}"
             )
+
+        if total_iters <= 0:
+            raise ValueError(f"total_iters must be positive, but got {total_iters}")
 
         self.start_factor = start_factor
         self.end_factor = end_factor
@@ -1268,6 +1271,8 @@ class PolynomialLR(LRScheduler):
         power: float = 1.0,
         last_epoch: int = -1,
     ) -> None:
+        if total_iters <= 0:
+            raise ValueError(f"total_iters must be positive, but got {total_iters}")
         self.total_iters = total_iters
         self.power = power
         super().__init__(optimizer, last_epoch)
@@ -1392,6 +1397,8 @@ class CosineAnnealingLR(LRScheduler):
         eta_min: float = 0.0,
         last_epoch: int = -1,
     ) -> None:
+        if T_max <= 0:
+            raise ValueError(f"T_max must be positive, but got {T_max}")
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
@@ -1904,6 +1911,15 @@ class CyclicLR(LRScheduler):
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
+
+        # Validate step sizes before any optimizer state is mutated below, so a
+        # failed construction leaves the optimizer untouched.
+        if step_size_up <= 0:
+            raise ValueError(f"step_size_up must be positive, but got {step_size_up}")
+        if step_size_down is not None and step_size_down <= 0:
+            raise ValueError(
+                f"step_size_down must be positive, but got {step_size_down}"
+            )
 
         base_lrs = _format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
@@ -2484,6 +2500,14 @@ class OneCycleLR(LRScheduler):
             )
         else:
             self._anneal_func_type = anneal_strategy
+
+        # Validate div_factor and final_div_factor
+        if div_factor <= 0:
+            raise ValueError(f"div_factor must be positive, but got {div_factor}")
+        if final_div_factor <= 0:
+            raise ValueError(
+                f"final_div_factor must be positive, but got {final_div_factor}"
+            )
 
         # Initialize learning rate variables
         max_lrs = _format_param("max_lr", self.optimizer, max_lr)
