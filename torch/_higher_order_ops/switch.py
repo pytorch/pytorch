@@ -18,7 +18,7 @@ from torch._higher_order_ops.utils import (
     create_fn_remove_none,
     fill_none_with_masks,
     materialize_as_graph,
-    move_bdim_to_front,
+    materialize_bdim_at_front,
     reenter_make_fx,
     save_values_for_backward,
     saved_values,
@@ -432,35 +432,6 @@ def switch_func(ctx, index, branches, inputs):
         return ctx.wrap_tensors(switch_return)
 
 
-def _vmap_with_front_bdims(fn, in_dims, batch_size, randomness):
-    """Vmaps ``fn`` and returns a callable producing ``(outputs, out_dims)``.
-
-    Tensor outputs are normalized with ``move_bdim_to_front``, so a batched output
-    gets its batch dim moved to 0 and an unbatched one is broadcast along a new
-    leading dim. This makes all branches of a switch agree on which outputs are
-    batched, which they must because the HOP requires matching output metadata, and
-    it materializes the result, which the HOP requires as well since it compares
-    strides and not just sizes. Non-tensor output leaves (``None``, ``int``) are
-    passed through and reported with a ``None`` out dim.
-    """
-
-    def inner(*args):
-        outs, out_bdims = restore_vmap(fn, in_dims, batch_size, randomness)(*args)
-
-        def to_front(out, bdim):
-            if not isinstance(out, torch.Tensor):
-                return out
-            return move_bdim_to_front(out, bdim, batch_size)
-
-        outs = pytree.tree_map(to_front, outs, out_bdims)
-        out_dims = pytree.tree_map(
-            lambda out: 0 if isinstance(out, torch.Tensor) else None, outs
-        )
-        return outs, out_dims
-
-    return inner
-
-
 @switch_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def switch_batch_rule(interpreter, index, branches, operands):
     level = interpreter.level()
@@ -471,25 +442,31 @@ def switch_batch_rule(interpreter, index, branches, operands):
     )
     if index_bdim is not None:
         raise RuntimeError(
-            "torch.switch does not support a batched index under torch.vmap, because "
-            "running a different branch for every batch element cannot be expressed "
-            "by a single switch. Make the index the same for all batch elements."
+            "torch.switch does not yet support a batched index under torch.vmap, i.e. "
+            "all batch elements must take the same branch. Make the index the same for "
+            "all batch elements."
         )
     operand_in_dims = tuple(operand_bdims)
-    out_dims = None
 
     with interpreter.lower():
-        # All batch elements take the same branch, so the switch is preserved and
-        # vmap is pushed into the branches. out_dims is recorded from inside the
-        # branches switch_op runs: the selected one when executing and all of them
-        # when tracing, which agree after normalization.
+        # All batch elements take the same branch, so the switch is preserved and vmap is
+        # pushed into the branches. Every tensor output is normalized to a leading batch
+        # dim, broadcasting the ones that do not depend on the operands, because the HOP
+        # requires the branches to agree on output metadata *and* strides. The copy is
+        # unconditional and so costs an allocation per output leaf: in eager only the
+        # selected branch runs, so the others' layouts cannot be inspected to skip it.
         def vmap_branch(branch):
             def wrapper(*args):
-                nonlocal out_dims
-                outs, out_dims = _vmap_with_front_bdims(
+                outs, out_bdims = restore_vmap(
                     branch, operand_in_dims, batch_size, randomness
                 )(*args)
-                return outs
+
+                def to_front(out, bdim):
+                    if not isinstance(out, torch.Tensor):
+                        return out
+                    return materialize_bdim_at_front(out, bdim, batch_size)
+
+                return pytree.tree_map(to_front, outs, out_bdims)
 
             return wrapper
 
@@ -498,7 +475,11 @@ def switch_batch_rule(interpreter, index, branches, operands):
             [vmap_branch(branch) for branch in branches],
             unwrapped_operands,
         )
-        if out_dims is None:
-            raise AssertionError("switch_op did not run any branch")
 
+    # Non-tensor leaves (None, int) pass through unbatched; every tensor leaf was
+    # materialized with a leading batch dim above, so out_dims follows from the output
+    # and cannot disagree with its structure.
+    out_dims = pytree.tree_map(
+        lambda out: 0 if isinstance(out, torch.Tensor) else None, unwrapped_out
+    )
     return wrap_batched(unwrapped_out, out_dims, level)

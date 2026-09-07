@@ -132,6 +132,9 @@ class _VmapCombineFnWrapper:
     ``in_dims`` and passed as the combine_fn to the underlying HOP.
 
     Contract for callers:
+      - ``__call__`` returns a flat list of leaves, not the pytree ``combine_fn``
+        produced. The batch dims it moves are positional, so the leaf order is the
+        contract and the structure would only be re-flattened by every caller anyway.
       - ``in_dims`` are the flat batch-dim markers for the combine_fn's positional
         arguments, and are held fixed for the wrapper's lifetime.
       - ``num_carries``: the number of leading outputs that are ``scan`` carries.
@@ -179,12 +182,13 @@ class _VmapCombineFnWrapper:
         outputs, per_slice_out_dims = restore_vmap(
             self.combine_fn, self.in_dims, self.batch_size, self.randomness
         )(*args)
+        flat_outputs = pytree.tree_leaves(outputs)
         flat_dims = pytree.tree_leaves(per_slice_out_dims)
-        outputs = [
-            move_bdim_to_front(out, bdim, self.batch_size)
+        moved_outputs = [
+            materialize_bdim_at_front(out, bdim, self.batch_size)
             if i < self.num_carries
             else (out.movedim(bdim, -1) if bdim is not None else out)
-            for i, (out, bdim) in enumerate(zip(pytree.tree_leaves(outputs), flat_dims))
+            for i, (out, bdim) in enumerate(zip(flat_outputs, flat_dims))
         ]
         out_dims = (0,) * self.num_carries + _batch_dims_as_last_for_scan(
             flat_dims[self.num_carries :]
@@ -204,7 +208,7 @@ class _VmapCombineFnWrapper:
                 f"steps: {self.out_dims} then {out_dims}"
             )
         self.out_dims = out_dims
-        return outputs
+        return moved_outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):
@@ -1077,16 +1081,25 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
-# Gives `t` a leading batch dim of size `batch_size`.
+# Gives `t` a leading batch dim of size `batch_size` as a view, broadcasting `t` if it
+# does not have one yet.
 def move_bdim_to_front(
     t: torch.Tensor, bdim: int | None, batch_size: int
 ) -> torch.Tensor:
-    # Materialize with contiguous_format to match torch.stack behavior. .contiguous()
-    # is not enough: broadcasting or moving a size 1 dim leaves a view that reports as
-    # contiguous while keeping the strides of the source, and the HOPs compare the
-    # strides of their carries exactly.
-    t = t.expand(batch_size, *t.shape) if bdim is None else t.movedim(bdim, 0)
-    return t.clone(memory_format=torch.contiguous_format)
+    return t.expand(batch_size, *t.shape) if bdim is None else t.movedim(bdim, 0)
+
+
+# Same as move_bdim_to_front, but copies instead of returning a view. Required whenever the
+# result becomes a HOP carry: the HOPs compare the strides of their carries exactly, and a
+# broadcast or a moved size 1 dim leaves a view that reports as contiguous while keeping the
+# strides of the source, so .contiguous() would be a no-op. contiguous_format rather than
+# preserve_format to match what torch.stack would have produced.
+def materialize_bdim_at_front(
+    t: torch.Tensor, bdim: int | None, batch_size: int
+) -> torch.Tensor:
+    return move_bdim_to_front(t, bdim, batch_size).clone(
+        memory_format=torch.contiguous_format
+    )
 
 
 # Returns a mask whether a list element is a tensor or not
