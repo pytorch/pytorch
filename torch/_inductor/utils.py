@@ -2202,6 +2202,22 @@ def use_triton_template(
     )
 
 
+def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
+    """Index of the single stride-1 ("inner") dim, or None if there is not
+    exactly one. TMA requires exactly one contiguous dim, so None means the
+    tensor is not TMA-compatible. `strides` must already be resolved to ints or
+    hinted symbols by the caller.
+    """
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, st in enumerate(strides)
+        if V.graph.sizevars.statically_known_equals(st, 1)
+    ]
+    return inner[0] if len(inner) == 1 else None
+
+
 def can_use_tma(
     *matrices: IRNode, output_layout: Layout | None = None, add_guards: bool = False
 ) -> bool:
@@ -2278,15 +2294,9 @@ def can_use_tma(
                 V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
             ]
 
-        # Find the single contiguous ("inner") dim
-        inner = [
-            i
-            for i, st in enumerate(strides_i)
-            if V.graph.sizevars.statically_known_equals(st, 1)
-        ]
-        if len(inner) != 1:
+        inner_idx = tma_inner_dim(strides_i)
+        if inner_idx is None:
             return False
-        inner_idx = inner[0]
 
         # All "outer" dims must have 16-byte aligned strides
         for i, st in enumerate(strides_i):
@@ -2817,11 +2827,23 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
+
+    Prefer this over get_device_capability() for target-specific behaviour. On
+    ROCm that call reports the gfx major/minor, which does not order by
+    capability and spans two product lines: gfx1250 (MI450) reports (12, 5) and
+    gfx1100 (RDNA3) reports (11, 0), both greater than gfx950's (9, 5). Target
+    features are stripped, so "gfx950:sramecc+:xnack-" becomes "gfx950".
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return ""
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+
+
 def using_rocm_rdna3() -> bool:
     """Returns true if the device is based on RDNA3, otherwise returns false."""
-    return torch.cuda.is_available() and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx11")
+    return rocm_gfx_arch().startswith("gfx11")
 
 
 @functools.cache
@@ -3008,6 +3030,19 @@ def use_cpp_gemm_template(
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and (mat2.is_module_buffer() or not require_constant_mat2)
+    )
+
+
+# Note [BF16x9 precision]
+# The CUDA "bfx9" mode requests cuBLAS's full nine-product BF16 emulation.
+# Triton's bf16x3 and bf16x6 modes use different arithmetic, and Triton has no
+# bf16x9 input_precision. FP32 CUDA matmuls must therefore remain ATen extern
+# calls. Fused kernels without an ATen path warn and fall back to IEEE.
+def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
+    return (
+        device_type == "cuda"
+        and dtype == torch.float32
+        and torch.backends.cuda.matmul.fp32_precision == "bfx9"
     )
 
 
@@ -4153,16 +4188,14 @@ def set_tracing_context_output_strides(
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                fakify_first_call = False
-                if ctx := torch._guards.TracingContext.try_get():
-                    fakify_first_call = ctx.fakify_first_call
 
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    if fakify_first_call:
-                        return shape_env.deserialize_symexpr(e)
-                    return shape_env.evaluate_symexpr(e)
+                    # Keep the stride symbolic. Collapsing it to the current
+                    # hint would freeze that hint into the backward graph's
+                    # saved-activation placeholder.
+                    return shape_env.deserialize_symexpr(e)
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]

@@ -1181,7 +1181,14 @@ class TestHasTriton(TestCase):
         triton_utils.has_triton.cache_clear()
         super().tearDown()
 
-    def _run(self, registered, *, has_package=True, detection_disabled=False):
+    def _run(
+        self,
+        registered,
+        *,
+        has_package=True,
+        detection_disabled=False,
+        include_cpu=False,
+    ):
         with (
             mock.patch.object(
                 triton_utils, "has_triton_package", return_value=has_package
@@ -1193,6 +1200,9 @@ class TestHasTriton(TestCase):
             ),
         ):
             triton_utils.has_triton.cache_clear()
+            # Exercise the public default when CPU is not requested.
+            if include_cpu:
+                return triton_utils.has_triton(include_cpu=True)
             return triton_utils.has_triton()
 
     def test_no_triton_package(self):
@@ -1230,6 +1240,11 @@ class TestHasTriton(TestCase):
     def test_indexed_device_name_skipped(self):
         # "fake:0" is available+capable but must be skipped as an indexed alias.
         self.assertFalse(self._run([("fake:0", _make_triton_interface())]))
+
+    def test_cpu_ignored_by_default_and_included_when_requested(self):
+        registered = [("cpu", _make_triton_interface())]
+        self.assertFalse(self._run(registered))
+        self.assertTrue(self._run(registered, include_cpu=True))
 
     def test_first_working_device_wins(self):
         registered = [
