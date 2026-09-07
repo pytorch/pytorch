@@ -185,117 +185,6 @@ class TestCppExtensionJIT(_CppExtensionJITMixin):
             self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
         self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
 
-    def _test_jit_xpu_extension(self, extra_sycl_cflags):
-        # randomizing extension name and names of extension methods
-        # for the case when we test building few extensions in a row
-        # using this function
-        rand = "".join(random.sample(string.ascii_letters, 5))
-        name = f"torch_test_xpu_extension_{rand}"
-        temp_dir = tempfile.mkdtemp()
-        try:
-            with open("cpp_extensions/xpu_extension.sycl") as f:
-                text = f.read()
-                for fn in ["sigmoid_add", "SigmoidAddKernel"]:
-                    text = text.replace(fn, f"{fn}_{rand}")
-
-            sycl_file = f"{temp_dir}/xpu_extension.sycl"
-            with open(sycl_file, "w") as f:
-                f.write(text)
-
-            module = torch.utils.cpp_extension.load(
-                name=name,
-                sources=[sycl_file],
-                extra_sycl_cflags=extra_sycl_cflags,
-                verbose=True,
-                build_directory=temp_dir,
-            )
-
-            x = torch.zeros(100, device="xpu", dtype=torch.float32)
-            y = torch.zeros(100, device="xpu", dtype=torch.float32)
-
-            method = f"sigmoid_add_{rand}"
-            self.assertTrue(hasattr(module, method))
-            z = getattr(module, method)(x, y).cpu()
-
-            # 2 * sigmoid(0) = 2 * 0.5 = 1
-            self.assertEqual(z, torch.ones_like(z))
-        finally:
-            if IS_WINDOWS:
-                # rmtree returns permission error: [WinError 5] Access is denied
-                # on Windows, this is a workaround
-                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
-            else:
-                shutil.rmtree(temp_dir)
-
-    @unittest.skipIf(not (TEST_XPU), "XPU not found")
-    def test_jit_xpu_extension(self):
-        # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
-        self._test_jit_xpu_extension(extra_sycl_cflags=[])
-
-    @unittest.skipIf(not (TEST_XPU), "XPU not found")
-    def test_jit_xpu_archlists(self):
-        # NOTE: in this test we explicitly test few different options
-        # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
-        # environment before the test won't affect it.
-        cases = [
-            {
-                # Testing JIT compilation
-                "archlist": "",
-                "extra_sycl_cflags": [],
-            },
-            {
-                # Testing JIT + AOT (full torch AOT arch list)
-                # NOTE: default cpp extension AOT arch list might be reduced
-                # from the full list
-                "archlist": ",".join(torch.xpu.get_arch_list()),
-                "extra_sycl_cflags": [],
-            },
-            {
-                # Testing AOT (full torch AOT arch list)
-                # NOTE: default cpp extension AOT arch list might be reduced
-                # from the full list
-                "archlist": ",".join(torch.xpu.get_arch_list()),
-                # below excludes spir64 target responsible for JIT
-                "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
-            },
-        ]
-        old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
-        try:
-            for c in cases:
-                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
-                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
-        finally:
-            if old_envvar is None:
-                os.environ.pop("TORCH_XPU_ARCH_LIST")
-            else:
-                os.environ["TORCH_XPU_ARCH_LIST"] = old_envvar
-
-    @unittest.skipIf(not TEST_MPS, "MPS not found")
-    def test_mps_extension(self):
-        module = torch.utils.cpp_extension.load(
-            name="torch_test_mps_extension",
-            sources=[
-                "cpp_extensions/mps_extension.mm",
-            ],
-            verbose=True,
-            keep_intermediates=False,
-        )
-
-        tensor_length = 100000
-        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-
-        cpu_output = module.get_cpu_add_output(x, y)
-        mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
-
-        self.assertEqual(cpu_output, mps_output.to("cpu"))
-
-        # Regression test for https://github.com/pytorch/pytorch/issues/163721
-        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
-        lib.noop(mps_output)
-        module.mps_add_one_new_context(mps_output)
-        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
-
     def test_inline_jit_compile_extension_with_functions_as_list(self):
         cpp_source = """
         torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
@@ -360,80 +249,6 @@ class TestCppExtensionJIT(_CppExtensionJITMixin):
 
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
-
-    @unittest.skipIf(not TEST_XPU, "XPU not found")
-    def test_inline_jit_compile_extension_xpu(self):
-        sycl_source = """
-        #include <c10/xpu/XPUStream.h>
-
-        class CosAddKernel {
-        public:
-          void operator()(const sycl::nd_item<3> &item_ct1) const {
-            const int index = item_ct1.get_group(2) * item_ct1.get_local_range(2) +
-                              item_ct1.get_local_id(2);
-            if (index < size) {
-              output[index] = cosf(x[index]) + cosf(y[index]);
-            }
-          }
-          CosAddKernel(const float* _x, const float* _y, float* _output, int _size):
-            x(_x),
-            y(_y),
-            output(_output),
-            size(_size)
-          {}
-        private:
-          const float* x;
-          const float* y;
-          float* output;
-          int size;
-        };
-
-        void cos_add_kernel(
-            const float* x,
-            const float* y,
-            float* output,
-            int size) {
-          CosAddKernel krn(x, y, output, size);
-          const int threads = 1024;
-          const int blocks = (size + threads - 1) / threads;
-
-          sycl::queue& queue = c10::xpu::getCurrentXPUStream().queue();
-          queue.submit([&](sycl::handler &cgh) {
-              cgh.parallel_for<CosAddKernel>(
-                  sycl::nd_range<3>(
-                      sycl::range<3>(1, 1, blocks) * sycl::range<3>(1, 1, threads),
-                      sycl::range<3>(1, 1, threads)),
-              krn);
-          });
-        }
-
-        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
-          auto output = torch::zeros_like(x);
-          const int threads = 1024;
-          const int blocks = (output.numel() + threads - 1) / threads;
-          cos_add_kernel(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());
-          return output;
-        }
-        """
-
-        # Here, the C++ source need only declare the function signature.
-        cpp_source = "torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);"
-
-        module = torch.utils.cpp_extension.load_inline(
-            name="inline_jit_extension_xpu",
-            cpp_sources=cpp_source,
-            sycl_sources=sycl_source,
-            functions=["cos_add"],
-            verbose=True,
-        )
-
-        self.assertEqual(module.cos_add.__doc__.split("\n")[2], "cos_add")
-
-        x = torch.randn(4, 4, device="xpu", dtype=torch.float32)
-        y = torch.randn(4, 4, device="xpu", dtype=torch.float32)
-
-        z = module.cos_add(x, y)
-        self.assertEqual(z, x.cos() + y.cos())
 
     def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
         with self.assertRaises(ValueError):
@@ -1235,6 +1050,191 @@ except RuntimeError as e:
                         error_message,
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
+
+    def _test_jit_xpu_extension(self, extra_sycl_cflags):
+        # randomizing extension name and names of extension methods
+        # for the case when we test building few extensions in a row
+        # using this function
+        rand = "".join(random.sample(string.ascii_letters, 5))
+        name = f"torch_test_xpu_extension_{rand}"
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with open("cpp_extensions/xpu_extension.sycl") as f:
+                text = f.read()
+                for fn in ["sigmoid_add", "SigmoidAddKernel"]:
+                    text = text.replace(fn, f"{fn}_{rand}")
+
+            sycl_file = f"{temp_dir}/xpu_extension.sycl"
+            with open(sycl_file, "w") as f:
+                f.write(text)
+
+            module = torch.utils.cpp_extension.load(
+                name=name,
+                sources=[sycl_file],
+                extra_sycl_cflags=extra_sycl_cflags,
+                verbose=True,
+                build_directory=temp_dir,
+            )
+
+            x = torch.zeros(100, device="xpu", dtype=torch.float32)
+            y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+            method = f"sigmoid_add_{rand}"
+            self.assertTrue(hasattr(module, method))
+            z = getattr(module, method)(x, y).cpu()
+
+            # 2 * sigmoid(0) = 2 * 0.5 = 1
+            self.assertEqual(z, torch.ones_like(z))
+        finally:
+            if IS_WINDOWS:
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a workaround
+                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
+            else:
+                shutil.rmtree(temp_dir)
+
+    @unittest.skipIf(not (TEST_XPU), "XPU not found")
+    def test_jit_xpu_extension(self):
+        # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
+        self._test_jit_xpu_extension(extra_sycl_cflags=[])
+
+    @unittest.skipIf(not (TEST_XPU), "XPU not found")
+    def test_jit_xpu_archlists(self):
+        # NOTE: in this test we explicitly test few different options
+        # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
+        # environment before the test won't affect it.
+        cases = [
+            {
+                # Testing JIT compilation
+                "archlist": "",
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing JIT + AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                # below excludes spir64 target responsible for JIT
+                "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
+            },
+        ]
+        old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
+        try:
+            for c in cases:
+                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
+                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
+        finally:
+            if old_envvar is None:
+                os.environ.pop("TORCH_XPU_ARCH_LIST")
+            else:
+                os.environ["TORCH_XPU_ARCH_LIST"] = old_envvar
+
+    @unittest.skipIf(not TEST_XPU, "XPU not found")
+    def test_inline_jit_compile_extension_xpu(self):
+        sycl_source = """
+        #include <c10/xpu/XPUStream.h>
+
+        class CosAddKernel {
+        public:
+          void operator()(const sycl::nd_item<3> &item_ct1) const {
+            const int index = item_ct1.get_group(2) * item_ct1.get_local_range(2) +
+                              item_ct1.get_local_id(2);
+            if (index < size) {
+              output[index] = cosf(x[index]) + cosf(y[index]);
+            }
+          }
+          CosAddKernel(const float* _x, const float* _y, float* _output, int _size):
+            x(_x),
+            y(_y),
+            output(_output),
+            size(_size)
+          {}
+        private:
+          const float* x;
+          const float* y;
+          float* output;
+          int size;
+        };
+
+        void cos_add_kernel(
+            const float* x,
+            const float* y,
+            float* output,
+            int size) {
+          CosAddKernel krn(x, y, output, size);
+          const int threads = 1024;
+          const int blocks = (size + threads - 1) / threads;
+
+          sycl::queue& queue = c10::xpu::getCurrentXPUStream().queue();
+          queue.submit([&](sycl::handler &cgh) {
+              cgh.parallel_for<CosAddKernel>(
+                  sycl::nd_range<3>(
+                      sycl::range<3>(1, 1, blocks) * sycl::range<3>(1, 1, threads),
+                      sycl::range<3>(1, 1, threads)),
+              krn);
+          });
+        }
+
+        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
+          auto output = torch::zeros_like(x);
+          const int threads = 1024;
+          const int blocks = (output.numel() + threads - 1) / threads;
+          cos_add_kernel(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());
+          return output;
+        }
+        """
+
+        # Here, the C++ source need only declare the function signature.
+        cpp_source = "torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);"
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="inline_jit_extension_xpu",
+            cpp_sources=cpp_source,
+            sycl_sources=sycl_source,
+            functions=["cos_add"],
+            verbose=True,
+        )
+
+        self.assertEqual(module.cos_add.__doc__.split("\n")[2], "cos_add")
+
+        x = torch.randn(4, 4, device="xpu", dtype=torch.float32)
+        y = torch.randn(4, 4, device="xpu", dtype=torch.float32)
+
+        z = module.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
+    @unittest.skipIf(not TEST_MPS, "MPS not found")
+    def test_mps_extension(self):
+        module = torch.utils.cpp_extension.load(
+            name="torch_test_mps_extension",
+            sources=[
+                "cpp_extensions/mps_extension.mm",
+            ],
+            verbose=True,
+            keep_intermediates=False,
+        )
+
+        tensor_length = 100000
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+
+        cpu_output = module.get_cpu_add_output(x, y)
+        mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
+
+        self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
 
 
 @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
