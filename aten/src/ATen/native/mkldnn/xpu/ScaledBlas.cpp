@@ -120,14 +120,16 @@ bool is_blockwise_scaling(
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return at::isFloat8Type(t.scalar_type()) &&
-      is_blockwise_scaling(t, scale, at::kFloat, 1, 128);
+      (is_blockwise_scaling(t, scale, at::kFloat, 1, 128) ||
+       is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 1, 128));
 }
 
 bool is_blockwise_128x128_scaling(
     const at::Tensor& t,
     const at::Tensor& scale) {
   return at::isFloat8Type(t.scalar_type()) &&
-      is_blockwise_scaling(t, scale, at::kFloat, 128, 128);
+      (is_blockwise_scaling(t, scale, at::kFloat, 128, 128) ||
+       is_blockwise_scaling(t, scale, at::kFloat8_e8m0fnu, 128, 128));
 }
 
 // 1x32 blocks for microscaled fp8 or packed fp4 data and fp8_e8m0fnu scales
@@ -191,7 +193,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", 1) and scale_b should be (1, ",
       b.size(1),
       "), and both should be contiguous.\n",
-      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       a.size(0),
       ", ",
       ceil_div<int64_t>(a.size(1), 128),
@@ -200,7 +202,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", ",
       b.size(1),
       ").\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       ceil_div<int64_t>(a.size(0), 128),
       ", ",
       ceil_div<int64_t>(a.size(1), 128),
@@ -462,6 +464,7 @@ Tensor& _scaled_mm_out_xpu(
   // call a contiguous() to ensure row-major for oneDNN
   Tensor scale_a_internal = scale_a;
   Tensor scale_b_internal = scale_b;
+
   if (scaling_choice_a == ScalingType::BlockWise128x128 ||
       scaling_choice_a == ScalingType::BlockWise1x128 ||
       scaling_choice_a == ScalingType::BlockWise1x32 ||
@@ -685,22 +688,24 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:
@@ -752,22 +757,24 @@ Tensor& _scaled_block128x128_block1x128(
   TORCH_CHECK_VALUE(
       scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
       ceil_div<int64_t>(M, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:
@@ -819,23 +826,25 @@ Tensor& _scaled_block1x128_block128x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          scale_a.scalar_type() == kFloat,
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
       ceil_div<int64_t>(K, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_a.sizes());
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
-          scale_b.scalar_type() == kFloat,
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
       ceil_div<int64_t>(N, 128),
-      " Float elements, got ",
+      " Float or Float8_e8m0fnu elements, got ",
       scale_b.sizes());
 
   // Convert to oneDNN row-major layout:
@@ -1259,7 +1268,7 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       ", 1) and scale_b should be (1, ",
       mat_b.size(1),
       "), and both should be contiguous.\n"
-      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       mat_a.size(0),
       ", ",
       ceil_div<int64_t>(mat_a.size(1), 128),
@@ -1268,7 +1277,7 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       ", ",
       ceil_div<int64_t>(mat_b.size(0), 128),
       ").\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       ceil_div<int64_t>(mat_a.size(1), 128),
       ", ",
       ceil_div<int64_t>(mat_a.size(0), 128),
