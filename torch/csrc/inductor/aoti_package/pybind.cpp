@@ -68,6 +68,8 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelPackageLoaderPybind::get_call_spec)
+      .def("get_input_names", &AOTIModelPackageLoaderPybind::get_input_names)
+      .def("get_output_names", &AOTIModelPackageLoaderPybind::get_output_names)
       .def(
           "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)
       .def(
