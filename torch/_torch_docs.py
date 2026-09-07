@@ -13907,7 +13907,7 @@ Example::
 add_docstr(
     torch.quantized_batch_norm,
     r"""
-quantized_batch_norm(input, weight=None, bias=None, mean, var, eps, output_scale, output_zero_point) -> Tensor
+quantized_batch_norm(input, weight, bias, mean, var, eps, output_scale, output_zero_point) -> Tensor
 
 Applies batch normalization on a 4D (NCHW) quantized tensor.
 
