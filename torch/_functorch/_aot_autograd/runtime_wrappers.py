@@ -3768,27 +3768,42 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             if tangent_idx is None:
                 return x, [x]
             from .descriptors import (
+                InputMutationAOTOutput,
                 IntermediateBaseAOTOutput,
+                PlainAOTInput,
                 PlainAOTOutput,
                 TangentAOTInput,
             )
 
-            which = tangent_desc.expr() if tangent_desc else "an unknown output"
+            which = (
+                tangent_desc.expr() if tangent_desc is not None else "an unknown output"
+            )
             if isinstance(tangent_desc, TangentAOTInput):
                 out, via = tangent_desc.output, ""
                 if isinstance(out, IntermediateBaseAOTOutput):
                     out, via = out.base_of, "the intermediate base behind "
                 if isinstance(out, PlainAOTOutput):
                     which = f"{via}forward output {out.idx}"
-            graph = f" in compiled graph [{compile_id_str}]" if compile_id_str else ""
+                elif isinstance(out, InputMutationAOTOutput):
+                    mutated = out.mutated_input
+                    if isinstance(mutated, PlainAOTInput):
+                        which = f"{via}the mutation of forward input {mutated.idx}"
+                    else:
+                        which = f"{via}the mutation of {mutated.expr()}"
+            graph = (
+                f" in compiled graph [{compile_id_str}]"
+                if compile_id_str is not None
+                else ""
+            )
             trace = ""
-            if tangent_stack_trace:
+            if tangent_stack_trace is not None:
                 trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
             raise RuntimeError(
                 f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
                 f"for tangent {tangent_idx}, the gradient of {which}. The backward "
                 "requires this tangent, so this is a bug in AOTAutograd or the backend "
-                f"(materialize_grads / mark_non_differentiable mismatch); please report it.{trace}"
+                "(materialize_grads / mark_non_differentiable mismatch); please report it "
+                f"at https://github.com/pytorch/pytorch/issues.{trace}"
             )
 
         if is_fake_tensor(x):
