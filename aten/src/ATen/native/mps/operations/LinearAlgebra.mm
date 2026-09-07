@@ -1255,7 +1255,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
   }
 
-  MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
 
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -1689,18 +1689,76 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   return result;
 }
 
+// Complex triangular solve runs a custom Metal substitution kernel because
+// MPSMatrixSolveTriangular is float-only. conjugate selects adjoint (A^H)
+// instead of plain transpose (A^T) when transpose is set; it is a no-op for
+// real inputs.
+static void triangular_solve_metal(const Tensor& A_,
+                                   const Tensor& B_,
+                                   bool upper,
+                                   bool transpose,
+                                   bool left,
+                                   bool unitriangular,
+                                   bool conjugate,
+                                   const Tensor& out) {
+  using namespace mps;
+  const uint64_t batchSize =
+      std::accumulate(A_.sizes().begin(), A_.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
+  const uint64_t n = A_.size(-1);
+  const uint64_t k = left ? B_.size(-1) : B_.size(-2);
+
+  TriangularSolveParams params;
+  params.nbatch = safe_downcast<uint32_t, uint64_t>(batchSize);
+  params.n = safe_downcast<uint32_t, uint64_t>(n);
+  params.k = safe_downcast<uint32_t, uint64_t>(k);
+  params.upper = upper;
+  params.left = left;
+  params.transpose = transpose;
+  params.conj = conjugate;
+  params.unit = unitriangular;
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
+      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, A_, B_, out, params);
+      mtl_dispatch1DJob(encoder, pso, batchSize * k);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
 static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 const Tensor& B,
                                                 bool upper,
                                                 bool transpose,
                                                 bool left,
                                                 bool unitriangular,
-                                                Tensor& out) {
+                                                Tensor& out,
+                                                bool conjugate = false) {
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
-  TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
-              "linalg.solve.triangular(); Only float is supported!");
+  const auto scalar_type = A.scalar_type();
+  TORCH_CHECK(scalar_type == kFloat || scalar_type == kComplexFloat,
+              "linalg.solve_triangular(): MPS only supports float32 and complex64, got ",
+              scalar_type);
+  TORCH_CHECK(A.scalar_type() == B.scalar_type(), "linalg.solve_triangular(): A and B must have the same dtype");
+  // MPS ops get no generated device check and the solvers write into out= directly,
+  // so its device and dtype have to be validated here.
+  TORCH_CHECK(out.device() == A.device(),
+              "linalg.solve_triangular(): Expected out tensor on ",
+              A.device(),
+              " but got ",
+              out.device());
+  TORCH_CHECK(out.scalar_type() == scalar_type,
+              "linalg.solve_triangular(): Expected out tensor of dtype ",
+              scalar_type,
+              " but got ",
+              out.scalar_type());
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());
@@ -1710,17 +1768,31 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     return out;
   }
 
-  Tensor A_ = A_t;
-  Tensor B_ = B_t;
-  if (!A_t.is_contiguous()) {
-    A_ = A_t.clone(at::MemoryFormat::Contiguous);
+  // The substitution kernel reads raw elements, so materialize conjugated views.
+  Tensor A_ = A_t.is_conj() ? A_t.resolve_conj() : A_t;
+  Tensor B_ = B_t.is_conj() ? B_t.resolve_conj() : B_t;
+  if (!A_.is_contiguous()) {
+    A_ = A_.clone(at::MemoryFormat::Contiguous);
   }
-  if (!B_t.is_contiguous()) {
-    B_ = B_t.clone(at::MemoryFormat::Contiguous);
+  if (!B_.is_contiguous()) {
+    B_ = B_.clone(at::MemoryFormat::Contiguous);
   }
+
+  // Both solvers write a dense row-major solution, so a strided out needs a temporary.
+  // It is fully overwritten, hence empty rather than a copy of out.
+  Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
+
+  if (scalar_type == kComplexFloat) {
+    triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out_);
+    if (!out_.is_same(out)) {
+      out.copy_(out_);
+    }
+    return out;
+  }
+
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> bBuffer = getMTLBufferStorage(B_);
-  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out_);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -1736,43 +1808,41 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       uint64_t aElemSize = A_.element_size();
       uint64_t bElemSize = B_.element_size();
 
-      MPSMatrixSolveTriangular* filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
-                                                                                     right:!left
-                                                                                     upper:upper
-                                                                                 transpose:transpose
-                                                                                      unit:unitriangular
-                                                                                     order:left ? bRows : bCols
-                                                                    numberOfRightHandSides:left ? bCols : bRows
-                                                                                     alpha:1.0f] autorelease];
+      auto filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
+                                                                right:!left
+                                                                upper:upper
+                                                            transpose:transpose
+                                                                 unit:unitriangular
+                                                                order:left ? bRows : bCols
+                                               numberOfRightHandSides:left ? bCols : bRows
+                                                                alpha:1.0f] autorelease];
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_}, mpsStream);
 
-      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                                    columns:aCols
-                                                                                   matrices:batchSize
-                                                                                   rowBytes:aCols * aElemSize
-                                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                                   dataType:getMPSDataType(A_)];
-      MPSMatrixDescriptor* rightHandSideMatrixDesc =
-          [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
-                                                columns:bCols
-                                               matrices:batchSize
-                                               rowBytes:bCols * bElemSize
-                                            matrixBytes:bRows * bCols * bElemSize
-                                               dataType:getMPSDataType(B_)];
+      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                    columns:aCols
+                                                                   matrices:batchSize
+                                                                   rowBytes:aCols * aElemSize
+                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                   dataType:getMPSDataType(A_)];
+      auto rightHandSideMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
+                                                                           columns:bCols
+                                                                          matrices:batchSize
+                                                                          rowBytes:bCols * bElemSize
+                                                                       matrixBytes:bRows * bCols * bElemSize
+                                                                          dataType:getMPSDataType(B_)];
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
-        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                          descriptor:sourceMatrixDesc] autorelease];
-        MPSMatrix* rightHandSideMatrix =
-            [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B_.storage_offset() + bBatchOffset) * bElemSize
-                                    descriptor:rightHandSideMatrixDesc] autorelease];
-        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                                offset:(out.storage_offset() + bBatchOffset) * bElemSize
-                                                            descriptor:rightHandSideMatrixDesc] autorelease];
+        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
+                                                    descriptor:sourceMatrixDesc] autorelease];
+        auto rightHandSideMatrix = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                               offset:(B_.storage_offset() + bBatchOffset) * bElemSize
+                                                           descriptor:rightHandSideMatrixDesc] autorelease];
+        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
+                                                          offset:(out_.storage_offset() + bBatchOffset) * bElemSize
+                                                      descriptor:rightHandSideMatrixDesc] autorelease];
 
         [filter encodeToCommandBuffer:commandBuffer
                          sourceMatrix:sourceMatrix
@@ -1782,6 +1852,9 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       getMPSProfiler().endProfileKernel(filter, mpsStream);
     }
   });
+  if (!out_.is_same(out)) {
+    out.copy_(out_);
+  }
   return out;
 }
 
@@ -2580,20 +2653,24 @@ Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool uppe
   const bool first_transpose = upper;
   const bool second_transpose = !upper;
 
+  // A = L L^H (lower) or U^H U (upper); the transposed solve is against the
+  // conjugate-transpose factor, so it must be adjoint (no-op for real inputs).
   mps::linalg_solve_triangular_mps_impl(A,
                                         self,
                                         upper,
                                         first_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out);
+                                        out,
+                                        /*conjugate=*/first_transpose);
   mps::linalg_solve_triangular_mps_impl(A,
                                         out,
                                         upper,
                                         second_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out);
+                                        out,
+                                        /*conjugate=*/second_transpose);
   return out;
 }
 
