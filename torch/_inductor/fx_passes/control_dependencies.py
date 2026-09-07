@@ -203,6 +203,14 @@ def preserve_node_ordering(
         ordered_node.meta = original_meta
         # this will be constrained on the target node in subgraph if it exists
         ordered_node.meta.pop("eager_input_vals", None)
+        # The wrapped operation retains its fallback metadata in the subgraph.
+        # The control_deps HOP itself must use its dedicated lowering because
+        # FallbackKernel cannot handle its Subgraph argument.
+        ordered_node.meta.pop("should_fallback", None)
+        custom_meta = ordered_node.meta.get("custom")
+        if isinstance(custom_meta, dict) and "fallback_to_eager" in custom_meta:
+            ordered_node.meta["custom"] = custom_meta.copy()
+            ordered_node.meta["custom"].pop("fallback_to_eager")
 
         # Replace all uses of the original node with the ordered version
         dependent_node.replace_all_uses_with(ordered_node)

@@ -39,6 +39,7 @@ from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -263,6 +264,36 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
+class ValueAndAttributeMutationExisting(
+    ValueMutationExisting, AttributeMutationExisting
+):
+    """
+    Pre-existing objects whose class subclasses a builtin container: both the
+    builtin layout contents (value) and the instance __dict__ (attributes) can
+    mutate. Inherits both branches so isinstance-based dispatch engages the
+    value-axis machinery (is_modified) and the attribute-axis machinery
+    (store_attr_mutations) for the same object.
+    """
+
+    # The parents' cooperative __init__s conflict across the merged MRO, so
+    # initialize the base directly.
+    def __init__(self) -> None:
+        MutationType.__init__(self, SourceType.Existing)
+        self.is_modified = False
+
+
+class ValueAndAttributeMutationNew(ValueMutationNew, AttributeMutationNew):
+    """
+    Like ValueAndAttributeMutationExisting, for objects created during the
+    trace.
+    """
+
+    def __init__(self, cls_source: Source | None = None) -> None:
+        MutationType.__init__(self, SourceType.New)
+        self.is_modified = False
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id: int) -> bool:
     return scope_id == 1
 
@@ -394,51 +425,130 @@ class Method:
         return self.handler(vt, tx, args, kwargs)
 
 
+Getter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase"], "VariableTracker | None"
+]
+
+Setter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase", "VariableTracker | None"],
+    "VariableTracker | None",
+]
+
+
 @dataclasses.dataclass(slots=True)
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
     `(self, tx) -> VT | None` (None declines); `setter`
-    `(self, tx, value) -> VT | None`, None for read-only."""
+    `(self, tx, value) -> VT | None` (None declines). An attribute whose
+    PyGetSetDef has a NULL setter uses `readonly_setter`; one CPython lets you
+    write but Dynamo does not model uses `unmodeled_setter`."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    getter: Getter
+    setter: Setter
 
 
 @dataclasses.dataclass(slots=True)
 class Member:
     """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
-    GetSet; a distinct type so members and getsets never share a class."""
+    GetSet; a distinct type so members and getsets never share a class. A
+    PyMemberDef flagged READONLY uses `readonly_setter`."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    getter: Getter
+    setter: Setter
 
 
-def getset_read(
-    accessor: Callable[[Any], VariableTracker],
-) -> Callable[..., VariableTracker]:
-    """Getter for a GetSet/Member whose value is an already-built VT."""
-    return lambda self, tx: accessor(self)
+def readonly_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython declares read-only: a PyMemberDef flagged
+    READONLY, or a PyGetSetDef with a NULL setter.
+
+    Doubles as a marker. Dispatch sites that know the attribute name raise
+    CPython's more specific getset_set wording instead of calling this; the
+    message here is PyMember_SetOne's.
+    """
+    raise_attribute_error(tx, "readonly attribute")
+
+
+def unmodeled_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython lets you write but Dynamo does not model.
+
+    Eager accepts the write, so raising AttributeError would diverge; graph break
+    instead and let the write happen outside the graph.
+    """
+    unimplemented(
+        gb_type="Write to unmodeled getset/member attribute",
+        context=f"{self}",
+        explanation="Dynamo does not model writes to this attribute, which is "
+        "writable in eager.",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
 
 
 def getset_build(
     accessor: Callable[[Any], Any],
-) -> Callable[..., VariableTracker]:
+) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
-def unsupported_attr(name: str) -> Callable[..., VariableTracker | None]:
-    def graph_break(
-        vt: VariableTracker, tx: InstructionTranslatorBase
-    ) -> VariableTracker | None:
-        unimplemented(
-            gb_type="Unsupported attribute",
-            context=f"attr_unsupported {vt} {name}",
-            explanation=f"{type(vt).__name__} does not support attribute '{name}'",
-            hints=[*graph_break_hints.DYNAMO_BUG],
-        )
+def store_attr_mutation(
+    tx: InstructionTranslatorBase,
+    item: VariableTracker,
+    name: str,
+    value: VariableTracker | None,
+) -> None:
+    """Store an attribute mutation in the side effects tracker."""
+    se = tx.output.side_effects
+    if not se.is_attribute_mutation(item):
+        if item.source is not None:
+            raise AssertionError(
+                f"{item} has a source but was never registered via "
+                "track_object_existing (usually missing at its VariableBuilder "
+                "construction site) -- writes to its writable Member/GetSet "
+                "entries would otherwise be silently dropped instead of "
+                "raising here."
+            )
+        se.track_attribute_mutation_new(item)
+    value_to_store = variables.DeletedVariable() if value is None else value
+    se.store_attr(item, name, value_to_store)
 
-    return graph_break
+
+def load_pending_mutation(
+    tx: InstructionTranslatorBase, self: Any, name: str
+) -> VariableTracker | None:
+    """Returns the pending side-effect mutation of `self`'s attribute `name`,
+    or None if there isn't one. Shared by every writable getter that must
+    prefer an in-progress mutation over re-deriving the value from source."""
+    se = tx.output.side_effects
+    if se.has_pending_mutation_of_attr(self, name):
+        return se.load_attr(self, name)
+    return None
+
+
+def getset_load_or_build(
+    accessor: Callable[[Any], Any],
+    name: str,
+    source: Callable[[Any], Source | None] = lambda self: None,
+) -> Getter:
+    """Getter that builds a VT from the raw value returned by `accessor`,
+    attaching the Source returned by `source` (defaults to sourceless)."""
+
+    def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        pending = load_pending_mutation(tx, self, name)
+        if pending is not None:
+            return pending
+        return VariableTracker.build(tx, accessor(self), source(self))
+
+    return getter
+
+
+def getset_set(name: str) -> Callable[..., None]:
+    """Setter for a GetSet/Member whose value is an already-built VT."""
+
+    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -480,6 +590,25 @@ def _wrap_unaryfunc(
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
     return func(self, tx)
+
+
+def _wrap_hashfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., tuple[int, bool]],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 0:
+        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+
+    h, is_fake = func(self, tx)
+    if is_fake:
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+    return ConstantVariable.create(h)
 
 
 def _wrap_binaryfunc(
@@ -1051,7 +1180,13 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
+    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    TPSLOT(
+        "__hash__",
+        "hash_impl",
+        PyTypeSlots.TP_HASH,
+        _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
+    ),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
     TPSLOT(
@@ -1605,12 +1740,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
     tp_getset: dict[str, GetSet] = {
+        # object.__class__ has a non-NULL setter: it rejects non-heap types with
+        # TypeError rather than AttributeError, so this is unmodeled, not readonly.
         "__class__": GetSet(
             getter=lambda self, tx: VariableTracker.build(
                 tx,
                 self.python_type(),
                 AttrSource(self.source, "__class__") if self.source else None,
-            )
+            ),
+            setter=unmodeled_setter,
         ),
     }
     tp_members: dict[str, Member] = {}

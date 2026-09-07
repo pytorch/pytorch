@@ -4019,7 +4019,7 @@ Tensor linalg_vander_symint(
     const Tensor& x,
     std::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
-  TORCH_CHECK(t == ScalarType::Float ||
+  TORCH_CHECK_NOT_IMPLEMENTED(t == ScalarType::Float ||
               t == ScalarType::Double ||
               t == ScalarType::ComplexFloat ||
               t == ScalarType::ComplexDouble ||
