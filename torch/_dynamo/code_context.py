@@ -50,7 +50,9 @@ class CodeContext(TypedDict, total=False):
 
 class CodeContextDict:
     def __init__(self) -> None:
-        self.code_context: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+        self.code_context: ExactWeakKeyDictionary[CodeContext] = (
+            ExactWeakKeyDictionary()
+        )
 
     def has_context(self, code: types.CodeType) -> bool:
         return code in self.code_context

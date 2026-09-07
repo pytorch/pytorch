@@ -12,11 +12,13 @@ The system ensures that Dynamo's optimizations remain valid by detecting and res
 to runtime changes in module state and structure.
 """
 
+from __future__ import annotations
+
 import functools
 import inspect
 import weakref
 from collections.abc import MutableMapping
-from typing import Any
+from typing import Any, Protocol
 
 import torch.nn
 from torch.nn import Module
@@ -28,12 +30,16 @@ from .utils import ExactWeakKeyDictionary, nn_module_has_global_hooks
 unpatched_nn_module_init = torch.nn.Module.__init__
 
 
+class Invalidatable(Protocol):
+    def invalidate(self, ref: weakref.ReferenceType[Invalidatable]) -> None: ...
+
+
 class MutationTracker:
-    db: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+    db: ExactWeakKeyDictionary[MutationTracker] = ExactWeakKeyDictionary()
 
     def __init__(self) -> None:
         self.mutation_count: int = 0
-        self.watchers: list[weakref.ReferenceType[Any]] = []
+        self.watchers: list[weakref.ReferenceType[Invalidatable]] = []
 
     def on_mutation(self, name: str) -> None:
         self.mutation_count += 1
@@ -44,11 +50,11 @@ class MutationTracker:
             if guarded is not None:
                 guarded.invalidate(ref)
 
-    def track(self, guarded_code: Any) -> None:
+    def track(self, guarded_code: Invalidatable) -> None:
         self.watchers.append(weakref.ref(guarded_code))
 
 
-def watch(obj: Any, guarded_code: Any) -> None:
+def watch(obj: object, guarded_code: Invalidatable) -> None:
     """invalidate guarded_code when obj is mutated"""
     ensure_patched(type(obj))
 
@@ -76,11 +82,11 @@ def ensure_patched(cls: Any) -> None:
 
 class GenerationTracker:
     generation: int = 0
-    dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
-    generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+    dynamic_classes: ExactWeakKeyDictionary[bool] = ExactWeakKeyDictionary()
+    generation_values: ExactWeakKeyDictionary[int] = ExactWeakKeyDictionary()
 
     @classmethod
-    def tag(cls, obj: Any) -> None:
+    def tag(cls, obj: object) -> None:
         cls.generation_values[obj] = cls.generation
 
     @staticmethod
@@ -90,13 +96,13 @@ class GenerationTracker:
         GenerationTracker.dynamic_classes[cls] = True
 
     @classmethod
-    def get_generation_value(cls, obj: Any) -> int:
+    def get_generation_value(cls, obj: object) -> int:
         if obj not in cls.generation_values:
             return -1
         return cls.generation_values[obj]
 
     @classmethod
-    def check(cls, obj: Any) -> bool:
+    def check(cls, obj: object) -> bool:
         return (
             obj in cls.generation_values
             and cls.generation_values[obj] == cls.generation
@@ -109,7 +115,7 @@ class GenerationTracker:
         cls.generation_values = ExactWeakKeyDictionary()
 
 
-def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
+def is_dynamic_nn_module(obj: object, is_export: bool) -> bool:
     """Check for nn.Modules() created dynamically or mutated"""
     if isinstance(obj, torch.nn.Module) and (
         "forward" in obj.__dict__ or isinstance(obj, (dict, MutableMapping))

@@ -1107,23 +1107,29 @@ def nothing(*args: Any, **kwargs: Any) -> None:
     pass
 
 
-class ExactWeakKeyDictionary:
+class ExactWeakKeyDictionary(Generic[T]):
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
     def __init__(self) -> None:
-        self.values: dict[int, Any] = {}
-        self.refs: dict[int, weakref.ReferenceType[Any]] = {}
+        self.values: dict[int, T] = {}
+        self.refs: dict[int, weakref.ReferenceType[object]] = {}
 
-    def __getitem__(self, key: Any) -> Any:
+    def __getitem__(self, key: object) -> T:
         return self.values[id(key)]
 
-    def get(self, key: Any, default: Any = None) -> Any:
+    @overload
+    def get(self, key: object) -> T | None: ...
+
+    @overload
+    def get(self, key: object, default: R) -> T | R: ...
+
+    def get(self, key: object, default: R | None = None) -> T | R | None:
         return self.values.get(id(key), default)
 
-    def __contains__(self, key: Any) -> bool:
+    def __contains__(self, key: object) -> bool:
         return id(key) in self.values
 
-    def __setitem__(self, key: Any, value: Any) -> None:
+    def __setitem__(self, key: object, value: T) -> None:
         idx = id(key)
         if idx not in self.refs:
             self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
@@ -2568,7 +2574,7 @@ class CleanupHook:
         _cleanup_owners.pop((id(scope), name), None)
 
 
-class CleanupManager(ExactWeakKeyDictionary):
+class CleanupManager(ExactWeakKeyDictionary[list[CleanupHook]]):
     count = 0
     instance: ClassVar[CleanupManager]
 
@@ -3986,7 +3992,7 @@ def disable_cache_limit() -> Generator[None, None, None]:
 
 
 # map from transformed code back to original user code
-orig_code_map = ExactWeakKeyDictionary()
+orig_code_map: ExactWeakKeyDictionary[CodeType] = ExactWeakKeyDictionary()
 
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures: collections.defaultdict[Any, list[Any]] = collections.defaultdict(list)
@@ -3996,7 +4002,7 @@ graph_break_reasons: list[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
-seen_code_map = ExactWeakKeyDictionary()
+seen_code_map: ExactWeakKeyDictionary[bool] = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls

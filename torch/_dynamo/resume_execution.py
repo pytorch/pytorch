@@ -305,8 +305,12 @@ def _load_tuple_and_call(tup: tuple[object, ...]) -> list[Instruction]:
 
 
 class ContinueExecutionCache:
-    cache = ExactWeakKeyDictionary()
-    generated_code_metadata = ExactWeakKeyDictionary()
+    cache: ExactWeakKeyDictionary[dict[tuple[object, ...], types.CodeType]] = (
+        ExactWeakKeyDictionary()
+    )
+    generated_code_metadata: ExactWeakKeyDictionary[ResumeFunctionMetadata] = (
+        ExactWeakKeyDictionary()
+    )
 
     @classmethod
     def lookup(
