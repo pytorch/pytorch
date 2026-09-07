@@ -1839,8 +1839,8 @@ def _linalg_svd_meta(
         V = A.new_empty(V_shape)
         # NB: This checks for CUDA since there is no way to check for cuSolver.
         # Also, this might not work correctly on CPU when fake_device is not
-        # available as device_hint just defaults to CUDA in that case. See
-        # _linalg_svd meta in core.
+        # available: device_hint then reports the accelerator the process is
+        # using, or "cuda" when there is none. See _linalg_svd meta in core.
         is_cuda = device_hint(A) == "cuda"
         V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))  # type: ignore[arg-type]
     else:
@@ -2689,7 +2689,8 @@ def device_hint(tensor) -> "str":
     ):
         return tensor.device.type
     else:
-        return "cuda"  # default to cuda
+        acc = torch.accelerator.current_accelerator()
+        return acc.type if acc is not None else "cuda"
 
 
 def calc_conv_nd_return_shape(
