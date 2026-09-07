@@ -39,7 +39,7 @@ def staged_with_graph_breaks(x):
 
 def _graph_on(device):
     graph = torch.fx.Graph()
-    graph.call_function(torch.ones, args=(torch.device(device),))
+    graph.call_function(torch.ones, ((2,),), {"device": torch.device(device)})
     return graph
 
 
@@ -71,7 +71,7 @@ _CPU_TARGET_CASES = {
     "host_probe_failed": (
         ("x86_64", "AVX512", 512, ("CPU_CAPABILITY_AVX512",), None, "avx512"),
         False,
-        "no usable",
+        "reports no CPU codegen target",
     ),
 }
 
