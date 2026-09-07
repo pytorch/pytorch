@@ -152,24 +152,23 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     MIOPEN_CHECK(miopenInitConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale, c_mode));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
     MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, deterministic ? 1 : 0));
-#if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && (MIOPEN_VERSION_MINOR > 5 || (MIOPEN_VERSION_MINOR == 5 && MIOPEN_VERSION_PATCH >= 2)))
+#if MIOPEN_HAS_TF32_MATH_TYPE
     // TF32 is an fp32 compute mode: miopenMathDefault uses TF32 when possible,
     // miopenMathPedantic keeps strict IEEE fp32. Only meaningful for fp32 input.
-    // The math-type knob (miopenMathType_t) first exists in MIOpen >= 3.5.2; on
-    // older MIOpen there is no math-type attribute, so TF32 conv is never enabled.
-    // MIOpen < 3.6.1 has no deterministic TF32 backward solver; enabling TF32
-    // there hangs the find path in ConvHipImplicitGemmGroupBwdXdlops auto-tuning.
     if (dataType == miopenFloat) {
-#if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && (MIOPEN_VERSION_MINOR > 6 || (MIOPEN_VERSION_MINOR == 6 && MIOPEN_VERSION_PATCH >= 1)))
+#if MIOPEN_HAS_DETERMINISTIC_TF32
       bool use_tf32 = allow_tf32;
 #else
+      // MIOpen < 3.6.1 inverts the SetNextValue() wraparound test in the
+      // deterministic branch of the grouped Bwd/Wrw xdlops perf configs, so an
+      // exhaustive find with a cold perf-db spins forever once TF32 narrows the
+      // candidate list to a single kernel. Fixed by ROCm/rocm-libraries#10240.
       bool use_tf32 = allow_tf32 && !deterministic;
 #endif
       MIOPEN_CHECK(miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, use_tf32 ? miopenMathDefault : miopenMathPedantic));
     }
 #else
-    // On MIOpen < 3.5.2 allow_tf32 is unused; suppress -Wunused-parameter.
-    (void)allow_tf32;
+    (void)allow_tf32;  // no math-type attribute before MIOpen 3.5.2
 #endif
     if (benchmark) {
       MIOPEN_CHECK(miopenSetConvolutionFindMode(mut_desc(), miopenConvolutionFindModeNormal));
