@@ -67,10 +67,11 @@ class CompileArtifacts:
 
     def check_compatibility(self) -> None:
         # The cached info is the receiver so mismatch messages label self
-        # "cached", matching _DynamoCacheEntry.check_versions. This also sets
-        # which side the triton_version/gpu_name guards read off, so with the
-        # cached info as receiver those two exempt the current host, not the
-        # artifact -- the correct direction for a compatibility check.
+        # "cached", matching _DynamoCacheEntry.check_versions. It also sets
+        # which side the triton_version/gpu_name checks exempt off: with the
+        # cached info as receiver they skip only when the artifact itself
+        # recorded no Triton/GPU, requiring a match otherwise -- the correct
+        # direction for a compatibility check.
         device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = emits_native_code(self.backend_name)
         current = SystemInfo.current(
@@ -599,7 +600,9 @@ class AOTCompiledModel:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
                 reason = guard_manager.check_verbose(f_locals)
             except Exception as e:
-                lines.append(f"  [{i}] <guard check raised {type(e).__name__}: {e}>")
+                kind = type(e).__name__
+                detail = str(e).replace("\n", " ")
+                lines.append(f"  [{i}] <guard check raised {kind}: {detail}>")
                 continue
             parts = reason.verbose_code_parts or [str(reason)]
             joined = "; ".join(str(p) for p in parts).replace("\n", " ")
@@ -628,9 +631,10 @@ class AOTCompiledModel:
         traced. A guarded global the dict
         lacks fails the guard; there is no fallback to the serialized scope.
         The compiled bytecode itself still reads the globals serialized with
-        the artifact, not this dict. Only when ``model.forward`` is neither a
-        function nor a bound method is there no live scope to use, and guards
-        then resolve against the reconstructed one, with a warning.
+        the artifact, not this dict. Only when ``model.forward`` is not a plain
+        function or a bound method with an importable ``__globals__`` is there
+        no live scope to use, and guards then resolve against the reconstructed
+        one, with a warning.
         """
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
