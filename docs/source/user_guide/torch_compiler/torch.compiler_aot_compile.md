@@ -144,9 +144,15 @@ Load a previously saved AOT-compiled function from a file.
 
 - **file** -- A file-like object (opened in binary read mode) containing the
   serialized compiled function.
-- **f_globals** (`dict | None`) -- Optional global scope for the compiled
-  function. Required when the original function references user-defined types
-  or other non-standard globals.
+- **f_globals** (`dict | None`) -- Optional global scope enclosing the compiled
+  function. Guards are evaluated against this dict by reference, so a global
+  rebound after loading is seen on the next call, and a guarded global the dict
+  lacks fails the guard -- there is no fallback to the values serialized with
+  the artifact. Loading mutates it: the `__import_*` module aliases and the
+  `__builtins_dict___N` key recorded at capture are inserted (never overwriting
+  an existing key). When omitted, the reconstructed capture-time globals are
+  used. Pass it when the original function references user-defined types or
+  other non-standard globals.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
