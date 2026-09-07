@@ -172,7 +172,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # pick_vec_isa never raises for a missing compiler; it returns
         # invalid_vec_isa, which must read as "no target", not as a target
         # named INVALID_VEC_ISA that only an equally broken host would match.
-        with patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=[]):
+        # Patch pick_vec_isa directly, not valid_vec_isa_list: in fbcode on x86
+        # pick_vec_isa returns VecAVX2 before ever consulting the list, so
+        # emptying the list would leave this assertion inert there.
+        with patch.object(
+            cpu_vec_isa, "pick_vec_isa", return_value=cpu_vec_isa.invalid_vec_isa
+        ):
             self.assertIsNone(_current_cpu_codegen_target())
 
     def test_sve_widths_do_not_collide_in_the_codegen_fingerprint(self):
@@ -257,6 +262,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    def test_bypassed_entry_refuses_new_registrations(self):
+        def fn(x):
+            return x + 1
+
+        (backend_id,) = (
+            compiled_region_with_backend_id_for_package_test.__code__.co_names
+        )
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_entry()
+            package.add_guarded_code(
+                b"", compiled_region_with_backend_id_for_package_test.__code__
+            )
+            package.add_backend_id(backend_id)
+            package.add_import_source("alias", "os")
+
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [])
+        self.assertEqual(entry.guarded_codes, [])
+        self.assertEqual(entry.import_sources, {})
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
