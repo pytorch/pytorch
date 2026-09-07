@@ -268,7 +268,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         dist_model, dist_optim = self._create_model(device, compile, model_type)
         _, original_train_state = _train(dist_model, dist_optim, train_steps=2)
 
-        original_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))  # tests arbitrary saving/loading
+        original_stateful_obj = TestStatefulObj(
+            torch.rand(10, 10, device=self.device_type)
+        )  # tests arbitrary saving/loading
         sd = {
             "model": dist_model,
             "optimizer": dist_optim,
@@ -296,9 +298,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 sd,
                 storage_writer=writer,
                 async_checkpointer_type=(
-                    async_checkpointer_type
-                    if async_checkpointer_type
-                    else AsyncCheckpointerType.THREAD
+                    async_checkpointer_type or AsyncCheckpointerType.THREAD
                 ),
                 async_stager=stager,
             )
@@ -314,7 +314,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
 
-        loaded_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))
+        loaded_stateful_obj = TestStatefulObj(
+            torch.rand(10, 10, device=self.device_type)
+        )
         loaded_train_state = TestTrainState()
         dist_model, dist_optim = self._create_model(device, compile, model_type)
 
@@ -474,7 +476,6 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
                 storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
             )
 
-
 class TestNoCPU(DTensorTestBase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -534,6 +535,7 @@ class TestInitStateDict(DTensorTestBase):
         self.assertEqual(msd, get_model_state_dict(model_2))
         self.assertEqual(osd, get_optimizer_state_dict(model_2, optim_2))
         self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
+
     @with_temp_dir
     def test_stateful_and_non_stateful_loads(self) -> None:
         class StateDict(dict):
