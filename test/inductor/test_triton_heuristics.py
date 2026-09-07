@@ -16,9 +16,7 @@ from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
-from torch.testing._internal import common_device_type
 from torch.testing._internal.common_device_type import (
-    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyAccelerator,
 )
@@ -1917,22 +1915,8 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
-class _MTIATestBase(DeviceTypeTestBase):
-    device_type = "mtia"
-
-
-# Keep the legacy MTIA coverage until it has a built-in device test base.
-_test_bases = common_device_type.device_type_test_bases.copy()
-if torch.mtia.is_available() and not any(
-    base.device_type == "mtia" for base in _test_bases
-):
-    _test_bases.append(_MTIATestBase)
-
 # Collection initializes device bases, but must not enter Dynamo class fixtures.
-with (
-    patch.object(common_device_type, "device_type_test_bases", _test_bases),
-    patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)),
-):
+with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(
         TestTritonHeuristicsRuntime, globals(), except_for=("hpu",), allow_xpu=True
     )
