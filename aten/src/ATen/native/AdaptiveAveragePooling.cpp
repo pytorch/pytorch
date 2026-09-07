@@ -68,6 +68,11 @@ namespace {
       __func__, ": Expected dimensions ", input.dim(), " for `grad_output` but got dimensions ", ndim);
     TORCH_CHECK((ndim == 3 || ndim == 4),
       __func__, ": Expected 3D or 4D tensor, but got ", input.sizes());
+    for (const auto i : c10::irange(ndim - 2)) {
+      TORCH_CHECK(input.size(i) == grad_output.size(i),
+        __func__, ": input and grad_output must have the same size at dim ", i,
+        ", but got ", input.size(i), " and ", grad_output.size(i));
+    }
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
       __func__, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),
