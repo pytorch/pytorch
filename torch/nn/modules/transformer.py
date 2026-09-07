@@ -86,7 +86,7 @@ class Transformer(Module):
             other attention and feedforward operations, otherwise after. Default: ``False`` (after).
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
-        vocab_size: this parameter is accepted for **compatibility** and has no effect.
+        vocab_size: this parameter is accepted for **compatibility** with wrappers that
             It exists only so that wrappers that expect a vocabulary size argument can
             instantiate this layer without adaptation; it is ignored.
 
