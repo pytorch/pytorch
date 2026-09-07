@@ -2,7 +2,6 @@
 
 import os
 
-import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -24,8 +23,29 @@ class TestMiscCollectiveUtils(TestCase):
         """
         Test device to backend mapping
         """
-        backend = dist.get_default_backend_for_device(device)
-        self.assertIn(backend, dist.Backend.backend_list)
+        if "cuda" in device:
+            if dist.get_default_backend_for_device(device) != "nccl":
+                raise AssertionError(
+                    f"Expected nccl, got {dist.get_default_backend_for_device(device)}"
+                )
+        elif "cpu" in device:
+            if dist.get_default_backend_for_device(device) != "gloo":
+                raise AssertionError(
+                    f"Expected gloo, got {dist.get_default_backend_for_device(device)}"
+                )
+        elif "mps" in device:
+            if dist.get_default_backend_for_device(device) != "gloo":
+                raise AssertionError(
+                    f"Expected gloo, got {dist.get_default_backend_for_device(device)}"
+                )
+        elif "xpu" in device:
+            if dist.get_default_backend_for_device(device) != "xccl":
+                raise AssertionError(
+                    f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
+                )
+        else:
+            with self.assertRaises(ValueError):
+                dist.get_default_backend_for_device(device)
 
     def test_create_pg(self, device) -> None:
         """
