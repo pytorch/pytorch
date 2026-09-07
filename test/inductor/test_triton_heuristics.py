@@ -8,6 +8,8 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 
+import sympy
+
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import TritonUnavailableError
@@ -27,7 +29,12 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_TRITON,
+    requires_gpu_with_enough_memory,
+    requires_triton,
+)
 
 
 try:
@@ -564,8 +571,12 @@ class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class _TritonHeuristicsBackendConfig(_TritonDeviceTestCase):
-    def _test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
+class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
         from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
@@ -597,22 +608,6 @@ class _TritonHeuristicsBackendConfig(_TritonDeviceTestCase):
             self.assertEqual(len(configs), expected_count)
 
 
-class TestCudaHeuristicsBackendConfig(_TritonHeuristicsBackendConfig):
-    hw_classification = HardwareClassification.CUDA
-
-    @parametrize("do_pruning", [False, True])
-    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
-        self._test_prune_configs_over_shared_memory_limit(device, do_pruning)
-
-
-class TestXpuHeuristicsBackendConfig(_TritonHeuristicsBackendConfig):
-    hw_classification = HardwareClassification.XPU
-
-    @parametrize("do_pruning", [False, True])
-    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
-        self._test_prune_configs_over_shared_memory_limit(device, do_pruning)
-
-
 @requires_triton()
 class TestTritonHeuristicsROCm(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
@@ -642,6 +637,101 @@ class TestTritonHeuristicsROCm(_TritonDeviceTestCase):
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
+
+    @runOnRocm
+    def test_flex_default_configs_gated_on_arch_name(self, device):
+        """A gfx target gets tuned flex defaults only if registered for them.
+
+        get_device_capability() on ROCm reports the gfx major/minor, which
+        neither orders by capability nor identifies the product line, so gating
+        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
+        hands them tables measured on gfx950.
+        """
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.utils import rocm_gfx_arch
+
+        heuristic = ROCmConfigHeuristic()
+        dtype, head_dim = torch.float16, 128
+
+        # the registries are keyed on the bare target, so the features that
+        # gcnArchName carries ("gfx950:sramecc+:xnack-") have to be stripped
+        self.assertNotIn(":", rocm_gfx_arch())
+        self.assertTrue(
+            torch.cuda.get_device_properties(0).gcnArchName.startswith(rocm_gfx_arch())
+        )
+
+        # stands in for any target that has no measured values of its own, and
+        # gives the fallback to compare against without pinning its values here
+        unregistered = "gfx000"
+        # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
+        # length rather than by target, so it is not part of this dispatch.
+        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
+
+        def configs_for(arch, get_configs):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
+                    lambda: arch,
+                ),
+                patch(
+                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                    lambda: False,
+                ),
+            ):
+                return get_configs()
+
+        paths = (
+            (
+                "forward",
+                heuristic.flex_fwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_fwd_configs(
+                    head_dim, sympy.Integer(1024), dtype
+                ),
+            ),
+            (
+                "backward",
+                heuristic.flex_bwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_bwd_configs(head_dim, dtype),
+            ),
+        )
+        for path, registry, get_configs in paths:
+            with self.subTest(path=path):
+                self.assertIn("gfx950", registry)
+                self.assertNotIn(unregistered, registry)
+                fallback = configs_for(unregistered, get_configs)
+                for arch in targets:
+                    configs = configs_for(arch, get_configs)
+                    tuned = registry.get(arch, {}).get((dtype, head_dim))
+                    if tuned is None:
+                        self.assertEqual(configs, fallback, msg=arch)
+                    else:
+                        self.assertEqual(configs, [tuned], msg=arch)
+                        self.assertNotEqual(configs, fallback, msg=arch)
+
+
+class TestROCmExhaustiveConfigs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @runOnRocm
+    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self, device):
+        """ROCmConfigHeuristic._filter_configs forces num_stages to
+        default_num_stages, so enumerating num_stages in exhaustive_configs would
+        only yield duplicates that get deduped again in _finalize_mm_configs.
+        """
+        from torch._inductor.heuristics.template.triton import (
+            GemmConfig,
+            ROCmConfigHeuristic,
+        )
+
+        heuristic = ROCmConfigHeuristic()
+        self.assertEqual(
+            {c.num_stages for c in heuristic.exhaustive_configs},
+            {heuristic.default_num_stages},
+        )
+
+        # the invariant above is only safe because _filter_configs clobbers it
+        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
+        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
 
 
 _PLUGIN_FACTORY_PATH = (
@@ -869,18 +959,13 @@ class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
         self.assertEqual(revived._plugins, [])
 
 
-class _ArgumentCloneAndRestore(_TritonDeviceTestCase):
+class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Our tensor is large enough. If a unexpected copy happens, the
     # peak memory increase should be larger than tolerance and the test
     # will fail.
     MEM_TOLERANCE = int(256 * 1e6)
-
-    def setUp(self):
-        device = self.get_primary_device()
-        device_module = torch.get_device_module(device)
-        if device_module.get_device_properties(device).total_memory < 1e10:
-            self.skipTest("requires at least 10GB of device memory")
-        super().setUp()
 
     def _create_caching_autotuner(self, device):
         args = _get_cos_kernel_caching_autotuner_args(device)
@@ -935,50 +1020,30 @@ class _ArgumentCloneAndRestore(_TritonDeviceTestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
-    def _test_clone_contiguous_args(self, device):
+    @onlyAccelerator
+    @requires_gpu_with_enough_memory(1e10)
+    def test_clone_contiguous_args(self, device):
         arg = self._create_tensor(device, pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(device, arg)
 
-    def _test_clone_non_contiguous_args(self, device):
+    @onlyAccelerator
+    @requires_gpu_with_enough_memory(1e10)
+    def test_clone_non_contiguous_args(self, device):
         arg = self._create_tensor(device, pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(device, arg)
 
-    def _test_clone_args_with_non_zero_offset(self, device):
+    @onlyAccelerator
+    @requires_gpu_with_enough_memory(1e10)
+    def test_clone_args_with_non_zero_offset(self, device):
         arg = self._create_tensor(device, pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() > 0)
 
         self._do_test(device, arg)
-
-
-class TestCudaArgumentCloneAndRestore(_ArgumentCloneAndRestore):
-    hw_classification = HardwareClassification.CUDA
-
-    def test_clone_contiguous_args(self, device):
-        self._test_clone_contiguous_args(device)
-
-    def test_clone_non_contiguous_args(self, device):
-        self._test_clone_non_contiguous_args(device)
-
-    def test_clone_args_with_non_zero_offset(self, device):
-        self._test_clone_args_with_non_zero_offset(device)
-
-
-class TestXpuArgumentCloneAndRestore(_ArgumentCloneAndRestore):
-    hw_classification = HardwareClassification.XPU
-
-    def test_clone_contiguous_args(self, device):
-        self._test_clone_contiguous_args(device)
-
-    def test_clone_non_contiguous_args(self, device):
-        self._test_clone_non_contiguous_args(device)
-
-    def test_clone_args_with_non_zero_offset(self, device):
-        self._test_clone_args_with_non_zero_offset(device)
 
 
 @requires_triton()
@@ -1852,27 +1917,6 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
-def _instantiate_device_tests(test_class, scope, **kwargs):
-    # Device discovery must not enter Dynamo's class fixtures during collection.
-    test_bases = common_device_type.get_desired_device_type_test_bases(**kwargs)
-    for base in test_bases:
-        if base._should_exclude(test_class.__name__):
-            continue
-        if any(
-            name.startswith("test")
-            and not base._should_exclude(test_class.__name__, test_name=name)
-            for name in test_class.__dict__
-        ):
-            base._init_and_get_primary_device()
-    # PrivateUse1 setup can rename the backend after candidates were filtered.
-    with patch.object(
-        common_device_type,
-        "get_desired_device_type_test_bases",
-        return_value=test_bases,
-    ):
-        instantiate_device_type_tests(test_class, scope, **kwargs)
-
-
 class _MTIATestBase(DeviceTypeTestBase):
     device_type = "mtia"
 
@@ -1884,49 +1928,56 @@ if torch.mtia.is_available() and not any(
 ):
     _test_bases.append(_MTIATestBase)
 
-with patch.object(common_device_type, "device_type_test_bases", _test_bases):
-    _instantiate_device_tests(
+# Collection initializes device bases, but must not enter Dynamo class fixtures.
+with (
+    patch.object(common_device_type, "device_type_test_bases", _test_bases),
+    patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)),
+):
+    instantiate_device_type_tests(
         TestTritonHeuristicsRuntime, globals(), except_for=("hpu",), allow_xpu=True
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
+        TestTritonHeuristicsBackendConfig,
+        globals(),
+        only_for=(GPU_TYPE,),
+        allow_xpu=True,
+    )
+    instantiate_device_type_tests(
+        TestArgumentCloneAndRestore, globals(), only_for=(GPU_TYPE,), allow_xpu=True
+    )
+    instantiate_device_type_tests(
+        TestTritonHeuristicsROCm, globals(), only_for=("cuda",)
+    )
+    instantiate_device_type_tests(
         TestCachingAutotunerPrecompileDriverSetup,
         globals(),
         except_for=("hpu",),
         allow_xpu=True,
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
         TestCachingAutotunerPlugin, globals(), except_for=("hpu",), allow_xpu=True
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
         TestDumpLaunchTensors, globals(), except_for=("hpu",), allow_xpu=True
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
         TestRecheckAutotuneCache, globals(), except_for=("hpu",), allow_xpu=True
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
+        TestHIPInvalidConfigHandling, globals(), only_for=("cuda",)
+    )
+    instantiate_device_type_tests(
         TestDynamicScaleRblockCacheInteraction,
         globals(),
         except_for=("hpu",),
         allow_xpu=True,
     )
-    _instantiate_device_tests(
+    instantiate_device_type_tests(
         TestCheckLauncherCallArgs, globals(), except_for=("hpu",), allow_xpu=True
     )
-
-_instantiate_device_tests(
-    TestCudaHeuristicsBackendConfig, globals(), only_for=("cuda",)
-)
-_instantiate_device_tests(
-    TestXpuHeuristicsBackendConfig, globals(), only_for=("xpu",), allow_xpu=True
-)
-_instantiate_device_tests(
-    TestCudaArgumentCloneAndRestore, globals(), only_for=("cuda",)
-)
-_instantiate_device_tests(
-    TestXpuArgumentCloneAndRestore, globals(), only_for=("xpu",), allow_xpu=True
-)
-_instantiate_device_tests(TestTritonHeuristicsROCm, globals(), only_for=("cuda",))
-_instantiate_device_tests(TestHIPInvalidConfigHandling, globals(), only_for=("cuda",))
+    instantiate_device_type_tests(
+        TestROCmExhaustiveConfigs, globals(), only_for=("cuda",)
+    )
 
 
 if __name__ == "__main__":

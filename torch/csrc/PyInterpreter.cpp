@@ -2,7 +2,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 

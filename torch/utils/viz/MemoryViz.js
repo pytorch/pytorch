@@ -201,7 +201,11 @@ function eventStack(e, allocated, reserved) {
       reserved,
     )} reserved)\n${event}`;
   }
-  const user_metadata_str = format_user_metadata(e.user_metadata);
+  let user_metadata_str = format_user_metadata(e.user_metadata);
+  if (e.internal_metadata) {
+    const internal_str = `Internal Metadata:\n  ${e.internal_metadata}`;
+    user_metadata_str += (user_metadata_str ? '\n' : '') + internal_str;
+  }
   const frames_str = format_frames(e.frames);
   const forward_frames_str = format_forward_frames(e.forward_frames);
   return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str + forward_frames_str;

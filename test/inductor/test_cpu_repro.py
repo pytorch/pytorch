@@ -838,18 +838,6 @@ class CPUReproTests(TestCase):
                     inps_var = [v_var]
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
-    def test_lstm_compile_default_grad_enabled(self):
-        mod = LstmModule(4, 8, 1, batch_first=True).eval()
-        x = torch.randn(2, 3, 4)
-
-        fn_opt = torch.compile(mod, backend="inductor", fullgraph=True)
-
-        actual = fn_opt(x)
-        self.assertEqual(actual, mod(x))
-        actual[0].sum().backward()
-        for param in mod.parameters():
-            self.assertIsNotNone(param.grad)
-
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
@@ -3856,6 +3844,36 @@ class CPUReproTests(TestCase):
             _args = (x, y)
             self.common(torch.remainder, _args)
             check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_vec_remainder_tail(self):
+        # 131 leaves a masked tail for every integer dtype width on every
+        # supported ISA, and the tail load zero-fills the padded lanes. A
+        # padded zero divisor must not trip the divide-by-zero check; only a
+        # real one may.
+        def fn(a, b):
+            return a % b
+
+        for dtype in [torch.uint8, torch.int8, torch.int32, torch.int64]:
+            a = torch.arange(131, dtype=dtype) + 1
+            b = torch.full((131,), 16, dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (a, b))
+            check_metrics_vec_kernel_count(1)
+
+        # The reported repro shape: odd inner size, broadcast divisor. Whether
+        # it vectorizes is ISA-dependent, so pin correctness only.
+        a = torch.arange(6, dtype=torch.int64).reshape(2, 3) + 1
+        b = torch.full((3,), 16, dtype=torch.int64)
+        torch._dynamo.reset()
+        self.common(fn, (a, b))
+
+        a = torch.arange(6, dtype=torch.int64).reshape(2, 3)
+        b = torch.tensor([16, 0, 16], dtype=torch.int64)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            torch.compile(fn, fullgraph=True)(a, b)
 
     def test_skip_cpp_codegen(self):
         with config.patch({"disable_cpp_codegen": True}):

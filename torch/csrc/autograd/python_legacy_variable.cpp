@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/python_legacy_variable.h>
 
 #include <ATen/ATen.h>
-#include <fmt/format.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_function.h>

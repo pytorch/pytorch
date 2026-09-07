@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     parametrize,
     run_tests,
     subtest,
@@ -1126,9 +1127,12 @@ class TestStatelessRNGInteger(TestCase):
         n = 128
         b32 = random.randint(key, (2 * n,), dtype=torch.uint32)
         b64 = random.randint(key, (n,), dtype=torch.uint64)
-        self.assertEqual(
-            b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1)
-        )
+        if not IS_S390X:
+            self.assertEqual(
+                b64.view(torch.uint32), b32.reshape(-1, 2).flip(-1).reshape(-1)
+            )
+        else:
+            self.assertEqual(b64.view(torch.uint32), b32)
 
     @parametrize("dtype", [torch.uint8, torch.uint16, torch.uint32, torch.uint64])
     def test_full_range_statistically_uniform(self, device, dtype):
