@@ -870,11 +870,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             invalidator_done = threading.Event()
 
             def invalidator():
-                wrapper.extra_state.invalidate(
-                    DeletedGuardManagerWrapper("test object"),
-                    wrapper,
-                )
-                invalidator_done.set()
+                try:
+                    wrapper.extra_state.invalidate(
+                        DeletedGuardManagerWrapper("test object"),
+                        wrapper,
+                    )
+                    invalidator_done.set()
+                except Exception as e:
+                    errors.put(e)
 
             inv_thread = threading.Thread(target=invalidator, daemon=True)
             inv_thread.start()
@@ -884,11 +887,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # running a compile into the next test, holding compile_lock.
             release_eq.set()
             thread.join(timeout=120)
-        self.assertFalse(thread.is_alive())
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
         _reraise_worker_error(raised)
+        self.assertFalse(thread.is_alive())
         # A later lock holder drains the parked request: the entry reports
         # itself invalidated and a fresh compile serves the next call.
         self.assertEqual(opt1(x), f(x))
