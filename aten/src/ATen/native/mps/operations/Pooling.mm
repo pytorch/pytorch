@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/PoolingChecks.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pooling.h>
@@ -636,31 +637,14 @@ static void max_unpool_out_mps_template(const Tensor& input,
                                         Tensor& output,
                                         const int32_t pooling_dims,
                                         const std::string& op_name) {
-  TORCH_CHECK(output_size_.size() == static_cast<size_t>(pooling_dims),
-              op_name,
-              "There should be exactly ",
-              pooling_dims,
-              " elements but got ",
-              output_size_.size());
-
-  // Check that input and indices have the same shape
-  TORCH_CHECK(input.sizes() == indices.sizes(),
-              "Expected shape of indices to be same as that of the input tensor (",
-              input.sizes(),
-              ") but got indices tensor with shape: ",
-              indices.sizes());
+  if (pooling_dims == 2) {
+    max_unpooling2d_shape_check(input, indices, output_size_, op_name.c_str());
+  } else {
+    max_unpooling3d_shape_check(input, indices, output_size_, stride, padding, op_name.c_str());
+  }
 
   auto dims = input.dim();
-  auto leading_dims = input.dim() - pooling_dims;
-  for (int64_t i = 1; i < dims; ++i) {
-    TORCH_CHECK(input.size(i) > 0,
-                op_name,
-                ": Expected input to have non-zero size for non-batch dimensions, but got ",
-                input.sizes(),
-                " with dimension ",
-                i,
-                " being empty.");
-  }
+  auto leading_dims = dims - pooling_dims;
 
   const auto memory_format = input.suggest_memory_format();
   std::vector<int64_t> output_size(dims);
@@ -668,12 +652,6 @@ static void max_unpool_out_mps_template(const Tensor& input,
     output_size[dim] = input.sizes()[dim];
   }
   for (int dim : c10::irange(pooling_dims)) {
-    TORCH_CHECK(output_size_[dim] >= 0,
-                op_name,
-                ": output_size must contain non-negative spatial dimensions, but got output_size[",
-                dim,
-                "]=",
-                output_size_[dim]);
     output_size[leading_dims + dim] = output_size_[dim];
   }
 

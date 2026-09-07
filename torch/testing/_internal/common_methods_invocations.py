@@ -10170,11 +10170,11 @@ _UNPOOL_NAME_TO_DIM = {
 
 
 def error_inputs_max_unpool(op_info, device, **kwargs):
-    """Error inputs for max_unpool: shape mismatch between input and indices."""
+    """Error inputs for max_unpool: bad indices dtype, input rank, shape and stride."""
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    make_indices = partial(torch.zeros, device=device, dtype=torch.long)
     pool_dim = _UNPOOL_NAME_TO_DIM[op_info.name]
 
-    # Create mismatched shapes for input and indices
     kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
     if pool_dim == 1:
         input_shape = (8, 8)
@@ -10186,15 +10186,26 @@ def error_inputs_max_unpool(op_info, device, **kwargs):
         input_shape = (1, 1, 4, 4, 4)
         indices_shape = (1, 1, 4, 4, 1)
 
-    yield ErrorInput(
-        SampleInput(
-            make_arg(input_shape),
-            args=(torch.zeros(indices_shape, device=device, dtype=torch.long),),
-            kwargs=kwargs_dict
-        ),
-        error_type=RuntimeError,
-        error_regex='Expected shape of indices to be'
-    )
+    def make_error_input(input_shape, indices, error_regex, **extra_kwargs):
+        return ErrorInput(
+            SampleInput(make_arg(input_shape), args=(indices,), kwargs={**kwargs_dict, **extra_kwargs}),
+            error_type=RuntimeError,
+            error_regex=error_regex,
+        )
+
+    yield make_error_input(input_shape, make_indices(indices_shape), 'Expected shape of indices to be')
+    yield make_error_input(
+        input_shape, make_indices(input_shape).float(), 'elements in indices should be type int64')
+
+    # max_unpool1d unsqueezes its input and forwards to max_unpool2d, so it reports the 2d ranks
+    unbatched_shape = input_shape[1:] if pool_dim == 1 else input_shape[2:]
+    rank_regex = 'Input to max_unpooling3d should be a 4d or 5d Tensor' if pool_dim == 3 else \
+        'Input to max_unpooling2d should be a 3d or 4d Tensor'
+    yield make_error_input(unbatched_shape, make_indices(unbatched_shape), rank_regex)
+
+    if pool_dim == 3:
+        yield make_error_input(
+            input_shape, make_indices(input_shape), 'strides should be greater than zero', stride=0)
 
 
 def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
