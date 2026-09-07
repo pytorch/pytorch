@@ -24,6 +24,7 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR,
     FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR,
+    FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
@@ -45,7 +46,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
-    local_reduce_unsupported_tensorssa_error,
+    ungrouped_reduction_error,
+    unsupported_reduction_op_error,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
@@ -430,7 +432,6 @@ def flex_gemm_indexed_output_store(
         or not isinstance(aux_meta, torch.Tensor)
         or main_meta.ndim != 2
         or not statically_known_shape_equal(aux_meta.shape, (main_meta.shape[0],))
-        or aux_meta.dtype is not main_meta.dtype
     ):
         return None
 
@@ -462,10 +463,14 @@ def flex_gemm_indexed_output_store(
         or dim not in (-1, 1)
         or not isinstance(unsqueeze_node, torch.fx.Node)
         or sparse_grad is not False
-        or source not in (main_output, terminal_dtype_conversion_source(main_output))
         or unsqueeze_node.target is not torch.ops.aten.unsqueeze.default
     ):
         return None
+    if (
+        source not in (main_output, terminal_dtype_conversion_source(main_output))
+        or aux_meta.dtype is not main_meta.dtype
+    ):
+        raise NotImplementedError(FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR)
     indices, unsqueeze_dim = unsqueeze_node.args
     indices_meta = (
         indices.meta.get("val") if isinstance(indices, torch.fx.Node) else None
@@ -521,6 +526,7 @@ class FlexGemmLocalReduceAnalysis:
     matches: dict[torch.fx.Node, FlexGemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
     )
+    gemm: torch.fx.Node | None = None
     gemm_shape: tuple[Any, ...] | None = None
 
     @classmethod
@@ -533,6 +539,7 @@ class FlexGemmLocalReduceAnalysis:
         gemm_shape = tensor_meta_shape(gemm) if gemm is not None else None
         analysis = cls(
             FlexGemmEpilogueGraph.from_nodes(tuple(graph_module.graph.nodes)),
+            gemm=gemm,
             gemm_shape=gemm_shape,
         )
         for node in graph_module.graph.nodes:
@@ -568,13 +575,22 @@ class FlexGemmLocalReduceAnalysis:
             if propagated or grouped:
                 return
         normalized = self.graph.normalized_nodes.get(node)
-        if isinstance(
-            normalized, NormalizedGemmReduction
-        ) and self.bind_grouped_reduction(node, normalized):
-            return
-        if isinstance(normalized, NormalizedUnsupportedReduction):
-            if normalized.source in self.grouped_tensors:
-                raise local_reduce_unsupported_tensorssa_error(normalized.target)
+        if isinstance(normalized, NormalizedGemmReduction):
+            if self.bind_grouped_reduction(node, normalized):
+                return
+            if (
+                normalized.source not in self.grouped_tensors
+                and self.gemm is not None
+                and self.graph.depends_on(normalized.source, self.gemm)
+            ):
+                op_name = (
+                    "softmax/logsumexp"
+                    if isinstance(normalized, NormalizedPrepareSoftmax)
+                    else str(getattr(node.target, "overloadpacket", node.target))
+                )
+                raise ungrouped_reduction_error(op_name)
+        elif isinstance(normalized, NormalizedUnsupportedReduction):
+            raise unsupported_reduction_op_error(normalized.target)
         if self.propagate_local_reduce_match(node, squeeze_source_node(node)):
             return
         if node.target is operator.getitem and self.propagate_local_reduce_match(
