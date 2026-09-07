@@ -878,17 +878,17 @@ class profile:
         return all_function_events
 
 
-# Set by torch.profiler to the active cupti_monitor ProfilerObserver while a session is
+# Set by torch.profiler to the active cuspy ProfilerObserver while a session is
 # running (None otherwise). record_function routes regions to it via push/pop_annotation.
-# Held as an opaque object -- NOT imported from the cupti package -- so record_function never
-# pulls in the cupti chain on a non-cupti run, and there is a single "is a session active"
+# Held as an opaque object -- NOT imported from the cuspy package -- so record_function never
+# pulls in the cuspy chain on a non-cuspy run, and there is a single "is a session active"
 # signal (this reference) rather than a separate flag.
-_active_cupti_profiler_observer: Any = None
+_active_cuspy_profiler_observer: Any = None
 
 
-def _set_active_cupti_profiler_observer(observer: Any) -> None:
-    global _active_cupti_profiler_observer
-    _active_cupti_profiler_observer = observer
+def _set_active_cuspy_profiler_observer(observer: Any) -> None:
+    global _active_cuspy_profiler_observer
+    _active_cuspy_profiler_observer = observer
 
 
 class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
@@ -942,29 +942,29 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
-        self._cupti_monitor_external_id: int | None = None
+        self._cuspy_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
-        # Route the region to the active cupti_monitor observer, if any. The reference is
-        # None unless a cupti_monitor profile is running, so a non-cupti run never touches
-        # the cupti chain. Guarded by is_scripting() (the global access doesn't compile under
+        # Route the region to the active cuspy observer, if any. The reference is
+        # None unless a cuspy profile is running, so a non-cuspy run never touches
+        # the cuspy chain. Guarded by is_scripting() (the global access doesn't compile under
         # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
         if not torch.jit.is_scripting():
-            observer = _active_cupti_profiler_observer
+            observer = _active_cuspy_profiler_observer
             if observer is not None:
-                self._cupti_monitor_external_id = observer.push_annotation(self.name)
+                self._cuspy_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if not torch.jit.is_scripting():
-            if self._cupti_monitor_external_id is not None:
-                observer = _active_cupti_profiler_observer
+            if self._cuspy_external_id is not None:
+                observer = _active_cuspy_profiler_observer
                 if observer is not None:
                     observer.pop_annotation()
-                self._cupti_monitor_external_id = None
+                self._cuspy_external_id = None
         if not self.run_callbacks_on_exit:
             return
 

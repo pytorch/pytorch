@@ -2811,6 +2811,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.flydsl.intrinsics",  # depends on flydsl
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
@@ -2831,7 +2832,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
-                           "torch.profiler._cupti",  # depends on cupti-python
+                           "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

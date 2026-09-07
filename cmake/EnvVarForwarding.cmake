@@ -26,6 +26,11 @@
 #                            is set)
 #   USE_CUDA=0, BUILD_TEST=0, ...   feature toggles, next section
 #   TORCH_CUDA_ARCH_LIST     CUDA arches to build for, e.g. "8.0;9.0"
+#   TORCH_NATIVE_AOT=0       skip the native-AOT stage-2 step (export DSL
+#                            kernels, relink them into libtorch_cuda). Honored by
+#                            both tools/native_aot/build_stage2.py and the
+#                            generated build/native_aot/native_aot.cmake. Not
+#                            forwarded: both sides read the environment directly
 #
 # Feature toggles (USE_*/BUILD_*, forwarded by prefix):
 #   USE_CUDA=0                disables CUDA build

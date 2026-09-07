@@ -2260,8 +2260,8 @@ class triton:
     )
     # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
     # args instead of creating them device-side inside the kernel. Selects the
-    # descriptor flavor only; requires use_tensor_descriptor and
-    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    # descriptor flavor only. Pointwise/reduction kernels additionally require
+    # use_tensor_descriptor and assume_aligned_inputs; GEMM templates do not.
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs

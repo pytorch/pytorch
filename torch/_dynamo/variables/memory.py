@@ -9,7 +9,7 @@ from ..exc import raise_type_error, unimplemented
 from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, CallFunctionNoArgsSource, ImportSource
-from .base import Member, VariableTracker
+from .base import Member, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
 
@@ -97,7 +97,7 @@ class CUDAMemPoolVariable(VariableTracker):
         return ConstantVariable.create(self.value.id)
 
     tp_members = {
-        "id": Member(_id),
+        "id": Member(_id, readonly_setter),
     }
 
     def as_proxy(self) -> Proxy:

@@ -1003,8 +1003,6 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const at::TensorBase& /*self*/ /*unused*/,
       const std::optional<c10::ScalarType>& /*grad_dtype*/ /*unused*/)
       const override;
-  void mark_multi_output_view(
-      const at::TensorBase& /*self*/ /*unused*/) const override;
 };
 
 namespace utils {

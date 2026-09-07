@@ -107,6 +107,7 @@ from torch.testing._internal.common_quantization import (
     _group_quantize_tensor_symmetric,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     DeterministicGuard,
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -6404,10 +6405,23 @@ for dtype in (torch.int32, torch.int64):
         ),
     )
     @parametrize("nhwc", (False, True))
+    # ROCm 7.14+ Triton conv2d backward accuracy issue for
+    # channels_groups=[61, 151, 1], stride=1, nhwc=True:
+    # - kernel=1, padding=0 (both dilations): original skip, observed on MI350
+    # - kernel=3, padding in {0, 1} (both dilations): additional fails on MI200
+    #   (these kernel=3 cases passed on MI350)
+    @decorateIf(
+        unittest.skip("ROCm 7.14+ Triton conv2d backward accuracy issue"),
+        lambda p: (
+            TEST_WITH_ROCM
+            and _get_torch_rocm_version() >= (7, 14)
+            and p["channels_groups"] == [61, 151, 1]
+            and p["stride"] == 1
+            and p["nhwc"]
+            and ((p["kernel"] == 1 and p["padding"] == 0) or p["kernel"] == 3)
+        ),
+    )
     @with_tf32_off
-    @skipIfRocmVersionAtLeast(
-        [7, 14]
-    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
     def test_conv2d_backward_parametrized(
         self,
         channels_groups: list,
@@ -7479,6 +7493,59 @@ for dtype in (torch.int32, torch.int64):
             return a_s + b_s
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
+
+    @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
+    def test_as_strided_past_input_extent(self):
+        # A graph input aliasing a larger storage may legitimately be
+        # as_strided'd past its own extent: Inductor rebases the storage-relative
+        # offset onto the input pointer, so the read stays in bounds at runtime.
+        # The extent check on realized buffers must not reject this.
+        def fn(x):
+            return torch.as_strided(x, (12,), (1,), 0) + 1.0
+
+        # Not self.common: its host-to-device input copy compacts the view and
+        # drops the aliased storage this test is about.
+        base = torch.arange(12, dtype=torch.float32, device=self.device)
+        self.assertEqual(torch.compile(fn)(base[6:9]), fn(base[6:9]))
+
+    def test_as_strided_past_realized_buffer_raises(self):
+        # An intermediate is allocated to exactly its layout, so an as_strided past
+        # that extent has no data to read. Inductor must fail loudly rather than
+        # reinterpret unallocated memory into an unmasked load.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (2 * y.numel(),), (1,), 0)
+
+        with self.assertRaisesRegex(torch._inductor.exc.InductorError, "holds only"):
+            torch.compile(fn, fullgraph=True)(torch.randn(64, device=self.device))
+
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_as_strided_past_unbacked_buffer_extent(self):
+        # Same over-extent, but with an unbacked size the comparison cannot be
+        # decided while compiling: statically_known_gt is false and check_leq only
+        # defers a runtime assertion. That assertion is registered by the as_strided
+        # lowering, so it exists only while that lowering runs -- a warm FX graph
+        # cache replays the artifact without it and the read goes through unchecked.
+        # Caches are disabled here so this pins the half that is covered.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (128,), (1,), 0)
+
+        inp = torch.randn(64, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(inp, 0)
+        with self.assertRaises((RuntimeError, AssertionError)):
+            torch.compile(fn, fullgraph=True)(inp)
+
+    def test_as_strided_within_unbacked_buffer_extent(self):
+        # The complement: an unbacked buffer that does turn out to be large enough
+        # must still compile and run, so the guard cannot reject on unprovable alone.
+        def fn(x):
+            y = x * 2
+            return torch.as_strided_copy(y, (128,), (1,), 0)
+
+        inp = torch.randn(256, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(inp, 0)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(inp), fn(inp))
 
     def test_repeat_interleave(self):
         def fn(x):
@@ -10700,6 +10767,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         fn_compiled = torch.compile(fn)
         y = fn_compiled(x)
         self.assertTrue(y is not x)
+
+    def test_constant_pad_nd_negative_pad_with_mm(self):
+        # https://github.com/pytorch/pytorch/issues/194558
+        def fn(x, w):
+            v = x + 1.0
+            v = aten.constant_pad_nd(v, [0, -2, 0, 0], 0.5)
+            return aten.mm(v, w)
+
+        x = torch.randn([2, 5], device=self.device)
+        w = torch.randn([3, 4], device=self.device)
+        # Inputs are downcast to fp16 by check_model_gpu's lowp check; allow
+        # fp16 mm accumulation noise (observed ~2.4e-4 on MPS).
+        self.common(fn, (x, w), atol=1e-3, rtol=1e-3)
 
     def test_constant_pad_nd_fused_with_split_reduction(self):
         # https://github.com/pytorch/pytorch/issues/<你的issue号>
@@ -21956,9 +22036,6 @@ if RUN_GPU:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
-        @skipIfRocmVersionAtLeast(
-            [7, 14]
-        )  # ck/config.h missing on ROCm 7.14+ wheel stack
         @unittest.skipIf(
             not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
             "no scaled_grouped_mm support",
