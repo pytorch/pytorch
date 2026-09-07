@@ -701,7 +701,6 @@ class TestSparse(TestSparseBase):
         sparse_matrix = sparse_matrix.coalesce()
 
     @dtypes(torch.float32)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_no_warn_when_check_invariants_is_explicit(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/178274
