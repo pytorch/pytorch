@@ -697,8 +697,16 @@ void lookup(
 
   // ---- guard evaluation, cache_mutex NOT held (depth stays raised) ----
   for (const PrecompileEntry* entry : precompile_candidates) {
-    if (torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)) {
-      *maybe_cached_code = entry->code.inc_ref().ptr();
+    try {
+      if (torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)) {
+        *maybe_cached_code = entry->code.inc_ref().ptr();
+        return;
+      }
+    } catch (py::error_already_set& e) {
+      // Mirror the cache-entry loop below: a guard that raises must not
+      // escape into the C frame evaluator. Restore the error, report a miss.
+      e.restore();
+      *maybe_cached_code = nullptr;
       return;
     }
   }
@@ -1159,9 +1167,10 @@ void _reset_precompile_entries_for_owner(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id,
     const py::handle& owner) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
+  // PyCode_Check, not py::isinstance: this runs from weakref.finalize while
+  // the interpreter may be finalizing, where importing types to read CodeType
+  // can fail. Matches the sibling bindings added in this commit.
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
@@ -1224,11 +1233,16 @@ void _load_precompile_entry(
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
-  // A parked CLEAR_ALL / PRECOMPILE_ALL applied by the next depth-zero holder
-  // would otherwise take this install with it; drain first, then add. Only
-  // evictions are drained, not pending invalidations: those relink cache
-  // entries, never precompile_entries, so a parked one cannot touch this push,
-  // and the next depth-zero holder applies it.
+  // Drain first, then add, so a parked CLEAR_ALL / PRECOMPILE_ALL is applied
+  // before this install rather than sweeping it away with the rest. This only
+  // protects the install at depth 0: apply_pending_evictions no-ops whenever a
+  // lookup (on this or any other thread) holds cache_python_depth raised, so a
+  // PRECOMPILE_ALL parked before that lookup stays parked and the next
+  // depth-zero holder can still splice away this just-pushed entry. That
+  // narrow, newly introduced cross-thread race is a tracked follow-up (see the
+  // PR FAQ). Only evictions are drained, not pending invalidations: those
+  // relink cache entries, never precompile_entries, so a parked one cannot
+  // touch this push, and the next depth-zero holder applies it.
   extra->apply_pending_evictions(
       reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));
