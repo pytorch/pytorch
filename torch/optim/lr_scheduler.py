@@ -1550,11 +1550,6 @@ class ChainedScheduler(LRScheduler):
             scheduler._initial_step()
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
-    def _initial_step(self) -> None:
-        for scheduler in self._schedulers:
-            scheduler._initial_step()
-        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
-
     def step(self, metrics: SupportsFloat | None = None) -> None:  # type: ignore[override]
         """Perform a step.
 
