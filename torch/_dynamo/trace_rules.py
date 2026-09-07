@@ -535,7 +535,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.remainder",
         "math.sin",
         "math.sinh",
-        "math.sumprod",
         "math.tan",
         "math.tanh",
         "math.trunc",
@@ -2431,6 +2430,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
+
+if sys.version_info >= (3, 12):
+    torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 13):
     torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
