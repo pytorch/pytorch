@@ -18,11 +18,13 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    suppress_warnings,
+    TestCase,
+)
 from torch.utils._pytree import tree_flatten, tree_map_
-
-
-DEVICE_TYPE = "cpu"
 
 
 def apply_skip_decorators(all_opinfos, test_case_name, base_test_name, to_skip):
@@ -65,6 +67,8 @@ apply_skip_decorators(
 
 
 class TestOpsUnbacked(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _has_valid_unbacked_dims(self, t: torch.Tensor) -> bool:
         """Check if tensor has dimensions that can be marked as unbacked."""
         return t.ndim > 0 and any(s >= 2 for s in t.shape)
@@ -124,7 +128,7 @@ class TestOpsUnbacked(TestCase):
             self.fail("Should have skipped; no valid samples found")
 
 
-instantiate_device_type_tests(TestOpsUnbacked, globals(), only_for=(DEVICE_TYPE,))
+instantiate_device_type_tests(TestOpsUnbacked, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
     run_tests()
