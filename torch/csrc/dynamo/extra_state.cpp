@@ -608,32 +608,6 @@ static bool cache_entry_has_no_guards(
   return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
 }
 
-// Search a region's cache list for a matching entry.
-// Returns the matching CacheEntry, or nullptr if no match.
-// Sets *guard_error = true if a guard evaluation exception occurred.
-static bool try_lookup_without_guard_eval_in_list(
-    std::list<CacheEntry>& entries,
-    PyObject* backend,
-    bool is_skip_guard_eval_unsafe,
-    CacheEntry** found) {
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
-
-    if (valid) {
-      if (!PyCode_Check(cache_entry.code.ptr())) {
-        continue;
-      }
-      if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
-        *found = &cache_entry;
-        return true;
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
 void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
@@ -791,29 +765,60 @@ bool try_lookup_without_guard_eval(
     PyObject** maybe_cached_code,
     std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  // Mirrors lookup(): snapshot candidates under cache_mutex, raise
+  // CachePythonDepth, RELEASE the lock, then run backend_match (backend __eq__
+  // is arbitrary Python that can reach convert_frame.compile_lock through
+  // reset()/remove_from_cache) lock-free, re-locking only for the move_to_front
+  // on a hit. Holding cache_mutex across backend __eq__ would order
+  // (cache_mutex, compile_lock) against the compile path's reverse order -- the
+  // ABBA deadlock lookup() documents in full. reaped_* are declared before
+  // python_depth so they destruct AFTER depth returns to 0 and the lock is
+  // released. Depth stays raised across the lock-free window, so the
+  // snapshotted raw pointers cannot be freed (every destroy path parks) and
+  // std::list splice keeps node addresses stable under a concurrent insert or
+  // move_to_front.
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
-  CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(
-      reaped_precompile, reaped_cache, reaped_evictions);
-  // A parked invalidation must not keep serving through this no-guard-eval
-  // fast path (a guardless entry would never be re-checked otherwise).
-  extra_state->drain_pending_invalidations();
-  // backend_match below can run a backend __eq__; same re-entrancy rule as
-  // lookup().
-  CachePythonDepth python_depth(extra_state);
-  // Own region only, matching lookup().
+
+  std::optional<CachePythonDepth> python_depth;
   const PrecompileEntry* first_precompile_entry = nullptr;
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
-      first_precompile_entry = &entry;
-      break;
-    }
-  }
+  struct CacheCandidate {
+    CacheEntry* entry;
+    std::list<CacheEntry>* list;
+  };
+  std::vector<CacheCandidate> cache_candidates;
+
   std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+
+  {
+    CacheLock lock(extra_state->cache_mutex);
+    extra_state->apply_pending_evictions(
+        reaped_precompile, reaped_cache, reaped_evictions);
+    // A parked invalidation must not keep serving through this no-guard-eval
+    // fast path (a guardless entry would never be re-checked otherwise).
+    extra_state->drain_pending_invalidations();
+    python_depth.emplace(extra_state);
+    // Own region only, matching lookup().
+    for (const auto& entry : extra_state->precompile_entries) {
+      if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+        first_precompile_entry = &entry;
+        break;
+      }
+    }
+    for (int i = 0; i < num_ids; i++) {
+      auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+      if (it != extra_state->cache_entry_map.end()) {
+        std::list<CacheEntry>& entries = it->second;
+        for (CacheEntry& e : entries) {
+          cache_candidates.push_back(CacheCandidate{&e, &entries});
+        }
+      }
+    }
+  }
+
+  // ---- cache_mutex NOT held (depth stays raised) ----
   if (first_precompile_entry != nullptr) {
     // Only the first precompile entry can be safely fast-pathed: a later
     // guardless entry must not preempt an earlier guarded entry whose guards
@@ -826,25 +831,36 @@ bool try_lookup_without_guard_eval(
     return false;
   }
 
-  std::list<CacheEntry>* found_list = nullptr;
   CacheEntry* found = nullptr;
-
-  for (int i = 0; i < num_ids && found == nullptr; i++) {
-    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
-    if (it != extra_state->cache_entry_map.end()) {
-      // Same rule as lookup(): backend __eq__ can rehash the map under `it`.
-      std::list<CacheEntry>& entries = it->second;
-      if (!try_lookup_without_guard_eval_in_list(
-              entries, backend, is_skip_guard_eval_unsafe, &found)) {
-        return false;
-      }
-      if (found) {
-        found_list = &entries;
-      }
+  std::list<CacheEntry>* found_list = nullptr;
+  // Candidates span the own-region bucket then the default (-1) fallback, in
+  // order, so the first backend match here is the one the per-bucket search
+  // would have resolved first.
+  for (const CacheCandidate& candidate : cache_candidates) {
+    CacheEntry& cache_entry = *candidate.entry;
+    bool valid = Py_IsFalse(backend) ||
+        backend_match(cache_entry.backend.ptr(), backend);
+    if (!valid) {
+      continue;
     }
+    if (!PyCode_Check(cache_entry.code.ptr())) {
+      continue;
+    }
+    // The first backend match decides: a guardless entry is the fast-path hit;
+    // a guarded one blocks it (its guards may still pass, so fall back to the
+    // full lookup rather than skip past it).
+    if (cache_entry_has_no_guards(cache_entry, is_skip_guard_eval_unsafe)) {
+      found = candidate.entry;
+      found_list = candidate.list;
+      break;
+    }
+    return false;
   }
 
   if (found) {
+    // Re-lock for the only structural mutation on the hit path. found is still
+    // in found_list: depth kept every eviction/invalidation parked.
+    CacheLock lock(extra_state->cache_mutex);
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }

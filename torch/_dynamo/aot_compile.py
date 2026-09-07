@@ -134,6 +134,7 @@ class AOTCompilePickler(FunctionPicklerBase):
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
                 annotations=self._pickleable_annotations(obj),
+                doc=obj.__doc__,
                 type_params=self._pickleable_type_params(obj),
             )
 
