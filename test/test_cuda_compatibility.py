@@ -5,11 +5,17 @@ from unittest.mock import patch
 
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 @patch("torch.version.cuda", "12.6")
 class TestCodeCompatibleWithDevice(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compatible_cases(self):
         self.assertTrue(
             torch.cuda._code_compatible_with_device(device_cc=80, code_cc=80)
@@ -75,6 +81,8 @@ class TestCodeCompatibleWithDevice(TestCase):
 @patch("torch.cuda.device_count", return_value=1)
 @patch("torch.version.cuda", "12.6")
 class TestCheckCapability(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rocm_skips_check(self, *args):
         with (
             patch("torch.version.cuda", None),

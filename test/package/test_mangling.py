@@ -9,7 +9,7 @@ from torch.package._mangling import (
     is_mangled,
     PackageMangler,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -20,6 +20,8 @@ except ImportError:
 
 
 class TestMangling(PackageTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_unique_manglers(self):
         """
         Each mangler instance should generate a unique mangled name for a given input.
