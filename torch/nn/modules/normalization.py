@@ -20,8 +20,9 @@ class LocalResponseNorm(Module):
     Applies normalization across channels.
 
     .. math::
-        b_{c} = a_{c}\left(k + \frac{\alpha}{n}
-        \sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}a_{c'}^2\right)^{-\beta}
+        y_c = x_c \cdot \left(k + \frac{\alpha}{n}
+          \sum_{c'=\max(0, c-\lfloor n/2 \rfloor)}^{\min(N,c+\lceil n/2 \rceil)-1}
+          x_{c'}^2 \right)^{-\beta}
 
     Args:
         size: amount of neighbouring channels used for normalization
@@ -109,16 +110,27 @@ class LayerNorm(Module):
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-    The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,\dots,h,w,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(n,c,\dots \phantom{,h,w,\dots\,})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(n,c,\dots \phantom{,h,w,\dots\,})  \\
+          \gamma          &=& \gamma          &(\phantom{n,c,\dots,} h,w,\dots)  \\
+          \beta           &=& \beta           &(\underbrace{\phantom{n,c,\dots,}}_{D-d} \underbrace{h,w,\dots}_{d} \,)
+        \end{alignat*}
+
+    The mean and standard-deviation are calculated over the last `d` dimensions, where `d`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the mean and standard-deviation are computed over
     the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -148,11 +160,11 @@ class LayerNorm(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            :attr:`normalized_shape` when :attr:`elementwise_affine` is set to ``True``.
             The values are initialized to 1.
-        bias:   the learnable bias of the module of shape
-                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
-                The values are initialized to 0.
+        bias: the learnable bias of the module of shape
+            :attr:`normalized_shape` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 0.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -243,16 +255,29 @@ class GroupNorm(Module):
     the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-    The input channels are separated into :attr:`num_groups` groups, each containing
-    ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=&    x  &(n, \phantom{g,}\mathclap{c\;\;}\phantom{s} ,i_2,i_3,\dots) =  \\
+                          & &  = x' &(n, \overbracket{g,s}^{\mathclap{c = g \cdot C/G + s}}\!\! ,i_2,i_3,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}_{s,i_2,i_3,\dots}[x']   &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}_{s,i_2,i_3,\dots}[x'] &(n,g\phantom{,s,i_2,i_3,\dots\,})  \\
+          \gamma          &=& \gamma(c)=\quad  \gamma' &(\phantom{n,}g,s\phantom{,i_2,i_3,\dots\,})  \\
+          \beta           &=& \beta(c)=\quad    \beta' &(\phantom{n,}g,s\phantom{,i_2,i_3,\dots\,})
+        \end{alignat*}
+
+    The input `x` may be 2D or higher-dimensional. The input channels are separated
+    into `G =` :attr:`num_groups` groups, each containing ``num_channels / num_groups``
+    `= C/G` channels. `C =` :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
     separately over each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -278,7 +303,7 @@ class GroupNorm(Module):
         >>> m = nn.GroupNorm(3, 6)
         >>> # Separate 6 channels into 6 groups (equivalent with InstanceNorm)
         >>> m = nn.GroupNorm(6, 6)
-        >>> # Put all 6 channels into a single group (equivalent with LayerNorm)
+        >>> # Put all 6 channels into a single group
         >>> m = nn.GroupNorm(1, 6)
         >>> # Activating the module
         >>> output = m(input)
@@ -347,13 +372,25 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y_i = \frac{x_i}{\mathrm{RMS}(x)} * \gamma_i, \quad
-        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
+        y = \frac{x}{\mathrm{RMS}(x)} \cdot \gamma
 
-    The RMS is taken over the last ``D`` dimensions, where ``D``
+    where
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(i_0,\dots,i_{D-d-1}, i_{D-d},\dots,i_{D-1})  \\
+          \mathrm{RMS}[x] &=& \mathrm{RMS}[x] &(i_0,\dots,i_{D-d-1} \phantom{,i_{D-d},\dots,i_{D-1}}) =
+                                \sqrt{\epsilon + \frac{1}{n} \sum_{i_{D-d},\dots,i_{D-1}} x_{i_0,\dots,i_{D-1}}^2}  \\
+          \gamma          &=& \gamma          &(\phantom{i_0,\dots,i_{D-d-1},} i_{D-d},\dots,i_{D-1})
+        \end{alignat*}
+
+    and `n` is the number of terms in the sum.
+
+    The RMS is taken over the last `d` dimensions, where `d`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
-    the last 2 dimensions of the input.
+    the last 2 dimensions of the input. :math:`\gamma` is a learnable scaling
+    parameter of :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
 
     Args:
         normalized_shape (int or list or torch.Size): input shape from an expected input
@@ -370,7 +407,8 @@ class RMSNorm(Module):
             fp16/bf16 and fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64
             inputs use ``torch.finfo(torch.float64).eps``. Default: ``None``
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+            has learnable per-element scaling parameters initialized to ones.
+            Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`
