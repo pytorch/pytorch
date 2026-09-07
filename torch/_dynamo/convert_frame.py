@@ -2042,11 +2042,10 @@ def _compile(
                 strict_error=record and explicit_capture,
             )
 
-        # bypass_package clears output.package when this entry's guards could
-        # not be serialized; the local still holds what was passed in.
-        # add_guarded_code/add_inlined_source no-op on a bypassed entry;
-        # update_device_type records a package-global property (the graph's
-        # accelerator), independent of any single entry, so it runs regardless.
+        # bypass_package sets output.package to None when this entry's guards
+        # could not be serialized (the local `package` still holds the object).
+        # Skip the whole block in that case: a bypassed entry contributes none
+        # of its guards, inlined source, or device type to the package.
         if record and output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
