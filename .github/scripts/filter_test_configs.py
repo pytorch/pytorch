@@ -73,6 +73,11 @@ def parse_args() -> Any:
         help="a comma-separated list of test configurations from the test matrix to keep",
     )
     parser.add_argument(
+        "--ignore-test-config-labels",
+        action="store_true",
+        help="ignore test-config/* PR labels when filtering the test matrix",
+    )
+    parser.add_argument(
         "--workflow", type=str, help="the name of the current workflow, i.e. pull"
     )
     parser.add_argument(
@@ -144,7 +149,11 @@ def filter_labels(labels: set[str], label_regex: Any) -> set[str]:
     return {l for l in labels if re.match(label_regex, l)}
 
 
-def filter(test_matrix: dict[str, list[Any]], labels: set[str]) -> dict[str, list[Any]]:
+def filter(
+    test_matrix: dict[str, list[Any]],
+    labels: set[str],
+    ignore_test_config_labels: bool = False,
+) -> dict[str, list[Any]]:
     """
     Select the list of test config to run from the test matrix. The logic works
     as follows:
@@ -156,6 +165,10 @@ def filter(test_matrix: dict[str, list[Any]], labels: set[str]) -> dict[str, lis
 
     If the PR has none of the test-config label, all tests are run as usual.
     """
+    if ignore_test_config_labels:
+        logging.warning("Ignoring test-config/* PR labels by explicit request")
+        return test_matrix
+
     filtered_test_matrix: dict[str, list[Any]] = {"include": []}
 
     for entry in test_matrix.get("include", []):
@@ -610,7 +623,9 @@ def main() -> None:
         # If a PR number is set, query all the labels from that PR
         labels = get_labels(int(pr_number))
         # Then filter the test matrix and keep only the selected ones
-        filtered_test_matrix = filter(test_matrix, labels)
+        filtered_test_matrix = filter(
+            test_matrix, labels, args.ignore_test_config_labels
+        )
 
     elif tag:
         m = tag_regex.match(tag)
@@ -621,7 +636,9 @@ def main() -> None:
             # The PR number can also come from the tag in ciflow tag event
             labels = get_labels(int(pr_number))
             # Filter the test matrix and keep only the selected ones
-            filtered_test_matrix = filter(test_matrix, labels)
+            filtered_test_matrix = filter(
+                test_matrix, labels, args.ignore_test_config_labels
+            )
 
         else:
             # There is a tag but it isn't ciflow, so there is nothing left to do

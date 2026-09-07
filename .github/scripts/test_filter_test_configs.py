@@ -295,6 +295,13 @@ class TestConfigFilter(TestCase):
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
+    def test_filter_ignores_test_config_labels(self) -> None:
+        test_matrix = {"include": [{"config": "default"}]}
+        self.assertEqual(
+            filter(test_matrix, {f"{PREFIX}cfg"}, ignore_test_config_labels=True),
+            test_matrix,
+        )
+
     def test_filter_selected_test_configs(self) -> None:
         testcases = [
             {
