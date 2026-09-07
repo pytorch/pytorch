@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
-# [Adding a new supported class within the keys of SetVariable]
+# [Adding a new supported class within the keys of BaseSetVariable]
 # see steps outlined for ConstDictVariable
 
 
@@ -85,15 +85,16 @@ class BaseSetVariable(VariableTracker):
     subclass of set, and neither is dict_keys (see #192874). This base holds
     every operation that is valid on an immutable set-like collection.
     SetVariable (mutable Python ``set``) adds the mutating operations on top.
-    FrozensetVariable and DictKeySetVariable inherit only this base, so a
-    traced frozenset or dict_keys is not matched by isinstance checks against
-    SetVariable.
+    FrozensetVariable, DictKeySetVariable, and OrderedSetVariable inherit only
+    this base, so a traced frozenset, dict_keys, or OrderedSet is not matched
+    by isinstance checks against SetVariable.
 
     Only ``isdisjoint`` is registered in ``tp_methods`` here: that is the whole
     named surface of ``collections.abc.Set``, and of ``dict_keys``. The other
     read-only methods (``union``, ``copy``, ...) are implemented here but
-    registered by SetVariable and FrozensetVariable, the same way CPython's
-    ``set_methods`` and ``frozenset_methods`` tables share one implementation.
+    registered by SetVariable, FrozensetVariable, and OrderedSetVariable, the
+    same way CPython's ``set_methods`` and ``frozenset_methods`` tables share
+    one implementation.
     """
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
@@ -832,7 +833,9 @@ class OrderedSetClassVariable(VariableTracker):
             return variables.OrderedSetVariable([], mutation_type=ValueMutationNew())
 
         resolved_fn = getattr(set, name)
-        if resolved_fn in set_methods and isinstance(args[0], variables.SetVariable):
+        if resolved_fn in set_methods and isinstance(
+            args[0], (variables.SetVariable, variables.OrderedSetVariable)
+        ):
             return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
@@ -859,13 +862,19 @@ class OrderedSetClassVariable(VariableTracker):
         return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
 
 
-class OrderedSetVariable(SetVariable):
+class OrderedSetVariable(BaseSetVariable):
     _cpython_type = OrderedSet
 
     def method_flags_type(self) -> type:
         # OrderedSet is pure-Python (no C ml_flags); its named methods mirror
         # set's arities, so derive MethodFlags from set to enforce them.
         return set
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def _get_internal_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # OrderedSet is backed by a dict (self._dict). Expose it so inlined
@@ -905,13 +914,44 @@ class OrderedSetVariable(SetVariable):
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
         codegen.extend_output(create_call_function(1, False))
 
+    def pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            key = next(iter(self.items))
+        except StopIteration:
+            raise_observed_exception(KeyError, tx, args=["pop from an empty set"])
+        self.should_reconstruct_all = True
+        tx.output.side_effects.mutation(self)
+        self.items.pop(key)
+        return key.vt
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        temp_ordered_set_vt = SourcelessBuilder.create(tx, OrderedSet).call_function(
+            tx, args, kwargs
+        )
+        tx.output.side_effects.mutation(self)
+        self.items.clear()
+        self.items.update(temp_ordered_set_vt.items)  # type: ignore[attr-defined]
+        return ConstantVariable.create(None)
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # OrderedSet does not inherit from Python set, so SetVariable.nb_or_impl
+        # OrderedSet does not inherit from Python set, so BaseSetVariable.nb_or_impl
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "union", [other], {})
 
@@ -921,7 +961,7 @@ class OrderedSetVariable(SetVariable):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # OrderedSet does not inherit from Python set, so SetVariable.nb_and_impl
+        # OrderedSet does not inherit from Python set, so BaseSetVariable.nb_and_impl
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "intersection", [other], {})
 
@@ -931,9 +971,27 @@ class OrderedSetVariable(SetVariable):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        # OrderedSet does not inherit from Python set, so SetVariable.nb_xor_impl
+        # OrderedSet does not inherit from Python set, so BaseSetVariable.nb_xor_impl
         # won't work due to the PyAnySet_Check
         return super().call_method(tx, "symmetric_difference", [other], {})
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        self.call_method(tx, "update", [other], {})
+        return self
+
+    def nb_inplace_and_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        self.call_method(tx, "intersection_update", [other], {})
+        return self
+
+    def nb_inplace_xor_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        self.call_method(tx, "symmetric_difference_update", [other], {})
+        return self
 
     def nb_subtract_impl(
         self,
@@ -950,6 +1008,26 @@ class OrderedSetVariable(SetVariable):
         tx.output.side_effects.mutation(self)
         self.call_method(tx, "difference_update", [other], {})
         return self
+
+    tp_methods = {
+        "isdisjoint": Method(BaseSetVariable.isdisjoint),
+        "intersection": Method(BaseSetVariable.intersection),
+        "union": Method(BaseSetVariable.union),
+        "difference": Method(BaseSetVariable.difference),
+        "symmetric_difference": Method(BaseSetVariable.symmetric_difference),
+        "issubset": Method(BaseSetVariable.issubset),
+        "issuperset": Method(BaseSetVariable.issuperset),
+        "copy": Method(BaseSetVariable.copy),
+        "add": Method(SetVariable.add),
+        "pop": Method(pop),
+        "intersection_update": Method(SetVariable.intersection_update),
+        "difference_update": Method(SetVariable.difference_update),
+        "symmetric_difference_update": Method(SetVariable.symmetric_difference_update),
+        "update": Method(SetVariable.update),
+        "remove": Method(SetVariable.remove),
+        "discard": Method(SetVariable.discard),
+        "clear": Method(SetVariable.clear),
+    }
 
 
 class FrozensetVariable(BaseSetVariable):
