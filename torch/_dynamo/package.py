@@ -179,7 +179,7 @@ class FunctionPicklerBase(pickle.Pickler):
     def _build_function(
         cls,
         f_globals: dict[str, Any],
-        module: str,
+        module: str | None,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -188,15 +188,17 @@ class FunctionPicklerBase(pickle.Pickler):
         fn = types.FunctionType(code, f_globals, name, None, closure)
         # FunctionType derives __module__ from f_globals["__name__"], so any
         # scope that is not the real module dict leaves it None and a guard
-        # rooted at fn.__module__ rebuilds against that.
-        fn.__module__ = module
+        # rooted at fn.__module__ rebuilds against that. Leave that None in
+        # place rather than assigning it back (which the stub rejects).
+        if module is not None:
+            fn.__module__ = module
         fn.__qualname__ = qualname
         return fn
 
     @classmethod
     def _unpickle_fn_from_module(
         cls,
-        module: str,
+        module: str | None,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -220,7 +222,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_snapshot(
         cls,
-        module: str,
+        module: str | None,
         code: types.CodeType,
         qualname: str,
         name: str,
