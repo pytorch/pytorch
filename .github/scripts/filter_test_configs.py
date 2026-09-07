@@ -166,7 +166,7 @@ def filter(
     If the PR has none of the test-config label, all tests are run as usual.
     """
     if ignore_test_config_labels:
-        info("Ignoring test-config labels")
+        logging.warning("Ignoring test-config/* PR labels by explicit request")
         return test_matrix
 
     filtered_test_matrix: dict[str, list[Any]] = {"include": []}
