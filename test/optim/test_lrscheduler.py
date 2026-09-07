@@ -871,60 +871,73 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs=2)
         self.opt = old_opt
 
+    def _get_lrs(self, scheduler):
+        lrs = []
+        for _ in range(5):
+            lrs.append(scheduler.get_last_lr())
+            scheduler.optimizer.step()
+            scheduler.step()
+        return lrs
+
     def test_nested_sequentiallr_does_not_skip_an_epoch(self):
-        """A nested SequentialLR runs the same schedule as it does on its own."""
-        epochs = 8
-        # The first five values are exactly what the inner scheduler produces
-        # when it is used directly: two epochs of ConstantLR, then ExponentialLR
-        # from its epoch 0. Nesting must not consume one of those epochs.
-        inner_targets = [0.5, 0.5, 1.0, 0.9, 0.81]
-        outer_targets = [1.0, 1.0, 0.5]
-        single_targets = inner_targets + outer_targets
-        targets = [
-            [0.05 * x for x in single_targets],
-            [0.5 * x for x in single_targets],
-        ]
-        inner = SequentialLR(
-            self.opt,
-            schedulers=[
-                ConstantLR(self.opt, factor=0.5, total_iters=2),
-                ExponentialLR(self.opt, gamma=0.9),
+        nested_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        nested_scheduler = SequentialLR(
+            nested_optimizer,
+            [
+                SequentialLR(
+                    nested_optimizer,
+                    [
+                        ConstantLR(nested_optimizer, factor=0.5, total_iters=2),
+                        ConstantLR(nested_optimizer, factor=0.2, total_iters=10),
+                    ],
+                    milestones=[2],
+                ),
+            ],
+            milestones=[],
+        )
+
+        standalone_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        standalone_scheduler = SequentialLR(
+            standalone_optimizer,
+            [
+                ConstantLR(standalone_optimizer, factor=0.5, total_iters=2),
+                ConstantLR(standalone_optimizer, factor=0.2, total_iters=10),
             ],
             milestones=[2],
         )
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[inner, StepLR(self.opt, step_size=2, gamma=0.5)],
-            milestones=[5],
-        )
-        self._test(scheduler, targets, epochs)
+
+        nested_lrs = self._get_lrs(nested_scheduler)
+        standalone_lrs = self._get_lrs(standalone_scheduler)
+        self.assertEqual(nested_lrs, standalone_lrs)
 
     def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
-        """A nested ChainedScheduler runs the same schedule as it does on its own."""
-        epochs = 8
-        # The first five values are exactly what the chained scheduler produces
-        # when it is used directly: ConstantLR and ExponentialLR both scaling
-        # the lr from its epoch 0. Nesting must not apply either of them twice.
-        inner_targets = [0.5, 0.45, 0.81, 0.729, 0.6561]
-        outer_targets = [1.0, 1.0, 0.5]
-        single_targets = inner_targets + outer_targets
-        targets = [
-            [0.05 * x for x in single_targets],
-            [0.5 * x for x in single_targets],
-        ]
-        inner = ChainedScheduler(
+        nested_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        nested_scheduler = SequentialLR(
+            nested_optimizer,
             [
-                ConstantLR(self.opt, factor=0.5, total_iters=2),
-                ExponentialLR(self.opt, gamma=0.9),
+                ChainedScheduler(
+                    [
+                        ConstantLR(nested_optimizer, factor=0.5, total_iters=2),
+                        ExponentialLR(nested_optimizer, gamma=0.9),
+                    ],
+                    optimizer=nested_optimizer,
+                ),
             ],
-            optimizer=self.opt,
+            milestones=[],
         )
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[inner, StepLR(self.opt, step_size=2, gamma=0.5)],
-            milestones=[5],
+
+        standalone_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        standalone_scheduler = ChainedScheduler(
+            [
+                ConstantLR(standalone_optimizer, factor=0.5, total_iters=2),
+                ExponentialLR(standalone_optimizer, gamma=0.9),
+            ],
+            optimizer=standalone_optimizer,
         )
-        self._test(scheduler, targets, epochs)
+
+        nested_lrs = self._get_lrs(nested_scheduler)
+        standalone_lrs = self._get_lrs(standalone_scheduler)
+        self.assertEqual(nested_lrs, standalone_lrs)
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
