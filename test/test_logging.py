@@ -97,6 +97,160 @@ class LoggingTest(TestCase):
             self.assertIn("issue173759 component log", result.stderr)
             self.assertIn("issue173759 artifact log", result.stderr)
 
+    def test_log_init_callback_invoked_on_set_logs_and_init_logs(self):
+        old_callbacks = list(log_internal._log_init_callbacks)
+        try:
+            log_internal._log_init_callbacks.clear()
+            calls = []
+            log_internal.register_log_init_callback(lambda: calls.append(1))
+
+            _init_logs()
+            self.assertEqual(len(calls), 1)
+
+            log_internal.set_logs(dynamo=logging.DEBUG)
+            self.assertEqual(len(calls), 2)
+        finally:
+            log_internal.set_logs()
+            log_internal._log_init_callbacks[:] = old_callbacks
+            _init_logs()
+
+    def test_log_init_callback_exception_does_not_block_others(self):
+        old_callbacks = list(log_internal._log_init_callbacks)
+        try:
+            log_internal._log_init_callbacks.clear()
+            calls = []
+
+            def bad():
+                raise RuntimeError("boom")
+
+            log_internal.register_log_init_callback(bad)
+            log_internal.register_log_init_callback(lambda: calls.append(1))
+
+            with self.assertLogs(
+                logging.getLogger("torch._logging._internal"), level="WARNING"
+            ):
+                _init_logs()
+            self.assertEqual(len(calls), 1)
+        finally:
+            log_internal._log_init_callbacks[:] = old_callbacks
+            _init_logs()
+
+    def test_register_log_env_var_does_not_modify_log_env_var(self):
+        old_extra = list(log_internal._extra_log_env_vars)
+        try:
+            log_internal._extra_log_env_vars.clear()
+            self.assertEqual(log_internal.LOG_ENV_VAR, "TORCH_LOGS")
+
+            log_internal.register_log_env_var("TORCH_TEST_EXTRA_LOGS")
+            self.assertEqual(log_internal.LOG_ENV_VAR, "TORCH_LOGS")
+            self.assertIn("TORCH_TEST_EXTRA_LOGS", log_internal._extra_log_env_vars)
+        finally:
+            log_internal._extra_log_env_vars[:] = old_extra
+
+    def test_register_log_env_var_triggers_reinit_when_already_set(self):
+        old_extra = list(log_internal._extra_log_env_vars)
+        old_callbacks = list(log_internal._log_init_callbacks)
+        old_env = os.environ.get("TORCH_TEST_EXTRA_LOGS")
+        try:
+            log_internal._extra_log_env_vars.clear()
+            log_internal._log_init_callbacks.clear()
+            os.environ["TORCH_TEST_EXTRA_LOGS"] = "+dynamo"
+
+            calls = []
+            log_internal.register_log_init_callback(lambda: calls.append(1))
+            self.assertEqual(len(calls), 0)
+
+            log_internal.register_log_env_var("TORCH_TEST_EXTRA_LOGS")
+            self.assertEqual(len(calls), 1)
+        finally:
+            if old_env is None:
+                os.environ.pop("TORCH_TEST_EXTRA_LOGS", None)
+            else:
+                os.environ["TORCH_TEST_EXTRA_LOGS"] = old_env
+            log_internal._extra_log_env_vars[:] = old_extra
+            log_internal._log_init_callbacks[:] = old_callbacks
+            _init_logs()
+
+    def test_set_logs_ignores_call_when_extra_env_var_is_set(self):
+        old_extra = list(log_internal._extra_log_env_vars)
+        old_env = os.environ.get("TORCH_TEST_EXTRA_LOGS")
+        try:
+            log_internal._extra_log_env_vars.clear()
+            log_internal._extra_log_env_vars.append("TORCH_TEST_EXTRA_LOGS")
+            os.environ["TORCH_TEST_EXTRA_LOGS"] = "+dynamo"
+
+            with self.assertLogs(
+                logging.getLogger("torch._logging._internal"), level="WARNING"
+            ) as cm:
+                log_internal.set_logs(aot=logging.DEBUG)
+            self.assertTrue(any("TORCH_TEST_EXTRA_LOGS" in msg for msg in cm.output))
+            # set_logs() should have been a true no-op: "aot" must not appear
+            # in log_state, since the call short-circuited before _set_logs().
+            self.assertNotIn(
+                "torch._functorch.aot_autograd",
+                log_internal.log_state.log_qname_to_level,
+            )
+        finally:
+            if old_env is None:
+                os.environ.pop("TORCH_TEST_EXTRA_LOGS", None)
+            else:
+                os.environ["TORCH_TEST_EXTRA_LOGS"] = old_env
+            log_internal._extra_log_env_vars[:] = old_extra
+            _init_logs()
+
+    def test_update_log_state_merges_torch_logs_and_extra_env_var(self):
+        old_extra = list(log_internal._extra_log_env_vars)
+        old_torch_logs = os.environ.get("TORCH_LOGS")
+        old_extra_env = os.environ.get("TORCH_TEST_EXTRA_LOGS")
+        try:
+            log_internal._extra_log_env_vars.clear()
+            log_internal._extra_log_env_vars.append("TORCH_TEST_EXTRA_LOGS")
+            os.environ["TORCH_LOGS"] = "dynamo"
+            os.environ["TORCH_TEST_EXTRA_LOGS"] = "+aot"
+
+            _init_logs()
+            qnames = log_internal.log_state.log_qname_to_level
+            self.assertTrue(any("dynamo" in qname for qname in qnames))
+            self.assertTrue(
+                any("aot" in qname or "functorch" in qname for qname in qnames)
+            )
+        finally:
+            if old_torch_logs is None:
+                os.environ.pop("TORCH_LOGS", None)
+            else:
+                os.environ["TORCH_LOGS"] = old_torch_logs
+            if old_extra_env is None:
+                os.environ.pop("TORCH_TEST_EXTRA_LOGS", None)
+            else:
+                os.environ["TORCH_TEST_EXTRA_LOGS"] = old_extra_env
+            log_internal._extra_log_env_vars[:] = old_extra
+            _init_logs()
+
+    def test_extra_env_var_overrides_torch_logs_on_conflicting_qname(self):
+        old_extra = list(log_internal._extra_log_env_vars)
+        old_torch_logs = os.environ.get("TORCH_LOGS")
+        old_extra_env = os.environ.get("TORCH_TEST_EXTRA_LOGS")
+        try:
+            log_internal._extra_log_env_vars.clear()
+            log_internal._extra_log_env_vars.append("TORCH_TEST_EXTRA_LOGS")
+            os.environ["TORCH_LOGS"] = "dynamo"  # bare -> INFO
+            os.environ["TORCH_TEST_EXTRA_LOGS"] = "+dynamo"  # '+' -> DEBUG
+
+            _init_logs()
+            levels = log_internal.log_state.log_qname_to_level
+            self.assertEqual(levels["torch._dynamo"], logging.DEBUG)
+        finally:
+            if old_torch_logs is None:
+                os.environ.pop("TORCH_LOGS", None)
+            else:
+                os.environ["TORCH_LOGS"] = old_torch_logs
+            if old_extra_env is None:
+                os.environ.pop("TORCH_TEST_EXTRA_LOGS", None)
+            else:
+                os.environ["TORCH_TEST_EXTRA_LOGS"] = old_extra_env
+            log_internal._extra_log_env_vars[:] = old_extra
+            _init_logs()
+
     def testApiUsage(self):
         """
         This test verifies that api usage logging is not triggered via static
