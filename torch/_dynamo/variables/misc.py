@@ -2543,7 +2543,7 @@ class DebuggingVariable(VariableTracker):
 
     @staticmethod
     def is_reorderable_logging_function(
-        obj: Any,
+        obj: object,
     ) -> TypeGuard[types.FunctionType | types.BuiltinFunctionType]:
         return (
             callable(obj)
