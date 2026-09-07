@@ -220,7 +220,9 @@ class OptionalArrayRef final {
     return wrapped_opt_array_ref.emplace(il, std::forward<Args>(args)...);
   }
 
-  [[nodiscard]] friend bool operator==(OptionalArrayRef a1, ArrayRef<T> other) {
+  [[nodiscard]] friend bool operator==(
+      const OptionalArrayRef& a1,
+      ArrayRef<T> other) {
     if (!a1.has_value()) {
       return false;
     }
