@@ -652,21 +652,32 @@ def wait_tensor_backward(ctx, grad_output: torch.Tensor):
     return grad_output
 
 
-def wait_tensor_setup_context(ctx, inputs, output):
-    """
-    Setup context for wait_tensor backward.
-    Args:
-        ctx: Context object to save state for backward
-        inputs: Tuple of (tensor,)
-        output: Output from forward pass
-    """
-    return
-
-
 torch.library.register_autograd(
     "_c10d_functional::wait_tensor",
     wait_tensor_backward,
-    setup_context=wait_tensor_setup_context,
+)
+
+
+def wait_tensors_backward(ctx, grad_outputs: list[torch.Tensor]):
+    """
+    Backward for wait_tensors: identity (no-op), matching wait_tensor.
+    Wait is just a synchronization primitive, so each gradient flows through
+    unchanged.
+
+    Args:
+        ctx: Context object
+        grad_outputs: List of gradients from downstream operations
+
+    Returns:
+        Gradients unchanged (identity), wrapped in a 1-tuple for the single
+        Tensor[] input
+    """
+    return (grad_outputs,)
+
+
+torch.library.register_autograd(
+    "_c10d_functional::wait_tensors",
+    wait_tensors_backward,
 )
 
 

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import unittest
 from functools import partial, wraps
 
 import torch
@@ -1028,6 +1027,38 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
+    def test_all_reduce_coalesced_compile(self):
+        """coalesced sum/avg backward flows grad through wait_tensors under compile.
+
+        Companion to the min/max coalesced test: min/max exposed the missing
+        wait_tensors autograd via all-zero grads, but wait_tensors sits on the
+        forward path of every coalesced reduce, so the non-extremum ops must
+        backprop through it too.
+        """
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+
+        for reduce_op in ["sum", "avg"]:
+            with self.subTest(reduce_op=reduce_op):
+
+                @torch.compile(fullgraph=True)
+                def compiled_fn(a, b):
+                    outs = fcols.all_reduce_coalesced(
+                        [a, b], reduce_op, group=group_name
+                    )
+                    return outs[0].sum() + outs[1].sum()
+
+                a = torch.randn(*shape, device=self.device, requires_grad=True)
+                b = torch.randn(*shape, device=self.device, requires_grad=True)
+
+                compiled_fn(a, b).backward()
+
+                fill = float(self.world_size) if reduce_op == "sum" else 1.0
+                expected_grad = torch.full(shape, fill_value=fill, device=self.device)
+                self.assertEqual(a.grad, expected_grad)
+                self.assertEqual(b.grad, expected_grad)
+
+    @with_comms
     def test_all_reduce_min_max_ties_compile(self):
         """min/max backward splits grad evenly across tied holders under compile.
 
@@ -1062,22 +1093,9 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertIsNotNone(input_tensor.grad)
                 self.assertEqual(input_tensor.grad, expected_grad)
 
-    # Known-broken: under torch.compile the coalesced min/max backward returns
-    # all-zero grads (eager is correct). The AOT joint graph is right, but
-    # Inductor's lowering of the multi-output wait_tensors op mishandles waiting
-    # the forward's coalesced output again in the backward: unlike the
-    # single-tensor wait_tensor (which gets an alias inserted), the re-wait
-    # yields wrong data, so the `input == output` extremum mask is all-False.
-    # Fixing that lives in torch/_inductor comm lowering, out of scope here.
-    @unittest.expectedFailure
     @with_comms
     def test_all_reduce_coalesced_min_max_ties_compile(self):
-        """coalesced min/max backward splits grad evenly across ties under compile.
-
-        Mirrors the single-tensor compile test for all_reduce_coalesced, whose
-        schema and Inductor lowering this PR touches, so the coalesced min/max
-        backward is traced and lowered.
-        """
+        """coalesced min/max backward splits grad evenly across ties under compile."""
         group_name = dist.group.WORLD.group_name
         ws = self.world_size
         rank = self.rank
