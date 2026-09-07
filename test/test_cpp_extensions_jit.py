@@ -121,6 +121,8 @@ class TestCppExtensionJIT(_CppExtensionJITMixin):
     Don't confuse this with the PyTorch JIT (aka TorchScript).
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
             name="jit_extension",
@@ -1051,6 +1053,16 @@ except RuntimeError as e:
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
 
+
+@unittest.skipIf(not TEST_XPU, "XPU not found")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionJITXPU(_CppExtensionJITMixin):
+    """Tests just-in-time cpp extensions.
+    Don't confuse this with the PyTorch JIT (aka TorchScript).
+    """
+
+    hw_classification = HardwareClassification.XPU
+
     def _test_jit_xpu_extension(self, extra_sycl_cflags):
         # randomizing extension name and names of extension methods
         # for the case when we test building few extensions in a row
@@ -1093,12 +1105,10 @@ except RuntimeError as e:
             else:
                 shutil.rmtree(temp_dir)
 
-    @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
         # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
         self._test_jit_xpu_extension(extra_sycl_cflags=[])
 
-    @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_archlists(self):
         # NOTE: in this test we explicitly test few different options
         # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
@@ -1136,7 +1146,6 @@ except RuntimeError as e:
             else:
                 os.environ["TORCH_XPU_ARCH_LIST"] = old_envvar
 
-    @unittest.skipIf(not TEST_XPU, "XPU not found")
     def test_inline_jit_compile_extension_xpu(self):
         sycl_source = """
         #include <c10/xpu/XPUStream.h>
@@ -1210,7 +1219,16 @@ except RuntimeError as e:
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
-    @unittest.skipIf(not TEST_MPS, "MPS not found")
+
+@unittest.skipIf(not TEST_MPS, "MPS not found")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionJITMPS(_CppExtensionJITMixin):
+    """Tests just-in-time cpp extensions.
+    Don't confuse this with the PyTorch JIT (aka TorchScript).
+    """
+
+    hw_classification = HardwareClassification.MPS
+
     def test_mps_extension(self):
         module = torch.utils.cpp_extension.load(
             name="torch_test_mps_extension",
