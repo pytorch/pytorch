@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import weakref
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 import torch
+import torch._dynamo.compiled_autograd as compiled_autograd
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed import _spmd_no_typecheck
@@ -16,6 +18,7 @@ from torch.distributed.fsdp._common_utils import (
     collect_grad_tensors,
     replace_grad_tensors,
 )
+from torch.distributed.tensor import DTensor
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
@@ -181,6 +184,8 @@ class FSDPParamGroup:
             )
             for param, module_info in zip(params, param_module_infos)
         ]
+        for fsdp_param in self.fsdp_params:
+            fsdp_param._flat_param_group = self
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
@@ -201,6 +206,9 @@ class FSDPParamGroup:
         self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
         self._all_gather_comm: AllGather = DefaultAllGather()
         self._all_gather_output = torch.empty(0, device=self.device)
+        self._flat_param_buffer: torch.Tensor | None = None
+        self._flat_param_numels: list[int] | None = None
+        self._flat_param_buffer_supported: bool | None = None
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
@@ -321,7 +329,145 @@ class FSDPParamGroup:
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
+        self._init_flat_param_buffer()
         self._register_state_dict_hooks()
+
+    def _invalidate_flat_param_buffer(self, reset_support_check: bool = True) -> None:
+        self._flat_param_buffer = None
+        self._flat_param_numels = None
+        if reset_support_check:
+            self._flat_param_buffer_supported = None
+
+    def _can_use_flat_param_buffer(self) -> bool:
+        if not self.fsdp_params or compiled_autograd.compiled_autograd_enabled:
+            return False
+        if self._flat_param_buffer_supported is not None:
+            return self._flat_param_buffer_supported
+        first_fsdp_param = self.fsdp_params[0]
+        input_dtype = first_fsdp_param.param_dtype or first_fsdp_param.orig_dtype
+        orig_dtype = first_fsdp_param.orig_dtype
+        for fsdp_param in self.fsdp_params:
+            if (
+                fsdp_param.sharded_state != ShardedState.SHARDED
+                or fsdp_param.offload_to_cpu
+                or fsdp_param._sharded_param_data.is_meta
+                or fsdp_param.orig_dtype != orig_dtype
+                or (fsdp_param.param_dtype or fsdp_param.orig_dtype) != input_dtype
+                or not self._can_swap_sharded_param(fsdp_param.sharded_param)
+                or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+                or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
+            ):
+                self._flat_param_buffer_supported = False
+                return False
+        self._flat_param_buffer_supported = True
+        return True
+
+    @staticmethod
+    def _can_swap_sharded_param(sharded_param: nn.Parameter) -> bool:
+        # Preflight swap_tensors() for the entire group before rebasing any
+        # parameter. It rejects weakrefs/use counts, and swapping a fresh
+        # TensorImpl would not preserve existing autograd hook bindings.
+        return (
+            type(sharded_param) is DTensor
+            and not weakref.getweakrefs(sharded_param)
+            and sharded_param._use_count() == 1
+            and sharded_param.grad is None
+            and not getattr(sharded_param, "_backward_hooks", None)
+            and not getattr(sharded_param, "_post_accumulate_grad_hooks", None)
+        )
+
+    def _is_flat_param_buffer_ready(self) -> bool:
+        if compiled_autograd.compiled_autograd_enabled:
+            return False
+        flat_param_buffer = self._flat_param_buffer
+        flat_param_numels = self._flat_param_numels
+        if (
+            flat_param_buffer is None
+            or flat_param_numels is None
+            or not self.fsdp_params
+        ):
+            return False
+        first_fsdp_param = self.fsdp_params[0]
+        return (
+            first_fsdp_param.sharded_state == ShardedState.SHARDED
+            and first_fsdp_param._sharded_param_data.untyped_storage().data_ptr()
+            == flat_param_buffer.untyped_storage().data_ptr()
+        )
+
+    def _validate_flat_param_buffer(self) -> None:
+        flat_param_buffer = self._flat_param_buffer
+        flat_param_numels = self._flat_param_numels
+        if flat_param_buffer is None or flat_param_numels is None:
+            raise AssertionError("Expects the FSDP flat parameter buffer to exist")
+        expected_ptr = flat_param_buffer.untyped_storage().data_ptr()
+        expected_offset = 0
+        for fsdp_param, expected_numel in zip(self.fsdp_params, flat_param_numels):
+            if (
+                fsdp_param.sharded_state != ShardedState.SHARDED
+                or fsdp_param._sharded_param_data.untyped_storage().data_ptr()
+                != expected_ptr
+                or fsdp_param._sharded_param_data.storage_offset() != expected_offset
+                or fsdp_param._sharded_param_data.numel() != expected_numel
+            ):
+                raise AssertionError("Invalid FSDP flat parameter buffer")
+            expected_offset += expected_numel
+
+    @staticmethod
+    def _rebase_sharded_param(
+        fsdp_param: FSDPParam, sharded_local_tensor: torch.Tensor
+    ) -> None:
+        sharded_param = fsdp_param.sharded_param
+        if not isinstance(sharded_param, DTensor):
+            raise AssertionError(f"Expected DTensor, got {type(sharded_param)}")
+        new_sharded_param = nn.Parameter(
+            fsdp_param.to_sharded_dtensor(sharded_local_tensor),
+            requires_grad=sharded_param.requires_grad,
+        )
+        new_sharded_param.__dict__.update(sharded_param.__dict__)
+        # Swap the complete DTensor instead of only replacing _local_tensor so
+        # its outer TensorImpl has the same storage aliasing. FakeTensor relies
+        # on this consistency when tracing optimizers.
+        torch.utils.swap_tensors(sharded_param, new_sharded_param)
+
+    def _init_flat_param_buffer(self) -> None:
+        if self._is_flat_param_buffer_ready():
+            return
+        if not self._can_use_flat_param_buffer():
+            return
+        self._invalidate_flat_param_buffer(reset_support_check=False)
+
+        flat_param_numels = [
+            fsdp_param._sharded_param_data.numel() for fsdp_param in self.fsdp_params
+        ]
+        flat_param_buffer = torch.empty(
+            (sum(flat_param_numels),),
+            dtype=self.fsdp_params[0].orig_dtype,
+            device=self.device,
+        )
+        offset = 0
+        for fsdp_param, numel in zip(self.fsdp_params, flat_param_numels):
+            sharded_param_data = fsdp_param._sharded_param_data
+            flat_param_slice = flat_param_buffer.narrow(0, offset, numel)
+            if numel > 0:
+                flat_param_slice.copy_(sharded_param_data)
+            fsdp_param._sharded_param_data = flat_param_slice
+
+            shard_dim = fsdp_param.fsdp_placement.dim
+            local_shard_length = fsdp_param.sharded_size[shard_dim] if numel > 0 else 0
+            padded_local_tensor = flat_param_slice.view(
+                fsdp_param.padded_sharded_param_size
+            )
+            sharded_local_tensor = padded_local_tensor.narrow(
+                dim=shard_dim,
+                start=0,
+                length=local_shard_length,
+            )
+            self._rebase_sharded_param(fsdp_param, sharded_local_tensor)
+            offset += numel
+
+        self._flat_param_buffer = flat_param_buffer
+        self._flat_param_numels = flat_param_numels
+        self._validate_flat_param_buffer()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):

@@ -334,31 +334,51 @@ def foreach_all_gather(
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
+        flat_param_buffer = _get_flat_param_buffer(fsdp_params)
+        if flat_param_buffer is not None:
+            (
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+                inp_split_sizes,
+            ) = _get_flat_param_all_gather_input_metadatas(fsdp_params)
+            all_gather_input_numel = flat_param_buffer.numel()
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+                [flat_param_buffer],
+                all_gather_output,
+                [all_gather_input_numel],
+                all_gather_input_numel,
+                rank,
+            )
         else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
-        )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs
+            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+            (
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+            if dtype == torch.uint8:
+                all_gather_inputs = [
+                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+                ]
+            else:
+                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+            inp_split_sizes = [t.numel() for t in all_gather_inputs]
+            all_gather_input_numel = sum(inp_split_sizes)
+            all_gather_output = all_gather_comm.allocate(
+                (all_gather_input_numel * world_size,), dtype=dtype, device=device
+            )
+            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+                all_gather_inputs,
+                all_gather_output,
+                inp_split_sizes,
+                all_gather_input_numel,
+                rank,
+            )
+            del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
@@ -376,6 +396,36 @@ def foreach_all_gather(
             param_all_gather_input_numels,
             inp_split_sizes,
         )
+
+
+@torch.no_grad()
+def _get_flat_param_buffer(
+    fsdp_params: list[FSDPParam],
+) -> torch.Tensor | None:
+    if not fsdp_params:
+        return None
+    param_group = fsdp_params[0]._flat_param_group
+    if param_group is None or not param_group._is_flat_param_buffer_ready():
+        return None
+    return param_group._flat_param_buffer
+
+
+def _get_flat_param_all_gather_input_metadatas(
+    fsdp_params: list[FSDPParam],
+) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype, list[int]]:
+    param_group = fsdp_params[0]._flat_param_group
+    if param_group is None or param_group._flat_param_numels is None:
+        raise AssertionError("Expects flat parameter metadata to be initialized")
+    flat_param_numels = param_group._flat_param_numels
+    all_gather_dtype = fsdp_params[0].param_dtype or fsdp_params[0].orig_dtype
+    param_all_gather_input_dtypes = [[all_gather_dtype] for _ in fsdp_params]
+    param_all_gather_input_numels = [[numel] for numel in flat_param_numels]
+    return (
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_dtype,
+        flat_param_numels,
+    )
 
 
 @torch.no_grad()
