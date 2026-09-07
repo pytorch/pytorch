@@ -87,7 +87,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
     onlyOn,
     PYTORCH_CUDA_MEMCHECK,
 )
@@ -18625,7 +18624,7 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
 class MiscTestsCUDA(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self):
         def fn(x):
@@ -18639,7 +18638,7 @@ class MiscTestsCUDA(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable_bad_inputs(self):
         def fn1(x):
@@ -18666,7 +18665,7 @@ class MiscTestsCUDA(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
     @torch._dynamo.config.patch(recompile_limit=999)
     def test_legacy_cuda_tensor(self):
         typs = [
@@ -19288,8 +19287,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
 
 instantiate_parametrized_tests(MiscTestsPyTree)
-
-instantiate_device_type_tests(MiscTestsCUDA, globals(), only_for=("cuda",))
 
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), except_for=("cpu",), allow_xpu=True
