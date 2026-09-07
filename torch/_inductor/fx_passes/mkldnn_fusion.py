@@ -1348,7 +1348,7 @@ if torch._C._has_mkldnn:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or meta_value.device.type != "cpu"
+                or bias_meta_value.device.type != "cpu"
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
