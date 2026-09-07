@@ -40,6 +40,7 @@ from torch.serialization import (
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyAccelerator,
     skipMPSIf,
@@ -932,7 +933,9 @@ class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlo
     y: int
     c: str
 
-class TestBothSerialization(TestCase):
+class TestBothSerialization(DeviceTypeTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
@@ -958,6 +961,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
     @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
+    hw_classification = HardwareClassification.GENERIC
 
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
@@ -1062,6 +1066,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
@@ -4955,7 +4960,7 @@ class TestSerialization(TestCase, SerializationMixin):
             return super().run(*args, **kwargs)
 
 
-class TestSerializationAccelerator(TestCase):
+class TestSerializationDeviceType(DeviceTypeTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -5169,24 +5174,6 @@ class TestSerializationAccelerator(TestCase):
                     torch.save(ft, f)
 
     @onlyAccelerator
-    def test_tensor_subclass_map_location(self, device):
-        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
-        sd = {'t': t}
-
-        with TemporaryFileName() as f:
-            torch.save(sd, f)
-            with safe_globals([TwoTensor]):
-                sd_loaded = torch.load(f, map_location=torch.device(device))
-                self.assertTrue(sd_loaded['t'].device == torch.device(device))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device(device))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device(device))
-                # make sure map_location is not propagated over multiple torch.load calls
-                sd_loaded = torch.load(f)
-                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
-                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
-
-    @onlyAccelerator
     @skipMPSIf(True, "pin memory allocator is not registered on MPS")
     def test_use_pinned_memory_for_d2h(self, device):
         def patched_write_record(self, filename, data, nbytes):
@@ -5269,6 +5256,8 @@ class TestEmptySubclass(torch.Tensor):
 
 
 class TestSubclassSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
         my_tensor = TestWrapperSubclass(wrapped_tensor)
@@ -5573,8 +5562,29 @@ class TestSubclassSerialization(TestCase):
             torch.load(modified_buffer, weights_only=True)
 
 
-instantiate_device_type_tests(TestBothSerialization, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestSerializationAccelerator, globals(), allow_xpu=True)
+class TestSubclassSerializationCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_tensor_subclass_map_location(self):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        sd = {'t': t}
+
+        with TemporaryFileName() as f:
+            torch.save(sd, f)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
+                # make sure map_location is not propagated over multiple torch.load calls
+                sd_loaded = torch.load(f)
+                self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
+                self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
+
+
+instantiate_device_type_tests(TestBothSerialization, globals())
+instantiate_device_type_tests(TestSerializationDeviceType, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)
