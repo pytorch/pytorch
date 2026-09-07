@@ -556,6 +556,36 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 out = torch.compile(fn, backend="inductor")(x)
                 self.assertEqual(out.shape, torch.Size([]))
 
+    @staticmethod
+    def _repro_storage_line(dev):
+        from torch._dynamo.debug_utils import InputWriter
+
+        with torch.cuda.device(dev):
+            w = InputWriter(None)
+            w.storage(torch.randn(4, device=f"cuda:{dev}").untyped_storage())
+            return "\n".join(w._lines)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_omits_current_device_index(self):
+        # fx_graph_runnable records each input storage's device. Writing the concrete
+        # index makes every rank's repro differ, and makes a rank-N repro unrunnable
+        # anywhere with fewer than N+1 GPUs. Under CooR the inputs are on the current
+        # accelerator by invariant, so an index-less device reproduces the same compile
+        # and is portable -- the reader puts the storage on whatever device is current.
+        self.assertNotIn("index=", self._repro_storage_line(0))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_repro_writer_storage_identical_across_devices(self):
+        self.assertEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    def test_repro_writer_keeps_device_index_without_coor(self):
+        # Outside CooR several devices can be live, so the repro must say which one.
+        self.assertIn("index=0", self._repro_storage_line(0))
+        self.assertNotEqual(self._repro_storage_line(0), self._repro_storage_line(1))
+
     # ---- the fx graph cache key must not encode which rank compiled ----
     # The key is computed before post_grad runs, so the graph it hashes is the
     # device-agnostic AOT one. The device index reaches the key only through
