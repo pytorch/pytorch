@@ -3142,7 +3142,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         import torch.distributed as dist
-        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+        from torch.distributed._functional_collectives import (
+            _ASYNC_OP_REMAP_ERROR,
+            REDUCE_OP_TO_STR,
+        )
 
         # Merge args into kwargs so positional and keyword args
         # can be processed the same way.
@@ -3154,7 +3157,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             unimplemented(
                 gb_type="async_op=True for distributed collectives",
                 context=f"{self.fn}, {args=}, {kwargs=}",
-                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                explanation=_ASYNC_OP_REMAP_ERROR,
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
