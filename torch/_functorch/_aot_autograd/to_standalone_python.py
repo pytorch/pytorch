@@ -561,6 +561,12 @@ def _compose_standalone_module(
         for gname, gobj in globals_dict.items():
             if gname == "__builtins__":
                 continue
+            # The runtime wrapper's warn-once set is live compile-time state that must
+            # not be baked into the artifact: emit a fresh empty set so the exported
+            # module round-trips deterministically and starts its own warn-once cycle.
+            if gname == "_warned_inputs":
+                out.append((gname, "set()"))
+                continue
             expr = _resolve_global(
                 gobj,
                 helper_table,
