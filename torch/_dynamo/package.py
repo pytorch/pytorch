@@ -28,7 +28,7 @@ import sys
 import types
 import uuid
 import weakref
-from collections.abc import Callable, Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -480,6 +480,9 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    # Why Dynamo gave up on this frame. Known at the bypass site and otherwise
+    # only reachable via tlparse, which leaves a refusal downstream guessing.
+    bypass_reason: str | None = None
 
 
 def _resume_global_renames(
@@ -919,7 +922,7 @@ class _DynamoCacheEntry:
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
-    fn_first_lineno: str | None = None
+    fn_first_lineno: int | None = None
 
     @property
     def backend_ids(self) -> set[_BackendId]:
@@ -952,6 +955,7 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
+            "device_types": sorted(self.device_types or frozenset((self.device_type,))),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -990,7 +994,9 @@ class PrecompileCacheEntry:
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
         backend_content: dict[_BackendId, Any] = {}
-
+        # Non-mutating: the entry handed in may be the live one still serving
+        # this process, so a code whose backend is missing is bypassed on a copy.
+        codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
@@ -1010,12 +1016,13 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code.bypassed = True
+                    code = dataclasses.replace(code, bypassed=True)
                     break
-                else:
-                    backend_content[backend_id] = backends[backend_id]
+                backend_content[backend_id] = backends[backend_id]
+            codes.append(code)
 
-        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+        dynamo = dataclasses.replace(cache_entry, codes=codes)
+        return PrecompileCacheEntry(dynamo=dynamo, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
@@ -1112,6 +1119,10 @@ class CompilePackage:
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
         *,
+        serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
+        | None = None,
+        explicit_capture: bool = False,
+        serving: bool = False,
         requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
@@ -1136,12 +1147,22 @@ class CompilePackage:
         # so repeated loads of one artifact cannot grow the frame cache and
         # module globals without bound. Registered by install().
         self._uninstall_finalizer: weakref.finalize[..., CompilePackage] | None = None
-        # Empty means no graph named a device; cache_entry records that as cpu.
+        # Frames whose capture was cut short by the recompile limit. Deliberately
+        # runtime-only and NOT serialized: it describes this capture session, not
+        # the artifact, and it must not affect what install() serves.
+        self._truncated_frames: set[str] = set()
         self._device_types: set[str] = set()
-        # An eager backend bakes no vector width, so it neither pays the C++
-        # toolchain probe at save nor is rejected on ISA skew at load.
-        self._requires_native_backend_compatibility = (
+        self._system_info: SystemInfo | None = None
+        # Set when the CPU codegen target changed between compiles of one
+        # capture. The compile itself must not fail over it (the ambient
+        # caching_precompile path reaches update_device_type on every user
+        # compile), but the mixed-target package can never be serialized.
+        self._cpu_codegen_target_drift: str | None = None
+        self._default_requires_native_backend_compatibility = (
             requires_native_backend_compatibility
+        )
+        self._requires_native_backend_compatibility = (
+            self._default_requires_native_backend_compatibility
         )
 
         # For debugging/testing purpose only.
@@ -1155,6 +1176,18 @@ class CompilePackage:
         # name. Distinct from _install_owner, which is re-minted per install.
         # See _resume_global_renames.
         self._resume_name_token = uuid.uuid4().hex
+        # Runtime guards stay intact; this filter applies only to the guard
+        # state recorded in the package.
+        self._serialization_guard_filter_fn = serialization_guard_filter_fn
+        # A torch.compiler.precompile capture or serve, as opposed to the
+        # ambient caching_precompile cache: only the filtered copy of the guards
+        # is recorded, and the package is never auto-persisted.
+        self._explicit_capture = explicit_capture
+        # Serves a loaded artifact. A frame it does not cover still compiles
+        # and counts toward the recompile limit, but nothing will ever save
+        # this package, so its guards are neither serialized nor held to the
+        # strictness of a capture.
+        self._serving = serving
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -1162,6 +1195,20 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def serialization_guard_filter_fn(
+        self,
+    ) -> Callable[[Sequence[Any]], Sequence[bool]] | None:
+        return self._serialization_guard_filter_fn
+
+    @property
+    def explicit_capture(self) -> bool:
+        return self._explicit_capture
+
+    @property
+    def serving(self) -> bool:
+        return self._serving
 
     def initialize(
         self,
@@ -1196,8 +1243,16 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            # Restored so a re-save keeps checking what the capture targeted.
+            # Written last so a failed load cannot leak into a cold-cache fallback.
             self._device_types = set(dynamo.device_types or (dynamo.device_type,))
+            self._system_info = dynamo.system_info
+            # OR, never replace: a loaded entry that did not require native
+            # backend compatibility must not relax a host that does, or the ISA
+            # check fails open on a kernel built for another target.
+            self._requires_native_backend_compatibility = (
+                self._requires_native_backend_compatibility
+                or dynamo.requires_native_backend_compatibility
+            )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1310,9 +1365,99 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_types.update(_graph_device_types(graph))
+        # A bypassed entry is never installed, so skip the device scan (and the
+        # C++ toolchain probe it can trigger), matching add_guarded_code and
+        # add_inlined_source. This can also run outside a code_context (no
+        # current entry), so it does not assert one is set the way they do.
+        if self._current_entry is not None and self._current_entry.bypassed:
+            return
+        # An empty variant contributes no device, and a SymInt-first graph is not
+        # "cpu": either misread bakes a cpu_codegen_target into a pure-accelerator
+        # capture, which then refuses to load on a host with a different ISA.
+        device_types = _graph_device_types(graph)
+        if not device_types:
+            return
+        # Computing cpu_codegen_target runs the C++ toolchain, so only a capture
+        # that emits CPU native code pays for it; a later cpu graph backfills it.
+        needs_cpu_codegen = (
+            self._requires_native_backend_compatibility and "cpu" in device_types
+        )
+        if self._system_info is None:
+            self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
+        elif needs_cpu_codegen:
+            # Re-read per cpu compile, not the whole SystemInfo: the toolchain
+            # probe is cached, and the inductor config it folds in can change
+            # between compiles of one process.
+            current_target = _current_cpu_codegen_target()
+            if self._system_info.cpu_codegen_target is None:
+                self._system_info = dataclasses.replace(
+                    self._system_info, cpu_codegen_target=current_target
+                )
+            elif self._system_info.cpu_codegen_target != current_target:
+                # Never fail the compile: the ambient caching_precompile path
+                # runs through here. refuse_unserializable() refuses the
+                # mixed-target package at serialization boundaries instead.
+                if self._cpu_codegen_target_drift is None:
+                    self._cpu_codegen_target_drift = (
+                        "CPU codegen target changed during capture: "
+                        f"first={self._system_info.cpu_codegen_target}, "
+                        f"current={current_target}"
+                    )
+                    logger.warning(
+                        "%s; this package will not be serialized.",
+                        self._cpu_codegen_target_drift,
+                    )
+        self._device_types.update(device_types)
 
-    def bypass_current_entry(self) -> None:
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        return self._current_entry
+
+    def mark_current_entry_truncated(self) -> None:
+        """
+        Record that this frame hit the recompile limit, so callers building an
+        artifact can tell the capture is missing variants. Unlike bypassing, the
+        variants already captured stay installable -- a truncated frame still
+        serves what it covers and recompiles for the rest.
+
+        Only the frame that hit the limit lands here, so ``truncated_frames`` is
+        a LOWER BOUND: the limit also puts everything called beneath this frame
+        into run-only mode, and those frames stop capturing without ever
+        re-entering Dynamo to report it.
+        """
+        if self._current_entry is None:
+            raise AssertionError(
+                "_current_entry is not set in mark_current_entry_truncated"
+            )
+        code = self._current_entry.python_code
+        self._truncated_frames.add(
+            f"{code.co_name} ({code.co_filename}:{code.co_firstlineno})"
+        )
+
+    @property
+    def truncated_frames(self) -> frozenset[str]:
+        return frozenset(self._truncated_frames)
+
+    @property
+    def uncovered_frames(self) -> frozenset[str]:
+        # Entered Dynamo yet holds no guarded code, which is exactly what
+        # install() skip_code()s. Resume code that was generated but never
+        # executed has no compile id and is not a gap; a frame that hit the
+        # recompile limit has working variants and is reported as truncated.
+        return frozenset(
+            code.co_name
+            for code, entry in self._codes.items()
+            if entry.has_compile_id and not entry.guarded_codes and not entry.bypassed
+        )
+
+    def guarded_code_count(self, code: types.CodeType) -> int:
+        entry = self._codes.get(code)
+        return 0 if entry is None else len(entry.guarded_codes)
+
+    def code_objects(self) -> tuple[types.CodeType, ...]:
+        return tuple(self._codes)
+
+    def bypass_current_entry(self, reason: str | None = None) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
@@ -1320,6 +1465,7 @@ class CompilePackage:
         # would only be serialized for nothing.
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
+        self._current_entry.bypass_reason = reason
 
     def add_resume_function(
         self,
@@ -1576,6 +1722,25 @@ class CompilePackage:
                         self._install_owner,
                     )
 
+    def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
+        """The per-frame entries, for a caller that edits them before they are
+        packaged. Unlike cache_entry(), this does not require a complete
+        capture."""
+        return self._codes.values()
+
+    def refuse_unserializable(self) -> None:
+        """Raise PackageError if this package can never be serialized -- its
+        CPU codegen target drifted mid-capture, so it mixes native code for
+        two targets. Called at serialization boundaries only: introspection
+        (summary(), backend-id enumeration, teardown) still builds a
+        cache_entry() from such a package without raising.
+        """
+        if self._cpu_codegen_target_drift is not None:
+            raise PackageError(
+                f"{self._cpu_codegen_target_drift}; the package mixes native "
+                "code for two targets and cannot be serialized."
+            )
+
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         if self._innermost_fn is None:
@@ -1590,14 +1755,9 @@ class CompilePackage:
             source_info=self._source_info,
             device_type=device_type,
             device_types=device_types,
-            # The codegen probe runs the C++ toolchain; only pay for it when the
-            # artifact can hold native CPU code.
-            system_info=SystemInfo.current(
-                cpu_codegen=(
-                    self._requires_native_backend_compatibility
-                    and "cpu" in device_types
-                )
-            ),
+            # _system_info is None only when no graph was ever captured, so
+            # there is nothing baked and no reason to run the toolchain probe.
+            system_info=self._system_info or SystemInfo.current(cpu_codegen=False),
             requires_native_backend_compatibility=(
                 self._requires_native_backend_compatibility
             ),
@@ -1633,6 +1793,7 @@ class DynamoStore(abc.ABC):
         """
         from torch._dynamo.precompile_context import PrecompileContext
 
+        package.refuse_unserializable()
         cache_entry = package.cache_entry()
         PrecompileContext.record_dynamo_cache_entry(
             cache_entry=cache_entry, key=package.source_id
