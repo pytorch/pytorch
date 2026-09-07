@@ -10,6 +10,7 @@ import io
 import multiprocessing as mp
 import os
 import pickle
+import platform
 import sys
 import tempfile
 import threading
@@ -44,6 +45,7 @@ from torch._dynamo.package import (
     _current_cpu_codegen_target,
     DynamoCache,
     load_guards_state,
+    SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
@@ -2233,6 +2235,30 @@ from user code:
         )
         with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
             artifacts.check_compatibility()
+
+    def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
+        # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
+        # host (other). An artifact built with Triton must be rejected on a
+        # Triton-less host -- it would otherwise fail later at kernel load --
+        # while an artifact built without Triton bakes in no Triton code and
+        # loads anywhere. Same for gpu_name: only an artifact that recorded a
+        # GPU pins the model.
+        def make(triton, gpu):
+            return SystemInfo(
+                python_version=platform.python_version(),
+                torch_version=torch.__version__,
+                toolkit_version="12.0",
+                triton_version=triton,
+                gpu_name=gpu,
+            )
+
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "Triton version"):
+                make((3, 5), "A100").check_compatibility(make((0, 0), "A100"), "cuda")
+            make((0, 0), "A100").check_compatibility(make((3, 5), "A100"), "cuda")
+            with self.assertRaisesRegex(RuntimeError, "different GPU"):
+                make((3, 5), "A100").check_compatibility(make((3, 5), "H100"), "cuda")
+            make((3, 5), None).check_compatibility(make((3, 5), "H100"), "cuda")
 
     def test_inductor_cpu_capture_records_cpu_codegen_target(self):
         # Pins the recording side: a regression that records None silently
