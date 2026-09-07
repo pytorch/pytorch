@@ -5,7 +5,11 @@ import unittest
 import unittest.mock
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -73,6 +77,7 @@ class TestGpuTraceDevice(TestCase):
         del tensor
         self.mock.assert_called_once_with(data_ptr)
 
+    @onlyCUDA
     def test_stream_creation_callback(self, device):
         gpu_trace.register_callback_for_stream_creation(self.mock)
 
@@ -115,6 +120,7 @@ class TestGpuTraceDevice(TestCase):
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5238")
     def test_memcpy_synchronization(self, device):
         gpu_trace.register_callback_for_stream_synchronization(self.mock)
 
@@ -135,7 +141,7 @@ class TestGpuTraceDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestGpuTraceDevice, globals(), only_for=("cuda",), except_for="cpu"
+    TestGpuTraceDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 
