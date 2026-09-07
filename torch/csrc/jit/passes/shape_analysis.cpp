@@ -2000,8 +2000,12 @@ class ShapePropagator : public PropertyPropBase {
             /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes().concrete_sizes().value();
-      auto dims = node->get<c10::List<int64_t>>(attr::dim).value();
+      auto dims_list = node->get<c10::List<int64_t>>(attr::dim).value();
       bool keepdim = node->get<bool>(attr::keepdim).value();
+      // Materialized rather than reversed in place: List<T>'s iterator
+      // dereferences to a proxy, which some standard library ranges::reverse
+      // implementations (MSVC's, notably) refuse to accept as random-access.
+      std::vector<int64_t> dims = dims_list.vec();
       std::ranges::reverse(dims);
       for (int64_t dim : dims) {
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());

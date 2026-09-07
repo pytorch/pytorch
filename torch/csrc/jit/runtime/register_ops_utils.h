@@ -352,7 +352,11 @@ template <typename T>
 void listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
-  std::ranges::sort(list, [reverse](const T& a, const T& b) {
+  // Sorted out-of-place and written back through set(): List<T>'s iterator
+  // dereferences to a proxy, which some standard library ranges::sort
+  // implementations (MSVC's, notably) refuse to accept as random-access.
+  std::vector<T> elements = list.vec();
+  std::ranges::sort(elements, [reverse](const T& a, const T& b) {
     // FBCode errors without this check - "strict weak ordering"
     // TODO: remove when possible, since it just slows down
     // sorting and doesn't do anything useful
@@ -361,6 +365,9 @@ void listSort(Stack& stack) {
     }
     return (a < b) != reverse;
   });
+  for (const auto i : c10::irange(elements.size())) {
+    list.set(i, std::move(elements[i]));
+  }
 }
 
 // Specialization for at::Tensor
@@ -370,15 +377,15 @@ void listSort<at::Tensor>(Stack& stack);
 template <typename T>
 void listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
-  auto list_copied = list.copy();
-  std::ranges::sort(list_copied, [](const T& a, const T& b) {
+  std::vector<T> elements = list.vec();
+  std::ranges::sort(elements, [](const T& a, const T& b) {
     // "strict weak ordering" issue - see other sort
     if (a == b) {
       return false;
     }
     return a < b;
   });
-  push(stack, list_copied);
+  push(stack, c10::List<T>(elements));
 }
 
 // Specialization for at::Tensor

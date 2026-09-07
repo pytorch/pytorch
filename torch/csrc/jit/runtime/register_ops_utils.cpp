@@ -71,24 +71,31 @@ template <>
 void listSort<at::Tensor>(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
+  // Sorted out-of-place and written back through set(): List<T>'s iterator
+  // dereferences to a proxy, which some standard library ranges::sort
+  // implementations (MSVC's, notably) refuse to accept as random-access.
+  std::vector<at::Tensor> elements = list.vec();
   std::ranges::sort(
-      list, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+      elements, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
         // "strict weak ordering" issue - see other sort
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
         }
         return (at::native::is_nonzero(a.lt(b))) ^ reverse;
       });
+  for (const auto i : c10::irange(elements.size())) {
+    list.set(i, std::move(elements[i]));
+  }
 }
 
 template <>
 void listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
-  auto list_copied = list.copy();
-  std::ranges::sort(list_copied, [](const at::Tensor& a, const at::Tensor& b) {
+  std::vector<at::Tensor> elements = list.vec();
+  std::ranges::sort(elements, [](const at::Tensor& a, const at::Tensor& b) {
     return at::native::is_nonzero(a.lt(b));
   });
-  push(stack, list_copied);
+  push(stack, c10::List<at::Tensor>(elements));
 }
 
 template <>
@@ -187,7 +194,13 @@ void listAppend(Stack& stack) {
 void listReverse(Stack& stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  std::ranges::reverse(list);
+  // See the comment in listSort<at::Tensor>: List<T>'s iterator dereferences
+  // to a proxy, which some ranges implementations refuse as random-access.
+  std::vector<IValue> elements = list.vec();
+  std::ranges::reverse(elements);
+  for (const auto i : c10::irange(elements.size())) {
+    list.set(i, std::move(elements[i]));
+  }
 }
 
 void listPopImpl(Stack& stack, const char* empty_message) {

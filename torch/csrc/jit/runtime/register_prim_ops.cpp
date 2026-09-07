@@ -171,7 +171,14 @@ void sort_op(Stack& stack) {
     } else {
       comparator = c10::getLessThanComparator(g_list.get(0));
     }
-    std::ranges::sort(g_list, comparator);
+    // Sorted out-of-place and written back through set(): List<T>'s iterator
+    // dereferences to a proxy, which some standard library ranges::sort
+    // implementations (MSVC's, notably) refuse to accept as random-access.
+    std::vector<IValue> elements = g_list.vec();
+    std::ranges::sort(elements, comparator);
+    for (const auto i : c10::irange(elements.size())) {
+      g_list.set(i, std::move(elements[i]));
+    }
   }
 
   if (copy_return_list) {
@@ -2575,7 +2582,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           } else {
             int64_t index = 0;
             auto iter = size.begin();
-            std::ranges::sort(axes);
+            // Sorted out-of-place and written back through set(): List<T>'s
+            // iterator dereferences to a proxy, which some standard library
+            // ranges::sort implementations (MSVC's, notably) refuse to
+            // accept as random-access.
+            std::vector<int64_t> sorted_axes = axes.vec();
+            std::ranges::sort(sorted_axes);
+            for (const auto i : c10::irange(sorted_axes.size())) {
+              axes.set(i, sorted_axes[i]);
+            }
             for (const auto& axis : axes) {
               // move iter to the next axis
               iter += axis - index;
