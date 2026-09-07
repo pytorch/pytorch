@@ -6,7 +6,10 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <cstring>
+#include <mutex>
+#include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -134,17 +137,18 @@ class StoreExchange {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int world_size,
-      T val) {
+      T val,
+      const std::string& group_name) {
     static_assert(std::is_trivially_copyable_v<T>);
 
+    const size_t seq_id = next_seq_id(group_name);
     std::vector<std::string> peer_keys;
     peer_keys.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
-      oss << store_prefix_ << '/' << seq_id_ << '/' << r;
+      oss << store_prefix_ << '/' << seq_id << '/' << r;
       peer_keys.push_back(std::move(oss).str());
     }
-    ++seq_id_;
 
     {
       std::vector<uint8_t> payload(
@@ -169,17 +173,33 @@ class StoreExchange {
   void barrier(
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
-      int world_size) {
+      int world_size,
+      const std::string& group_name) {
     (void)rank;
     std::ostringstream oss;
-    oss << store_prefix_ << '/' << seq_id_;
-    ++seq_id_;
+    oss << store_prefix_ << '/' << next_seq_id(group_name);
     store->barrier(std::move(oss).str(), world_size);
   }
 
  private:
+  // One counter per group, not one per process. The counter is part of the
+  // key every rank computes, so it has to be a function of the group: a
+  // process-global counter advances on ranks that take part in a rendezvous
+  // and not on those that do not, after which the members of a larger group
+  // disagree about which key to read and the rendezvous hangs with no
+  // diagnostic. See pytorch/pytorch#196082.
+  //
+  // The key itself needs no group component: a process group's store is
+  // already a PrefixStore over the group name, so distinct groups cannot
+  // collide on keys. Only the counter was shared.
+  size_t next_seq_id(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return seq_ids_[group_name]++;
+  }
+
   const std::string store_prefix_;
-  size_t seq_id_ = 0;
+  std::mutex mutex_;
+  std::unordered_map<std::string, size_t> seq_ids_;
 };
 
 // Returns a pointer of virtual address that is mapped to the physical memory
