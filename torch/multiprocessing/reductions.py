@@ -2,6 +2,8 @@
 import multiprocessing
 import os
 import threading
+import warnings
+from collections.abc import Callable as _Callable
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 
@@ -96,6 +98,36 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
+_ipc_tensor_reduce_registry: dict[str, tuple[_Callable, _Callable]] = {}
+_ipc_storage_reduce_check_registry: dict[str, _Callable] = {}
+
+
+def register_ipc_tensor_reducer(
+    device_type: str, reduce_fn: _Callable, rebuild_fn: _Callable
+) -> None:
+    device_type = torch.device(device_type).type
+    if device_type in _ipc_tensor_reduce_registry:
+        warnings.warn(
+            f"An IPC tensor reducer for '{device_type}' is already registered. "
+            "Overwriting it with the new reducer.",
+            UserWarning,
+            stacklevel=2,
+        )
+    _ipc_tensor_reduce_registry[device_type] = (reduce_fn, rebuild_fn)
+
+
+def register_ipc_storage_check(device_type: str, check_fn: _Callable) -> None:
+    device_type = torch.device(device_type).type
+    if device_type in _ipc_storage_reduce_check_registry:
+        warnings.warn(
+            f"An IPC storage check for '{device_type}' is already registered. "
+            "Overwriting it with the new check.",
+            UserWarning,
+            stacklevel=2,
+        )
+    _ipc_storage_reduce_check_registry[device_type] = check_fn
+
+
 # Kept for BC only.
 def rebuild_event(device, handle):
     return torch.cuda.Event.from_ipc_handle(device, handle)
@@ -181,7 +213,7 @@ def rebuild_cuda_tensor(
         )
         if storage is None:
             torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(
+            storage = storage_cls._new_shared_ipc(
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
@@ -196,9 +228,7 @@ def rebuild_cuda_tensor(
             )
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
-            storage_cls._release_ipc_counter(
-                ref_counter_handle, ref_counter_offset, device=storage_device
-            )
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     _storage = (
         storage
@@ -221,6 +251,44 @@ def rebuild_cuda_tensor(
         t.requires_grad = requires_grad
 
     return t
+
+
+def reduce_cuda_tensor(tensor):
+    storage = tensor._typed_storage()
+    (
+        device,
+        handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        ref_counter_handle,
+        ref_counter_offset,
+        event_handle,
+        event_sync_required,
+    ) = storage._share_ipc_()
+    tensor_offset = tensor.storage_offset()
+    shared_cache[handle] = StorageWeakRef(storage)
+    # _backward_hooks purposely omitted here, see
+    # Note [Don't serialize hooks]
+    return (
+        rebuild_cuda_tensor,
+        (
+            type(tensor),
+            tensor.size(),
+            tensor.stride(),
+            tensor_offset,  # tensor offset in its storage
+            type(storage),
+            tensor.dtype,
+            device,
+            handle,  # identifier which CUDA allocation is the storage in.
+            storage_size_bytes,  # size(in bytes) of the storage
+            storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+            tensor.requires_grad,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ),
+    )
 
 
 def reduce_tensor(tensor):
@@ -343,42 +411,13 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
-        (
-            device,
-            handle,
-            storage_size_bytes,
-            storage_offset_bytes,
-            ref_counter_handle,
-            ref_counter_offset,
-            event_handle,
-            event_sync_required,
-        ) = storage._share_cuda_()
-        tensor_offset = tensor.storage_offset()
-        shared_cache[handle] = StorageWeakRef(storage)
-        # _backward_hooks purposely omitted here, see
-        # Note [Don't serialize hooks]
-        return (
-            rebuild_cuda_tensor,
-            (
-                type(tensor),
-                tensor.size(),
-                tensor.stride(),
-                tensor_offset,  # tensor offset in its storage
-                type(storage),
-                tensor.dtype,
-                device,
-                handle,  # identifier which CUDA allocation is the storage in.
-                storage_size_bytes,  # size(in bytes) of the storage
-                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
-                tensor.requires_grad,
-                ref_counter_handle,
-                ref_counter_offset,
-                event_handle,
-                event_sync_required,
-            ),
-        )
-    elif storage._untyped_storage.device.type == "meta":
+    device_type = storage._untyped_storage.device.type
+    reducer = _ipc_tensor_reduce_registry.get(device_type)
+    if reducer is not None:
+        reduce_fn, _ = reducer
+        return reduce_fn(tensor)
+
+    if device_type == "meta":
         return (
             rebuild_meta_tensor,
             (
@@ -595,11 +634,15 @@ def reduce_typed_storage_child(storage):
 def reduce_storage(storage):
     from . import get_sharing_strategy
 
-    if storage.is_cuda:
+    device_type = storage.device.type
+    check_fn = _ipc_storage_reduce_check_registry.get(device_type)
+    if check_fn is not None and check_fn(storage):
         raise RuntimeError(
-            "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+            f"Cannot pickle {device_type} storage; "
+            f"try pickling a {device_type} tensor instead"
         )
-    elif storage.device.type == "meta":
+
+    if storage.device.type == "meta":
         raise RuntimeError(
             "Cannot pickle meta storage; try pickling a meta tensor instead"
         )
@@ -626,6 +669,14 @@ def reduce_storage(storage):
 
 
 def init_reductions():
+    torch.UntypedStorage._share_ipc_ = torch.UntypedStorage._share_cuda_
+    torch.UntypedStorage._new_shared_ipc = torch.UntypedStorage._new_shared_cuda
+    torch.UntypedStorage._release_ipc_counter = (
+        torch.UntypedStorage._release_ipc_counter_cuda
+    )
+    register_ipc_tensor_reducer("cuda", reduce_cuda_tensor, rebuild_cuda_tensor)
+    register_ipc_storage_check("cuda", lambda storage: storage.is_cuda)
+
     ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
     for event_cls in ipc_event_classes:
         reduction.register(event_cls, _reduce_event)
