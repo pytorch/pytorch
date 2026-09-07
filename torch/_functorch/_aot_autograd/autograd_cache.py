@@ -1544,19 +1544,20 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
-            AOTAutogradCache._write_to_local_cache(key, content)
+            try:
+                AOTAutogradCache._write_to_local_cache(key, content)
+            except OSError as e:
+                # The local cache root is shared across processes, so a concurrent
+                # AOTAutogradCache.clear() can remove the key's subdir between the
+                # temp write and the rename inside write_atomic(). Losing that race
+                # means we don't save the entry; it is not a bypass, and it is not a
+                # reason to fail the compile, so don't re-raise even in strict mode.
+                log.warning("AOTAutograd cache unable to write compiled graph: %s", e)
+                return None
             counters["aot_autograd"]["autograd_cache_saved"] += 1
             cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
-            return None
-        except OSError as e:
-            # The local cache root is shared across processes, so a concurrent
-            # AOTAutogradCache.clear() can remove the key's subdir between the
-            # temp write and the rename inside write_atomic(). Losing that race
-            # means we don't save the entry; it is not a bypass, and it is not a
-            # reason to fail the compile, so don't re-raise even in strict mode.
-            log.warning("AOTAutograd cache unable to write compiled graph: %s", e)
             return None
         except Exception as e:
             AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)

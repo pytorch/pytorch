@@ -1890,11 +1890,18 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             try:
                 names = sorted(os.listdir(subdir))
-            except OSError:
+            except FileNotFoundError:
                 # Nothing was ever written for this key, or another process cleared
                 # the cache out from under us. The local cache root is shared across
                 # processes, so checking os.path.exists() first would only narrow the
                 # race, not close it. Either way there are no candidates: a miss.
+                names = []
+            except OSError:
+                # Anything else (a bad mode on the cache dir, a dead mount) is not a
+                # race and is worth surfacing, but it still leaves no candidates.
+                log.warning(
+                    "%s unable to list cache entries", cls.__name__, exc_info=True
+                )
                 names = []
             for path in names:
                 if path.startswith("."):
