@@ -998,9 +998,10 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ]
 
         init_idx = torch.zeros((), dtype=torch.int64)
-        # Autograd can pass view gradients. The generated backward while_loop
-        # needs stable carry metadata across iterations, so canonicalize tensor
-        # gradients before they become carries.
+        # Autograd can pass view gradients, and zeros_like defaults to preserve_format,
+        # so a non-contiguous additional input would seed a non-contiguous accumulator.
+        # The generated backward while_loop needs stable carry metadata across iterations,
+        # so canonicalize both halves of the carry tuple the same way body_fn does below.
         init_grad_carries = tuple(
             grad.clone(memory_format=torch.contiguous_format)
             if isinstance(grad, torch.Tensor)
@@ -1008,7 +1009,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             for grad in filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
         )
         init_grad_additional_inputs = tuple(
-            torch.zeros_like(t)
+            torch.zeros_like(t, memory_format=torch.contiguous_format)
             for need_keep, t in zip(
                 additional_inputs_tensor_masks, ctx.additional_inputs
             )
@@ -1075,8 +1076,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             cur_grad_additional_inputs_tensors = filter_with_masks(
                 cur_grad_additional_inputs, additional_inputs_tensor_masks
             )
-            return (
-                idx + 1,
+            next_grads = (
                 *cur_grad_carries_tensors,
                 *(
                     cur_grad + grad
@@ -1084,6 +1084,13 @@ class WhileLoopAutogradOp(torch.autograd.Function):
                         cur_grad_additional_inputs_tensors, grad_additional_inputs
                     )
                 ),
+            )
+            # Same reason as for init_grad_carries above: the carries need stable metadata
+            # across iterations, and the gradients bw_body_fn returns have whatever layout
+            # the backward of body_fn happens to produce.
+            return (
+                idx + 1,
+                *(t.clone(memory_format=torch.contiguous_format) for t in next_grads),
             )
 
         args_single_step_bw = (

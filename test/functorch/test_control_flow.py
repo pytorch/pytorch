@@ -11069,11 +11069,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
 
-    @skipIfTorchDynamo("not a dynamo test")
-    def test_scan_in_vmap_unbatched_init_error(self):
-        # Test with various operations requiring shape reasoning
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_unbatched_init(self):
         x = torch.randn(4, 5, 3, 2)
-        init = torch.randn(4, 3, 2)
+        init = torch.randn(3, 2)
         weight = torch.randn(3, 3)
 
         def combine_fn(carry, xs):
@@ -11085,17 +11084,18 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             output = torch.sin(carry).sum() + torch.cos(xs).mean()
             return new_carry, output
 
-        def vmap_fn(x, init):
-            def fn(x, init):
-                return scan(combine_fn, init, x)
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
 
-            return torch.vmap(fn, in_dims=(0, None))(x, init)
+            return torch.vmap(inner_fn, in_dims=(0, None))(x, init)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            """The size of tensor a \\(4\\) must match the size of tensor b \\(2\\) at non-singleton dimension 4""",
-        ):
-            vmap_fn(x, init)
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
 
     @skipIfTorchDynamo("a vmap test, not a dynamo test")
     def test_vmap_closure_weight_error(self):
@@ -11147,6 +11147,74 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         out = fn(scan, init, xs_batched)
         compile_out = torch.compile(fn)(scan, init, xs_batched)
         exp = fn(_fake_scan, init, xs_batched)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    # num_carries is what splits the combine_fn's flat outputs into front-batched carries
+    # and last-batched ys, so a single-tensor init leaves a mis-placed boundary invisible.
+    # Batching only one of the two carries also runs both materialize_bdim_at_front
+    # branches, movedim and broadcast, within the same call.
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_multi_carry(self):
+        init_batched = torch.randn(4, 3, 2)
+        init_shared = torch.randn(2)
+        xs = torch.randn(4, 5, 3, 2)
+
+        def combine_fn(carry, xs):
+            # carry: ((3, 2), (2,)), xs: (3, 2), ys: ((), (3,))
+            a, b = carry
+            return (a + xs, b * 0.5 + xs.sum(0)), (a.sum(), xs @ b)
+
+        def fn(scan_op, init_batched, init_shared, xs):
+            def inner_fn(a, b, xs):
+                return scan_op(combine_fn, (a, b), xs)
+
+            batched_fn = torch.vmap(inner_fn, in_dims=(0, None, 0))
+            return batched_fn(init_batched, init_shared, xs)
+
+        args = (init_batched, init_shared, xs)
+        out = fn(scan, *args)
+        compile_out = torch.compile(fn)(scan, *args)
+        exp = fn(_fake_scan, *args)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+        autograd_args = tuple(arg.detach().requires_grad_() for arg in args)
+        expected_args = tuple(arg.detach().requires_grad_() for arg in args)
+        result = pytree.tree_leaves(fn(scan, *autograd_args))
+        expected = pytree.tree_leaves(fn(_fake_scan, *expected_args))
+        grads = torch.autograd.grad(
+            result, autograd_args, [torch.ones_like(output) for output in result]
+        )
+        expected_grads = torch.autograd.grad(
+            expected,
+            expected_args,
+            [torch.ones_like(output) for output in expected],
+        )
+        self.assertEqual(grads, expected_grads)
+
+    # The rule hardcodes its internal out_dims, 0 for the carries and -1 for the ys, and
+    # hands those to wrap_batched, so a user-requested out_dims has to compose with them.
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("out_dims", [0, 1, -1])
+    def test_scan_in_vmap_out_dims(self, out_dims):
+        init = torch.randn(4, 3, 2)
+        xs = torch.randn(4, 5, 3, 2)
+
+        def combine_fn(carry, xs):
+            return carry + xs, (carry * xs).sum(-1)
+
+        def fn(scan_op, init, xs):
+            def inner_fn(init, xs):
+                return scan_op(combine_fn, init, xs)
+
+            return torch.vmap(inner_fn, in_dims=(0, 0), out_dims=out_dims)(init, xs)
+
+        out = fn(scan, init, xs)
+        compile_out = torch.compile(fn)(scan, init, xs)
+        exp = fn(_fake_scan, init, xs)
 
         self.assertEqual(out, exp)
         self.assertEqual(compile_out, exp)
@@ -11945,8 +12013,8 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
-        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
-        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
+        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False, memory_format = torch.contiguous_format)
+        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False, memory_format = torch.contiguous_format)
         while_loop_cond_graph_1 = self.while_loop_cond_graph_1
         while_loop_body_graph_1 = self.while_loop_body_graph_1
         zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
@@ -11984,12 +12052,41 @@ class GraphModule(torch.nn.Module):
             mul_2: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
             add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_2);  mm = mul_2 = None
             add_3: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_2, mul_1);  add_2 = mul_1 = None
-            add_4: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_5: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_4, add_3, add_5, add_6)
+            add_4: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_5: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            add_6: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            clone: "f32[3, 3]" = torch.ops.aten.clone.default(add_3, memory_format = torch.contiguous_format);  add_3 = None
+            clone_1: "f32[3]" = torch.ops.aten.clone.default(add_4, memory_format = torch.contiguous_format);  add_4 = None
+            clone_2: "f32[3, 3]" = torch.ops.aten.clone.default(add_5, memory_format = torch.contiguous_format);  add_5 = None
+            return (add_6, clone, clone_1, clone_2)
 """,
             )
+
+    # The backward while_loop accumulates a gradient per additional input, so the init
+    # accumulator and what the body returns have to agree on strides. Both are now
+    # canonicalized to contiguous; zeros_like alone defaults to preserve_format, which
+    # for a dense non-contiguous additional input seeds a carry the body cannot match.
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("transposed", [False, True])
+    def test_while_loop_autograd_noncontiguous_additional_input(self, transposed):
+        def fn(w, x):
+            def cond_fn(i, x):
+                return i < 3
+
+            def body_fn(i, x):
+                return i + 1, x + (w @ w.t()).sum() * x
+
+            i = torch.zeros((), dtype=torch.int64)
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (i, x))[1]
+
+        w = torch.rand(3, 4).t() if transposed else torch.rand(4, 3)
+        self.assertEqual(w.is_contiguous(), not transposed)
+        w = w.detach().requires_grad_()
+        x = torch.ones(3, 3, requires_grad=True)
+        compiled_grads = torch.autograd.grad(
+            torch.compile(fn, fullgraph=True)(w, x).sum(), (w, x)
+        )
+        self.assertEqual(compiled_grads, torch.autograd.grad(fn(w, x).sum(), (w, x)))
 
     def test_input_output_alias(self):
         def fn(f, *args):
@@ -12521,14 +12618,6 @@ class TestWhileLoopVmapDevice(TestCase):
         torch._dynamo.reset()
         super().setUp()
 
-    # TODO: A scan in the body of a while_loop triggers a stride mismatch in scan.
-    # The same scan under vmap works on its own, so this is
-    # a limitation of the two batching rules combined rather than of either one.
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["autograd"]
-        and params["while_loop_test"] == "scan_in_body",
-    )
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize("while_loop_test", list(WHILE_LOOP_VMAP_TESTS.keys()))
     @parametrize("compile_mode", ["none", "compile"])
