@@ -567,12 +567,36 @@ def _exhaustive_16bit(dtype, device):
 # Operand pairs the value sweeps cannot produce. Left/right are matched positionally.
 _SPECIAL_PAIRS = (
     torch.tensor(
-        [0.0, -0.0, 0.0, -0.0, 1.0, -1.0, float("inf"), -float("inf"),
-         float("nan"), 1.0, 0.0, float("inf")]
+        [
+            0.0,
+            -0.0,
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            float("inf"),
+            -float("inf"),
+            float("nan"),
+            1.0,
+            0.0,
+            float("inf"),
+        ]
     ),
     torch.tensor(
-        [-0.0, 0.0, 0.0, -0.0, -1.0, 1.0, -float("inf"), float("inf"),
-         1.0, float("nan"), float("inf"), 0.0]
+        [
+            -0.0,
+            0.0,
+            0.0,
+            -0.0,
+            -1.0,
+            1.0,
+            -float("inf"),
+            float("inf"),
+            1.0,
+            float("nan"),
+            float("inf"),
+            0.0,
+        ]
     ),
 )
 
@@ -886,9 +910,7 @@ POINTWISE_XFAIL = frozenset(
 # reached by the neg signed-zero divergence (fixed later in this stack) only on sm_100;
 # on sm_89 the compiled result already matches eager, so listing it there would XPASS.
 # The other two __rdiv__ dtypes diverge on both and are listed unconditionally.
-_SM100_ONLY_BACKWARD_XFAIL = frozenset(
-    {("__rdiv__", "bfloat16")} if IS_SM100 else ()
-)
+_SM100_ONLY_BACKWARD_XFAIL = frozenset({("__rdiv__", "bfloat16")} if IS_SM100 else ())
 
 BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
     {
@@ -1126,9 +1148,7 @@ class PointwiseStrictNumericsTest(TestCase):
             if not isinstance(sample.input, torch.Tensor):
                 continue
             args = tuple(_substitute(a, y, x.numel()) for a in sample.args)
-            kwargs = {
-                k: _substitute(v, y, x.numel()) for k, v in sample.kwargs.items()
-            }
+            kwargs = {k: _substitute(v, y, x.numel()) for k, v in sample.kwargs.items()}
             key = (
                 tuple(scalar(a) for a in args),
                 tuple(sorted((k, scalar(v)) for k, v in kwargs.items())),
