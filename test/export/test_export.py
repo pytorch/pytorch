@@ -78,6 +78,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
@@ -318,6 +319,8 @@ def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -580,6 +583,8 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
@@ -18632,6 +18637,8 @@ def forward(self, q, k, v):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_scaled_dot_product_attention_cpu(self):
         """
         This test makes sure we are always getting the same decomposition result for SDPA.
@@ -19321,6 +19328,8 @@ def forward(self, x):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
