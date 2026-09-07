@@ -135,14 +135,14 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
     # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
     # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
     # (y < exp(-32)) and the +-inf / nan returns are never reached by them.
-    # Only generated without requires_grad: the derivative is inf at 0 and 1 and
-    # nan outside [0, 1].
+    # The derivative is inf at 0 and 1 and nan outside [0, 1], which is why the
+    # backward comparison for this op carries a widened tolerance.
     extremes = [
         0.0,
         1.0,
         -0.5,
         1.5,
-        float('nan'),
+        float("nan"),
         1e-30,
         1e-20,
         1e-15,
@@ -153,7 +153,9 @@ def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs)
         0.864,
         0.866,
     ]
-    yield SampleInput(torch.tensor(extremes, dtype=dtype, device=device, requires_grad=requires_grad))
+    yield SampleInput(
+        torch.tensor(extremes, dtype=dtype, device=device, requires_grad=requires_grad)
+    )
 
 
 op_db: list[OpInfo] = [
