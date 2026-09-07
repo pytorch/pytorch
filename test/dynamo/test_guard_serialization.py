@@ -167,6 +167,21 @@ def keep_globals_length(func):
     return wrapper
 
 
+def keep_annotations(func):
+    # A guard reading an annotation value rebakes a TYPE_MATCH on the
+    # __annotations__ dict and an ID_MATCH on the value type; the by-value
+    # function reconstruction must restore __annotations__ for both to hold.
+    func.__annotations__ = {"x": int}
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__annotations__["x"] is int:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 class UnpicklableDefault:
     def __reduce__(self):
         raise RuntimeError("unrelated default cannot pickle")
@@ -219,6 +234,12 @@ class DecoratedGlobalForwardModule(torch.nn.Module):
 
 class DecoratedGlobalsLengthForwardModule(torch.nn.Module):
     @keep_globals_length
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedAnnotationsForwardModule(torch.nn.Module):
+    @keep_annotations
     def forward(self, x):
         return x * 2
 
@@ -485,6 +506,14 @@ FQN_MISMATCH_CASES = [
     subtest(
         ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
         name="name_beside_unpicklable_default",
+    ),
+    subtest(
+        (
+            "ID_MATCH",
+            DecoratedAnnotationsForwardModule,
+            ("__annotations__", {"x": str}),
+        ),
+        name="annotations",
     ),
 ]
 
