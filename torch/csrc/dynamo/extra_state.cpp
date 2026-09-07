@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
@@ -648,12 +649,12 @@ void lookup(
   // lookup() held no lock at all) and needs skip_guard_eval_unsafe plus two
   // threads recompiling one code object.
   std::optional<CachePythonDepth> python_depth;
-  std::vector<const PrecompileEntry*> precompile_candidates;
+  c10::SmallVector<const PrecompileEntry*, 8> precompile_candidates;
   struct CacheCandidate {
     CacheEntry* entry;
     std::list<CacheEntry>* list;
   };
-  std::vector<CacheCandidate> cache_candidates;
+  c10::SmallVector<CacheCandidate, 8> cache_candidates;
 
   // Search own bucket first, then fall back to default bucket (-1). This lets
   // isolated compiles reuse compilations from non-isolated torch.compile()
@@ -787,7 +788,7 @@ bool try_lookup_without_guard_eval(
     CacheEntry* entry;
     std::list<CacheEntry>* list;
   };
-  std::vector<CacheCandidate> cache_candidates;
+  c10::SmallVector<CacheCandidate, 8> cache_candidates;
 
   std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
   int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
