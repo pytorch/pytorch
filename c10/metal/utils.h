@@ -275,6 +275,38 @@ inline common_dtype<T, U> fmod(T x, U y) {
 }
 
 // cast_to primitives
+namespace detail {
+template <
+    typename U,
+    ::metal::enable_if_t<is_scalar_integral_v<U>, bool> = true>
+inline uchar cast_to_uchar(const U from) {
+  return static_cast<uchar>(static_cast<long>(from));
+}
+
+template <
+    typename U,
+    ::metal::enable_if_t<is_scalar_floating_point_v<U>, bool> = true>
+inline uchar cast_to_uchar(const U from) {
+  return static_cast<uchar>(static_cast<long>(static_cast<float>(from)));
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!::metal::is_same_v<T, uchar>, bool> = true>
+inline T cast_scalar_to_scalar(const U from) {
+  return static_cast<T>(from);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<::metal::is_same_v<T, uchar>, bool> = true>
+inline T cast_scalar_to_scalar(const U from) {
+  return cast_to_uchar(from);
+}
+} // namespace detail
+
 //  - No-op if types as the same
 template <
     typename T,
@@ -291,7 +323,7 @@ template <
         !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
         bool> = true>
 inline T cast_to(const U from) {
-  return static_cast<T>(from);
+  return detail::cast_scalar_to_scalar<T>(from);
 }
 
 // - Scalar to complex
@@ -319,7 +351,7 @@ template <
         !is_complex_v<T> && !::metal::is_same_v<T, bool> && is_complex_v<U>,
         bool> = true>
 inline T cast_to(const U from) {
-  return static_cast<T>(from.x);
+  return detail::cast_scalar_to_scalar<T>(from.x);
 }
 
 // Generalizable math operators (used for both scalar and complex)
