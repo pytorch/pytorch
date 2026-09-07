@@ -121,12 +121,10 @@ def gen_empty_impl_names(
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
-    elif (
-        backend_index.dispatch_key == DispatchKey.PrivateUse1
-        and backend_index.use_out_as_primary
+    elif backend_index.dispatch_key == DispatchKey.PrivateUse1 and any(
+        m.structured for m in backend_index.index.values()
     ):
-        # Only out-as-primary PrivateUse1 backends use create_out (via structured set_output);
-        # gate on use_out_as_primary so legacy PrivateUse1 backends don't emit the helpers unused.
+        # Only the structured set_output path uses create_out; don't emit it unused.
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
 
@@ -515,51 +513,39 @@ class RegisterDispatchKey:
                     and self.backend_index.use_out_as_primary
                     and self.backend_index.external
                     and g is not None
-                    and (f.func.kind() is not SchemaKind.out)
-                    and (self.backend_index.has_kernel(g.out))
+                    # A mutable variant writes some arguments and returns the rest; it is
+                    # not derivable from the .out and would register an undefined symbol.
+                    and f.func.kind() in (SchemaKind.functional, SchemaKind.inplace)
+                    and self.backend_index.has_kernel(g.out)
                     # TensorList out has a runtime count: can't pre-allocate to derive the
                     # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
                     and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
-                    # The inplace variant is always safe to derive (its output is self, so the
-                    # dtype is correct by construction) and is generated below. The functional
-                    # variant needs the output dtype up front, which the input-seeded derive
-                    # (at::empty({0}, self.options())) only gets right when the output dtype equals
-                    # the input dtype -- which we cannot prove here. Handle it explicitly:
+                    # The inplace passes self as the out, so its dtype is right by construction.
+                    # A natively structured functional is left to the in-tree
+                    # CompositeExplicitAutogradNonFunctional kernel: it runs op.meta() for the
+                    # output dtype and redispatches to this backend's .out (PrivateUse1 is in
+                    # non_functional_backend_dispatch_keyset), which also keeps eager and
+                    # FakeTensor dtypes in agreement.
                     if f.func.kind() is SchemaKind.functional:
-                        if g.structured and len(f.func.returns) == 1:
-                            # Natively structured single-output op: do NOT derive the functional
-                            # here. The in-tree CompositeExplicitAutogradNonFunctional kernel
-                            # already provides it correctly -- it runs op.meta() (which computes the
-                            # true output dtype, e.g. isin -> Bool, or a promoting div -> the
-                            # promoted type) and then at::<op>_outf(), which redispatches to this
-                            # backend's out kernel. PrivateUse1 inherits that dispatch key (see
-                            # non_functional_backend_dispatch_keyset), so returning None defers to
-                            # it instead of the dtype-unsafe input-seeded derive -- this also keeps
-                            # the Meta/FakeTensor (torch.compile) and eager dtypes in agreement,
-                            # since both then come from the op's meta. Register 'structured: true'
-                            # only when supplying a custom meta/impl.
+                        if g.structured:
                             return None
-                        if len(f.func.returns) > 1:
-                            # Multi-output ops mix output dtypes (e.g. a Long index), which the
-                            # input-seeded derive gets wrong.
-                            raise AssertionError(
-                                f"'{g.out.func.name}' is a multi-output op registered out-as-primary "
-                                "via its '.out' only; the derived functional would type every output "
-                                "as the input dtype, but multi-output ops mix dtypes (e.g. a Long "
-                                "index). Register it with 'structured: true' (if natively structured) "
-                                "or register the functional variant explicitly."
+                        if f.func.arguments.tensor_options is not None:
+                            reason = (
+                                "a factory op resolves dtype/layout/device in its functional "
+                                "body and its .out schema has no options argument to carry them"
                             )
-                        # A non-structured single-output op has no native meta to compute the output
-                        # dtype, so a dtype-changing op (e.g. bucketize -> Long) would be silently
-                        # mistyped; require the functional to be registered explicitly.
+                        elif len(f.func.returns) != len(g.out.func.arguments.out):
+                            reason = (
+                                "its returns do not map one-to-one onto out arguments"
+                            )
+                        else:
+                            reason = "there is no native meta to derive the output dtype from"
                         raise AssertionError(
-                            f"'{g.out.func.name}' is a non-structured op registered out-as-primary "
-                            "via its '.out' only; the derived functional would type its output as "
-                            "the input dtype, which is wrong for a dtype-changing op (e.g. "
-                            "bucketize -> Long) and cannot be checked here. Register the functional "
-                            "variant explicitly, since there is no native meta to derive the "
-                            "output dtype from."
+                            f"'{g.out.func.name}' is registered out-as-primary via its '.out' "
+                            f"only, but its functional cannot be derived: {reason}. Register "
+                            f"'{g.functional.func.name}' instead; its '.out' and inplace are "
+                            "then derived from it."
                         )
                     gets_func_inplace_wrapper = True
                 elif (

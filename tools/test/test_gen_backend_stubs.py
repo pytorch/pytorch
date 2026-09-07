@@ -459,49 +459,46 @@ supported:
     # Deriving the functional from a multi-output op's '.out' would type every output as the input
     # dtype, but multi-output ops mix dtypes (a Long index). Reject it for both a structured op
     # (sort) and a non-structured one (_ctc_loss); a single-output op like div still derives.
-    def test_multi_output_out_as_primary_rejected_structured(self) -> None:
-        yaml_str = """\
-backend: PrivateUse1
-cpp_namespace: at::priv1::native
-use_out_as_primary: true
-supported:
-- sort.values_stable"""
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertIn(
-            "'sort.values_stable' is a multi-output op registered out-as-primary via its "
-            "'.out' only",
-            output_error,
-        )
+    # Non-structured ops have no native meta to derive the output dtype from, so the
+    # functional is refused (at any arity) and the message names the escape.
+    def test_non_structured_out_as_primary_rejected(self) -> None:
+        for out, functional in (
+            ("_ctc_loss.out", "_ctc_loss"),
+            ("bucketize.Tensor_out", "bucketize.Tensor"),
+        ):
+            with self.subTest(op=out):
+                _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+                output_error = self.get_errors_from_gen_backend_stubs(
+                    f"backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
+                    f"use_out_as_primary: true\nsupported:\n- {out}"
+                )
+                self.assertIn(
+                    f"'{out}' is registered out-as-primary via its '.out' only, but its "
+                    f"functional cannot be derived: there is no native meta",
+                    output_error,
+                )
+                self.assertIn(f"Register '{functional}' instead", output_error)
 
-    def test_multi_output_out_as_primary_rejected_non_structured(self) -> None:
-        yaml_str = """\
-backend: PrivateUse1
-cpp_namespace: at::priv1::native
-use_out_as_primary: true
-supported:
-- _ctc_loss.out"""
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertIn(
-            "'_ctc_loss.out' is a multi-output op registered out-as-primary via its '.out' only",
-            output_error,
-        )
+    # A factory op resolves dtype/layout/device inside its functional body (arange from the
+    # scalar values, zeros_like from self) and its .out schema has no options argument, so
+    # the functional is refused even though it is single-output.
+    def test_factory_out_as_primary_rejected(self) -> None:
+        for out in ("arange.start_out", "zeros_like.out", "randint.low_out"):
+            with self.subTest(op=out):
+                _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
+                output_error = self.get_errors_from_gen_backend_stubs(
+                    f"backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
+                    f"use_out_as_primary: true\nsupported:\n- {out}"
+                )
+                self.assertIn("a factory op resolves dtype/layout/device", output_error)
 
-    # A single-output non-structured op (bucketize -> Long) registered out-as-primary via its
-    # '.out' only has no native meta to derive the output dtype from, so the input-dtype-seeded
-    # functional would be silently mistyped. Reject it; the author must register the functional.
-    def test_single_output_non_structured_out_as_primary_rejected(self) -> None:
-        yaml_str = """\
-backend: PrivateUse1
-cpp_namespace: at::priv1::native
-use_out_as_primary: true
-supported:
-- bucketize.Tensor_out"""
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertIn(
-            "'bucketize.Tensor_out' is a non-structured op registered out-as-primary via its "
-            "'.out' only",
-            output_error,
+    # Returns must map one-to-one onto out arguments for a functional to be derived.
+    def test_return_out_arity_mismatch_rejected(self) -> None:
+        output_error = self.get_errors_from_gen_backend_stubs(
+            "backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
+            "use_out_as_primary: true\nsupported:\n- _amp_update_scale.out"
         )
+        self.assertIn("do not map one-to-one onto out arguments", output_error)
 
     # Codegen-outcome matrix for out-as-primary across op classes: which registration generates
     # vs raises. Runtime dtype correctness (whether the generated code produces the right dtype) is
@@ -519,15 +516,15 @@ supported:
             _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
             self.assertIn(needle, self.get_errors_from_gen_backend_stubs(yaml_str))
 
-        # (out_name, functional_name, natively_structured, multi_output)
+        # (out_name, functional_name, natively_structured)
         cases = [
-            ("div.out", "div.Tensor", True, False),
-            ("isin.Tensor_Tensor_out", "isin.Tensor_Tensor", True, False),
-            ("bucketize.Tensor_out", "bucketize.Tensor", False, False),
-            ("sort.values_stable", "sort.stable", True, True),
-            ("_ctc_loss.out", "_ctc_loss", False, True),
+            ("div.out", "div.Tensor", True),
+            ("isin.Tensor_Tensor_out", "isin.Tensor_Tensor", True),
+            ("bucketize.Tensor_out", "bucketize.Tensor", False),
+            ("sort.values_stable", "sort.stable", True),
+            ("_ctc_loss.out", "_ctc_loss", False),
         ]
-        for out, func, structured, multi in cases:
+        for out, func, structured in cases:
             with self.subTest(op=out):
                 # Default external (functional primary) and use_out_as_primary + functional
                 # registered both always generate.
@@ -541,18 +538,14 @@ supported:
                     generates(structured_yaml)
                 else:
                     raises(structured_yaml, "is not defined as a structured operator")
-                # use_out_as_primary with only the out: a multi-output op is rejected (mixed
-                # dtypes), a non-structured single-output op is rejected (no meta to derive the
-                # output dtype, so a dtype-changing op would be mistyped), and a single-output
-                # natively-structured op defers its functional to the in-tree composite (which
-                # computes the correct dtype via meta) -- codegen succeeds either way.
+                # use_out_as_primary with only the out: a natively-structured op defers its
+                # functional to the in-tree composite at any arity; a non-structured op has
+                # no meta to derive the output dtype from and is refused.
                 naive_yaml = f"{head}{oap}supported:\n- {out}"
-                if multi:
-                    raises(naive_yaml, "is a multi-output op registered out-as-primary")
-                elif not structured:
-                    raises(naive_yaml, "is a non-structured op registered out-as-primary")
-                else:
+                if structured:
                     generates(naive_yaml)
+                else:
+                    raises(naive_yaml, "functional cannot be derived")
 
     # structured kernels are out-primary; structured: true without use_out_as_primary would
     # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
@@ -740,11 +733,10 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
 """,
         )
 
-    # Backward-compat: a default functional-primary PrivateUse1 backend (no use_out_as_primary)
-    # must generate the same registration-helper block as without the structured/out-as-primary
-    # opt-in. create_out / maybe_create_proxy are only consumed by the structured set_output path,
-    # so they must NOT be emitted for a default backend; resize_out and check_inplace are emitted
-    # either way. The opt-in case still gets all four helpers.
+    # create_out / maybe_create_proxy are only consumed by the structured set_output path, so
+    # they are emitted only when a structured op is registered -- not for a default backend,
+    # and not for an out-as-primary backend with only plain .out kernels. resize_out and
+    # check_inplace are emitted either way.
     def test_default_priv1_omits_structured_set_output_helpers(self) -> None:
         from torchgen.dest.register_dispatch_key import gen_registration_helpers
 
@@ -756,6 +748,11 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         self.assertNotIn("maybe_create_proxy", default)
         self.assertIn("resize_out", default)
         self.assertIn("check_inplace", default)
+
+        _, plain_index, _ = self._parse("- div.out")
+        plain = "\n".join(gen_registration_helpers(plain_index))
+        self.assertNotIn("create_out", plain)
+        self.assertNotIn("maybe_create_proxy", plain)
 
         _, optin_index, _ = self._parse("- mul.out:\n    structured: true")
         optin = "\n".join(gen_registration_helpers(optin_index))
@@ -824,6 +821,32 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
 }
 """,
         )
+
+    # A natively structured op defers its functional to the in-tree composite at any arity:
+    # the composite runs op.meta(), which types each output independently (sort -> Long indices).
+    def test_multi_output_structured_out_as_primary_defers(self) -> None:
+        anon = self.anonymous_definitions("- sort.values_stable")
+        self.assertIn("wrapper_PrivateUse1_values_stable_sort_out", anon)
+        self.assertNotIn("wrapper_PrivateUse1_stable_sort(", anon)
+
+
+    # A mutable variant (writes some arguments, returns the rest) is not derivable from the
+    # .out; neither codegen pass may emit anything for it, or the registration pass would
+    # reference a wrapper the definition pass never defines.
+    def test_mutable_variant_not_derived_from_out(self) -> None:
+        groups, backend_index, class_name = self._parse("- rrelu_with_noise.out")
+        g = next(g for g in groups if g.mutable is not None)
+        for target in (Target.ANONYMOUS_DEFINITION, Target.REGISTRATION):
+            gen = dest.RegisterDispatchKey(
+                backend_index,
+                target,
+                SelectiveBuilder.get_nop_selector(),
+                rocm=False,
+                symint=True,
+                class_method_name=class_name,
+                skip_dispatcher_op_registration=False,
+            )
+            self.assertIsNone(gen.gen_unstructured(g.mutable, g))
 
     # TensorList out (runtime-dependent count) can't be pre-allocated to derive the
     # functional, so we emit only the plain out wrapper and leave the functional to the
