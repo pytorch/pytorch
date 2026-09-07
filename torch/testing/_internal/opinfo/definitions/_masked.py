@@ -567,6 +567,14 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # FIXME: scatter_gather_base_kernel_func not implemented for ComplexFloat/ComplexDouble on XPU (sparse_coo inputs)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMasked",
+                "test_mask_layout",
+                device_type="xpu",
+                dtypes=(torch.complex64, torch.complex128),
+            ),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
                 unittest.skip("Skipped!"),
