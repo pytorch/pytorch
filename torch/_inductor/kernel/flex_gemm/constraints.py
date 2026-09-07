@@ -91,6 +91,11 @@ FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
     "value whose dtype conversion is the main output) and keep its dtype: write "
     "main.gather(1, indices[:, None]).squeeze(1)"
 )
+FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
+    "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
+    "[M, N] or broadcast as [1, N] / [M, 1] / [1, 1]; 1-D captures are read as "
+    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]"
+)
 FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR = (
     "FlexGEMM nested TensorSSA composition does not support captured tensors"
 )
