@@ -776,6 +776,15 @@ static void check_shape_forward(const at::Tensor& input,
                   "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
                   (std::numeric_limits<T>::max() / 2));
     }
+    for (const auto i : c10::irange(params.output_padding.size())) {
+      TORCH_CHECK(
+          params.output_padding[i] < params.stride[i] || params.output_padding[i] < dilation[i],
+          "output padding must be smaller than either stride or dilation, "
+          "but got output_padding=", params.output_padding[i],
+          " stride=", params.stride[i],
+          " dilation=", dilation[i],
+          " at dimension ", i);
+    }
     if constexpr (std::is_same_v<T, c10::SymInt>) {
       TORCH_SYM_CHECK(at::symint::size<T>(input, 1).sym_eq(weight_sizes[0]),
                "Given transposed=", transposed, ", weight of size ", weight_sizes,
