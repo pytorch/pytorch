@@ -9112,6 +9112,37 @@ class TestMPS(TestCaseMPS):
         helper(do_add=False)
 
     # Test pytorch scatter_reduce
+    def test_scatter_reduce_nan(self):
+        # amax/amin/prod go through a compare-and-swap loop; comparing floats
+        # rather than bit patterns made that loop never terminate once a NaN was
+        # stored, which hung the GPU rather than returning a wrong answer.
+        src_cpu = torch.tensor([float('nan'), -1.39, 2.37, float('nan'), -8.15, 5.01, 1.36])
+        idx_cpu = torch.tensor([0, 2, 4, 1, 4, 0, 3])
+        for reduce_str in ["amax", "amin", "prod", "sum", "mean"]:
+            for include_self in [False, True]:
+                for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+                    out_cpu = torch.zeros(5, dtype=dtype)
+                    out_mps = torch.zeros(5, dtype=dtype, device='mps')
+                    out_cpu.scatter_reduce_(0, idx_cpu, src_cpu.to(dtype), reduce_str,
+                                            include_self=include_self)
+                    out_mps.scatter_reduce_(0, idx_cpu.to('mps'), src_cpu.to(dtype).to('mps'),
+                                            reduce_str, include_self=include_self)
+                    self.assertEqual(out_cpu, out_mps, equal_nan=True)
+
+    def test_index_reduce_nan(self):
+        # Same compare-and-swap loop as test_scatter_reduce_nan, reached through
+        # index_reduce_ instead.
+        src_cpu = torch.tensor([float('nan'), 2.0, -3.0, float('nan')])
+        idx_cpu = torch.tensor([0, 1, 1, 2])
+        for reduce_str in ["amax", "amin", "prod", "mean"]:
+            for include_self in [False, True]:
+                out_cpu = torch.zeros(3)
+                out_mps = torch.zeros(3, device='mps')
+                out_cpu.index_reduce_(0, idx_cpu, src_cpu, reduce_str, include_self=include_self)
+                out_mps.index_reduce_(0, idx_cpu.to('mps'), src_cpu.to('mps'), reduce_str,
+                                      include_self=include_self)
+                self.assertEqual(out_cpu, out_mps, equal_nan=True)
+
     def test_scatter_reduce(self):
         def helper(shape, dim, idx_shape, src_shape, idx_dtype=torch.int64, reduce_str="sum"):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
