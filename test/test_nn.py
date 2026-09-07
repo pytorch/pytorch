@@ -9035,6 +9035,27 @@ class TestNNDeviceType(NNTestCase):
             # avoid this state leaking outside of this test
             torch.use_deterministic_algorithms(original_deterministic)
 
+    @onlyCUDA
+    @parametrize_test("deterministic", [False, True])
+    def test_ReflectionPad2d_empty_output_backward(self, device, deterministic):
+        original_deterministic = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(deterministic)
+
+            input_tensor = torch.ones(
+                (2, 2, 4, 4),
+                dtype=torch.float64,
+                device=device,
+                requires_grad=True,
+            )
+            output = F.pad(input_tensor, (0, 0, -4, 0), mode="reflect")
+
+            self.assertEqual(output.shape, (2, 2, 0, 4))
+            output.backward(torch.empty_like(output))
+            self.assertEqual(input_tensor.grad, torch.zeros_like(input_tensor))
+        finally:
+            torch.use_deterministic_algorithms(original_deterministic)
+
     @onlyNativeDeviceTypes
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
