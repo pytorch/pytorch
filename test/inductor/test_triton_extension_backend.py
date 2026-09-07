@@ -207,7 +207,9 @@ class TritonExtensionBackendTestBase(BaseExtensionBackendTests):
                 return ExtensionPythonWrapperCodegen()
 
         register_backend_for_device(
-            device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
+            torch.device(device).type,
+            ExtensionTritonScheduling,
+            ExtensionPythonWrapperCodegen,
         )
 
     def _test_codegen_with_custom_heuristics_module(self, device):
@@ -286,10 +288,8 @@ class TritonExtensionBackendCPUTests(TritonExtensionBackendTestBase):
 class TritonExtensionBackendAcceleratorTests(TritonExtensionBackendTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
+    def setUp(self):
+        device = self.get_primary_device()
         if not HAS_TRITON:
             raise unittest.SkipTest(f"triton is required for {device}")
         try:
@@ -304,6 +304,7 @@ class TritonExtensionBackendAcceleratorTests(TritonExtensionBackendTestBase):
             interface.raise_if_triton_unavailable(device)
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
+        super().setUp()
 
     @onlyAccelerator
     @requires_triton_backend
