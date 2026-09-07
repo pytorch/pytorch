@@ -28,6 +28,16 @@ bool Stream::is_capturing() const {
   return impl.isStreamCapturing(*this);
 }
 
+int Stream::priority() const {
+  impl::VirtualGuardImpl impl{device_.type()};
+  return impl.getStreamPriority(*this);
+}
+
+std::tuple<int, int> Stream::priority_range(DeviceType device_type) {
+  impl::VirtualGuardImpl impl{device_type};
+  return impl.getStreamPriorityRange();
+}
+
 // Not very parsable, but I don't know a good compact syntax for streams.
 // Feel free to change this into something more compact if needed.
 std::ostream& operator<<(std::ostream& stream, const Stream& s) {

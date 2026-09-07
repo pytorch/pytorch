@@ -81,6 +81,14 @@ class TestAccelerator(TestCase):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
+    def test_generic_stream_priority(self):
+        low, high = torch.Stream.priority_range()
+        self.assertGreaterEqual(low, high)
+        s1 = torch.Stream(priority=low)
+        self.assertEqual(s1.priority, low)
+        s2 = torch.Stream(priority=high)
+        self.assertEqual(s2.priority, high)
+
     def test_current_stream_query(self):
         s = torch.accelerator.current_stream()
         self.assertEqual(torch.accelerator.current_stream(s.device), s)

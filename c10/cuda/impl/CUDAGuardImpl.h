@@ -95,6 +95,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDAStream stream{s};
     return reinterpret_cast<void*>(stream.stream());
   }
+  int getStreamPriority(const Stream s) const override {
+    CUDAStream stream{s};
+    return stream.priority();
+  }
+  std::tuple<int, int> getStreamPriorityRange() const override {
+    return CUDAStream::priority_range();
+  }
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
   }
