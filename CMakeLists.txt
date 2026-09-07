@@ -540,6 +540,8 @@ if(USE_CMAKE_INSTRUMENTATION)
 endif()
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
+cmake_dependent_option(USE_KLEIDIAI_SME "Build KleidiAI's SME/SME2 kernels (skip on CPUs without SME, e.g. GB10)." ON
+                        "USE_KLEIDIAI" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
 set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
 if(LINUX AND CPU_AARCH64)
