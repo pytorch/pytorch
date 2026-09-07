@@ -5015,15 +5015,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
                 return self._reduce_function_by_value(obj)
+            resolved: Any = None
             if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
+                resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                if f is not obj:
-                    # See Note [Reconstructing a function a guard is rooted at].
-                    if id(obj) not in self.guard_tree_values:
-                        return _Missing, ("fqn mismatch",)
-                    return self._reduce_function_by_value(obj)
+                    resolved = getattr(resolved, name, None)
+            if resolved is not obj:
+                # See Note [Reconstructing a function a guard is rooted at].
+                # A module absent from sys.modules (an exec-created function, or
+                # __module__ is None) is an fqn mismatch too: reference-pickling
+                # would fail, so rebuild a guarded function by value and prune an
+                # unguarded one, rather than fall through and fail the dump.
+                if id(obj) not in self.guard_tree_values:
+                    return _Missing, ("fqn mismatch",)
+                return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
             # Decide from the receiver's FATE, not by reading it. This branch
             # emits a bound method, so its own output comes back through here
@@ -5145,11 +5150,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         if isinstance(obj, _get_unsupported_types()):
             return True
         if inspect.isfunction(obj) and "<locals>" not in obj.__qualname__:
+            # Mirror reducer_override: an absent module is an fqn mismatch, so an
+            # unguarded such function reduces to _Missing while a guarded one is
+            # rebuilt by value.
+            resolved: Any = None
             if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
+                resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                return f is not obj and id(obj) not in self.guard_tree_values
+                    resolved = getattr(resolved, name, None)
+            return resolved is not obj and id(obj) not in self.guard_tree_values
         return False
 
     def _prune_unguarded_attributes(self, obj: Any) -> None:
