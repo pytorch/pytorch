@@ -4187,6 +4187,45 @@ class TestMaxAutotuneSubproc(TestCase):
                 ),
             )
 
+    def test_async_autotuner_does_not_reuse_future_across_modules(self):
+        """A Future belongs to the generated module it was scheduled for.
+
+        choice_hash_to_future is process-global and never invalidated. Keyed on
+        hash_key() + inputs_key alone, two compilations that share shapes and config
+        collide, so start() sees the key already present and skips submitting, and
+        get_results() hands back the earlier compilation's Future. If that one
+        aborted -- or its cache dir has since been deleted -- the subprocess cannot
+        load the module, returns inf, and every choice looks unbenchmarkable.
+
+        Including the module path in the key keeps a Future scoped to its own module.
+        """
+        inputs_key = "inputs"
+
+        def choice_for(module_path):
+            # Same hash_key on purpose: identical shapes and config, different
+            # generated module -- the case the bare key cannot tell apart.
+            choice = mock.Mock(hash_key=lambda: "same")
+            choice.bmreq.module_path = module_path
+            return choice
+
+        stale = choice_for("/tmp/torchinductor_old/aa/kernel.py")
+        fresh = choice_for("/tmp/torchinductor_new/bb/kernel.py")
+
+        self.assertNotEqual(
+            AsyncAutotuner.get_choice_hash(stale, inputs_key),
+            AsyncAutotuner.get_choice_hash(fresh, inputs_key),
+        )
+
+        # A Future left over for the stale module must not be served to the fresh one.
+        stale_future = mock.Mock()
+        stale_future.result.return_value = float("inf")
+        with mock.patch.object(
+            AsyncAutotuner,
+            "choice_hash_to_future",
+            {AsyncAutotuner.get_choice_hash(stale, inputs_key): stale_future},
+        ):
+            self.assertEqual({}, AsyncAutotuner.get_results([fresh], inputs_key))
+
     @skipIfXpu(msg="XPU not support multiprocessing tensor reduction")
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
