@@ -25,6 +25,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
+from torch._inductor.utils import ceildiv
 from torch._prims_common import is_expandable_to
 from torch._subclasses.fake_tensor import is_fake
 
@@ -209,6 +210,17 @@ def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     if arg.dtype in (torch.bool, torch.float4_e2m1fn_x2):
         return arg.view(torch.uint8)
     return arg
+
+
+def quack_blockscaled_scale_view(
+    scale: torch.Tensor, mn: int, storage_k: int, format_name: str
+) -> torch.Tensor:
+    """View a public flat SWIZZLE_32_4_4 scale as QuACK's (rm, rk, 32, 4, 4) blocked tensor."""
+    from torch._vendor.quack.blockscaled import operand as blockscaled
+
+    format = blockscaled.BlockScaledFormat.from_name(format_name)
+    sf_k = ceildiv(format.logical_k(storage_k), format.sf_vec_size)
+    return scale.view(ceildiv(mn, 128), ceildiv(sf_k, 4), 32, 4, 4)
 
 
 def normalize_c(
@@ -446,6 +458,9 @@ def gemm_epimod(
     C: torch.Tensor | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
+    SFA: torch.Tensor | None = None,
+    SFB: torch.Tensor | None = None,
+    blockscaled_format: str | None = None,
     out: torch.Tensor,
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
@@ -456,11 +471,20 @@ def gemm_epimod(
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected; ``None`` takes
     QuACK's untuned default for the remaining ``config_constraints``.
     """
+    if blockscaled_format is not None:
+        if SFA is None or SFB is None:
+            raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
+        SFA = quack_blockscaled_scale_view(
+            SFA, a.shape[0], a.shape[1], blockscaled_format
+        )
+        SFB = quack_blockscaled_scale_view(
+            SFB, b.shape[1], b.shape[0], blockscaled_format
+        )
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
@@ -552,7 +576,7 @@ def gemm_epimod(
                 epimod,
                 a,
                 b,
-                None,
+                SFA,
                 output_buffers,
                 operands,
                 config_constraints,
@@ -575,6 +599,16 @@ def gemm_epimod(
         # Layout callbacks predicate logical stores but do not own padded bytes.
         if initialize_local_reduce_out is not None:
             initialize_local_reduce_out.zero_()
+        blockscaled_kwargs = (
+            {}
+            if blockscaled_format is None
+            else {
+                "SFA": SFA,
+                "SFB": SFB,
+                "bs_format_a": blockscaled_format,
+                "bs_format_b": blockscaled_format,
+            }
+        )
         result = epimod(
             a,
             b,
@@ -587,6 +621,7 @@ def gemm_epimod(
             tuned=False,
             concat_layout=concat_layout,
             compile_dispatch=False,
+            **blockscaled_kwargs,
             **operands,
         )
     return result[main_name]
