@@ -15386,7 +15386,7 @@
 
 - func: special_airy_ai.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: special_airy_ai_out
+    CPU, CUDA, MPS, XPU: special_airy_ai_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

@@ -3156,5 +3156,176 @@ float erfcx(T x) {
   }
 }
 
+// Copy-n-paste from airy_ai_forward in aten/src/ATen/native/Math.h
+// See note [3-Clause BSD License for the Cephes Math Library].
+template <typename T>
+inline float airy_ai_forward(T x_) {
+  constexpr float AN[] = {
+      +3.46538101525629032477e-01,
+      +1.20075952739645805542e+01,
+      +7.62796053615234516538e+01,
+      +1.68089224934630576269e+02,
+      +1.59756391350164413639e+02,
+      +7.05360906840444183113e+01,
+      +1.40264691163389668864e+01,
+      +9.99999999999999995305e-01,
+  };
+
+  constexpr float AD[] = {
+      +5.67594532638770212846e-01,
+      +1.47562562584847203173e+01,
+      +8.45138970141474626562e+01,
+      +1.77318088145400459522e+02,
+      +1.64234692871529701831e+02,
+      +7.14778400825575695274e+01,
+      +1.40959135607834029598e+01,
+      +1.00000000000000000470e+00,
+  };
+
+  constexpr float AFN[] = {
+      -1.31696323418331795333e-01,
+      -6.26456544431912369773e-01,
+      -6.93158036036933542233e-01,
+      -2.79779981545119124951e-01,
+      -4.91900132609500318020e-02,
+      -4.06265923594885404393e-03,
+      -1.59276496239262096340e-04,
+      -2.77649108155232920844e-06,
+      -1.67787698489114633780e-08,
+  };
+
+  constexpr float AFD[] = {
+      +1.33560420706553243746e+01,
+      +3.26825032795224613948e+01,
+      +2.67367040941499554804e+01,
+      +9.18707402907259625840e+00,
+      +1.47529146771666414581e+00,
+      +1.15687173795188044134e-01,
+      +4.40291641615211203805e-03,
+      +7.54720348287414296618e-05,
+      +4.51850092970580378464e-07,
+  };
+
+  constexpr float AGN[] = {
+      +1.97339932091685679179e-02,
+      +3.91103029615688277255e-01,
+      +1.06579897599595591108e+00,
+      +9.39169229816650230044e-01,
+      +3.51465656105547619242e-01,
+      +6.33888919628925490927e-02,
+      +5.85804113048388458567e-03,
+      +2.82851600836737019778e-04,
+      +6.98793669997260967291e-06,
+      +8.11789239554389293311e-08,
+      +3.41551784765923618484e-10,
+  };
+
+  constexpr float AGD[] = {
+      +9.30892908077441974853e+00,
+      +1.98352928718312140417e+01,
+      +1.55646628932864612953e+01,
+      +5.47686069422975497931e+00,
+      +9.54293611618961883998e-01,
+      +8.64580826352392193095e-02,
+      +4.12656523824222607191e-03,
+      +1.01259085116509135510e-04,
+      +1.17166733214413521882e-06,
+      +4.91834570062930015649e-09,
+  };
+
+  const float x = static_cast<float>(x_);
+
+  if (::metal::isinf(x)) {
+    return NAN;
+  }
+
+  if (x > 103.892) {
+    return 0.0;
+  }
+
+  if (x < -2.09) {
+    const float z = 1.0 / (-2.0 * x * ::metal::precise::sqrt(-x) / 3.0);
+
+    float afn = 0.0;
+    float afd = 0.0;
+    for (auto index = 0; index <= 8; index++) {
+      afn = afn * (z * z) + AFN[index];
+      afd = afd * (z * z) + AFD[index];
+    }
+
+    float agn = 0.0;
+    for (auto index = 0; index <= 10; index++) {
+      agn = agn * (z * z) + AGN[index];
+    }
+
+    float agd = 0.0;
+    for (auto index = 0; index <= 9; index++) {
+      agd = agd * (z * z) + AGD[index];
+    }
+
+    const float t = -2.0 * x * ::metal::precise::sqrt(-x) / 3.0 + 0.25 * M_PI_F;
+
+    return 5.64189583547756286948e-01 /
+        ::metal::precise::sqrt(::metal::precise::sqrt(-x)) *
+        (::metal::precise::sin(t) * (1.0 + z * z * afn / afd) -
+         ::metal::precise::cos(t) * (z * agn / agd));
+  }
+
+  int domain_flag = 0;
+  float ai = 0.0;
+
+  if (x >= 2.09) {
+    domain_flag = 5;
+
+    const float zeta = 2.0 * x * ::metal::precise::sqrt(x) / 3.0;
+
+    float an = 0.0;
+    float ad = 0.0;
+    for (auto index = 0; index <= 7; index++) {
+      an = an * (1.0 / zeta) + AN[index];
+      ad = ad * (1.0 / zeta) + AD[index];
+    }
+
+    ai = 5.64189583547756286948e-01 * (an / ad) /
+        (2.0 * ::metal::precise::sqrt(::metal::precise::sqrt(x)) *
+         ::metal::precise::exp(zeta));
+
+    if (x > 8.3203353) {
+      return ai;
+    }
+  }
+
+  float f = 1.0;
+  float g = x;
+  float k = 1.0;
+
+  float m = 1.0;
+  float n = x;
+  float t = 1.0;
+  const float z = x * x * x;
+
+  while (t > ::metal::numeric_limits<float>::epsilon()) {
+    m *= z;
+    k += 1.0;
+    m /= k;
+    n *= z;
+    k += 1.0;
+    n /= k;
+    m /= k;
+    f += m;
+    k += 1.0;
+    n /= k;
+    g += n;
+
+    t = ::metal::fabs(m / f);
+  }
+
+  if ((domain_flag & 1) == 0) {
+    return 0.355028053887817239260 * f - 0.258819403792806798405 * g;
+  }
+
+  return ai;
+} // airy_ai_forward(T x)
+
 } // namespace metal
 } // namespace c10

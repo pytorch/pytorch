@@ -16358,10 +16358,10 @@ class TestFallbackWarning(TestCase):
 
     def _get_not_implemented_op(self):
         # Should return fn, args, kwargs, string_version. Uses an op with no MPS
-        # kernel; change it if 'special.airy_ai' ever gets one.
-        return (torch.special.airy_ai,
-                [torch.tensor([1.0], device='mps')], {},
-                "torch.special.airy_ai(torch.tensor([1.0], device='mps'))")
+        # kernel; change it if 'linalg.ldl_factor' ever gets one.
+        return (torch.linalg.ldl_factor,
+                [torch.eye(2, device='mps')], {},
+                "torch.linalg.ldl_factor(torch.eye(2, device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
