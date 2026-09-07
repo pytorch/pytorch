@@ -1,0 +1,65 @@
+diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
+index a16883f..48871d7 100644
+--- a/quack/grouped_reduce.py
++++ b/quack/grouped_reduce.py
+@@ -264,0 +265 @@ class GroupedLocalReduceOutputLayout:
++    validate_carrier_fn: object | None = None
+@@ -276,0 +278,2 @@ class GroupedLocalReduceOutputLayout:
++        if self.validate_carrier_fn is not None and not callable(self.validate_carrier_fn):
++            raise TypeError("output layout carrier validator must be callable")
+@@ -288,0 +292 @@ class GroupedLocalReduceOutputLayout:
++            semantic_value_key(self.validate_carrier_fn, set(), force_source=True),
+@@ -623,6 +627,7 @@ class GroupedReduceBase(EpiOp):
+-        elif value.ndim not in (2, 3):
+-            raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
+-        if value.stride(-1) != 1:
+-            raise ValueError(
+-                f"{self.name}: compressed aux buffer must be contiguous in its last dim"
+-            )
++        else:
++            if value.ndim not in (2, 3):
++                raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
++            if value.stride(-1) != 1:
++                raise ValueError(
++                    f"{self.name}: compressed aux buffer must be contiguous in its last dim"
++                )
+@@ -686,0 +692,2 @@ class GroupedReduceBase(EpiOp):
++        if self.output_layout.validate_carrier_fn is not None:
++            self.output_layout.validate_carrier_fn(value)
+diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
+index 2c8ee5c..61531b5 100644
+--- a/tests/test_grouped_reduce.py
++++ b/tests/test_grouped_reduce.py
+@@ -290,0 +291,32 @@ def test_two_argument_finalizer_rejects_swap_ab():
++def test_output_layout_owns_carrier_stride_contract():
++    """Custom callbacks may interpret strides that dense sinks reject."""
++
++    def tensor_fn(tensor, _transposed):
++        return tensor
++
++    def carrier_shape(batch, rows, cols):
++        return (batch, rows, cols)
++
++    layout = GroupedLocalReduceOutputLayout(
++        "strided",
++        tensor_fn,
++        carrier_shape,
++        carrier_shape,
++        3,
++    )
++    op = GroupedLocalReduce("g", axis=1, group=16, output_layout=layout)
++    carrier = torch.empty(1, 4, 8).transpose(-1, -2)
++    assert carrier.shape == (1, 8, 4)
++    assert carrier.stride(-1) != 1
++    assert op.host_arg_key(carrier)[0] is cutlass.Float32
++    op.host_validate(
++        carrier,
++        m=8,
++        n=64,
++        tile_M=128,
++        tile_N=64,
++        batch=None,
++        varlen_m=False,
++    )
++
++
