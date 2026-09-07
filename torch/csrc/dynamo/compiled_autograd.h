@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/TensorGeometry.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
@@ -462,12 +463,8 @@ class CompiledNodeArgs {
   void collect(const ska::flat_hash_map<std::string, V>& m) {
     collect_size(m.size());
 
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
@@ -965,12 +962,8 @@ class SwapSavedVariables {
 
   template <typename V>
   void before(ska::flat_hash_map<std::string, V>& m) {
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (auto& k : keys) {
       before(m.at(k));
@@ -1338,11 +1331,11 @@ struct IValuePacker<TypeAndSize> {
     return tuple;
   }
   static TypeAndSize unpack(const at::IValue& t) {
-    auto tuple =
+    auto [sym_sizes, options] =
         t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
     TypeAndSize result;
-    result.sym_sizes = std::get<0>(tuple);
-    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    result.sym_sizes = std::move(sym_sizes);
+    result.options = unpack_TensorOptions(options);
     return result;
   }
   static at::TypePtr packed_type() {

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from .nv_universal_gemm import (
+    add_nv_universal_addmm_choices,
     add_nv_universal_gemm_choices,
     add_nv_universal_grouped_gemm_choices,
     add_nv_universal_scaled_gemm_choices,
@@ -11,6 +12,7 @@ from .nv_universal_gemm import (
 __all__ = [
     "GemmVariant",
     "NVUniversalGemmCaller",
+    "add_nv_universal_addmm_choices",
     "add_nv_universal_gemm_choices",
     "add_nv_universal_grouped_gemm_choices",
     "add_nv_universal_scaled_gemm_choices",

@@ -28,10 +28,6 @@ class OpenRegStream {
     return unwrap() == other.unwrap();
   }
 
-  bool operator!=(const OpenRegStream& other) const noexcept {
-    return unwrap() != other.unwrap();
-  }
-
   operator orStream_t() const {
     return stream();
   }

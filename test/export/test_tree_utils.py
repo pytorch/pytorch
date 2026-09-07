@@ -4,11 +4,13 @@ from collections import OrderedDict
 import torch
 from torch._dynamo.test_case import TestCase
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.utils._pytree import tree_structure
 
 
 class TestTreeUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_reorder_kwargs(self):
         original_kwargs = {"a": torch.tensor(0), "b": torch.tensor(1)}
         user_kwargs = {"b": torch.tensor(2), "a": torch.tensor(3)}

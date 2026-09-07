@@ -5,11 +5,31 @@ import operator
 import sympy
 
 import torch
+from torch._inductor import config
 from torch._inductor.codegen.common import deduce_output_dtype_by_name
-from torch._inductor.optimize_indexing import convert_index_expr_to_value_expr
+from torch._inductor.loop_body import LoopBody
+from torch._inductor.optimize_indexing import (
+    convert_index_expr_to_value_expr,
+    remove_redundant_argreduce_indices,
+)
+from torch._inductor.virtualized import V
 from torch.fx import Graph
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._sympy.value_ranges import ValueRanges
+
+
+class _FakeSizeVars:
+    @staticmethod
+    def simplify_with_ranges(expr, var_ranges):
+        return expr
+
+    @staticmethod
+    def statically_known_equals(left, right):
+        return sympy.expand(left - right) == 0
+
+
+class _FakeGraph:
+    sizevars = _FakeSizeVars()
 
 
 class TestOptimizeIndexing(TestCase):
@@ -48,6 +68,85 @@ class TestOptimizeIndexing(TestCase):
                 return self._bounds
 
         return FakeLoopBody()
+
+    def _make_argreduce_loop_body(self, logical_index):
+        r0, r1 = sympy.symbols("r0 r1", integer=True, nonnegative=True)
+
+        def fn(index, reduction_index):
+            value = V.ops.constant(1.0, torch.float32)
+            index = V.ops.index_expr(logical_index(*reduction_index), torch.int64)
+            return V.ops.reduction(torch.int64, torch.float32, "argmax", (value, index))
+
+        with (
+            config.patch(constant_and_index_propagation=False),
+            V.set_graph_handler(_FakeGraph()),
+        ):
+            loop_body = LoopBody(
+                fn,
+                ([], [r0, r1]),
+                {r0: 4, r1: 8},
+                [],
+                [r0, r1],
+            )
+        return loop_body
+
+    @staticmethod
+    def _argreduce_nodes(loop_body):
+        graph = loop_body.root_block.graph
+        reduction = graph.find_nodes(op="call_method", target="reduction")[0]
+        value, index_expr = reduction.args[-1]
+        get_index = index_expr.args[1]
+        return graph, reduction, value, index_expr, get_index
+
+    def test_remove_redundant_argreduce_index(self):
+        loop_body = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
+        graph, reduction, value, index_expr, get_index = self._argreduce_nodes(
+            loop_body
+        )
+        with V.set_graph_handler(_FakeGraph()):
+            remove_redundant_argreduce_indices([loop_body])
+
+        self.assertIs(reduction.args[-1], value)
+        self.assertIn(index_expr, graph.nodes)
+        self.assertIn(get_index, graph.nodes)
+
+    def test_keep_non_native_argreduce_index(self):
+        loop_body = self._make_argreduce_loop_body(lambda r0, r1: 4 * r1 + r0)
+        graph, reduction, _, index_expr, get_index = self._argreduce_nodes(loop_body)
+        with V.set_graph_handler(_FakeGraph()):
+            remove_redundant_argreduce_indices([loop_body])
+
+        self.assertIs(reduction.args[-1][1], index_expr)
+        self.assertIn(index_expr, graph.nodes)
+        self.assertIn(get_index, graph.nodes)
+
+    def test_keep_shared_non_native_argreduce_index(self):
+        original = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
+        r0, r1 = original.reduce_vars
+        with V.set_graph_handler(_FakeGraph()):
+            native = LoopBody(
+                original,
+                ([], [r0, r1]),
+                original.var_ranges,
+                [],
+                [r0, r1],
+                allow_same_symbol_in_index=True,
+            )
+            reordered = LoopBody(
+                original,
+                ([], [r0, r1]),
+                original.var_ranges,
+                [],
+                [r0, r1],
+                allow_same_symbol_in_index=True,
+            )
+            reordered.indexing_exprs["index0"] = 4 * r1 + r0
+            remove_redundant_argreduce_indices([native, reordered])
+
+        self.assertIs(native.root_block.graph, reordered.root_block.graph)
+        self.assertIsInstance(self._argreduce_nodes(native)[1].args[-1], tuple)
+        self.assertIsInstance(self._argreduce_nodes(reordered)[1].args[-1], tuple)
+        self.assertEqual(reordered.indexing_exprs["index0"], 4 * r1 + r0)
 
     def test_index_expr_mixed_use_converts_in_place(self):
         # When the same index_expr is used both as an index (load) and as a

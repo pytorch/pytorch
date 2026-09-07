@@ -1,14 +1,17 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import os
 import re
 import unittest
+from types import SimpleNamespace
 
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -92,6 +95,91 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
 )
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
+    @staticmethod
+    def _benchmark_lock_call(events):
+        def kernel(index):
+            return SimpleNamespace(
+                clone_args=lambda *args, **kwargs: (args, kwargs),
+                run=lambda *args, **kwargs: events.append(f"run_{index}"),
+                device_props=SimpleNamespace(type="cuda"),
+            )
+
+        multi_kernel_call = object.__new__(MultiKernelCall)
+        multi_kernel_call._kernels = [kernel(0), kernel(1)]
+        multi_kernel_call.arg_index = {
+            0: [slice(0, 1)],
+            1: [slice(0, 1)],
+        }
+        return multi_kernel_call
+
+    def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
+        events = []
+        multi_kernel_call = self._benchmark_lock_call(events)
+
+        @contextlib.contextmanager
+        def benchmark_lock():
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        def benchmark(fn, **kwargs):
+            index = len([event for event in events if event.startswith("benchmark_")])
+            events.append(f"benchmark_{index}")
+            fn()
+            return 2.0 - index
+
+        previous = set_gpu_benchmark_lock_context(benchmark_lock)
+        try:
+            with unittest.mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                side_effect=benchmark,
+            ):
+                timings = multi_kernel_call.benchmark_sub_kernels("arg")
+        finally:
+            set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(timings, [2.0, 1.0])
+        self.assertEqual(
+            events,
+            [
+                "lock_enter",
+                "benchmark_0",
+                "run_0",
+                "benchmark_1",
+                "run_1",
+                "lock_exit",
+            ],
+        )
+
+    def test_benchmark_sub_kernels_releases_gpu_lock_on_failure(self):
+        events = []
+        multi_kernel_call = self._benchmark_lock_call(events)
+
+        @contextlib.contextmanager
+        def benchmark_lock():
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        previous = set_gpu_benchmark_lock_context(benchmark_lock)
+        try:
+            with (
+                unittest.mock.patch(
+                    "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                    side_effect=RuntimeError("benchmark failed"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "benchmark failed"),
+            ):
+                multi_kernel_call.benchmark_sub_kernels("arg")
+        finally:
+            set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(events, ["lock_enter", "lock_exit"])
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)

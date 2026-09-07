@@ -375,7 +375,7 @@ class BackendConfig:
 
     def set_backend_pattern_config(self, config: BackendPatternConfig) -> BackendConfig:
         """
-        Set the config for an pattern that can be run on the target backend.
+        Set the config for a pattern that can be run on the target backend.
         This overrides any existing config for the given pattern.
         """
         # Avoid circular dependencies

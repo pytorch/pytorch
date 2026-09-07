@@ -82,7 +82,7 @@ lookup_seed = make_prim(
 )
 # inductor_random() doesn't accept a dtype.
 # instead, its lowering always burns in float32, and conversions to a different type
-# are explicit in the graph. We therefore need this impl (used during tracing) to hardcoded
+# are explicit in the graph. We therefore need this impl (used during tracing) to hardcode
 # the dtype, so it always faithfully produces a float32 tensor during tracing,
 # even if the default dtype is set to something else.
 random = make_prim(

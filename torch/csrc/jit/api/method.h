@@ -69,7 +69,7 @@ struct TORCH_API Method : public torch::IMethod {
       std::vector<std::string>& /*argumentNames*/ /*argumentNamesOut*/)
       const override;
 
-  // Methods are uniqued owned by a single module. This raw pointer allows
+  // Methods are uniquely owned by a single module. This raw pointer allows
   // looking up the module.
   ObjectPtr owner_;
 

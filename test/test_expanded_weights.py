@@ -1098,9 +1098,10 @@ def supported_inputs(op, sample_inputs, supported_inputs=True):
         ]
         batched_input_size = dict(zip(convolutions, [3, 4, 5]))
         if op.name == "nn.functional.linear":
-            is_supported_input = (
-                input.input.dim() > 1
-            )  # input of rank 1 means no batch dim
+            # input of rank 1 means no batch dim; the per-sample-grad
+            # computation assumes a 2-D weight
+            weight = input.args[0]
+            is_supported_input = input.input.dim() > 1 and weight.dim() == 2
         elif op.name == "nn.functional.layer_norm":
             normalized_shape = input.args[0]
             is_supported_input = (
@@ -1159,8 +1160,10 @@ def clone_if_tensor(t):
         return t
 
 
-instantiate_device_type_tests(TestExpandedWeightHelperFunction, globals())
-instantiate_device_type_tests(TestExpandedWeightFunctional, globals())
-instantiate_device_type_tests(TestExpandedWeightModule, globals())
+instantiate_device_type_tests(
+    TestExpandedWeightHelperFunction, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(TestExpandedWeightFunctional, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestExpandedWeightModule, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

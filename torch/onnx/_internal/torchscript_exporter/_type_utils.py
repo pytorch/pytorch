@@ -160,7 +160,7 @@ class JitScalarType(enum.IntEnum):
     def from_onnx_type(
         cls, onnx_type: int | _C_onnx.TensorProtoDataType | None
     ) -> JitScalarType:
-        """Convert a ONNX data type to JitScalarType.
+        """Convert an ONNX data type to JitScalarType.
 
         Args:
             onnx_type: A torch._C._onnx.TensorProtoDataType to create a JitScalarType from

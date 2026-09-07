@@ -20,12 +20,14 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
+from torch._library.opaque_object import is_opaque_constant_type
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
+    bytecode_from_template,
     create_binary_subscr,
     create_build_tuple,
     create_call_function,
@@ -46,6 +48,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
@@ -61,6 +64,25 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
     from .symbolic_convert import InstructionTranslatorBase
+
+
+# Templates for the runtime-gated pregraph profiler marker (see
+# PyCodegen.make_call_generated_code). Emitted via bytecode_from_template so the
+# `if` compiles to the correct per-Python-version jump opcodes. The values
+# (profiler flag, marker fns) are pre-loaded into the mapped locals by the caller.
+def _pregraph_marker_enter_template(is_profiler_enabled, utils_module):
+    # `cm` is remapped to the caller's shared cm var and read by the exit
+    # template, so it is not "unused" despite what a local static check sees.
+    # The marker fn is looked up on utils_module INSIDE the branch so its attr
+    # load only runs when a profiler is active.
+    cm = None
+    if is_profiler_enabled:
+        cm = utils_module.record_pregraph_bytecode_enter()  # noqa: F841
+
+
+def _pregraph_marker_exit_template(cm, utils_module):
+    if cm is not None:
+        utils_module.record_pregraph_bytecode_exit(cm)
 
 
 @dataclasses.dataclass
@@ -304,7 +326,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            # Recompute from the operands at runtime instead of burning in the value
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+            if allow_cache and value in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -368,6 +399,23 @@ class PyCodegen:
 
                 self.add_push_null(gen_fn)
                 output.extend(create_call_function(0, False))
+            elif isinstance(value, CustomClassObjectVariable):
+                try:
+                    py_value = value.as_python_constant()
+                except NotImplementedError:
+                    py_value = None
+
+                if is_opaque_constant_type(type(py_value)):
+                    self.add_push_null(
+                        lambda: self.load_import_from(
+                            "torch._library.fake_class_registry",
+                            "maybe_unwrap_fake_script_object",
+                        )
+                    )
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
+                    output.extend(create_call_function(1, False))
+                else:
+                    self.load_graph_output(graph_outputs[graph_outputs_key].index)
             else:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
         elif isinstance(value, NNModuleVariable):
@@ -425,13 +473,6 @@ class PyCodegen:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
-
-    def clear_tempvars(self) -> None:
-        for key, var in list(self.tempvars.items()):
-            if var is not None:
-                self._output.append(self.create_delete(var))
-            del self.tempvars[key]
-        self.top_of_stack = None
 
     def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
@@ -710,16 +751,55 @@ class PyCodegen:
         )
 
         cm_var = None
+        marker_module_var = None
         if config.record_runtime_overhead:
-            # Record the pregraph bytecode start
-            self.add_push_null(
-                lambda: self.load_import_from(
-                    utils.__name__, "record_pregraph_bytecode_enter"
+            # Runtime profiler gate for the "Pregraph bytecode" marker: emit it
+            # into the compiled bytecode but only call it when a profiler is
+            # actually attached, so a non-profiled call pays ~nothing. The `if` is
+            # emitted via bytecode_from_template so its jump opcodes are correct
+            # on every supported Python version.
+            #   cm = None
+            #   if torch.autograd.profiler._is_profiler_enabled:
+            #       cm = record_pregraph_bytecode_enter()
+            #   <reconstruct graph args>
+            #   if cm is not None:
+            #       record_pregraph_bytecode_exit(cm)
+            cm_var = self.new_var()
+            marker_module_var = self.new_var()
+            enter_map = {
+                "is_profiler_enabled": self.new_var(),
+                "utils_module": marker_module_var,
+                "cm": cm_var,
+            }
+            # Pre-load the template's locals: the profiler flag and the
+            # torch._dynamo.utils module (the marker fns are looked up on it
+            # inside the gated branch, so their attr loads only run when
+            # profiling). Reconstruct inline (not via load_import_from, whose CSE
+            # temp would get an unconditional DELETE_FAST from clear_tempvars()).
+            self(
+                AttrSource(
+                    self.tx.import_source("torch.autograd.profiler"),
+                    "_is_profiler_enabled",
                 )
             )
-            self.extend_output(create_call_function(0, False))
-            cm_var = self.new_var()
-            self.store(cm_var)
+            self.extend_output(
+                [
+                    create_instruction(
+                        "STORE_FAST", argval=enter_map["is_profiler_enabled"]
+                    )
+                ]
+            )
+            self(self.tx.import_source(utils.__name__))
+            self.extend_output(
+                [create_instruction("STORE_FAST", argval=marker_module_var)]
+            )
+            self.extend_output(
+                bytecode_from_template(
+                    _pregraph_marker_enter_template, varname_map=enter_map
+                )
+            )
+            # noreturn leaves the template's implicit `return None` on the stack.
+            self.pop_top()
 
         arg_varnames = []
         for i, arg in enumerate(graphargs):
@@ -742,20 +822,21 @@ class PyCodegen:
                 self.add_pycode(f"{arg_varname} = {{}}", arg)
 
         if config.record_runtime_overhead:
-            # Record the pregraph bytecode end
-            self.add_push_null(
-                lambda: self.load_import_from(
-                    utils.__name__, "record_pregraph_bytecode_exit"
+            # Record the pregraph bytecode end, matched to the gated start above:
+            #   if cm is not None: record_pregraph_bytecode_exit(cm)
+            # Reuses cm and the utils module the enter block already loaded.
+            if cm_var is None or marker_module_var is None:
+                raise AssertionError("enter block must set cm_var / marker_module_var")
+            exit_map = {"cm": cm_var, "utils_module": marker_module_var}
+            self.extend_output(
+                bytecode_from_template(
+                    _pregraph_marker_exit_template, varname_map=exit_map
                 )
             )
-            if cm_var is None:
-                raise AssertionError("cm_var must not be None")
-            self.extend_output([self.create_load(cm_var)])
-            self.extend_output(create_call_function(1, False))
+            # noreturn leaves the template's implicit `return None` on the stack.
             self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
-        self.clear_tempvars()
         self.add_pycode(
             f"__graph_out = {fn_name}({', '.join(arg_varnames)})",
         )

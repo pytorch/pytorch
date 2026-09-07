@@ -1,4 +1,5 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
+#include <ATen/core/functional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <iostream>
@@ -37,18 +38,8 @@ TensorMetadata::TensorMetadata(
 void TensorMetadata::build_guard(const torch::dynamo::LocalState& local_state) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic_, "Not support symbolic shape now");
-  std::vector<std::optional<c10::SymInt>> sym_sizes;
-  std::vector<std::optional<c10::SymInt>> sym_strides;
-  std::transform(
-      sizes_.begin(),
-      sizes_.end(),
-      std::back_inserter(sym_sizes),
-      [](int64_t size) { return std::optional<c10::SymInt>(size); });
-  std::transform(
-      strides_.begin(),
-      strides_.end(),
-      std::back_inserter(sym_strides),
-      [](int64_t stride) { return std::optional<c10::SymInt>(stride); });
+  auto sym_sizes = c10::fmap<std::optional<c10::SymInt>>(sizes_);
+  auto sym_strides = c10::fmap<std::optional<c10::SymInt>>(strides_);
   tensor_check_ = torch::dynamo::TensorCheck(
       local_state,
       nullptr,

@@ -4,32 +4,35 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Mapping, Sequence
 
     from torch.cuda import _CudaDeviceProperties
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
-    def _record_missing_op(target: Any) -> None:
+    def _record_missing_op(target: object) -> None:
         with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
 
-    def _record_missing_op(target: Any) -> None:  # type: ignore[misc]
+    def _record_missing_op(target: object) -> None:  # type: ignore[misc]
         pass
 
 
 class OperatorIssue(RuntimeError):
     @staticmethod
-    def operator_str(target: Any, args: list[Any], kwargs: dict[str, Any]) -> str:
+    def operator_str(
+        target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> str:
         lines = [f"target: {target}"] + [
             f"args[{i}]: {arg}" for i, arg in enumerate(args)
         ]
@@ -39,13 +42,17 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(
+        self, target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> None:
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(
+        self, target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> None:
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -64,9 +71,9 @@ class LoweringException(OperatorIssue):
     def __init__(
         self,
         exc: Exception,
-        target: Any,
-        args: list[Any],
-        kwargs: dict[str, Any],
+        target: object,
+        args: Sequence[object],
+        kwargs: Mapping[str, object],
         stack_trace: str | None = None,
     ) -> None:
         msg = f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
@@ -127,6 +134,10 @@ class CppCompileError(RuntimeError):
 
 
 class CUDACompileError(CppCompileError):
+    pass
+
+
+class XPUCompileError(CppCompileError):
     pass
 
 

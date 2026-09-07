@@ -34,7 +34,7 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
 
     For each subgraph output, check if any caller has a getitem for that index
     with users. If no caller uses it, remove the output.
-    If the user in caller is an output node, to simply the algorithm, we do not recursively check
+    If the user in caller is an output node, to simplify the algorithm, we do not recursively check
     if the caller's output is used further up in the call chain.
 
     Args:

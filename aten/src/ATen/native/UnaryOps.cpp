@@ -1,12 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/MemoryOverlap.h>
-#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/WrapDimUtils.h>
 
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
@@ -249,7 +246,7 @@ TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
 }
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
@@ -490,7 +487,7 @@ Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
 Tensor& rad2deg_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "rad2deg is not supported for complex tensors.");
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
@@ -508,7 +505,7 @@ Tensor rad2deg(const Tensor& self) {
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 Tensor& deg2rad_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
@@ -607,7 +604,7 @@ Tensor imag(const Tensor& self) {
     }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
-    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
+    TORCH_CHECK_TYPE(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
 }
 
@@ -844,7 +841,7 @@ Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
 Tensor positive(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
   return self;
 }
 

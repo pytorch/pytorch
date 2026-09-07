@@ -26,6 +26,7 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
   // Does nothing - `throw ...` should not be evaluated
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      // @allow-raw-throw: the test asserts this argument is never evaluated
       (throw std::runtime_error("I'm throwing..."), true)));
 #else
   ASSERT_THROW(TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false), c10::Error);

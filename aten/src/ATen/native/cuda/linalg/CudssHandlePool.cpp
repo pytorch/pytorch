@@ -1,4 +1,3 @@
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
 #if defined(USE_CUDSS)

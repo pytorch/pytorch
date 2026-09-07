@@ -30,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -105,8 +106,17 @@ SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
-NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
+NAVI_ARCH = (
+    "gfx1030",
+    "gfx1100",
+    "gfx1101",
+    "gfx1150",
+    "gfx1151",
+    "gfx1200",
+    "gfx1201",
+)
 NAVI3_ARCH = ("gfx1100", "gfx1101")
+NAVI3_5_ARCH = ("gfx1150", "gfx1151")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
 
 class ProfilingMode(Enum):
@@ -693,6 +703,24 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     return composite_fn
 
 
+def validate_test_name(name):
+    """
+    Validates a generated test name at instantiation time. In particular, test names must
+    not contain '.': unittest.TestLoader.loadTestsFromName resolves dotted names by
+    splitting on '.' and walking with getattr, so a dotted test name is discoverable in a
+    full-suite run but breaks any attempt to load the test by name (e.g.
+    `python test_foo.py TestClass.test_name`).
+    """
+    if '.' in name:
+        raise RuntimeError(
+            f'Test name "{name}" is invalid: it contains a "." character, which breaks '
+            'loading the test by name (unittest.TestLoader.loadTestsFromName splits on '
+            '"."). This name likely comes from a custom name_fn or an explicit subtest '
+            'name that interpolates a value whose string form contains a dot (e.g. '
+            'str(torch.bfloat16) == "torch.bfloat16" or a float). Use dtype_name() for '
+            'dtypes, or sanitize the generated name (e.g. .replace(".", "_")).')
+
+
 def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
@@ -732,6 +760,7 @@ def instantiate_parametrized_tests(generic_cls):
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = f'{test.__name__}_{test_suffix}'
+            validate_test_name(full_name)
 
             # Apply decorators based on full param kwargs.
             for decorator in decorator_fn(param_kwargs):
@@ -1243,6 +1272,7 @@ def retry_shell(
     timeout=None,
     retries=1,
     was_rerun=False,
+    label="",
 ) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
     if not (retries >= 0):
@@ -1262,8 +1292,14 @@ def retry_shell(
         )
     except subprocess.TimeoutExpired:
         if retries == 0:
+            # NB: the "Command took >Nmin, returning 124" prefix is load
+            # bearing -- the CI log classifier matches on it, so only ever
+            # append here. The label names what timed out, so that timeouts
+            # group per test file on HUD instead of collapsing into a single
+            # fleet-wide bucket (which makes an uptick in one file invisible).
             print(
-                f"Command took >{timeout // 60}min, returning 124",
+                f"Command took >{timeout // 60}min, returning 124"
+                + (f" ({label})" if label else ""),
                 file=stdout,
                 flush=True,
             )
@@ -1282,6 +1318,7 @@ def retry_shell(
         timeout=timeout,
         retries=retries - 1,
         was_rerun=True,
+        label=label,
     )
 
 
@@ -1545,7 +1582,9 @@ def run_tests(argv=None):
         if failed:
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
-        pytest_args = argv + ["--use-main-module"]
+        # xdist workers import the test file as a module, so they cannot collect
+        # tests from the coordinator's __main__ module.
+        pytest_args = argv if "-n" in argv else argv + ["--use-main-module"]
         if HW_CLASSIFICATION is not None:
             pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""
@@ -1709,6 +1748,7 @@ TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -1763,6 +1803,8 @@ _dsl_checker = LazyDSLCheck()
 # Lazy constants to avoid import-time overhead
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
+TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
+TEST_FLYDSL = LazyVal(lambda: _dsl_checker.is_available('flydsl'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1774,6 +1816,8 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 # DSL skip decorators (following existing pattern)
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
+skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
+skipIfNoFlyDSL = unittest.skipIf(not TEST_FLYDSL, "FlyDSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -1830,6 +1874,12 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PERIODIC",
+    env_var="PYTORCH_TEST_WITH_PERIODIC",
+    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
+)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -1912,6 +1962,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
 def lazy_skip_if(condition_fn, reason):
@@ -1943,6 +1994,11 @@ def lazy_skip_if(condition_fn, reason):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+requires_accelerator = lazy_skip_if(
+    lambda: not torch.accelerator.is_available(),
+    "requires accelerator",
+)
 
 
 def skipIfCrossRef(fn):
@@ -2011,6 +2067,14 @@ def xfailIfTorchDynamo(func):
 
 def xfailIfPy312Plus(func):
     return unittest.expectedFailure(func) if sys.version_info >= (3, 12) else func
+
+
+def xfailIfPy314Plus(func):
+    return unittest.expectedFailure(func) if sys.version_info >= (3, 14) else func
+
+
+def xfailIfPy313AndEarlier(func):
+    return unittest.expectedFailure(func) if sys.version_info < (3, 14) else func
 
 
 def xfailIfLinux(func):
@@ -2532,6 +2596,22 @@ def skipIfRocmVersionLessThan(version=None):
         )
     return lazy_skip_if(_should_skip, f"ROCm version less than {version} required")
 
+# Skips a test on ROCm if the version is at least the given major.minor tuple.
+# Use for failures introduced in a ROCm release that pass on older versions,
+# e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
+# Built on lazy_skip_if so it works on both test methods and test classes.
+def skipIfRocmVersionAtLeast(version=None):
+    def _should_skip():
+        if not TEST_WITH_ROCM:
+            return False
+        rocm_version_tuple = getRocmVersion()
+        return (
+            rocm_version_tuple is not None
+            and version is not None
+            and rocm_version_tuple >= tuple(version)
+        )
+    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
@@ -2547,6 +2627,8 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
         lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
     )
     return decorator(func) if func is not None else decorator
+
+requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
@@ -2814,6 +2896,37 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def periodic(fn):
+    """Marks a test to run only when periodic test mode is enabled.
+
+    The periodic test configuration selects the corresponding pytest marker
+    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
+    Python test sweep (e.g. distributed or quantization) never run.
+
+    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
+    slow gating (static or dynamic) does not block @periodic tests there,
+    while the periodic gate keeps a test marked both out of the slow shards;
+    it runs only in periodic-strict.
+    """
+    reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
+
+    if isinstance(fn, type):
+        if has_pytest:
+            fn = pytest.mark.periodic(fn)
+        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
+
+    # Isolate decorator metadata when parameter variants share the original
+    # test function.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    if has_pytest:
+        wrapper = pytest.mark.periodic(wrapper)
+
+    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -3076,7 +3189,7 @@ class CudaMemoryLeakCheck:
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
-        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        # NOTE: driver API discrepancies alone are ignored because with the jiterator
         #   some tests may permanently increase the CUDA context size and
         #   that will appear as a driver memory leak but is the expected behavior.
 
@@ -3663,7 +3776,15 @@ class TestCase(expecttest.TestCase):
         return CudaMemoryLeakCheck(self, name)
 
     def before_cuda_memory_leak_check(self):
-        torch._dynamo.reset()
+        self._reset_dynamo_if_imported()
+
+    @staticmethod
+    def _reset_dynamo_if_imported():
+        dynamo = sys.modules.get("torch._dynamo")
+        if dynamo is not None:
+            reset = getattr(dynamo, "reset", None)
+            if reset is not None:
+                reset()
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
@@ -3832,6 +3953,13 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        else:
+            # For the non-compiled path there is no optimize() region, so this
+            # reset (and the matching one after super_run) is the only place we
+            # clear Dynamo state between tests. Resetting inside setUp/tearDown
+            # would land inside the compiled region and corrupt compiled
+            # autograd state, so do it here instead.
+            self._reset_dynamo_if_imported()
 
         torch.compiler.set_stance("default")
 
@@ -3921,6 +4049,8 @@ class TestCase(expecttest.TestCase):
             torch._dynamo.reset()
         elif torch._dynamo.config.compiled_autograd:
             torch._dynamo.compiled_autograd.reset()
+        else:
+            self._reset_dynamo_if_imported()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():
@@ -3976,6 +4106,7 @@ class TestCase(expecttest.TestCase):
         self._prev_grad_state = torch.is_grad_enabled()
         self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
         self._prev_torch_function_state = torch._C._get_torch_function_state()
+        self._prev_fp32_precision = _snapshot_fp32_precision()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -4016,6 +4147,28 @@ class TestCase(expecttest.TestCase):
                 f"torch function state was leaked: "
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
+
+        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # legitimately mutate these globals must restore them themselves (e.g.
+        # via recover_orig_fp32_precision or setUpClass/tearDownClass).
+        # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
+        # the check globally; goal is zero callers.
+        if (
+            hasattr(self, '_prev_fp32_precision')
+            and os.environ.get('PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK') != '1'
+        ):
+            current = _snapshot_fp32_precision()
+            if current != self._prev_fp32_precision:
+                _restore_fp32_precision(self._prev_fp32_precision)
+                specs = _fp32_precision_flag_specs()
+                mismatches = [
+                    f"  {label}: was {prev!r}, became {cur!r}"
+                    for (label, _, _), prev, cur in zip(specs, self._prev_fp32_precision, current)
+                    if prev != cur
+                ]
+                raise AssertionError(
+                    "fp32 precision flag leak detected:\n" + "\n".join(mismatches)
+                )
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -5138,7 +5291,7 @@ class TestCase(expecttest.TestCase):
         Args:
             file (pathlib.Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
-            exected_failure_message (str, optional): The expected failure message if the
+            expected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
         """
         script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
@@ -5203,7 +5356,7 @@ def find_free_port():
         return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
-ADDRESS_IN_USE = "Address already in use"
+ADDRESS_IN_USE = "address already in use"
 CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
@@ -5221,7 +5374,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if any(connect_error in str(error) for connect_error in connect_errors):
+                if any(ce in str(error) or ce in str(error).lower() for ce in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error
@@ -6373,6 +6526,16 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         gc.set_debug(0)
 
 
+def _win_rmtree_onerror(func, path, exc_info):
+    # Retry after clearing the read-only attribute (WinError 5); ignore
+    # anything else so cleanup stays best-effort.
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        pass
+
+
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -6380,9 +6543,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            shutil.rmtree(default_build_root, onerror=_win_rmtree_onerror)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
@@ -6436,54 +6597,61 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# Single source of truth for which globals count as "fp32 precision state".
+# Add a new flag here and both recover_orig_fp32_precision and the TestCase
+# leak detector pick it up automatically.
+def _fp32_precision_flag_specs():
+    return (
+        ("torch.backends.cuda.matmul.fp32_precision",
+            lambda: torch.backends.cuda.matmul.fp32_precision,
+            lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
+        ("torch.backends.cudnn.conv.fp32_precision",
+            lambda: torch.backends.cudnn.conv.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.cudnn.conv, "fp32_precision", v)),
+        ("torch.backends.cudnn.rnn.fp32_precision",
+            lambda: torch.backends.cudnn.rnn.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.cudnn.rnn, "fp32_precision", v)),
+        ("torch.backends.mkldnn.matmul.fp32_precision",
+            lambda: torch.backends.mkldnn.matmul.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.matmul, "fp32_precision", v)),
+        ("torch.backends.mkldnn.conv.fp32_precision",
+            lambda: torch.backends.mkldnn.conv.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.conv, "fp32_precision", v)),
+        ("torch.backends.mkldnn.rnn.fp32_precision",
+            lambda: torch.backends.mkldnn.rnn.fp32_precision,  # type: ignore[attr-defined]
+            lambda v: setattr(torch.backends.mkldnn.rnn, "fp32_precision", v)),
+    )
+
+
+def _snapshot_fp32_precision():
+    return tuple(get() for _, get, _ in _fp32_precision_flag_specs())
+
+
+def _restore_fp32_precision(snapshot):
+    specs = _fp32_precision_flag_specs()
+    if not isinstance(snapshot, tuple) or len(snapshot) != len(specs):
+        # Catches accidental shadowing of self._prev_fp32_precision by a
+        # subclass (e.g. assigning a scalar); without this check zip() would
+        # silently iterate over the wrong sequence.
+        raise TypeError(
+            f"fp32 precision snapshot must be a {len(specs)}-tuple, "
+            f"got {type(snapshot).__name__} of length "
+            f"{len(snapshot) if hasattr(snapshot, '__len__') else 'unknown'}"
+        )
+    for (_, _, set_), value in zip(specs, snapshot):
+        set_(value)
+
+
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
-        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        snap = _snapshot_fp32_precision()
         try:
             yield
         finally:
-            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+            _restore_fp32_precision(snap)
 
     return recover()(fn)
-
-
-def with_ieee_matmul_precision(f):
-    """Force matmul fp32_precision="ieee" on both CUDA and CPU/mkldnn for
-    the duration of the wrapped test. Save/restore across the call.
-
-    "ieee" is the default, so this decorator is defensive: it insulates
-    tests whose intent is FP32 numerical correctness of an algorithm
-    (e.g. a factorization) from any non-default matmul fp32_precision
-    left set in the process by the build, by global configuration, or
-    by a sibling test that didn't restore it.
-
-    Affects matmul only, not convolution. Tests that also need
-    reduced-precision conv disabled must additionally control the
-    relevant cudnn/mkldnn conv.fp32_precision knobs.
-    """
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        old_cuda = torch.backends.cuda.matmul.fp32_precision
-        old_mkldnn = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
-        try:
-            torch.backends.cuda.matmul.fp32_precision = "ieee"
-            torch.backends.mkldnn.matmul.fp32_precision = "ieee"  # type: ignore[attr-defined]
-            return f(*args, **kwargs)
-        finally:
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda
-    return wrapped
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info

@@ -66,7 +66,7 @@ test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_remove_noop_slice": TestFailure(
-        ("xpu", "cuda"),
+        ("cuda",),
         is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
     ),
     "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
@@ -75,6 +75,19 @@ test_failures = {
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
+    # TypeError: cannot pickle '_thread._local' object.
+    # nested_compile_region(options=...) hangs compiler callables off
+    # NestedCompileRegionOptions. dill cannot resolve a module reference for that
+    # class, falls back to pickling the callables by value, and walking their
+    # globals reaches a thread-local. is_skip rather than xfail because the
+    # by-value fallback is dill-specific, so the test still passes where the
+    # graph pickler does not go through dill.
+    "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
     # cover a legacy lowering table entry, which is outside the subprocess
     # compile serialization path this file exercises.

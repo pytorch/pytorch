@@ -1264,7 +1264,7 @@ def create_equality_constraints_for_broadcasting(
         d1: Variables that store dimensions for e1
         d2: Variables that store dimensions for e2
         d11: Variables that store dimensions for e11
-        d12: Variables that store dimensions for e22
+        d12: Variables that store dimensions for e12
 
     Returns: Four equality constraints
 
@@ -1401,8 +1401,8 @@ def gen_broadcasting_constraints(
     Args:
         e1: TVar representing the type of input 1
         e2: TVar representing the type of input 2
-        e11: TVar representing the representing broadcasted input 1
-        e12: TVar representing the representing broadcasted input 2
+        e11: TVar representing the broadcasted input 1
+        e12: TVar representing the broadcasted input 2
         i: The rank of the resulting type of addition
         counter: for variable tracking
 

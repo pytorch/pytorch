@@ -6,7 +6,6 @@ import sys
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -433,56 +432,19 @@ class TestCalculateShards(unittest.TestCase):
             ),
         )
 
-    def test_opinfo_uses_min_duration_for_pytest_sharding(self) -> None:
-        opinfo = "inductor/test_torchinductor_opinfo"
-        with mock.patch(
-            "tools.testing.test_selections.BUILD_ENVIRONMENT",
-            "linux-jammy-py3.10-gcc11",
-        ):
-            shards = calculate_shards(
-                1,
-                [TestRun(opinfo), TestRun("normal_test")],
-                {opinfo: 1, "normal_test": 2},
-                None,
-            )
-        self.assertEqual(THRESHOLD * 56 + 2, shards[0][0])
-
-        opinfo_shards = [test for test in shards[0][1] if test.name == opinfo]
-        self.assertEqual(56, len(opinfo_shards))
-        self.assertEqual(list(range(1, 57)), [test.shard for test in opinfo_shards])
-        self.assertTrue(
-            all(
-                test.num_shards == 56 and test.time == THRESHOLD
-                for test in opinfo_shards
-            )
-        )
-        self.assertIn(
-            ShardedTest(test="normal_test", shard=1, num_shards=1, time=2),
-            shards[0][1],
+    def test_disable_pytest_sharding_preserves_file_times(self) -> None:
+        test_times = {"test1": THRESHOLD * 4, "test2": THRESHOLD * 2.5}
+        shards = calculate_shards(
+            2,
+            [TestRun(t) for t in test_times],
+            test_times,
+            gen_class_times(test_times),
+            allow_pytest_sharding=False,
         )
 
-    def test_opinfo_does_not_use_min_duration_on_windows(self) -> None:
-        opinfo = "inductor/test_torchinductor_opinfo"
-        with mock.patch(
-            "tools.testing.test_selections.BUILD_ENVIRONMENT",
-            "win-vs2022-cpu-py3",
-        ):
-            shards = calculate_shards(
-                1,
-                [TestRun(opinfo), TestRun("normal_test")],
-                {opinfo: 1, "normal_test": 2},
-                None,
-            )
-
-        self.assertEqual(3, shards[0][0])
-        self.assertIn(
-            ShardedTest(test=opinfo, shard=1, num_shards=1, time=1),
-            shards[0][1],
-        )
-        self.assertIn(
-            ShardedTest(test="normal_test", shard=1, num_shards=1, time=2),
-            shards[0][1],
-        )
+        tests = [test for _, shard in shards for test in shard]
+        self.assertEqual([test.num_shards for test in tests], [1, 1])
+        self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
 
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))

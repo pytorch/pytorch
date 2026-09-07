@@ -309,6 +309,34 @@ class NoChangeTestCase(TestCase):
         fx_g = gms[0]
         check(fx_g, None, 0, check_val=False, graph_input=True)
 
+    def test_neg_nan_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, -float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 0, check_val=False)
+
+    def test_neg_zero_not_merged(self):
+        def f(x):
+            a = torch.full_like(x, 0.0)
+            b = torch.full_like(x, -0.0)
+            return torch.stack([a.reciprocal(), b.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
+    def test_complex_neg_zero_not_merged(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(0.0, 0.0))
+            b = torch.full_like(y, complex(-0.0, 0.0))
+            return torch.stack([a.real.reciprocal(), b.real.reciprocal()])
+
+        t = torch.randn(2, 2)
+        check(f, t, 0)
+
 
 class ReduceTestCase(TestCase):
     def test_immutable_list_type(self):
@@ -405,6 +433,43 @@ class ReduceTestCase(TestCase):
 
         t = torch.randn(2, 2)
         check(f, t, 1)
+
+    def test_nan_full_deduplication(self):
+        def f(x):
+            a = torch.full_like(x, float("nan"))
+            b = torch.full_like(x, float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_non_factory_op(self):
+        def f(x):
+            a = x.clamp(min=float("nan"))
+            b = x.clamp(min=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_nan_dedup_constant_pad(self):
+        def f(x):
+            a = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            b = torch.nn.functional.pad(x, (1, 1, 1, 1), value=float("nan"))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
+
+    def test_complex_nan_full_deduplication(self):
+        def f(x):
+            y = x.to(torch.cfloat)
+            a = torch.full_like(y, complex(float("nan"), 0.0))
+            b = torch.full_like(y, complex(float("nan"), 0.0))
+            return a + b
+
+        t = torch.randn(2, 2)
+        check(f, t, 1, check_val=False)
 
 
 class RandomOpTestCase(TestCase):

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_sys.py b/test/cpython/v3_13/test_sys.py
-index 6b37094ed5f..c5e96a6a3dd 100644
+index 72d51361e0b4d10c75be01f67750b57ff139b7ca..c08d9bfa2ad90cdb74cab075500f323932f83290 100644
 --- a/test/cpython/v3_13/test_sys.py
 +++ b/test/cpython/v3_13/test_sys.py
 @@ -1,3 +1,58 @@
@@ -70,7 +70,23 @@ index 6b37094ed5f..c5e96a6a3dd 100644
  
      def test_original_displayhook(self):
          dh = sys.__displayhook__
-@@ -81,19 +136,8 @@ class DisplayHookTest(unittest.TestCase):
+@@ -64,6 +119,7 @@ class DisplayHookTest(unittest.TestCase):
+         finally:
+             sys.stdout = stdout
+ 
++    @torch._dynamo.error_on_graph_break(False)
+     def test_lost_displayhook(self):
+         displayhook = sys.displayhook
+         try:
+@@ -73,6 +129,7 @@ class DisplayHookTest(unittest.TestCase):
+         finally:
+             sys.displayhook = displayhook
+ 
++    @torch._dynamo.error_on_graph_break(False)
+     def test_custom_displayhook(self):
+         def baddisplayhook(obj):
+             raise ValueError
+@@ -81,19 +138,8 @@ class DisplayHookTest(unittest.TestCase):
              code = compile("42", "<string>", "single")
              self.assertRaises(ValueError, eval, code)
  
@@ -80,18 +96,18 @@ index 6b37094ed5f..c5e96a6a3dd 100644
 -                sys.stdout = io.StringIO()
 -                support.gc_collect()
 -                return 'foo'
- 
+-
 -        with support.swap_attr(sys, 'stdout', None):
 -            sys.stdout = io.StringIO()  # the only reference
 -            sys.displayhook(X())  # should not crash
 -
--
+ 
 -class ActiveExceptionTests(unittest.TestCase):
 +class ActiveExceptionTests(__TestCase):
      def test_exc_info_no_exception(self):
          self.assertEqual(sys.exc_info(), (None, None, None))
  
-@@ -157,7 +201,7 @@ class ActiveExceptionTests(unittest.TestCase):
+@@ -157,7 +203,7 @@ class ActiveExceptionTests(unittest.TestCase):
          self.assertIs(exc, e)
  
  
@@ -100,7 +116,7 @@ index 6b37094ed5f..c5e96a6a3dd 100644
  
      @force_not_colorized
      def test_original_excepthook(self):
-@@ -200,7 +244,7 @@ class ExceptHookTest(unittest.TestCase):
+@@ -200,7 +246,7 @@ class ExceptHookTest(unittest.TestCase):
      # Python/pythonrun.c::PyErr_PrintEx() is tricky.
  
  
@@ -109,28 +125,7 @@ index 6b37094ed5f..c5e96a6a3dd 100644
  
      def tearDown(self):
          test.support.reap_children()
-@@ -500,6 +544,7 @@ class SysModuleTest(unittest.TestCase):
-             is sys._getframe().f_code
-         )
- 
-     def test_getframemodulename(self):
-         # Default depth gets ourselves
-         self.assertEqual(__name__, sys._getframemodulename())
-@@ -894,7 +939,12 @@ class SysModuleTest(unittest.TestCase):
-     def assert_raise_on_new_sys_type(self, sys_attr):
-         # Users are intentionally prevented from creating new instances of
-         # sys.flags, sys.version_info, and sys.getwindowsversion.
--        support.check_disallow_instantiation(self, type(sys_attr), sys_attr)
-+        arg = sys_attr
-+        attr_type = type(sys_attr)
-+        with self.assertRaises(TypeError):
-+            attr_type(arg)
-+        with self.assertRaises(TypeError):
-+            attr_type.__new__(attr_type, arg)
- 
-     def test_sys_flags_no_instantiation(self):
-         self.assert_raise_on_new_sys_type(sys.flags)
-@@ -1354,7 +1404,7 @@ class SysModuleTest(unittest.TestCase):
+@@ -1359,7 +1405,7 @@ class SysModuleTest(unittest.TestCase):
  
  
  @test.support.cpython_only
@@ -139,7 +134,7 @@ index 6b37094ed5f..c5e96a6a3dd 100644
      def test_original_unraisablehook(self):
          _testcapi = import_helper.import_module('_testcapi')
          from _testcapi import err_writeunraisable, err_formatunraisable
-@@ -1511,7 +1561,7 @@ class UnraisableHookTest(unittest.TestCase):
+@@ -1516,7 +1562,7 @@ class UnraisableHookTest(unittest.TestCase):
  
  
  @test.support.cpython_only
@@ -148,7 +143,7 @@ index 6b37094ed5f..c5e96a6a3dd 100644
  
      def setUp(self):
          self.P = struct.calcsize('P')
-@@ -1519,6 +1569,7 @@ class SizeofTest(unittest.TestCase):
+@@ -1524,6 +1570,7 @@ class SizeofTest(unittest.TestCase):
          _testinternalcapi = import_helper.import_module("_testinternalcapi")
          self.gc_headsize = _testinternalcapi.SIZEOF_PYGC_HEAD
          self.managed_pre_header_size = _testinternalcapi.SIZEOF_MANAGED_PRE_HEADER
@@ -156,7 +151,15 @@ index 6b37094ed5f..c5e96a6a3dd 100644
  
      check_sizeof = test.support.check_sizeof
  
-@@ -1955,4 +2006,4 @@ class SizeofTest(unittest.TestCase):
+@@ -1572,6 +1619,7 @@ class SizeofTest(unittest.TestCase):
+         self.assertEqual(sys.getsizeof(True), size('') + self.longdigit)
+         self.assertEqual(sys.getsizeof(True, -1), size('') + self.longdigit)
+ 
++    @torch._dynamo.error_on_graph_break(False)
+     def test_objecttypes(self):
+         # check all types defined in Objects/
+         calcsize = struct.calcsize
+@@ -1960,4 +2008,4 @@ class SizeofTest(unittest.TestCase):
          self.assertEqual(err, b"")
  
  if __name__ == "__main__":

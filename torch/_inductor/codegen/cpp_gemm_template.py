@@ -1370,7 +1370,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
+                    L.view(blocked_w, permute_size),
                     permute_dims,
                 )
         else:
@@ -1449,8 +1449,8 @@ class CppGemmTemplate(CppTemplate):
             W = W.as_strided(W.shape, new_stride)
             return W
 
-    def get_default_reindexers(self, epilogue_nodes):
-        return [None] * len(epilogue_nodes)
+    def get_default_reindexers(self, epilogues):
+        return [None] * len(epilogues)
 
     def get_options(
         self,
@@ -1601,6 +1601,11 @@ class CppGemmTemplate(CppTemplate):
                 layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
+            # In-template epilogues are built over the GEMM output buffer's ranges,
+            # whose rank can exceed that of the 2D tiles the template stores into
+            # (the BMM template keeps a leading batch dim). Let the template supply
+            # the reindexers mapping the 2D tile indices onto those ranges.
+            creator_reindexers = self.get_default_reindexers(epilogue_creators)
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
                     buffer_name = template_buffer.get_name()
@@ -1616,7 +1621,7 @@ class CppGemmTemplate(CppTemplate):
                 )
                 fake_buffers.append(current_input_buffer)
                 Y_aliases.add(current_input_buffer.get_name())
-                reindexers.append(None)
+                reindexers.append(creator_reindexers[i])
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
                         name=buffer_name,

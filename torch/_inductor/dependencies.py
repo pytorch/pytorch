@@ -19,9 +19,11 @@ from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler
 from .utils import (
+    decompose_index,
     get_dtype_size,
     reduction_num_outputs,
     sympy_index_symbol,
+    sympy_product,
     sympy_subs,
     VarRanges,
 )
@@ -74,6 +76,8 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
+    r"""A memory access dependency indexed over an iteration domain."""
+
     # pyrefly: ignore [bad-override]
     name: str
     # pyrefly: ignore [bad-override]
@@ -181,6 +185,54 @@ class MemoryDep(Dep):
             *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
             self.mode,
         )
+
+    def normalize_with_ranges(
+        self,
+        var_names: tuple[sympy.Symbol, ...],
+        sizes: tuple[sympy.Expr, ...],
+    ) -> "MemoryDep | None":
+        """Reindex this access over a new iteration domain.
+
+        Both domains list dimensions outermost-first and correspond by linearized
+        iteration order; this places no restriction on the access's memory layout.
+        Return ``None`` when that correspondence cannot be recovered.
+        """
+        if len(var_names) != len(sizes):
+            raise AssertionError("var_names and sizes must have equal length")
+        if self.is_indirect():
+            return None
+        if not self.var_names:
+            # A loop-invariant access is unchanged in every target domain.
+            return MemoryDep(self.name, self.index, var_names, sizes, self.mode)
+        # TODO: Retain dropped dimension positions during dependency
+        # normalization so broadcast accesses can also be reindexed.
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(self.size), sympy_product(sizes)
+        ):
+            return None
+
+        from .codegen.simd import CantSplit, SIMDKernel
+
+        def split_values(
+            *new_ranges: Sequence[sympy.Expr],
+        ) -> list[list[sympy.Expr]]:
+            return [
+                decompose_index(value, ranges)
+                for value, ranges in zip(var_names, new_ranges, strict=True)
+            ]
+
+        try:
+            (source_indices,) = SIMDKernel.map_kernel_groups_to_node_sizes(
+                sizes, (self.size,), split_values
+            )
+        except CantSplit:
+            return None
+        replacements = dict(zip(self.var_names, source_indices, strict=True))
+        var_ranges = dict(zip(var_names, sizes, strict=True))
+        index = V.graph.sizevars.simplify_with_ranges(
+            sympy_subs(self.index, replacements), var_ranges
+        )
+        return MemoryDep(self.name, index, var_names, sizes, self.mode)
 
     def normalize_with_stride_order(self, prefix: str = "t") -> "MemoryDep":
         r"""
@@ -836,14 +888,16 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         self.symbols = OrderedSet()
         self.get_symbols = free_unbacked_symbols if unbacked_only else free_symbols
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         for a in itertools.chain(args, kwargs.values()):
             if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
                 self.symbols |= self.get_symbols(a)
 
     def indirect_indexing(
         self,
-        index_var: Any,
+        index_var: object,
         size: int | sympy.Expr,
         check: bool = True,
         wrap_neg: bool = True,
@@ -855,16 +909,23 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
-    def frexp(self, x: Any) -> tuple[None, ...]:
+    def frexp(self, x: object) -> tuple[None, ...]:
         return (None,) * 2
 
     def scan(
-        self, dtypes: Any, combine_fn: Any, values: Sequence[Any]
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: object,
+        values: Sequence[object],
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def sort(
-        self, dtypes: Any, values: Sequence[Any], stable: Any, descending: Any
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: Sequence[object],
+        stable: bool,
+        descending: bool,
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
@@ -878,7 +939,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
-    def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
+    def masked(self, mask: object, body: Callable[[], object], other: object) -> None:
         if not callable(body):
             raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
@@ -912,7 +973,9 @@ class SymbolUsageCollectorOpsHandler(DefaultHandler):
         self.symbol = symbol
         self.usages = OrderedSet()
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         used_here = self.symbol in args or self.symbol in kwargs.values()
         if used_here:
             self.usages.add(name)

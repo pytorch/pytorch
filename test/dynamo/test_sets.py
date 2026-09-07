@@ -970,6 +970,288 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         self.assertEqual(list(s), [0, 1, 2, 3])
 
 
+class FrozensetHierarchyTests(_BaseSetTests):
+    """frozenset must not be a subclass of set (CPython parity). Part of #192874."""
+
+    def test_frozenset_not_a_set_variable(self):
+        from torch._dynamo.variables.sets import (
+            BaseSetVariable,
+            FrozensetVariable,
+            SetVariable,
+        )
+
+        self.assertFalse(issubclass(FrozensetVariable, SetVariable))
+        self.assertTrue(issubclass(FrozensetVariable, BaseSetVariable))
+        self.assertTrue(issubclass(SetVariable, BaseSetVariable))
+        # Matches real CPython.
+        self.assertFalse(issubclass(frozenset, set))
+
+    def test_frozenset_has_no_mutating_methods(self):
+        # Before the VT split, FrozensetVariable inherited SetVariable's
+        # named methods via the tp_methods MRO-merge, so eight of the nine
+        # below were reachable on a traced frozenset even though real
+        # frozenset doesn't have them. `update` is the exception: it already
+        # returned early on `not self.is_mutable()`, so it degraded correctly.
+        for name, args in [
+            ("add", (1,)),
+            ("pop", ()),
+            ("remove", (1,)),
+            ("discard", (1,)),
+            ("clear", ()),
+            ("update", ({1},)),
+            ("intersection_update", ({1},)),
+            ("difference_update", ({1},)),
+            ("symmetric_difference_update", ({1},)),
+        ]:
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(frozenset(), name))
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def fn(fs, _name=name, _args=args):
+                    return getattr(fs, _name)(*_args)
+
+                with self.assertRaises(Unsupported):
+                    fn(frozenset({1, 2, 3}))
+
+    def test_frozenset_mutating_method_graph_breaks(self):
+        # With fullgraph=False a frozenset mutation must graph break and let
+        # eager raise the real AttributeError. Before the split it surfaced an
+        # internal "mutation_type is None for FrozensetVariable() in
+        # check_allowed_side_effect" AssertionError instead.
+        @torch.compile(backend="eager")
+        def fn(fs):
+            fs.add(1)
+            return fs
+
+        with self.assertRaises(AttributeError):
+            fn(frozenset({1, 2, 3}))
+
+    @make_dynamo_test
+    def test_frozenset_inplace_operators_rebind_not_mutate(self):
+        """Not a regression test: this also passes before the split.
+
+        Real frozenset defines no __ior__/__iand__/__ixor__/__isub__, so
+        `fs |= other` rebinds the name to a new frozenset built by __or__.
+        FrozensetVariable used to inherit SetVariable's nb_inplace_* handlers,
+        but binary_iop1 gates on the real CPython type's nb slot bits (see
+        object_protocol.binary_iop1) and frozenset sets none of them, so the
+        inherited handlers were never reachable. Kept as a guard that the
+        split does not change this.
+        """
+        fs = frozenset({1, 2, 3})
+        other = frozenset({3, 4, 5})
+
+        fs_or = fs
+        fs_or |= other
+        self.assertEqual(fs_or, frozenset({1, 2, 3, 4, 5}))
+
+        fs_and = fs
+        fs_and &= other
+        self.assertEqual(fs_and, frozenset({3}))
+
+        fs_xor = fs
+        fs_xor ^= other
+        self.assertEqual(fs_xor, frozenset({1, 2, 4, 5}))
+
+    @make_dynamo_test
+    def test_frozenset_readonly_ops_still_work(self):
+        fs = frozenset({1, 2, 3})
+        other = frozenset({3, 4, 5})
+        self.assertEqual(fs | other, frozenset({1, 2, 3, 4, 5}))
+        self.assertEqual(fs & other, frozenset({3}))
+        self.assertEqual(fs - other, frozenset({1, 2}))
+        self.assertEqual(fs ^ other, frozenset({1, 2, 4, 5}))
+        self.assertEqual(fs.union(other), frozenset({1, 2, 3, 4, 5}))
+        self.assertEqual(fs.intersection(other), frozenset({3}))
+        self.assertEqual(fs.difference(other), frozenset({1, 2}))
+        self.assertEqual(fs.symmetric_difference(other), frozenset({1, 2, 4, 5}))
+        self.assertTrue(fs.isdisjoint(frozenset({7, 8})))
+        self.assertTrue(frozenset({1, 2}).issubset(fs))
+        self.assertTrue(fs.issuperset(frozenset({1, 2})))
+        self.assertEqual(fs.copy(), fs)
+        self.assertEqual(len(fs), 3)
+        self.assertTrue(3 in fs)
+
+    @make_dynamo_test
+    def test_regular_set_mutations_unaffected(self):
+        # The mutable-set path must be completely unaffected by the split.
+        s = {1, 2, 3}
+        s.add(4)
+        s.discard(1)
+        s |= {10}
+        self.assertEqual(s, {2, 3, 4, 10})
+
+
+class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
+    """`dict_keys` is not a `set`.
+
+    A `dict_keys` passed into the compiled region is traced by
+    `DictKeySetVariable`. Its CPython surface is the `collections.abc.Set` one,
+    `isdisjoint` plus the operator slots, not `set`'s named methods.
+    """
+
+    # dir(set) - dir(dict.keys()), i.e. everything a dict_keys must not have.
+    SET_ONLY_METHODS = (
+        "union",
+        "intersection",
+        "difference",
+        "symmetric_difference",
+        "issubset",
+        "issuperset",
+        "copy",
+        "add",
+        "pop",
+        "remove",
+        "discard",
+        "clear",
+        "update",
+        "intersection_update",
+        "difference_update",
+        "symmetric_difference_update",
+    )
+
+    @staticmethod
+    def keys():
+        return {1: 0, 2: 0}.keys()
+
+    @staticmethod
+    def caller(name):
+        if name in ("copy", "clear", "pop"):
+            return lambda k: getattr(k, name)()
+        return lambda k: getattr(k, name)({1})
+
+    def test_set_only_methods_raise_attribute_error(self):
+        """Compiled behaviour matches eager: AttributeError, not a value."""
+        for name in self.SET_ONLY_METHODS:
+            with self.subTest(method=name):
+                fn = self.caller(name)
+                with self.assertRaises(AttributeError):
+                    fn(self.keys())
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=False)
+                with self.assertRaises(AttributeError):
+                    compiled(self.keys())
+
+    def test_set_only_methods_are_untraceable(self):
+        """Under fullgraph there is no graph break, so it must be Unsupported."""
+        for name in self.SET_ONLY_METHODS:
+            with self.subTest(method=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(
+                    self.caller(name), backend="eager", fullgraph=True
+                )
+                with self.assertRaises(Unsupported):
+                    compiled(self.keys())
+
+    def test_binary_ops_match_eager(self):
+        """dictview_or and friends accept any iterable, unlike set's slots."""
+        ops = {
+            "or_set": lambda k: k | {3},
+            "and_set": lambda k: k & {1},
+            "sub_set": lambda k: k - {1},
+            "xor_set": lambda k: k ^ {1},
+            "or_list": lambda k: k | [3],
+            "and_list": lambda k: k & [1],
+            "sub_list": lambda k: k - [1],
+            "xor_list": lambda k: k ^ [1],
+            "reflected_or": lambda k: {3} | k,
+        }
+        for name, fn in ops.items():
+            with self.subTest(op=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_binary_op_with_non_iterable_raises(self):
+        fn = lambda k: k | 5  # noqa: E731
+        with self.assertRaises(TypeError):
+            fn(self.keys())
+        torch._dynamo.reset()
+        with self.assertRaises((TypeError, Unsupported)):
+            torch.compile(fn, backend="eager", fullgraph=True)(self.keys())
+
+    def test_comparisons_match_eager(self):
+        cmps = {
+            "eq_set": lambda k: k == {1, 2},
+            "eq_frozenset": lambda k: k == frozenset({1, 2}),
+            "eq_list": lambda k: k == [1, 2],
+            "ne_set": lambda k: k != {1, 2},
+            "le_set": lambda k: k <= {1, 2, 3},
+            "lt_set": lambda k: k < {1, 2, 3},
+            "ge_set": lambda k: k >= {1},
+            "gt_set": lambda k: k > {1},
+        }
+        for name, fn in cmps.items():
+            with self.subTest(cmp=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_ordering_against_non_set_raises(self):
+        fn = lambda k: k <= [1, 2, 3]  # noqa: E731
+        with self.assertRaises(TypeError):
+            fn(self.keys())
+        torch._dynamo.reset()
+        with self.assertRaises((TypeError, Unsupported)):
+            torch.compile(fn, backend="eager", fullgraph=True)(self.keys())
+
+    def test_set_abc_surface_still_works(self):
+        """isdisjoint, len, containment and iteration are unaffected."""
+        ops = {
+            "isdisjoint_set": lambda k: k.isdisjoint({9}),
+            "isdisjoint_list": lambda k: k.isdisjoint([9]),
+            "isdisjoint_false": lambda k: k.isdisjoint({1}),
+            "len": lambda k: len(k),
+            "contains": lambda k: 1 in k,
+            "iter": lambda k: set(k),
+            "mapping": lambda k: dict(k.mapping),
+        }
+        for name, fn in ops.items():
+            with self.subTest(op=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_dict_view_operands_match_eager(self):
+        """A view built inside the region is a DictKeysVariable, not this VT.
+
+        Comparing against one must fall through to the reflected operation.
+        """
+        ops = {
+            "eq_keys": lambda k: k == {1: 9, 2: 9}.keys(),
+            "le_keys": lambda k: k <= {1: 9, 2: 9, 3: 0}.keys(),
+            "or_keys": lambda k: k | {3: 0}.keys(),
+            "and_keys": lambda k: k & {1: 0}.keys(),
+            "eq_items": lambda k: k == {1: 9}.items(),
+            "eq_dict": lambda k: k == {1: 0, 2: 0},
+            "isdisjoint_keys": lambda k: k.isdisjoint({9: 0}.keys()),
+        }
+        for name, fn in ops.items():
+            with self.subTest(op=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_dict_keys_is_not_a_set_variable(self):
+        """Structural guard against the classes being merged again."""
+        from torch._dynamo.variables.sets import (
+            BaseSetVariable,
+            DictKeySetVariable,
+            SetVariable,
+        )
+
+        self.assertFalse(issubclass(DictKeySetVariable, SetVariable))
+        self.assertTrue(issubclass(DictKeySetVariable, BaseSetVariable))
+
+    def test_regular_set_behaviour_unaffected(self):
+        def fn(s):
+            return s.union({3}), s | {4}, s == {1, 2}, s.isdisjoint({9})
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled({1, 2}), fn({1, 2}))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

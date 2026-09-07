@@ -589,7 +589,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto output = at::empty({static_cast<int64_t>(totalSize)}, at::kLong);
 
     // tensors copied from cuda may not be contiguous, get a contiguous
-    // tensor before use its data_ptr
+    // tensor before using its data_ptr
     auto input = tensor.indices().contiguous();
 
     // Allgatherv indices.
@@ -637,10 +637,10 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     auto output = at::empty({totalSize}, tensor.scalar_type());
 
-    // Allgatherv indices.
+    // Allgatherv values.
     gloo::AllgathervOptions opts(context_);
     // tensors copied from cuda may not be contiguous, get a contiguous
-    // tensor before use its data_ptr
+    // tensor before using its data_ptr
     at::Tensor valueTensor = tensor.values().contiguous();
     GENERATE_ALL_TYPES(valueTensor.scalar_type(), setInput, opts, valueTensor);
     GENERATE_ALL_TYPES(

@@ -35,7 +35,20 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(IS_MACOS, "TODO: mac")
@@ -531,7 +544,7 @@ class TestCustomOpAutoTune(TestCase):
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
         def find_shape_dispatch(code_list):
-            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]|_selector\s*=\s*int\(.*\bs\d+")
             return [
                 line.strip()
                 for code in code_list

@@ -33,6 +33,27 @@ class DeviceInfo:
 # Indexing is based on `torch.cuda.get_device_name()`, normalized to upper-case.
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
+    # Source: NVIDIA Blackwell datasheet, "Individual Blackwell GPU Specifications",
+    # HGX B200 column. Tensor Core rows there are SPARSE; dense is 1/2. FP32/FP64 are
+    # already dense. Values below are all DENSE, so no sparsity factor.
+    # @lint-ignore https://www.nvidia.com/en-us/data-center/hgx/
+    "NVIDIA B200": DeviceInfo(
+        tops={
+            torch.float64: 37.0,
+            torch.float32: 75.0,
+            "torch.tf32": 1125.0,
+            torch.bfloat16: 2250.0,
+            torch.float16: 2250.0,
+            torch.float8_e4m3fn: 4500.0,
+            torch.float8_e4m3fnuz: 4500.0,
+            torch.float8_e5m2: 4500.0,
+            torch.float8_e5m2fnuz: 4500.0,
+            torch.float8_e8m0fnu: 4500.0,
+            torch.int8: 4500.0,
+        },
+        dram_bw_gbs=7700.0,
+        dram_gb=180.0,
+    ),
     # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
     # Tensor Core values are *with sparsity* per the datasheet.

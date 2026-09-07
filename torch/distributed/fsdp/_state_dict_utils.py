@@ -539,7 +539,7 @@ def _sharded_post_state_dict_hook(
 ) -> dict[str, Any]:
     """
     The hook replaces the unflattened, unsharded parameter in the state_dict
-    with a unflattened, sharded parameter (a ShardedTensor).
+    with an unflattened, sharded parameter (a ShardedTensor).
     """
 
     def param_hook(state_dict: dict[str, Any], prefix: str, fqn: str):

@@ -25,7 +25,7 @@ autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 # Type alias for kernel config key tuple.
 # Currently matches on (tile_m, tile_n, cluster_m, cluster_n).
-# tile_k excluded because nvMatmulHeuristics and cutlass_api use it to mean different things.
+# tile_k excluded because nvMatmulHeuristics and cutlass.operators use it to mean different things.
 # TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
 ConfigKey = tuple[int, int, int, int]
 
@@ -53,7 +53,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design."""
+    """Build config key from cutlass.operators kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 2
@@ -109,7 +109,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         returns the first `count` kernels without heuristic ranking.
 
         Args:
-            kernels: List of cutlass_api.Kernel objects
+            kernels: List of cutlass.operators.Operator objects
             inputs: MMKernelInputs with matrix shapes, dtypes, and strides
             count: Maximum number of kernels to return
             accumulator_type: Accumulator dtype
@@ -154,15 +154,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to heuristic configs
-        matched: list[tuple] = []
+        # Match kernels to each distinct heuristic config at its best estimate.
+        config_runtimes: dict[ConfigKey, float] = {}
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
+            config_runtimes[key] = min(
+                cfg.estimated_runtime, config_runtimes.get(key, float("inf"))
+            )
+
+        matched: list[tuple] = []
+        for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+                matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -217,6 +223,20 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 8, 2),
                     (256, 128, 2, 1),
                     (256, 128, 2, 2),
+                    # NVFP4 oracle-best configs (per-shape autotune winners over
+                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
+                    # propose; adding them lets autotune reach the oracle-best
+                    # config on 73/83 of those shapes.
+                    (128, 64, 1, 2),
+                    (128, 128, 1, 1),
+                    (128, 128, 1, 4),
+                    (128, 256, 1, 1),
+                    (256, 64, 2, 1),
+                    (256, 128, 4, 1),
+                    (256, 192, 2, 2),
+                    (256, 192, 4, 1),
+                    (256, 192, 4, 2),
+                    (256, 256, 4, 1),
                 ]
             )
             selected_keys = OrderedSet(
@@ -280,7 +300,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     ):
         """
         Create callback for nvMatmulHeuristics that only accepts configurations
-        matching the available cutlass_api kernel tile/cluster shapes.
+        matching the available cutlass.operators kernel tile/cluster shapes.
         """
 
         def validity_check(kernel_config_ptr, problem_ptr):
@@ -308,7 +328,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
 
-        Uses validity callback to filter to cutlass_api-compatible configs.
+        Uses validity callback to filter to cutlass.operators-compatible configs.
         """
         import nvMatmulHeuristics
 

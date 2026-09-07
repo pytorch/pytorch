@@ -54,7 +54,7 @@ def create_one_event(
         "process_group": pg_info,
         "input_sizes": input_sizes,
         "output_sizes": output_sizes,
-        "input_dtypes": "float32",
+        "input_dtypes": input_dtypes,
         "output_dtypes": output_dtypes,
         "collective_seq_id": str(collective_seq_id),
         "p2p_seq_id": str(p2p_seq_id),
@@ -193,7 +193,7 @@ class FlightRecorderEventTest(TestCase):
                 "all_gather_into_tensor_coalesced",
             ]:
                 output_sizes = [[math.prod(input_sizes[0]) * 2]]
-            if collective == "all_to_all":
+            if collective in ["all_to_all", "all_to_all_single"]:
                 expectedState = MatchState.UNDECIDED
             event = create_one_event(
                 collective, ("0", "default"), input_sizes, output_sizes, "scheduled", 1
@@ -201,6 +201,94 @@ class FlightRecorderEventTest(TestCase):
             membership = {"0": {0, 1}}
             result = match_one_event(event, event, membership, "0").state
             self.assertEqual(result, expectedState)
+
+    def test_collective_variants_are_distinct_types(self):
+        # c10d's FlightRecorderHook used to record every allgather variant as
+        # "all_gather" and both alltoalls as "all_to_all", so a rank calling
+        # one could match a peer calling the other.
+        membership = {"0": {0, 1}}
+        for a, b in (
+            ("all_gather", "_all_gather_base"),
+            ("all_reduce", "allreduce_coalesced"),
+            ("reduce_scatter", "_reduce_scatter_base"),
+            ("all_to_all", "all_to_all_single"),
+        ):
+            ea = create_one_event(a, ("0", "default"), [[8]], [[8]], "scheduled", 1)
+            eb = create_one_event(b, ("0", "default"), [[8]], [[8]], "scheduled", 1)
+            self.assertEqual(
+                match_one_event(ea, eb, membership, "0").state,
+                MatchState.COLLECTIVE_TYPE_MISMATCH,
+                msg=f"{a} vs {b}",
+            )
+
+    def test_all_gather_base_numel_is_checked(self):
+        # The rule was spelled "all_gather_base"; no producer has ever written
+        # that, so the branch never ran and a flattened all-gather with the
+        # wrong output numel passed.
+        membership = {"0": {0, 1}}
+        good = create_one_event(
+            "_all_gather_base", ("0", "default"), [[8]], [[16]], "scheduled", 1
+        )
+        bad = create_one_event(
+            "_all_gather_base", ("0", "default"), [[8]], [[24]], "scheduled", 1
+        )
+        self.assertEqual(
+            match_one_event(good, good, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
+        self.assertEqual(
+            match_one_event(bad, bad, membership, "0").state,
+            MatchState.SIZE_OR_SYNTAX_MISMATCH,
+        )
+
+    def test_all_to_all_single_uneven_splits_are_not_a_mismatch(self):
+        # alltoall_base with uneven splits gives each rank a different buffer
+        # size, so only the summed numel across the group can be checked --
+        # the same treatment "all_to_all" gets, which is why it is not folded
+        # into the per-rank size comparison.
+        membership = {"0": {0, 1}}
+        e0 = create_one_event(
+            "all_to_all_single", ("0", "default"), [[8]], [[12]], "scheduled", 1
+        )
+        e1 = create_one_event(
+            "all_to_all_single", ("0", "default"), [[12]], [[8]], "scheduled", 1
+        )
+        self.assertEqual(
+            match_one_event(e0, e1, membership, "0").state, MatchState.UNDECIDED
+        )
+
+    def test_recv_any_source_has_no_peer(self):
+        # recv_any_source names no peer. Reading it as rank -1 made
+        # _init_global_src_dst index the group's rank list from the end and
+        # pin the recv on the highest-ranked member.
+        membership = {"0": {2, 5}}
+        recv = create_one_event(
+            "recv 1<-?", ("0", "default"), [[8]], [[8]], "scheduled", 0, 1
+        )
+        op = Op(recv, membership, "0")
+        self.assertIsNone(op.src)
+        self.assertIsNone(op._src_g)
+        self.assertEqual((op.dst, op._dst_g), (1, 5))
+        # ... and it matches whichever rank actually sent to it.
+        send = create_one_event(
+            "send 0->1", ("0", "default"), [[8]], [[8]], "scheduled", 0, 1
+        )
+        self.assertEqual(
+            match_one_event(send, recv, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
+        self.assertEqual(
+            match_one_event(recv, send, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
+        # A genuine size mismatch is still caught.
+        short = create_one_event(
+            "send 0->1", ("0", "default"), [[4]], [[4]], "scheduled", 0, 1
+        )
+        self.assertEqual(
+            match_one_event(short, recv, membership, "0").state,
+            MatchState.SIZE_OR_SYNTAX_MISMATCH,
+        )
 
 
 class FlightRecorderOpBackendTest(TestCase):
@@ -239,9 +327,43 @@ class FlightRecorderOpBackendTest(TestCase):
         op = Op(self._make_event("xccl"), {"0": {0, 1}}, "0")
         self.assertEqual(op.type, "all_reduce")
 
-    def test_unsupported_backend_raises(self):
+    def test_nccl2_backend(self):
+        # c10d's FlightRecorderHook writes the backend's own name, so a group
+        # running nccl2 produces "nccl2:<op>".
+        op = Op(self._make_event("nccl2"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_c10d_backend(self):
+        # Fallback name the hook writes when it cannot identify the backend.
+        op = Op(self._make_event("c10d"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_nccl2_backend_p2p(self):
+        send = self._make_event("nccl2", "send 0->1")
+        op = Op(send, {"0": {0, 1}}, "0")
+        self.assertEqual((op.type, op.src, op.dst), ("send", 0, 1))
+        recv = self._make_event("nccl2", "recv 1<-0")
+        op = Op(recv, {"0": {0, 1}}, "0")
+        self.assertEqual((op.type, op.src, op.dst), ("recv", 0, 1))
+
+    def test_unsupported_backend_is_not_fatal(self):
+        # The hook attaches to any backend and records under whatever name it
+        # reports, so an unknown comm library must not cost us the collective.
+        op = Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_backend_name_with_colon(self):
+        # A stray colon in the comm library name must not eat the op name.
+        op = Op(self._make_event("weird:backend"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_missing_colon_raises(self):
         with self.assertRaises(AssertionError):
-            Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")
+            Op(
+                {**self._make_event("nccl"), "profiling_name": "all_reduce"},
+                {"0": {0, 1}},
+                "0",
+            )
 
 
 class FlightMatchInfoTest(TestCase):
@@ -286,6 +408,8 @@ def create_one_entry(
     p2p_seq_id=0,
     output_dtypes="float32",
     pg_info=("0", "default"),
+    input_dtypes="float32",
+    backend="nccl",
 ):
     event = create_one_event(
         collective_name,
@@ -296,6 +420,8 @@ def create_one_entry(
         collective_seq_id,
         p2p_seq_id,
         output_dtypes,
+        input_dtypes,
+        backend,
     )
     event.update({"record_id": record_id})
     event.update({"is_p2p": False})
@@ -456,6 +582,107 @@ class FlightRecorderE2ETest(TestCase):
         self.assertEqual(db.collectives[1].collective_name, f"{BACKEND}:_reduce_oop")
         self.assertEqual(db.collectives[1].record_id, 1)
         self.assertEqual(db.collectives[1].pass_check, True)
+
+
+class FlightRecorderHookShapeTest(TestCase):
+    """Analysis of traces written by c10d's FlightRecorderHook.
+
+    The hook records the tensors the dispatcher hands it. For the in-place
+    collectives that is the same buffer on both sides, and for the list-form
+    all_gather / reduce_scatter it is one shard-shaped buffer per rank rather
+    than the single flattened buffer a native backend records. Both spellings
+    have to analyze with no mismatch, or a real desync ends up buried under
+    fabricated ones.
+    """
+
+    version = "2.8"  # Same as the version in FlightRecorder.hpp
+
+    def _entry(self, record_id, collective_name, input_sizes, output_sizes, seq):
+        return create_one_entry(
+            record_id,
+            collective_name,
+            input_sizes,
+            output_sizes,
+            state="scheduled",
+            collective_seq_id=seq,
+            input_dtypes=["Float"] * len(input_sizes),
+            output_dtypes=["Float"] * len(output_sizes),
+            backend="nccl2",
+        )
+
+    def _build_db(self, entries_per_rank):
+        details = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
+        for rank, entries in enumerate(entries_per_rank):
+            details[f"dump_file_rank_{rank}"]["version"] = self.version
+            details[f"dump_file_rank_{rank}"]["entries"] = entries
+        return build_db(details, JobConfig().parse_args([]), self.version)
+
+    def _build_db_symmetric(self, entries):
+        # Both ranks recorded the same thing, so anything build_db reports is
+        # the analyzer misreading the shape, not a desync.
+        return self._build_db([copy.deepcopy(entries), copy.deepcopy(entries)])
+
+    def _match(self, entry):
+        membership = {"0": {0, 1}}
+        return match_one_event(entry, copy.deepcopy(entry), membership, "0").state
+
+    def test_matcher_accepts_hook_shapes(self):
+        for name, input_sizes, output_sizes in (
+            ("all_reduce", [[8]], [[8]]),
+            ("allreduce_coalesced", [[8], [4]], [[8], [4]]),
+            ("reduce", [[8]], [[8]]),
+            ("all_gather", [[8]], [[8], [8]]),
+            ("reduce_scatter", [[8], [8]], [[8]]),
+        ):
+            entry = self._entry(0, name, input_sizes, output_sizes, 1)
+            self.assertEqual(self._match(entry), MatchState.FULLY_MATCHED, msg=name)
+
+    def test_hook_shaped_run_has_no_mismatch(self):
+        db = self._build_db_symmetric(
+            [
+                self._entry(0, "all_reduce", [[8]], [[8]], 1),
+                self._entry(1, "reduce", [[8]], [[8]], 2),
+                self._entry(2, "all_gather", [[8]], [[8], [8]], 3),
+                self._entry(3, "reduce_scatter", [[8], [8]], [[8]], 4),
+                self._entry(4, "allreduce_coalesced", [[8], [4]], [[8], [4]], 5),
+            ]
+        )
+        self.assertEqual(
+            [c.collective_name for c in db.collectives],
+            [
+                "nccl2:all_reduce",
+                "nccl2:reduce",
+                "nccl2:all_gather",
+                "nccl2:reduce_scatter",
+                "nccl2:allreduce_coalesced",
+            ],
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [True] * 5)
+
+    def test_list_form_all_gather_mismatch_is_caught(self):
+        # The list form must not become a blanket accept: one buffer per rank
+        # is the whole point, so a list of the wrong length is still wrong.
+        db = self._build_db_symmetric(
+            [self._entry(0, "all_gather", [[8]], [[8], [8], [8]], 1)]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+
+    def test_list_form_reduce_scatter_mismatch_is_caught(self):
+        db = self._build_db_symmetric(
+            [self._entry(0, "reduce_scatter", [[8], [8], [8]], [[8]], 1)]
+        )
+        self.assertEqual([c.pass_check for c in db.collectives], [False])
+
+    def test_flattened_form_mismatch_is_still_caught(self):
+        # Native shapes keep their old verdict.
+        for name, input_sizes, output_sizes in (
+            ("all_gather", [[8]], [[17]]),
+            ("reduce_scatter", [[17]], [[8]]),
+        ):
+            db = self._build_db_symmetric(
+                [self._entry(0, name, input_sizes, output_sizes, 1)]
+            )
+            self.assertEqual([c.pass_check for c in db.collectives], [False], msg=name)
 
 
 if __name__ == "__main__":

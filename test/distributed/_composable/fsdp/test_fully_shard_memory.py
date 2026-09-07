@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_HPU,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -329,18 +328,17 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-
-        if TEST_CUDA or TEST_XPU:
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
-        if TEST_HPU:
-            return round(mem_stats["MaxInUse"] / 1e6)
+        return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA or TEST_XPU:
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
-        if TEST_HPU:
-            return round(mem_stats["InUse"] / 1e6)
+        return round(mem_stats["InUse"] / 1e6)
 
     def _register_optim_in_backward(
         self, model: torch.nn.Module, **optim_kwargs
@@ -371,8 +369,9 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "HSDP sync correctness test is CUDA-only")
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
     def test_ar_buffer_lifetime_mixed_dtype(self):
         """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
         HSDP AR, fp32 params`).

@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 
 import copy
-import unittest
 from collections import defaultdict
 
 import torch
@@ -12,9 +11,12 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
-class TestShapeInference(unittest.TestCase):
+class TestShapeInference(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_infer_symbol_values(self):
         def mksym(shape_env, value, source, dynamic_dim) -> None:
             return shape_env.create_symintnode(

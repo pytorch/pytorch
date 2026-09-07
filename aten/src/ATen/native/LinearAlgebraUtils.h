@@ -10,6 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TransposeType.h>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 #include <sstream>
 #include <cstring>
@@ -26,6 +27,36 @@
 #endif
 
 namespace at::native {
+
+inline void check_mm_shapes(
+    const Tensor& self,
+    const Tensor& mat2,
+    std::string_view func_name) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      func_name,
+      ": self must be a matrix, got ",
+      self.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2,
+      func_name,
+      ": mat2 must be a matrix, got ",
+      mat2.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      self.sym_size(1) == mat2.sym_size(0),
+      func_name,
+      ": mat1 and mat2 shapes cannot be multiplied (",
+      self.sym_size(0),
+      "x",
+      self.sym_size(1),
+      " and ",
+      mat2.sym_size(0),
+      "x",
+      mat2.sym_size(1),
+      ")");
+}
 
 inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
@@ -296,10 +327,10 @@ inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const ch
 
 inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name, const bool allow_low_precision_dtypes=true) {
   auto dtype = t.scalar_type();
-  TORCH_CHECK((at::isFloatingType(dtype) || at::isComplexType(dtype)),
+  TORCH_CHECK_NOT_IMPLEMENTED((at::isFloatingType(dtype) || at::isComplexType(dtype)),
               f_name, ": Expected a floating point or complex tensor as input. Got ", dtype);
   if (!allow_low_precision_dtypes) {
-    TORCH_CHECK(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
+    TORCH_CHECK_NOT_IMPLEMENTED(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
                 f_name, ": Low precision dtypes not supported. Got ", dtype);
   }
 }

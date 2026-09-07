@@ -1,6 +1,5 @@
 import functools
 
-from torch._inductor.ir import get_stride_order
 from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 from torch._inductor.runtime.runtime_utils import ceildiv
 from cutlass.utils import TensorMapUpdateMode
@@ -56,12 +55,14 @@ _TORCH_TO_CUTLASS_DTYPE = {
     torch.int64: cutlass.Int64,
 }
 
+# Strides are spelled out rather than derived from a stride order: a compact
+# layout would bake the wrong leading stride for a row-padded input, and the
+# tvm-ffi call checks the compiled strides against the runtime tensor.
 def _to_fake_cute_tensor(t, assumed_align=16):
-    dyn_shape = tuple(map(int, t.shape))
-    stride_order = tuple(get_stride_order(t.stride()))
-    return cute.runtime.make_fake_compact_tensor(
-        _TORCH_TO_CUTLASS_DTYPE[t.dtype], dyn_shape,
-        stride_order=stride_order, assumed_align=assumed_align,
+    return cute.runtime.make_fake_tensor(
+        _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+        tuple(map(int, t.shape)), tuple(map(int, t.stride())),
+        assumed_align=assumed_align,
     )
 
 
@@ -400,6 +401,11 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     sB_0, sB_n, sB_k = trans_stride_b
     sC_m, sC_n = stride_out
 
+    compile_options = "--enable-tvm-ffi"
+    if device_capability is not None:
+        major, minor = device_capability
+        compile_options += f" --gpu-arch sm_{major}{minor}a"
+
     prep_executor = cute.compile(
         launch_build_group_ptrs_from_bases,
         base_A_u64=0,
@@ -421,7 +427,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         out_problem=_to_fake_cute_tensor(proxy_probs, assumed_align=4),
         out_strides_abc=_to_fake_cute_tensor(proxy_strides, assumed_align=4),
         stream=cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi",
+        options=compile_options,
     )
 
     disk_cache_set(
@@ -489,7 +495,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
         _to_fake_cute_tensor(proxy_tensormap),
         max_active_clusters,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        options="--enable-tvm-ffi",
+        options=compile_options,
     )
 
     disk_cache_set(

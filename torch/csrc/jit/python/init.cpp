@@ -884,8 +884,9 @@ void initJITBindings(PyObject* module) {
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strat =
-                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+            auto strat = fmap(
+                std::move(old_strategy),
+                [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
                                                             : "DYNAMIC",
@@ -1548,9 +1549,7 @@ void initJITBindings(PyObject* module) {
     THPObjectPtr getMemview(void* buf, size_t n) const {
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-      if (!memview) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(memview);
       return memview;
     }
 
@@ -1785,7 +1784,8 @@ void initJITBindings(PyObject* module) {
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
           auto opWithStack = getOpWithStack(overloads, args, kwargs);
-          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          std::shared_ptr<Operator> overload =
+              std::move(std::get<0>(opWithStack));
           auto result = overload->schema().overload_name();
           if (result.empty()) {
             result = "default";

@@ -240,7 +240,7 @@ def get_static_quant_module_class(
     additional_static_quant_mapping: dict[Callable, Any] | None = None,
     is_reference: bool = False,
 ) -> Any:
-    r"""n Get the statically quantized module class corresponding to
+    r"""Get the statically quantized module class corresponding to
     the floating point module class
     """
     if additional_static_quant_mapping is None:
@@ -264,7 +264,7 @@ def get_dynamic_quant_module_class(
     float_module_class: Callable,
     additional_dynamic_quant_mapping: dict[Callable, Any] | None = None,
 ) -> Any:
-    r"""n Get the dynamically quantized module class corresponding to
+    r"""Get the dynamically quantized module class corresponding to
     the floating point module class
     """
     if additional_dynamic_quant_mapping is None:

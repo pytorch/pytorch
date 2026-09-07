@@ -3,7 +3,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
-#include "caffe2/core/common.h"
 
 namespace caffe2 {
 namespace serialize {

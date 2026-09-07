@@ -192,9 +192,12 @@ manual_torch_name_rule_map: dict[
     "torch.mtia.is_available": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer": UserFunctionVariable,
+    # Tracing this marked-constant helper requires a Python-constant device argument.
+    "torch._dynamo.utils.is_compile_supported": UserFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
+    "torch._C._is_cow_tensor": TorchInGraphFunctionVariable,
     "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
@@ -221,8 +224,12 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.set_rng_state": SkipFunctionVariable,
     "torch.cuda.manual_seed": SkipFunctionVariable,
     "torch.cuda.manual_seed_all": SkipFunctionVariable,
+    "torch.xpu.manual_seed": SkipFunctionVariable,
+    "torch.xpu.manual_seed_all": SkipFunctionVariable,
     "torch.cuda.random.manual_seed": SkipFunctionVariable,
     "torch.cuda.random.manual_seed_all": SkipFunctionVariable,
+    "torch.xpu.random.manual_seed": SkipFunctionVariable,
+    "torch.xpu.random.manual_seed_all": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
@@ -231,6 +238,7 @@ manual_torch_name_rule_map: dict[
     "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
+    "torch.backends.cuda.SDPAParams": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
@@ -3154,7 +3162,7 @@ Return if a torch object is ATen op or torch.Tensor method.
 """
 
 
-def is_aten_op_or_tensor_method(obj: Any) -> bool:
+def is_aten_op_or_tensor_method(obj: object) -> bool:
     return obj in get_tensor_method() or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
@@ -3335,58 +3343,58 @@ def _maybe_init_lazy_module(obj: object) -> None:
             fn()
 
 
-def is_callable_allowed(obj: Any) -> bool:
+def is_callable_allowed(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_callable_ids
 
 
-def is_nonstrict_trace_callable(obj: Any) -> bool:
+def is_nonstrict_trace_callable(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _nonstrict_trace_callable_ids
 
 
-def is_leaf_function(obj: Any) -> bool:
+def is_leaf_function(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _leaf_function_ids
 
 
-def is_callable_disallowed(obj: Any) -> bool:
+def is_callable_disallowed(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _disallowed_callable_ids
 
 
-def is_forbidden(obj: Any) -> bool:
+def is_forbidden(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
     return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
-def is_builtin_callable(obj: Any) -> bool:
+def is_builtin_callable(obj: object) -> bool:
     # See also torch/_dynamo/polyfills/loader.py, which removes items in _builtin_function_ids
     return id(obj) in _builtin_function_ids
 
 
-def is_builtin_constant(obj: Any) -> bool:
+def is_builtin_constant(obj: object) -> bool:
     return id(obj) in _builtin_constant_ids
 
 
-def is_polyfilled_callable(obj: Any) -> bool:
+def is_polyfilled_callable(obj: object) -> bool:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
     return id(obj) in _polyfilled_function_ids
 
 
-def is_numpy(obj: Any) -> bool:
+def is_numpy(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
-def is_numpy_dtype(obj: Any) -> bool:
+def is_numpy_dtype(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, np.dtype)
 
 
-def is_numpy_type_info(obj: Any) -> bool:
+def is_numpy_type_info(obj: object) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.finfo, np.iinfo))
@@ -3932,7 +3940,7 @@ def _force_inline() -> Iterator[None]:
 
 
 def check_verbose(
-    obj: Any, is_inlined_call: bool = False, frame: Any | None = None
+    obj: object, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
@@ -4004,7 +4012,7 @@ def check_verbose(
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
-    # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if rule is None:
@@ -4028,11 +4036,11 @@ def check_verbose(
         return SkipResult(True, reasons.pop())
 
 
-def check(obj: Any, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
+def check(obj: object, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
     return check_verbose(obj, is_inlined_call, frame).skipped
 
 
-def get_skip_reason(obj: Any) -> str:
+def get_skip_reason(obj: object) -> str:
     """Compute a descriptive skip reason for a callable. Only called on graph break."""
     if is_callable_disallowed(obj):
         return _disallowed_callable_ids.get_name(id(obj), repr(obj))
@@ -4127,13 +4135,13 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj: Any) -> type[VariableTracker] | None:
+def lookup(obj: object) -> type[VariableTracker] | None:
     return lookup_inner(obj)
 
 
 # also takes config.dont_skip_tracing into account
 def lookup_inner(
-    obj: Any,
+    obj: object,
     name: str | None = None,
     filename: str | None = None,
     is_direct_call: bool = True,
@@ -4174,7 +4182,7 @@ def lookup_inner(
 
 
 def _lookup_inner(
-    obj: Any,
+    obj: object,
     name: str | None = None,
     filename: str | None = None,
     is_direct_call: bool = True,

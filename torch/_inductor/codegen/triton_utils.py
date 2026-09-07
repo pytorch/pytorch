@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
+import functools
+import warnings
 from typing import Any
 
 import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._triton import has_triton_block_ptr
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
@@ -26,6 +29,35 @@ from .common import (
 )
 
 
+@functools.cache
+def _warn_block_ptr_unavailable() -> None:
+    # Fires only in the no-op case (flag on, API gone), so users who never set
+    # the flag -- and callers that patch it to False -- stay quiet.
+    warnings.warn(
+        "config.triton.use_block_ptr=True but the installed Triton no longer "
+        "provides the block-pointer frontend API (removed in "
+        "triton-lang/triton#10833); falling back to the default masked-indexing "
+        "path. This flag is deprecated and will be removed (#191012).",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+
+def use_block_ptr_enabled() -> bool:
+    """Effective block-pointer codegen setting.
+
+    Honors ``config.triton.use_block_ptr`` only where the installed Triton still
+    provides the block-pointer frontend API. When the flag is set but the API is
+    gone the request is a no-op: warn once, then fall back to masked indexing.
+    """
+    if not config.triton.use_block_ptr:
+        return False
+    if has_triton_block_ptr():
+        return True
+    _warn_block_ptr_unavailable()
+    return False
+
+
 def should_unwrap_unspec_arg(name: str):
     if V.graph.is_unspec_arg(name):
         # Unwrap on all devices except CPU
@@ -38,7 +70,10 @@ def should_unwrap_unspec_arg(name: str):
 
 
 def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
-    dtype: torch.dtype, arg_name: str | None = None
+    dtype: torch.dtype,
+    arg_name: str | None = None,
+    *,
+    device: torch.device | None = None,
 ) -> bool:
     # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
     # still dequantize float8_e4m3fn values by treating storage as raw bytes.
@@ -47,10 +82,11 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     if arg_name is not None and not arg_name.startswith("in_ptr"):
         return False
 
-    try:
-        device = V.graph.get_current_device_or_throw()
-    except AttributeError:
-        return False
+    if device is None:
+        try:
+            device = V.graph.get_current_device_or_throw()
+        except AttributeError:
+            return False
 
     if device.type != "cuda":
         return False
@@ -58,7 +94,13 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     return DeviceProperties.create(device).cc < 89
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
+def signature_of(
+    arg: KernelArgType,
+    *,
+    size_dtype: str | None,
+    use_fp64_for_python_float: bool = True,
+) -> str:
+    """Return the Triton signature type for an Inductor kernel argument."""
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -88,18 +130,25 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
-            # Python floats are natively fp64, so use fp64 to preserve precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            # Inductor-generated kernels use fp64 to preserve Python-float
+            # precision. User-defined Triton kernels opt out so their compiled
+            # signatures match Triton's eager specialization.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
-            # Unbacked floats from .item() should preserve fp64 precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            # Unbacked floats from .item() are runtime Python floats, so they
+            # follow the same eager-vs-Inductor signature policy as literals.
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"
@@ -174,6 +223,7 @@ def signature_to_meta(
     argdefs: list[ArgName],
     indices: list[int] | None = None,
     is_template: bool = False,
+    use_fp64_for_python_float: bool = True,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -183,16 +233,17 @@ def signature_to_meta(
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
         #
-        # Check config.triton.use_block_ptr, since Triton block pointer
-        # does not support 64bit indexing:
-        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        # Block pointers do not support 64-bit indexing, so keep ks indices in
+        # tl.int32 whenever the (deprecated) block-pointer path is actually
+        # active. Templates like flex attention/decoding likewise use
+        # hand-written block pointers, so they also stay on 32-bit ks indexing.
         #
-        # If the triton metadata is for a template, don't use tl.int64 index.
-        # Templates like flex attention/decoding uses block pointers which
-        # does not support 64 bit indexing.
+        # assume_32bit_indexing already asserts (and guards) that every ks* symbol
+        # fits in int32.
         if (
-            not config.triton.use_block_ptr
-            and not is_template
+            not is_template
+            and not use_block_ptr_enabled()
+            and not config.assume_32bit_indexing
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
@@ -200,7 +251,11 @@ def signature_to_meta(
         return size_dtype
 
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
+        argdefs[i].name: signature_of(
+            arg,
+            size_dtype=_decide_tl_dtype(arg),
+            use_fp64_for_python_float=use_fp64_for_python_float,
+        )
         for i, arg in zip(indices, signature)
     }
 

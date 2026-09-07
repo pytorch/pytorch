@@ -25,7 +25,7 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo, skipIfXpu)
+    skipIfTorchDynamo, skipIfXpu, isRocmArchAnyOf, MI200_ARCH)
 from types import ModuleType
 import operator
 
@@ -556,7 +556,7 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
     Kwargs:
-        batch_first[bool] : If True, all the Tensors in `args` while be unsqueezed at dim `0` .
+        batch_first[bool] : If True, all the Tensors in `args` will be unsqueezed at dim `0` .
                         and output will be squeezed at dim `0` else dim `1` for both.
         kwargs_to_batchify[dict] : Dictionary specifying the name of the argument and dimension to unsqueeze.
                                Useful if there are few arguments whose batch dimension are different
@@ -1975,39 +1975,56 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     target = make_target(num_classes, (*batch_dims, *of), torch.int64)
                     yield module_args, module_kwargs, (input, target)
 
-        # Chunked probability-target coverage (mean/sum; reduction='none'
-        # with a probability target falls back to the reference).
-        # Appended after all other samples so the RNG draw order -- and
-        # therefore the data the calibrated index-target ULP caps were
-        # measured on -- is unchanged.
-        for sizes in [(8, 5, 4), (None, 8, 4)]:
-            num_batches, in_features, num_classes = sizes
-            batch_dims = () if num_batches is None else (num_batches,)
-            weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
-            for reduction, w in product(["mean", "sum"], weights):
-                if acc_dtype is not None:
-                    options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
-                elif num_batches is not None:
-                    # batch_chunk_size=2 forces >=2 chunks on every device.
-                    options = dict(batch_chunk_size=2)
-                else:
-                    options = dict()
-                module_args = (in_features, num_classes)
-                module_kwargs = dict(
-                    out_features=(),
-                    device=device,
-                    dtype=dtype,
-                    reduction=reduction,
-                    weight=w,
-                    ignore_index=None,
-                    label_smoothing=0.0,
-                    options=torch.nn.LinearCrossEntropyOptions(
-                        allow_retain_graph=allow_retain_graph, **options
-                    ),
-                )
-                input = make_input(batch_dims, in_features)
-                target = make_target(num_classes, (*batch_dims, num_classes), dtype)
-                yield module_args, module_kwargs, (input, target)
+        # Chunked probability-target coverage (mean/sum/none), without and
+        # then with a linear bias. Appended after all other samples so the
+        # RNG draw order -- and therefore the data the calibrated index-target
+        # ULP caps were measured on -- is unchanged ("none" is last in the
+        # product so the mean/sum draws are also unchanged). The bias=True
+        # pass is emitted after the bias=False pass for the same reason
+        # (``bias=False`` is the constructor default, so its samples are
+        # identical to omitting the kwarg); it exercises the shared
+        # accumulator's bias-grad (the batch-sum of the dense grad_logits)
+        # for both the scalar and the none reductions.
+        def prob_target_samples(bias):
+            for sizes in [(8, 5, 4), (None, 8, 4)]:
+                num_batches, in_features, num_classes = sizes
+                batch_dims = () if num_batches is None else (num_batches,)
+                weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+                for reduction, w in product(["mean", "sum", "none"], weights):
+                    if acc_dtype is not None and bias:
+                        # bias=True is feps-only (no per-element caps), so force
+                        # >=2 chunks here (batch_chunk_size=2) to exercise the
+                        # mixed-precision bias-grad scratch-commit/zero_() across
+                        # chunk boundaries. bias=False keeps the single-chunk
+                        # aspect_ratio sample its per-element caps are calibrated on.
+                        options = dict(acc_dtype=acc_dtype, batch_chunk_size=2)
+                    elif acc_dtype is not None:
+                        options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
+                    elif num_batches is not None:
+                        # batch_chunk_size=2 forces >=2 chunks on every device.
+                        options = dict(batch_chunk_size=2)
+                    else:
+                        options = dict()
+                    module_args = (in_features, num_classes)
+                    module_kwargs = dict(
+                        out_features=(),
+                        bias=bias,
+                        device=device,
+                        dtype=dtype,
+                        reduction=reduction,
+                        weight=w,
+                        ignore_index=None,
+                        label_smoothing=0.0,
+                        options=torch.nn.LinearCrossEntropyOptions(
+                            allow_retain_graph=allow_retain_graph, **options
+                        ),
+                    )
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, (*batch_dims, num_classes), dtype)
+                    yield module_args, module_kwargs, (input, target)
+
+        yield from prob_target_samples(bias=False)
+        yield from prob_target_samples(bias=True)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
@@ -4701,8 +4718,20 @@ module_db: list[ModuleInfo] = [
                                 "test_non_contiguous_tensors", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-2, rtol=5e-2)}), "TestModule",
                                 "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
+                   # The MI200 entries below keep the arch query behind
+                   # TEST_WITH_ROCM: isRocmArchAnyOf raises on a ROCm build
+                   # with no visible GPU, and the first entry's lambda also
+                   # runs while instantiating the non-cuda device classes.
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
-                                "test_cpu_gpu_parity", dtypes=[torch.float16]),
+                                "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                active_if=lambda _: not (TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH))),
+                   # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                   # implementation (fp16_on_mi200 in numerical_accuracy.md);
+                   # cancellation over bf16-granularity intermediates gives a
+                   # measured single-element cpu/gpu diff of 0.125 (rel 0.5).
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-1, rtol=5e-1)}), "TestModule",
+                                "test_cpu_gpu_parity", dtypes=[torch.float16], device_type='cuda',
+                                active_if=lambda _: TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH)),
                    # Insufficient accuracy, likely related to an issue with cross_entropy
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
                                 dtypes=[torch.bfloat16], device_type='cuda'),
@@ -4718,6 +4747,10 @@ module_db: list[ModuleInfo] = [
                                 "test_forward", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
                                 "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
+                   # nll_loss2d_forward_xpu is nondeterministic (bf16 atomicAdd
+                   # across batch blocks); matches the CUDA override above.
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.bfloat16]),
                ),
                skips=(
                    # The chunked reduction='none' backward recomputes grads
@@ -5003,29 +5036,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Tanh,
                module_inputs_func=module_inputs_torch_nn_Tanh,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Tanhshrink,
                module_inputs_func=module_inputs_torch_nn_Tanhshrink,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Threshold,
                module_inputs_func=module_inputs_torch_nn_Threshold,
@@ -5121,15 +5134,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ZeroPad2d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad3d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.CircularPad1d,
                module_inputs_func=module_inputs_torch_nn_CircularPad1d,
@@ -5151,14 +5158,8 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ConstantPad2d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ConstantPad3d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                )
 ]

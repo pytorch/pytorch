@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 # Owner(s): ["module: internals"]
 
-import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestComparisonUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_equal_no_assert(self):
         t = torch.tensor([0.5])
         torch._assert_tensor_metadata(t, [1], [1], torch.float)
@@ -34,19 +43,27 @@ class TestComparisonUtils(TestCase):
         with self.assertRaises(RuntimeError):
             torch._assert_tensor_metadata(t, [3], [1], torch.float)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
-    def test_assert_device(self):
-        t = torch.tensor([0.5], device="cpu")
-
-        with self.assertRaises(RuntimeError):
-            torch._assert_tensor_metadata(t, device="cuda")
-
     def test_assert_layout(self):
         t = torch.tensor([0.5])
 
         with self.assertRaises(RuntimeError):
             torch._assert_tensor_metadata(t, layout=torch.sparse_coo)
 
+
+class TestComparisonUtilsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_assert_device(self, device):
+        t = torch.tensor([0.5], device="cpu")
+
+        with self.assertRaises(RuntimeError):
+            torch._assert_tensor_metadata(t, device=device)
+
+
+instantiate_device_type_tests(
+    TestComparisonUtilsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

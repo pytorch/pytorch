@@ -5,6 +5,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 _variable = 0
@@ -63,6 +64,8 @@ class MyModule(torch.nn.Module):
 
 
 class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_add_tensor1(self):
         def fn(a, b):
             return a + b

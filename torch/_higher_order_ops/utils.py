@@ -11,6 +11,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
+from torch._functorch.vmap import restore_vmap
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
@@ -100,6 +101,99 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _move_batch_dims_to_last_for_scan(unbatched_args, in_dims):
+    # Parks the batch dim on the last axis so it never collides with the scan
+    # dim (0). The -1 convention here is a scan/associative_scan contract, not a
+    # general vmap one: both scan batch rules rely on the scan dim being 0.
+    return pytree.tree_map(
+        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
+        unbatched_args,
+        in_dims,
+    )
+
+
+def _batch_dims_as_last_for_scan(in_dims):
+    # Flat markers matching _move_batch_dims_to_last_for_scan: -1 where batched, else None.
+    # Encodes the same scan-specific last-axis convention described there.
+    return tuple(
+        -1 if bdim is not None else None for bdim in pytree.tree_leaves(in_dims)
+    )
+
+
+class _VmapCombineFnWrapper:
+    """Re-vmaps a scan/associative_scan combine_fn for use inside a scan batch rule.
+
+    The wrapper re-applies vmap to ``combine_fn`` with the batch dim parked on the
+    last axis (the scan-specific convention, see ``_move_batch_dims_to_last_for_scan``) so it
+    cannot collide with the scan dim (0). It is constructed with a fixed ``in_dims``
+    and passed as the combine_fn to the underlying HOP.
+
+    Contract for callers:
+      - ``in_dims`` are the flat, last-axis batch-dim markers for the combine_fn's
+        positional arguments, and are held fixed for the wrapper's lifetime.
+      - ``out_dims`` is ``None`` until ``__call__`` runs at least once, and only then
+        holds the flat per-output markers aligned to the op's flat outputs. Because a
+        scan HOP may not invoke the combine_fn at all (e.g. scan length < 2), a caller
+        MUST check for ``out_dims is None`` and decide the fallback itself:
+        ``associative_scan_batch_rule`` falls back to the xs batch dims (the op is a
+        no-op so outputs alias xs), while ``scan_batch_rule`` asserts the op always
+        runs. The consistency check below guards ``out_dims`` stability across steps,
+        not ``in_dims`` correctness.
+      - ``expected_out_dims`` (optional): the batch-dim markers the caller assumes the
+        combine_fn outputs will carry. ``generic_associative_scan`` feeds combine_fn
+        outputs back as the left-hand arguments on later recursion levels, reusing the
+        fixed ``in_dims``; that is only valid if the outputs keep the same batchedness
+        as those inputs. When the outputs diverge (e.g. batched additional_inputs with
+        unbatched xs), the stale markers would silently reinterpret a batch axis as
+        data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
+        the first call instead, before the divergence corrupts a later level.
+    """
+
+    def __init__(
+        self,
+        combine_fn: Callable[..., Any],
+        in_dims: tuple[Any, ...],
+        batch_size: int,
+        randomness: str,
+        expected_out_dims: tuple[Any, ...] | None = None,
+        op_name: str = "associative_scan",
+    ) -> None:
+        self.combine_fn = combine_fn
+        self.in_dims = in_dims
+        self.batch_size = batch_size
+        self.randomness = randomness
+        self.expected_out_dims = expected_out_dims
+        self.op_name = op_name
+        self.out_dims: tuple[Any, ...] | None = None
+
+    def __call__(self, *args: Any) -> Any:
+        outputs, per_slice_out_dims = restore_vmap(
+            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+        )(*args)
+        outputs = pytree.tree_map(
+            lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,
+            outputs,
+            per_slice_out_dims,
+        )
+        out_dims = _batch_dims_as_last_for_scan(per_slice_out_dims)
+        if self.expected_out_dims is not None and out_dims != self.expected_out_dims:
+            raise RuntimeError(
+                f"{self.op_name} under vmap requires the combine_fn outputs to keep "
+                "the same batched arguments as its xs inputs, because the outputs are "
+                "fed back as inputs on later scan levels. Here they diverge (e.g. "
+                "batched additional_inputs with unbatched xs, or a pytree where an "
+                "output leaf becomes batched via another leaf): expected output batch "
+                f"dims {self.expected_out_dims} but got {out_dims}."
+            )
+        if self.out_dims is not None and out_dims != self.out_dims:
+            raise AssertionError(
+                "combine_fn produced inconsistent output batch dims across scan "
+                f"steps: {self.out_dims} then {out_dims}"
+            )
+        self.out_dims = out_dims
+        return outputs
 
 
 def _hop_compile_and_call(fn, args, kwargs=None):
@@ -310,7 +404,7 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -324,13 +418,13 @@ def _set_compilation_env():
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch.fx._symbolic_trace._set_is_fx_tracing(False)
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
@@ -577,11 +671,24 @@ def clone_outputs_aliasing_inputs(args):
     return maybe_clone
 
 
+def query_requires_grad(t: torch.Tensor) -> bool:
+    """requires_grad of ``t``, looking through a functional wrapper.
+
+    A FunctionalTensor does not carry the autograd metadata of the tensor it
+    wraps, so asking it directly reports False for something that does require
+    grad. This matters when the joint is traced with functionalization active.
+    """
+    if torch._is_functional_tensor(t):
+        t = torch._from_functional_tensor(t)
+    return t.requires_grad
+
+
 def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and query_requires_grad(ret))
+            for ret in fw_out
         ]
 
     return fw_with_masks
@@ -603,12 +710,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 fw_out,
             )
 
-        def _query_requires_grad(t: torch.Tensor) -> bool:
-            if torch._is_functional_tensor(t):
-                t = torch._from_functional_tensor(t)
-            return t.requires_grad
-
-        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
+        return fw_out, pytree.tree_map_only(torch.Tensor, query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -952,8 +1054,15 @@ def get_dummy_aot_autograd_config():
     )
 
 
-# Slices off the first element of a given dimension
+# Slices off the first element of a given dimension. Used to build a
+# representative single slice for subgraph tracing of control-flow ops.
+# When `dim` has size 0 (e.g. a zero-length scan) there is no real slice to
+# take, so return an uninitialized tensor with `dim` removed.
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    if t.shape[dim] == 0:
+        shape = list(t.shape)
+        del shape[dim]
+        return t.new_zeros(shape)
     return torch.select_copy(t, dim, 0)
 
 
@@ -1206,34 +1315,51 @@ class SubgraphCallableWrapper:
 
 
 class FunctionalizeCtxWrapper(SubgraphCallableWrapper):
-    """
-    Wraps a subgraph with functionalization context for the AOT Dispatcher
-    metadata collection pass.
+    """Functionalizes a subgraph and optionally returns selected input updates.
+
+    Each update is a new tensor; the original input is not mutated.
     """
 
     # Prevents PYTORCH_TEST_WITH_DYNAMO=1 test failures
     @torch._disable_dynamo
-    def __init__(self, ctx, subgraph):
+    def __init__(self, ctx, subgraph, mutated_input_indices=()):
         super().__init__(subgraph, subgraph)
         self.ctx = ctx
+        self.mutated_input_indices = mutated_input_indices
 
     def __repr__(self):
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        def append_mutated_inputs(fn):
+            if not self.mutated_input_indices:
+                return fn
+
+            def wrapped(*args, **kwargs):
+                inputs = args[0] if self._boxed_call else args
+                # Snapshot before a boxed GraphModule clears its input list.
+                mutated_inputs = tuple(inputs[i] for i in self.mutated_input_indices)
+                # Dynamo normalizes invoke_subgraph outputs to tuples.
+                return (*fn(*args, **kwargs), *mutated_inputs)
+
+            return wrapped
+
         if isinstance(self.subgraph, torch.fx.GraphModule):
             if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                functionalized = self.ctx.functionalize(
+                    append_mutated_inputs(self.subgraph)
+                )
                 if len(args) == 1 and isinstance(args[0], list):
-                    return self.ctx.functionalize(self.subgraph)(args[0])
-                return self.ctx.functionalize(self.subgraph)(list(args))
+                    return functionalized(args[0])
+                return functionalized(list(args))
             else:
                 # Running graph with interpreter is needed for propagating the stack_trace
                 with fx_traceback.preserve_node_meta():
                     return self.ctx.functionalize(
-                        torch.fx.Interpreter(self.subgraph).run
+                        append_mutated_inputs(torch.fx.Interpreter(self.subgraph).run)
                     )(*args, **kwargs)
-        functionalized = self.ctx.functionalize(self.subgraph)
+        functionalized = self.ctx.functionalize(append_mutated_inputs(self.subgraph))
         if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])

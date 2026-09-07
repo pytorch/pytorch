@@ -1,14 +1,15 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for richcompare_impl: unified comparison protocol in Dynamo."""
+"""Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
-import unittest
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._library.opaque_object import register_custom_class
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class _OpaqueVal(torch._custom_class_base.CustomClassBase):
@@ -34,6 +35,8 @@ register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_cmp_equals(self, a, b, op, *, expect_type_error=None):
         """Assert Dynamo's op(a, b) matches eager Python's op(a, b).
 
@@ -1574,21 +1577,6 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)([1, 2])
 
     # =====================================================================
-    # Event comparison (EventVariable)
-    # =====================================================================
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    def test_cuda_event_eq(self):
-        def fn(e1, e2):
-            return e1 == e2, e1 != e2, e1 == e1
-
-        e1 = torch.cuda.Event()
-        e2 = torch.cuda.Event()
-        expected = fn(e1, e2)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
-        self.assertEqual(result, expected)
-
-    # =====================================================================
     # itertools module comparison (ItertoolsVariable)
     # =====================================================================
 
@@ -1898,6 +1886,65 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         expected = fn(ks1, ks2)
         result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
+
+    def test_unbound_builtin_cmp_dunder(self):
+        """type.__cmp__(a, b) invokes only the left type's slot (may be
+        NotImplemented) rather than the full comparison protocol."""
+
+        def fn():
+            return (
+                complex.__eq__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, 2 + 2j),
+                complex.__eq__(1 + 1j, 2),
+                complex.__ne__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, None),
+                complex.__lt__(1 + 1j, 2 + 2j),
+                int.__eq__(1, 1),
+                int.__lt__(1, 2),
+                int.__eq__(1, None),
+                float.__eq__(1.0, 2.0),
+                float.__lt__(1.0, 2.0),
+                str.__eq__("a", "a"),
+                bool.__eq__(True, 1),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(len(expected), len(result))
+        for e, r in zip(expected, result):
+            self.assertIs(r, e)
+
+
+# =====================================================================
+# Event comparison (EventVariable)
+# =====================================================================
+
+
+class TestEventComparisonDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_accelerator_event_eq(self, device):
+        def fn(e1, e2):
+            return e1 == e2, e1 != e2, e1 == e1
+
+        # torch.Event(device=device) and torch.<device>.Event() are
+        # different classes; test both to ensure Dynamo handles them
+        # correctly.
+        def Event():
+            return torch.Event(device=device)
+
+        def DeviceEvent():
+            return torch.get_device_module(device).Event()
+
+        for EventFactory in (Event, DeviceEvent):
+            e1 = EventFactory()
+            e2 = EventFactory()
+            expected = fn(e1, e2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
+            self.assertEqual(result, expected)
+
+
+instantiate_device_type_tests(TestEventComparisonDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":

@@ -89,7 +89,7 @@ def hash_storage_kernel(x):
 
 
 # Returns a hex digest of the data in the storage.  Guaranteed to be
-# SHA-1 if stable_hash=True, otherwise it will consistent for a single
+# SHA-1 if stable_hash=True, otherwise it will be consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
     import torch._dynamo
@@ -173,7 +173,7 @@ class ContentStoreWriter:
             t.dtype,
             h,
             t.storage_offset(),
-            tuple(t.shape),
+            t.shape,
             t.stride(),
             torch._utils.get_tensor_metadata(t),
         )

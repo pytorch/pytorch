@@ -1,11 +1,16 @@
 # Owner(s): ["module: nn"]
-
 import itertools
 import random
+import sys
+import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 class PackedSequenceTest(TestCase):
@@ -47,6 +52,10 @@ class PackedSequenceTest(TestCase):
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
         for input_type, _ in self._type_by_name.values():
@@ -85,6 +94,10 @@ class PackedSequenceTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.utils.rnn.pad_sequence(5)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
@@ -130,6 +143,10 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
     def test_to(self):
         for enforce_sorted in (True, False):
             padded, lengths = self._padded_sequence(torch.IntTensor)

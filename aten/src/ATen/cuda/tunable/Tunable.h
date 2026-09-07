@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -77,6 +78,28 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     ResultEntry Lookup(const std::string& op_signature, const std::string& params_signature);
 
+    // Scans persisted wildcard entries (keys containing '*') under
+    // `op_signature` and returns the first whose token-by-token pattern
+    // matches `concrete_params_signature`. Used as a runtime fallback
+    // when a concrete miss happens without an active TunableDynamicDimsGuard
+    // (e.g., AOTI cpp_wrapper that wasn't compiled with guard emission).
+    // Returns ResultEntry::Null() if no wildcard matches.
+    //
+    // Overlapping patterns: KernelMap is an unordered_map, so when several
+    // wildcards match, the winner is iteration-order dependent rather than the
+    // most specific. Only the M dim is wildcarded today, so exactly one
+    // matches; precedence is follow-up work.
+    //
+    // A hit is a hint, not a guarantee: '*' does not preserve dim/stride
+    // relationships and nothing is re-validated here. If the algorithm cannot
+    // service the concrete shape, hipBLASLt/rocBLAS rejects it at Call() time
+    // and the caller re-dispatches through gemm_internal / gemm_and_bias --
+    // the next matching wildcard is not tried. Falls back to default ATen,
+    // never a wrong result.
+    ResultEntry LookupWildcardFallback(
+        const std::string& op_signature,
+        const std::string& concrete_params_signature);
+
     void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
@@ -104,6 +127,8 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
       const std::string& params_signature, const std::string& blas_signature);
     void ClearUntuned();
+
+    void ClearAll();
 
     void InitRealtimeAppend(
         const std::string& filename,
@@ -158,6 +183,32 @@ struct NumericalCheckConfig {
   NumericalCheckConfig(bool e, double a, double r) : enabled(e), atol(a), rtol(r) {}
 };
 
+// Per-call dynamic-dims mask. POD, trivially copyable so it composes with
+// the existing OpParams DeepCopy(*this) paths without any custom copy logic.
+// The four bits select which logical GEMM dim (M/N/K/BATCH) is wildcarded
+// when computing DynamicSignature() for that specific op invocation.
+struct TORCH_CUDA_CPP_API DynamicDimsMask {
+  static constexpr uint8_t M_BIT = 1u << 0;
+  static constexpr uint8_t N_BIT = 1u << 1;
+  static constexpr uint8_t K_BIT = 1u << 2;
+  static constexpr uint8_t BATCH_BIT = 1u << 3;
+
+  uint8_t bits{0};
+
+  constexpr DynamicDimsMask() = default;
+  constexpr DynamicDimsMask(bool m, bool n, bool k, bool batch)
+      : bits(
+            static_cast<uint8_t>(
+                (m ? M_BIT : 0) | (n ? N_BIT : 0) | (k ? K_BIT : 0) |
+                (batch ? BATCH_BIT : 0))) {}
+  explicit constexpr DynamicDimsMask(uint8_t b) : bits(b) {}
+
+  constexpr bool m() const { return (bits & M_BIT) != 0; }
+  constexpr bool n() const { return (bits & N_BIT) != 0; }
+  constexpr bool k() const { return (bits & K_BIT) != 0; }
+  constexpr bool batch() const { return (bits & BATCH_BIT) != 0; }
+  constexpr bool any() const { return bits != 0; }
+};
 
 class TORCH_CUDA_CPP_API TuningContext {
   public:
@@ -177,6 +228,9 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableRecordUntuned(bool value);
     bool IsRecordUntunedEnabled() const;
     std::ofstream& GetUntunedFile();
+
+    void EnableWildcardFallback(bool value);
+    bool IsWildcardFallbackEnabled() const;
 
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
@@ -249,11 +303,56 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::ofstream untuned_file_;
     size_t results_count_from_input_file_;
     bool is_shutting_down_;
+    bool wildcard_fallback_enabled_;
 
     NumericalCheckConfig numerics_cfg_;
 };
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();
+
+// Returns the current top-of-stack DynamicDimsMask for this thread, or an
+// all-zero mask when no TunableDynamicDimsGuard is active. Producers in
+// Blas.cpp / CUDABlas.cpp / ScaledBlas.cpp call this once per Gemm*Params
+// construction and stamp the result onto the params before invoking the
+// TunableOp, so DynamicSignature() can read the mask off *this rather than
+// from a global TuningContext setting.
+//
+// Frame note (canonical): the mask is pushed in inductor frame
+// (M = mat1.size(0), N = mat2.size(1), K = mat1.size(1)). When BLAS dispatch
+// swaps (M, N) -> (n, m) to keep cuBLAS column-major (cublasCommonArgs::
+// swapped_mn, or a transposed batched result), producers must remap the bits
+// (swap m()<->n()) before stamping; otherwise DynamicSignature() places '*'
+// in the wrong slot and LookupWildcardFallback never matches at runtime.
+TORCH_CUDA_CPP_API DynamicDimsMask GetCurrentDynamicDimsMask();
+
+// RAII guard that pushes a DynamicDimsMask onto the thread-local stack on
+// construction and pops on destruction. Use to wrap a single GEMM call (or a
+// scope containing GEMM calls) with the mask that applies to that op.
+//
+// Lives in at::cuda::tunable so it is reachable from both ATen Blas.cpp
+// callers (eager mode) and the AOTI cpp_wrapper-emitted code in compiled .so
+// shared libraries (which include this header).
+//
+// Thread affinity: construct and destroy on the same thread, in LIFO order.
+// The stack is thread-local and deliberately unsynchronized -- this sits on
+// the per-GEMM dispatch path -- so the destructor cannot pop another thread's
+// stack. A guard destroyed off-thread (e.g. a PyCapsule GC-finalized on the
+// finalizer thread) warns and skips its pop, leaving the owner's entry until
+// that thread's stack goes away with it. Out-of-order pops on one thread
+// remove the top entry, not necessarily this guard's.
+class TORCH_CUDA_CPP_API TunableDynamicDimsGuard {
+ public:
+  explicit TunableDynamicDimsGuard(DynamicDimsMask mask);
+  ~TunableDynamicDimsGuard();
+
+  TunableDynamicDimsGuard(const TunableDynamicDimsGuard&) = delete;
+  TunableDynamicDimsGuard& operator=(const TunableDynamicDimsGuard&) = delete;
+  TunableDynamicDimsGuard(TunableDynamicDimsGuard&&) = delete;
+  TunableDynamicDimsGuard& operator=(TunableDynamicDimsGuard&&) = delete;
+
+ private:
+  std::thread::id owner_thread_;
+};
 
 class ITimer {
   public:

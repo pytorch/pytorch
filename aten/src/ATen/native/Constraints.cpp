@@ -2,10 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
-#include <c10/core/Layout.h>
-#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
-#include <c10/core/ScalarType.h>
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS

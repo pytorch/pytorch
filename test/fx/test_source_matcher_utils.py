@@ -16,6 +16,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     raise_on_run_directly,
@@ -29,6 +30,8 @@ def _get_node_names(nodes: list[torch.fx.Node]) -> list[str]:
 
 
 class TestSourceMatcher(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):

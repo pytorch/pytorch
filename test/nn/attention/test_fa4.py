@@ -4,14 +4,23 @@ import importlib
 import unittest
 from unittest.mock import patch
 
-from _fa_test_common import FlashAttentionTestMixin, SdpaShape
+from _fa_test_common import flash_vs_math, FlashAttentionTestMixin, SdpaShape
 
 import torch
 import torch.nn.functional as F
-from torch.backends.cuda import SDPBackend
-from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel
+from torch.backends.cuda import can_use_flash_attention, SDPAParams, SDPBackend
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+    sdpa_kernel,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _fa4_dependencies_available() -> bool:
@@ -28,6 +37,8 @@ def _fa4_dependencies_available() -> bool:
 
 
 class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # Mixin configuration
     impl_name = "FA4"
     fwd_kernel_patterns = ["flash_attncute", "flash_fwd"]
@@ -76,6 +87,74 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_fa4_kernel_called(self, device, dtype):
         self._test_kernel_called(device, dtype)
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    def test_mixed_head_dims(self, device):
+        q = (
+            torch.randn(1, 128, 2, 192, dtype=torch.float16, device=device)
+            .transpose(1, 2)
+            .requires_grad_()
+        )
+        k = torch.randn_like(q, memory_format=torch.preserve_format).requires_grad_()
+        v = (
+            torch.randn(1, 128, 2, 128, dtype=torch.float16, device=device)
+            .transpose(1, 2)
+            .requires_grad_()
+        )
+
+        out, _, _ = flash_vs_math(self, q, k, v, is_causal=True)
+        self.assertEqual(out.shape, v.shape)
+        self.assertTrue(out.transpose(1, 2).is_contiguous())
+
+        grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+        for grad, expected in zip(grads, (q, k, v)):
+            self.assertEqual(grad.shape, expected.shape)
+            self.assertTrue(torch.isfinite(grad).all())
+
+        def sdpa(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            compiled_out = torch.compile(sdpa, fullgraph=True)(q, k, v)
+        self.assertEqual(compiled_out.shape, out.shape)
+        self.assertEqual(compiled_out.stride(), out.stride())
+        self.assertEqual(compiled_out, out)
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    def test_mixed_head_dims_with_expanded_query(self, device):
+        q = torch.randn(1, 1, 128, 192, dtype=torch.float16, device=device).expand(
+            2, 4, -1, -1
+        )
+        k = torch.randn(1, 1, 128, 192, dtype=torch.float16, device=device).expand(
+            2, 4, -1, -1
+        )
+        v = torch.randn(1, 1, 128, 128, dtype=torch.float16, device=device).expand(
+            2, 4, -1, -1
+        )
+
+        out, _, _ = flash_vs_math(self, q, k, v, is_causal=True)
+        self.assertEqual(out.shape, v.shape)
+        self.assertEqual(out.stride(-1), 1)
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    def test_head_dim_selection_uses_fa4_contract(self, device):
+        q = torch.empty(1, 1, 128, 192, dtype=torch.float16, device=device)
+        k = torch.empty_like(q)
+        v = torch.empty(1, 1, 128, 128, dtype=torch.float16, device=device)
+        params = SDPAParams(q, k, v, None, 0.0, True, False)
+        self.assertTrue(can_use_flash_attention(params))
+        dropout_params = SDPAParams(q, k, v, None, 0.1, True, False)
+        self.assertFalse(can_use_flash_attention(dropout_params))
+
+        if torch.cuda.get_device_capability(device)[0] == 10:
+            unsupported_params = SDPAParams(q, k, q, None, 0.0, True, False)
+            self.assertFalse(can_use_flash_attention(unsupported_params))
+
+        restore_flash_attention_impl()
+        try:
+            self.assertFalse(can_use_flash_attention(params))
+        finally:
+            activate_flash_attention_impl("FA4")
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
     def test_multiple_activate(self):

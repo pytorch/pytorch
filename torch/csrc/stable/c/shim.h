@@ -2,6 +2,7 @@
 #define STABLE_TORCH_SHIM
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 
 #include <torch/csrc/stable/version.h>
 
@@ -118,6 +119,9 @@ torch_string_c_str(StringHandle handle, const char** data);
 
 #ifdef USE_CUDA
 
+// The returned handle uses cuBLAS's default workspace unless ATen workspace
+// caching is explicitly enabled. Internal ATen operations restore the default
+// workspace before releasing their eager workspace allocations.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
@@ -247,13 +251,13 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what();
 /// thread is shutdown.
 AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
 
-// Allocates an StableIValue on the heap, returns an owning pointer.
+// Allocates a StableIValue on the heap, returns an owning pointer.
 // This allocation must be deleted with torch_delete_stable_ivalue or
 // by passing it to a dispatch call which frees it internally.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_new_stable_ivalue(StableIValue** ret_value);
 
-// Frees an StableIValue that was created by torch_new_stable_ivalue.
+// Frees a StableIValue that was created by torch_new_stable_ivalue.
 // Deleting a nullptr is invalid and returns failure, allocations must
 // only be deleted once.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -295,6 +299,42 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 // undefined tensors and for tensors without storage (e.g. sparse tensors).
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
+
+#ifdef USE_MPS
+
+// Binds size bytes at ptr so float, bool and small array args can be used
+// (for tensor and int64_t types see aoti_torch/c/shim_mps.h).
+// setBytes supports transient data up to 4 KB. Pass larger data as a tensor:
+// https://developer.apple.com/documentation/metal/mtlcomputecommandencoder/1443159-setbytes
+AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
+    AOTIMetalKernelFunctionHandle func,
+    unsigned idx,
+    const void* ptr,
+    uint64_t size);
+
+#endif // USE_MPS
+
+// --- Python interop shims -------------------------------------------------
+// Unlike the rest of the stable ABI, these convert between a Python
+// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
+// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// libtorch_python via a vtable it registers with libtorch, so an extension
+// still links only libtorch; if libtorch_python is not loaded at runtime the
+// call errors. The GIL must be held.
+
+// Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
+// underlying TensorImpl with the input.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
+    void* py_obj,
+    AtenTensorHandle* ret); // returns new reference
+
+// Wrap an AtenTensorHandle as a Python torch.Tensor. If py_type is non-null, it
+// is used as the result's exact PyTypeObject* (e.g. torch.nn.Parameter); null
+// means the default torch.Tensor type.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
+    AtenTensorHandle ath,
+    void* py_type,
+    void** ret); // returns new reference
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 

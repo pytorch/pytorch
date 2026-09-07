@@ -19,7 +19,7 @@ Two kernels, picked by (K, N) - see ``cutedsl_kernels.py``:
         Faster (~5-10%); indices may differ across runs on threshold ties.
 
 Common eligibility (see ``_cond``):
-  - fp32 input, CUDA, not COW
+  - fp32 input, CUDA on SM100 or newer, not COW
   - ``largest=True``, ``sorted=True``
   - reducing over the last axis, ``self`` contiguous (2D flatten is a view)
   - row count at least one full wave of SMs (perf gate)
@@ -92,6 +92,12 @@ def _kernel_for(k: int, n: int) -> str | None:
 
 
 @functools.cache
+def _sm100_or_above(device: int) -> bool:
+    major, _ = torch.cuda.get_device_capability(device)
+    return major >= 10
+
+
+@functools.cache
 def _min_rows_for_full_wave(device_idx: int) -> int:
     """Row threshold below which the one-CTA-per-row kernel underutilises
     the GPU. A full wave is SM-count CTAs; below that, aten's multi-CTA
@@ -103,6 +109,8 @@ def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
     if not self.is_cuda or self.dtype != torch.float32:
+        return False
+    if not _sm100_or_above(self.device.index or 0):
         return False
     if any_cow(self):
         return False

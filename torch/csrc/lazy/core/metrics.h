@@ -33,8 +33,8 @@ using MetricReprFn = std::function<std::string(double)>;
 class TORCH_API MetricData {
  public:
   // Creates a new MetricData object with the internal circular buffer storing
-  // max_samples samples. The repr_fn argument allow to specify a function which
-  // pretty-prints a sample value.
+  // max_samples samples. The repr_fn argument allows specifying a function
+  // which pretty-prints a sample value.
   MetricData(MetricReprFn repr_fn, size_t max_samples);
 
   // Returns the total values of all the samples being posted to this metric.

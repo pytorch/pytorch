@@ -118,6 +118,24 @@ if(WIN32)
   set(CMAKE_HIP_COMPILER_FRONTEND_VARIANT "GNU")
 endif()
 
+# CMake populates CMAKE_<LANG>_USING_LINKER_<TYPE> for C/CXX (Clang) but not for
+# HIP, so a global CMAKE_LINKER_TYPE (e.g. LLD) leaks into enable_language(HIP)'s
+# ABI probe and aborts with "LINKER_TYPE '<TYPE>' is unknown or not supported by
+# this toolchain". HIP here is the same clang++ driver as CXX, so reuse the CXX
+# linker-type mapping; fall back to the standard -fuse-ld flag if CXX has none.
+if(CMAKE_LINKER_TYPE AND NOT DEFINED CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE})
+  if(DEFINED CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE})
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE}
+        "${CMAKE_CXX_USING_LINKER_${CMAKE_LINKER_TYPE}}")
+    if(DEFINED CMAKE_CXX_USING_LINKER_MODE)
+      set(CMAKE_HIP_USING_LINKER_MODE "${CMAKE_CXX_USING_LINKER_MODE}")
+    endif()
+  else()
+    string(TOLOWER "${CMAKE_LINKER_TYPE}" _hip_linker_lc)
+    set(CMAKE_HIP_USING_LINKER_${CMAKE_LINKER_TYPE} "-fuse-ld=${_hip_linker_lc}")
+  endif()
+endif()
+
 enable_language(HIP)
 message(STATUS "HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}")
 message(STATUS "HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
@@ -201,6 +219,23 @@ list(FILTER CMAKE_MODULE_PATH EXCLUDE REGEX ".*/cmake/hip$")
 
 set(PYTORCH_FOUND_HIP TRUE)
 find_package_and_print_version(hip REQUIRED CONFIG)
+
+# hip::amdhip64's own DT_NEEDED on libhsa-runtime64.so must resolve at link
+# time. Nothing propagates ${ROCM_PATH}/lib as an -rpath-link entry for it, so
+# if some OTHER -rpath-link source elsewhere in the build (e.g. c10's NUMA
+# workaround, which points at libnuma's directory) happens to also contain an
+# unrelated system libhsa-runtime64.so (a stray distro package sharing that
+# multiarch dir), the linker's rpath-link search -- which is checked before
+# -rpath -- resolves against that wrong/incompatible version instead, causing
+# "undefined reference to hsa_amd_vmem_*"-style failures in ANY target that
+# transitively links hip::amdhip64, however deep. Attach this ROCm install's
+# own lib dir directly to the imported target so every consumer inherits it,
+# regardless of how many levels of target_link_libraries separate them from
+# hip::amdhip64. ELF/GNU-ld only.
+if(NOT WIN32 AND NOT APPLE AND TARGET hip::amdhip64)
+  set_property(TARGET hip::amdhip64 APPEND PROPERTY
+    INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib>")
+endif()
 
 # Map lowercase hip_VERSION vars (from CONFIG mode) to uppercase HIP_VERSION
 # vars that the rest of PyTorch's build expects (previously set by FindHIP MODULE).
@@ -328,7 +363,10 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    find_package_and_print_version(rocm_smi REQUIRED)
+    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+      find_package_and_print_version(hipfile REQUIRED)
+    endif()
   endif()
 
   # Optional components.

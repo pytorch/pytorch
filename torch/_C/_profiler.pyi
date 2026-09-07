@@ -76,6 +76,7 @@ class _ExperimentalConfig:
     # Deprecated no-ops; retained only so the Python layer can detect and warn.
     profiler_metrics: list[str]
     profiler_measure_per_kernel: bool
+    adjust_profiler_step: bool
 
 class ProfilerConfig:
     def __init__(
@@ -242,16 +243,16 @@ def _set_record_concrete_inputs_enabled_val(val: bool) -> None: ...
 def _set_fwd_bwd_enabled_val(val: bool) -> None: ...
 def _set_cuda_sync_enabled_val(val: bool) -> None: ...
 
-# Approximate-clock helpers used by the experimental CUPTI monitor.
+# Approximate-clock helpers used by Cuspy (experimental).
 class _ApproximateClockToUnixTimeConverter:
     def __init__(self) -> None: ...
     def to_unix_ns(self, t: int) -> int: ...
 
 def _get_approximate_time() -> int: ...
 
-# GIL-free CUPTI monitor buffer pool (torch/csrc/profiler/cupti/monitor_native).
-# Exposed as the torch._C._profiler._cupti_monitor submodule.
-class _CuptiMonitorModule:
+# GIL-free Cuspy buffer pool (torch/csrc/profiler/cuspy/cuspy_native).
+# Exposed as the torch._C._profiler._cuspy submodule.
+class _CuspyModule:
     @staticmethod
     def approximate_time_callback_address() -> int: ...
     @staticmethod
@@ -286,11 +287,6 @@ class _CuptiMonitorModule:
         flush_fn: int = 0,
     ) -> None: ...
     @staticmethod
-    def set_cbid_filter(
-        cbid_field_id: int,
-        filters: dict[int, tuple[bool, list[int]]],
-    ) -> None: ...
-    @staticmethod
     def start_decoder() -> None: ...
     @staticmethod
     def stop_decoder() -> None: ...
@@ -317,8 +313,26 @@ class _CuptiMonitorModule:
     def current_external_id() -> int: ...
     @staticmethod
     def metadata_put_external(blob: str, external_id: int = 0) -> None: ...
+    # groups: each a tuple (ts, end, track_uuid, name_iid, int_annos, str_annos,
+    #   arr_annos, json_annos, flow, gpu_corr, cat_iid) where gpu_corr is a
+    #   (int32_offsets, int64_ids) CSR of per-slice render-stage event_ids or None.
+    # render: (gpu_specs, gfx_contexts, stage_cols, extra, launch, tables, const_extra)
+    #   where stage_cols = (ts, dur, event_id, gpu_id, hw_queue_iid, stage_iid,
+    #   context, name_iid, event_wait) and event_wait is a (int32_offsets, uint64_ids)
+    #   CSR of per-stage event_wait_ids (graph node->node dependency arrows).
+    @staticmethod
+    def encode_pftrace(
+        base_ns: int,
+        tracks: list[tuple[int, int, bool, int, int, str]],
+        name_table: list[str],
+        category_table: list[str],
+        groups: list[tuple],
+        render: tuple | None = None,
+        counters: tuple | None = None,
+        compression_level: int = 1,
+    ) -> bytes: ...
 
-_cupti_monitor: _CuptiMonitorModule
+_cuspy: _CuspyModule
 
 class CapturedTraceback: ...
 

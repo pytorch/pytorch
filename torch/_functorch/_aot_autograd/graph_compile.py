@@ -42,11 +42,15 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
+from torch.fx.experimental.symbolic_shapes import (
+    fx_placeholder_vals,
+    statically_known_true,
+)
 from torch.fx.graph_module import GraphModule
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.types import py_sym_types
+from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
@@ -858,6 +862,9 @@ def run_joint_graph_passes_on_hops(
     recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -1234,6 +1241,25 @@ def run_joint_graph_passes_on_hops(
             # graph, it was fine because the input signature remains same.
             new_bw_node.meta.pop("eager_input_vals", None)
 
+            # When the region sets backward-specific inductor config, compile the
+            # partitioned backward under it; the forward keeps its own config.
+            fw_region_config = fw_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            # get_backward_nested_region_config returns fw_config unchanged when
+            # the region has no distinct backward config, so identity tells us
+            # whether to stamp.
+            bw_region_config = get_backward_nested_region_config(fw_region_config)
+            if bw_region_config is not fw_region_config:
+                # Re-stamp on the fresh backward node's meta["custom"] (the source
+                # of truth: unlike a GraphModule's meta it survives FX transforms).
+                # Lowering picks it up via the subgraph-module mirror (_propagate_*)
+                # or the ir.py node fallback.
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
+
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
 
@@ -1347,6 +1373,27 @@ def prepare_hook_gm(
     fn, args = create_wrap_fn(fn, args)
     gm = _create_graph(fn, args, aot_config=aot_config)  # type: ignore[arg-type]
     return gm
+
+
+def _materialize_fx_output_containers(x: Any) -> Any:
+    # FX stores an output node's container args as immutable_list /
+    # immutable_dict. The pack hook's return value is handed to the unpack hook
+    # trace (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`), and
+    # `create_wrap_fn` tree_maps it, which preserves those immutable types.
+    # Unpack hooks that check `type(c) is list` / `type(c) is dict` rather than
+    # isinstance would therefore see a different container than in eager, so
+    # normalize back to the plain runtime types.
+    #
+    # Note this only recovers `list` / `dict`, not other subclasses: FX's
+    # create_arg already collapses e.g. an OrderedDict pack output to
+    # immutable_dict, so that distinction is gone before we get here.
+    if type(x) in (immutable_list, list):
+        return [_materialize_fx_output_containers(v) for v in x]
+    if type(x) in (immutable_dict, dict):
+        return {k: _materialize_fx_output_containers(v) for k, v in x.items()}
+    if type(x) is tuple:
+        return tuple(_materialize_fx_output_containers(v) for v in x)
+    return x
 
 
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
@@ -1486,7 +1533,29 @@ def maybe_inline_graph_saved_tensors_hooks(
             return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
 
         with _saved_tensor_hook_context(_get_extra_info()):
-            pack_out_val = pack_hook_gm(val)
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
+                structured_logs,
+            )
+
+            # Extract pack_out_val from the traced graph's output-node meta.
+            # `pack_g` is what gets inlined into the joint graph below via
+            # `node_copy`, so its output meta uses the same symbols the
+            # inlined nodes carry -- no identity mismatch, no need to re-run
+            # the hook to get an "example value".
+            pack_out_args = _materialize_fx_output_containers(
+                pack_g.output_node().args[0]
+            )
+            pack_out_val = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda n: n.meta["val"],
+                pack_out_args,
+            )
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1497,18 +1566,6 @@ def maybe_inline_graph_saved_tensors_hooks(
                 "You can workaround it by manually returning subclass's inner tensors"
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
-
-        with _saved_tensor_hook_context(_get_extra_info()):
-            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-            pack_g = pack_gm.graph
-            maybe_log_graph(
-                pack_gm,
-                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
-                aot_config,
-                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
-                structured_logs,
-            )
-            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
@@ -2266,7 +2323,7 @@ def _aot_stage2b_fw_compile(
     # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
         adjusted_flat_args,
@@ -2283,7 +2340,7 @@ def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
-    fwd_output_strides: list[tuple[int, ...] | None] | None,
+    fwd_output_strides: list[tuple[IntLikeType, ...] | None] | None,
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
@@ -2321,47 +2378,40 @@ def _aot_stage2b_bw_compile(
                 if forward_saved_for_backwards_strides is None:
                     continue
 
-                real_stride = None
+                inductor_stride = None
                 # Per all_args calling convention
                 j = i - num_symints_saved_for_bw
                 if 0 <= j < len(forward_saved_for_backwards_strides):
-                    real_stride = forward_saved_for_backwards_strides[j]
-                if real_stride is None:
+                    inductor_stride = forward_saved_for_backwards_strides[j]
+                if inductor_stride is None:
                     continue
 
-                # Comparing ph_arg.stride() with real_stride directly may
-                # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using suppress_guards and guard_or_true to avoid that.
-
-                stride_different = False
-                fake_mode = detect_fake_mode()
-                suppress_ctx = (
-                    fake_mode.shape_env.suppress_guards()
-                    if fake_mode is not None and fake_mode.shape_env is not None
-                    else nullcontext()
+                # Inductor can choose a different layout for a saved activation
+                # than the backward graph's placeholder has. This comparison must
+                # not specialize ph_arg's dynamic dims, which is why it is
+                # proof-only: statically_known_true consults the shape env's
+                # replacements and value ranges, and uses hints only to
+                # disprove, so it installs no guard and an incidental match at
+                # the current sizes is not mistaken for equality. A stride
+                # inductor genuinely specialized still compares equal, while
+                # s1 vs align(s1) correctly does not. inductor_stride may be
+                # symbolic, see set_tracing_context_output_strides.
+                stride_different = any(
+                    not statically_known_true(ph_stride == inductor_stride[k])
+                    for k, ph_stride in enumerate(ph_arg.stride())
                 )
 
-                # Inductor can choose different strides for activations than
-                # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
-                with suppress_ctx:
-                    for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
-                            stride_different = True
-                            break
-
                 if stride_different:
-                    # Note that here we use the stride of the real tensor to
-                    # restride a FakeTensor. This does not cause trouble
-                    # for dynamic shape since this code path only get
-                    # executed if layout optimization is enabled. And we
-                    # disable layout optimization for dynamic shape right
-                    # now.
+                    # Note that here we use the stride inductor chose to restride
+                    # a FakeTensor. Under dynamic shapes that stride can be
+                    # symbolic, since config.pad_dynamic_shapes lets inductor pad
+                    # a symbolically-shaped buffer. It has to stay symbolic here:
+                    # resolving it against the current hint bakes that constant
+                    # into the backward graph and breaks every later call whose
+                    # dynamic size differs.
                     #
-                    # A solution that decide stride order based on real
-                    # tensor's stride and then apply that stride order to
+                    # A solution that decide stride order based on inductor's
+                    # stride and then apply that stride order to
                     # the FakeTensor does not work smoothly since some
                     # tensor's layout is not 'dense'. E.g. mixnet_l has a
                     # tensor with size [8, 64, 112, 112] and strides
@@ -2371,7 +2421,7 @@ def _aot_stage2b_bw_compile(
 
                     ph_size = ph_arg.size()
 
-                    placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
+                    placeholder_list[i] = ph_arg.as_strided(ph_size, inductor_stride)
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
@@ -2724,7 +2774,7 @@ def _aot_stage2b_compile_forward_or_inference(
     is_inference: bool,
     num_fw_outs_saved_for_bw: int | None = None,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     """
     Compile the forward or inference graph. Returns:
     - the output strides of the forward graph

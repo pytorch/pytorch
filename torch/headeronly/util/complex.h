@@ -161,7 +161,7 @@ struct alignas(sizeof(T) * 2) complex {
   template <typename U>
   explicit C10_HOST_DEVICE complex(const thrust::complex<U>& other)
       : real_(other.real()), imag_(other.imag()) {}
-// NOTE can not be implemented as follow due to ROCm bug:
+// NOTE can not be implemented as follows due to ROCm bug:
 //   explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other):
 //   complex(other.real(), other.imag()) {}
 #endif
@@ -669,3 +669,8 @@ using c10::complex_literals::operator""_id;
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+#define C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
+// utilities for complex types
+#include <torch/headeronly/util/complex_utils.h> // IWYU pragma: keep
+#undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H

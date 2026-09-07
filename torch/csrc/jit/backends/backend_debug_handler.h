@@ -56,7 +56,7 @@ namespace torch::jit {
  *  serialized. Now we know a. debug handles and b. how to map debug handles to
  *  model source code. Thus we can either do eager symbolication by converting
  *  debug handles to corresponding source code at runtime, or do lazy
- *  symbolicattion offline.
+ *  symbolication offline.
  *
  *  Note that it is not necessary to serialize [debug-handle, DebugInfoTuple]
  *  corresponding to lowered backend if the lowering process, that is

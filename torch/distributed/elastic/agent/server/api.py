@@ -601,7 +601,7 @@ class SimpleElasticAgent(ElasticAgent):
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
         2. The rank 0 agent reads all the role_info from the store and
-           determines each agents worker ranks.
+           determines each agent's worker ranks.
         3. Determine the global rank: the global rank of the workers is computed
            by cumulative sum of the local_world_size for all workers in front of it.
            For efficiency reasons each worker is assigned a base global rank

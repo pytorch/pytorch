@@ -80,7 +80,7 @@ def is_metal_capture_enabled() -> bool:
     """Checks if `metal_capture` context manager is usable
     To enable metal capture, set MTL_CAPTURE_ENABLED envvar
     """
-    return torch._C._mps_isCaptureEnabled()  # type: ignore[attr-defined, no-any-return]
+    return torch._C._has_mps and torch._C._mps_isCaptureEnabled()  # type: ignore[attr-defined, no-any-return]
 
 
 def is_capturing_metal() -> bool:
@@ -94,7 +94,7 @@ def metal_capture(fname: str) -> Iterator[None]:
     try:
         torch._C._mps_startCapture(fname)  # type: ignore[attr-defined]
         yield
-        # Drain all the work that were enqueued during the context call
-        torch.mps.synchronize()
     finally:
+        # _mps_stopCapture waits for work enqueued on MPS streams before
+        # stopping the capture, even if the body raised
         torch._C._mps_stopCapture()  # type: ignore[attr-defined]

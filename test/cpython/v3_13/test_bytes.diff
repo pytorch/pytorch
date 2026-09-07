@@ -1,0 +1,167 @@
+diff --git a/test/cpython/v3_13/test_bytes.py b/test/cpython/v3_13/test_bytes.py
+index f8edfe0a17a45d644409ee52922bd22fd78c7560..9e345db4bb898edcb47590846e331846ed829593 100644
+--- a/test/cpython/v3_13/test_bytes.py
++++ b/test/cpython/v3_13/test_bytes.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_bytes.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the bytes and bytearray types.
+ 
+ XXX This is a mess.  Common tests should be unified with string_tests.py (and
+@@ -19,8 +73,8 @@ import unittest
+ import test.support
+ from test.support import import_helper
+ from test.support import warnings_helper
+-import test.string_tests
+-import test.list_tests
++import string_tests
++import list_tests
+ from test.support import bigaddrspacetest, MAX_Py_ssize_t
+ from test.support.script_helper import assert_python_failure
+ 
+@@ -1032,7 +1086,7 @@ class BaseBytesTest:
+         self.assertEqual(_testlimitedcapi.sequence_getitem(obj, 0), 42)
+ 
+ 
+-class BytesTest(BaseBytesTest, unittest.TestCase):
++class BytesTest(BaseBytesTest, __TestCase):
+     type2test = bytes
+ 
+     def test__bytes__(self):
+@@ -1285,7 +1339,7 @@ class BytesTest(BaseBytesTest, unittest.TestCase):
+         self.assertNotEqual(id(s), id(s * 2))
+ 
+ 
+-class ByteArrayTest(BaseBytesTest, unittest.TestCase):
++class ByteArrayTest(BaseBytesTest, __TestCase):
+     type2test = bytearray
+ 
+     _testlimitedcapi = import_helper.import_module('_testlimitedcapi')
+@@ -1805,7 +1859,7 @@ class ByteArrayTest(BaseBytesTest, unittest.TestCase):
+             b[:] = data
+             self.assertEqual(list(it), [])
+ 
+-    test_exhausted_iterator = test.list_tests.CommonTest.test_exhausted_iterator
++    test_exhausted_iterator = list_tests.CommonTest.test_exhausted_iterator
+ 
+     def test_iterator_length_hint(self):
+         # Issue 27443: __length_hint__ can return negative integer
+@@ -1845,7 +1899,7 @@ class ByteArrayTest(BaseBytesTest, unittest.TestCase):
+                 self._testlimitedcapi.sequence_setitem(b, 0, Boom())
+ 
+ 
+-class AssortedBytesTest(unittest.TestCase):
++class AssortedBytesTest(__TestCase):
+     #
+     # Test various combinations of bytes and bytearray
+     #
+@@ -1990,7 +2044,7 @@ class AssortedBytesTest(unittest.TestCase):
+     # the rest that make sense (the code can be cleaned up to use modern
+     # unittest methods at the same time).
+ 
+-class BytearrayPEP3137Test(unittest.TestCase):
++class BytearrayPEP3137Test(__TestCase):
+     def marshal(self, x):
+         return bytearray(x)
+ 
+@@ -2017,7 +2071,7 @@ class BytearrayPEP3137Test(unittest.TestCase):
+         self.assertIsNot(val, newval)
+ 
+ 
+-class FixedStringTest(test.string_tests.BaseTest):
++class FixedStringTest(string_tests.BaseTest):
+     def fixtype(self, obj):
+         if isinstance(obj, str):
+             return self.type2test(obj.encode("utf-8"))
+@@ -2025,10 +2079,10 @@ class FixedStringTest(test.string_tests.BaseTest):
+ 
+     contains_bytes = True
+ 
+-class ByteArrayAsStringTest(FixedStringTest, unittest.TestCase):
++class ByteArrayAsStringTest(FixedStringTest, __TestCase):
+     type2test = bytearray
+ 
+-class BytesAsStringTest(FixedStringTest, unittest.TestCase):
++class BytesAsStringTest(FixedStringTest, __TestCase):
+     type2test = bytes
+ 
+ 
+@@ -2145,7 +2199,7 @@ class WithBytes:
+     def __bytes__(self):
+         return self.value
+ 
+-class ByteArraySubclassTest(SubclassTest, unittest.TestCase):
++class ByteArraySubclassTest(SubclassTest, __TestCase):
+     basetype = bytearray
+     type2test = ByteArraySubclass
+ 
+@@ -2159,14 +2213,14 @@ class ByteArraySubclassTest(SubclassTest, unittest.TestCase):
+         x = subclass(newarg=4, source=b"abcd")
+         self.assertEqual(x, b"abcd")
+ 
+-class ByteArraySubclassWithSlotsTest(SubclassTest, unittest.TestCase):
++class ByteArraySubclassWithSlotsTest(SubclassTest, __TestCase):
+     basetype = bytearray
+     type2test = ByteArraySubclassWithSlots
+ 
+-class BytesSubclassTest(SubclassTest, unittest.TestCase):
++class BytesSubclassTest(SubclassTest, __TestCase):
+     basetype = bytes
+     type2test = BytesSubclass
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

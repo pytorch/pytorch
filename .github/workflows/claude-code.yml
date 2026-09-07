@@ -17,7 +17,28 @@ jobs:
       id-token: write
     secrets: inherit
     with:
-      additional_claude_args: '--allowedTools Skill'
+      # Commenters opt into Fable by including "fable" in the comment (e.g.
+      # "@claude fable review"); default stays Opus. Branch on event_name so an
+      # issue/PR body mentioning "fable" doesn't affect an unrelated @claude comment.
+      model: ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'fable')) || (github.event_name == 'issues' && contains(github.event.issue.body, 'fable'))) && 'global.anthropic.claude-fable-5' || 'global.anthropic.claude-opus-5' }}
+      # Keep the comment text out of claude_args: only these hardcoded effort
+      # values can reach the CLI. "effort=max" wins if multiple values appear.
+      additional_claude_args: >-
+        --allowedTools Skill --effort
+        ${{
+          ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'effort=max')) ||
+           (github.event_name == 'issues' && contains(github.event.issue.body, 'effort=max'))) && 'max' ||
+          ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'effort=high')) ||
+           (github.event_name == 'issues' && contains(github.event.issue.body, 'effort=high'))) && 'high' ||
+          ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'effort=low')) ||
+           (github.event_name == 'issues' && contains(github.event.issue.body, 'effort=low'))) && 'low' ||
+          'medium'
+        }}
+      # Surface stalled Bedrock requests before the one-hour job timeout.
+      settings: '{"outputStyle":"Concise","alwaysThinkingEnabled":true,"env":{"API_TIMEOUT_MS":"180000","CLAUDE_CODE_MAX_RETRIES":"2","CLAUDE_ENABLE_STREAM_WATCHDOG":"1"}}'
+      # These logs are public and may include assistant messages and tool output.
+      show_full_output: true
+      upload_execution_log: true
       append_system_prompt: |
         When asked to review a PR, always use the /pr-review skill first.
         It contains PyTorch-specific review guidelines, output format, and critical checks.

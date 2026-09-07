@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_scope.py b/test/cpython/v3_13/test_scope.py
-index 24a366efc6c..d43ca10614e 100644
+index 24a366efc6ca05d942f7b68b5139e76b0f3efe70..d43ca10614e0b650a2e3c1dc65100002b4d6ae65 100644
 --- a/test/cpython/v3_13/test_scope.py
 +++ b/test/cpython/v3_13/test_scope.py
 @@ -1,3 +1,21 @@

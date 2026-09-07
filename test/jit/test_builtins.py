@@ -303,7 +303,10 @@ class TestTensorBuiltins(JitTestCase):
         keys = dir(tensor)
 
         # real and imag are only implemented for complex tensors.
-        self.assertRaises(RuntimeError, lambda: should_keep(tensor, "imag"))
+        # Eager returns TypeError, but dynamo wraps it into TorchRuntimeError.
+        self.assertRaises(
+            (TypeError, RuntimeError), lambda: should_keep(tensor, "imag")
+        )
         keys.remove("imag")
 
         properties = [p for p in keys if should_keep(tensor, p)]

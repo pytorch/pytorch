@@ -16,7 +16,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe[_T]):
     Wraps a sequence object into a MapDataPipe.
 
     Args:
-        sequence: Sequence object to be wrapped into an MapDataPipe
+        sequence: Sequence object to be wrapped into a MapDataPipe
         deepcopy: Option to deepcopy input sequence object
 
     .. note::

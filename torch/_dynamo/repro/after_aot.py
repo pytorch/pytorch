@@ -36,7 +36,7 @@ import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
 from typing import Any, IO, TYPE_CHECKING, TypedDict
-from typing_extensions import Unpack
+from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
 
@@ -98,6 +98,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.hub import tqdm
 
 from .. import config
+from . import _minifier_sanity_guard
 
 
 def _find_repeat_interleave_constraints(
@@ -144,6 +145,8 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_Ts = TypeVarTuple("_Ts")
 
 
 inductor_config = import_module("torch._inductor.config")
@@ -563,6 +566,7 @@ import torch
 from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
+import math
 from math import inf
 import torch._inductor.inductor_prims
 {distributed_imports}
@@ -607,7 +611,7 @@ if "__compile_source__" in globals():
         fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
         return fn.__name__.split(".")[-1]
 
-    def get_triton_import_line(name: str, val: Any) -> str | None:
+    def get_triton_import_line(name: str, val: object) -> str | None:
         # User-defined Triton kernels are serialized from their source, not from
         # their original Python module.  If the source references a global
         # imported from Triton, such as `from triton.language.extra import
@@ -1317,7 +1321,7 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    with config.patch(repro_after=None):
+    with config.patch(repro_after=None), _minifier_sanity_guard() as sanity:
         minifier(
             mod,
             args,
@@ -1331,6 +1335,7 @@ def repro_minify(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
             skip_sanity=options.skip_sanity,
             max_granularity=options.max_granularity,
         )
+    sanity.raise_if_failed()
 
 
 def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None:
@@ -1380,9 +1385,9 @@ def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None
         if new_args:
             raise AssertionError("new_args should be empty after compiled() call")
 
-    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> str | None:
-        diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
-        diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
+    def compare_tuples(t1: tuple[Unpack[_Ts]], t2: tuple[Unpack[_Ts]]) -> str | None:
+        diff_indices = [i for i in range(len(t1)) if t1[i] != t2[i]]
+        diff_values = [(t1[i], t2[i]) for i in diff_indices]
 
         if not diff_values:
             return None

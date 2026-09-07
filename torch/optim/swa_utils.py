@@ -174,7 +174,7 @@ class AveragedModel(Module):
     but using exponential weights instead of equal weights across iterations.
 
     AveragedModel class creates a copy of the provided module :attr:`model`
-    on the device :attr:`device` and allows to compute running averages of the
+    on the device :attr:`device` and allows computing running averages of the
     parameters of the :attr:`model`.
 
     Args:

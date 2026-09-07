@@ -57,9 +57,19 @@ on:
       runner-label:
         description: Fully qualified runner label derived from runner_config
         value: ${{ jobs.runner-determinator.outputs.runner-label }}
+      amd-sandbox-label-type:
+        description: Runner prefix for the "amd-sandbox" experiment (empty when not enabled)
+        value: ${{ jobs.runner-determinator.outputs.amd-sandbox-label-type }}
+      scale-config-label-type:
+        description: Scale-config AMI variant prefix, e.g. "wincanary." (empty when none)
+        value: ${{ jobs.runner-determinator.outputs.scale-config-label-type }}
+      # Deprecated empty-string alias kept only so the MI350/gfx950 workflows that
+      # still reference amd-do-label-type resolve to a bare (unprefixed) label,
+      # matching the old inactive amd-do experiment. Removed once #191249 drops
+      # those references.
       amd-do-label-type:
-        description: Runner prefix for the "amd-do" experiment (empty when not enabled)
-        value: ${{ jobs.runner-determinator.outputs.amd-do-label-type }}
+        description: Deprecated no-op alias; removed by the amd-do cleanup PR.
+        value: ${{ '' }}
       ci-docker-hash:
         description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
@@ -74,7 +84,8 @@ jobs:
       runner-config: ${{ steps.set-runner-info.outputs.runner-config }}
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
-      amd-do-label-type: ${{ steps.set-condition.outputs.amd-do-label-type }}
+      amd-sandbox-label-type: ${{ steps.set-condition.outputs.amd-sandbox-label-type }}
+      scale-config-label-type: ${{ steps.set-condition.outputs.scale-config-label-type }}
       ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

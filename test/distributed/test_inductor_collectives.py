@@ -699,6 +699,25 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_list_input(self):
+        def func(output, inputs):
+            torch.distributed.reduce_scatter(output, inputs)
+            return output
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = [
+                torch.ones(4, 4, device=self.device) * (self.rank + i)
+                for i in range(self.world_size)
+            ]
+            output = torch.empty(4, 4, device=self.device)
+            correct = torch.empty(4, 4, device=self.device)
+            func_compiled = torch.compile(func, fullgraph=True)
+            func_compiled(output, inputs)
+            func(correct, inputs)
+            self.assertTrue(same(output, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -1076,6 +1095,81 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism(self):
+        # A compiled region whose input alternates between an AsyncCollectiveTensor
+        # (the native all-gather output) and the resolved plain Tensor must not
+        # recompile on the tensor-class guard: the two produce an equivalent
+        # graph (the runtime wrapper unwraps ACT). See
+        # VariableBuilder.wrap_tensor / UnwrapCollectiveTensorSource.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            torch.manual_seed(1234)
+            x = torch.randn(8, 8, device=self.device)
+            w_shard = torch.randn(4, 8, device=self.device)
+            for i in range(6):
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                # Step 0 traces with the ACT; odd steps resolve to a plain
+                # Tensor before the compiled region.
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                eager = (
+                    x
+                    @ torch.ops._c10d_functional.wait_tensor(
+                        _functional_collectives.all_gather_tensor(
+                            w_shard, gather_dim=0, group=list(range(self.world_size))
+                        )
+                    )
+                ).sum()
+                self.assertEqual(step(x, w), eager)
+            # ACT and Tensor share one compiled graph -- no class-guard recompile.
+            self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_async_collective_tensor_input_polymorphism_backward(self):
+        # Backward through an ACT input (a real all-gather output) must match eager
+        # across the ACT/Tensor alternation and not recompile on the class change.
+        # Uses a real collective because grad flows through the all-gather autograd,
+        # not through a directly-constructed ACT wrapper.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+
+            @torch.compile(backend=cnt, fullgraph=True)
+            def step(x, w):
+                return (x @ w).sum()
+
+            for i in range(6):
+                torch.manual_seed(1234)
+                x = torch.randn(8, 8, device=self.device)
+                w_shard = torch.randn(4, 8, device=self.device, requires_grad=True)
+                w = _functional_collectives.all_gather_tensor(
+                    w_shard, gather_dim=0, group=list(range(self.world_size))
+                )
+                if i % 2 == 1:
+                    w = torch.ops._c10d_functional.wait_tensor(w)
+                step(x, w).backward()
+
+                w_shard_ref = w_shard.detach().clone().requires_grad_(True)
+                w_ref = torch.ops._c10d_functional.wait_tensor(
+                    _functional_collectives.all_gather_tensor(
+                        w_shard_ref, gather_dim=0, group=list(range(self.world_size))
+                    )
+                )
+                (x @ w_ref).sum().backward()
+                self.assertEqual(w_shard.grad, w_shard_ref.grad)
+            self.assertEqual(cnt.frame_count, 1)
+
 
 @instantiate_parametrized_tests
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -1387,6 +1481,72 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
         if counter.op_count != 3:
             raise AssertionError(f"Expected op_count == 3, got {counter.op_count}")
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        local_size = [4, 4]
+        # single-proc test
+        inputs = [torch.ones(local_size, device=self.device)]
+        outputs = torch.empty(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
+        if not same(outputs, correct_outputs):
+            raise AssertionError("Expected outputs to match correct_outputs")
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_size_mismatch(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([8, 4], device=self.device)]
+        outputs = torch.empty([4, 4], device=self.device)
+        compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception,
+            "reduce_scatter requires every input_list element to have the same size as output",
+        ):
+            compiled(outputs, inputs, pg=GroupMember.WORLD)
+
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
+    def test_dynamo_rewrite_dist_reduce_scatter_list_scalar(self):
+        def func(out, inp_list, *, pg):
+            torch.distributed.reduce_scatter(
+                out,
+                inp_list,
+                group=pg,
+            )
+
+        inputs = [torch.ones([], device=self.device)]
+        outputs = torch.empty([], device=self.device)
+        correct_outputs = torch.empty([], device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(outputs, inputs, pg=GroupMember.WORLD)
+        func(correct_outputs, inputs, pg=GroupMember.WORLD)
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected frame_count == 1, got {counter.frame_count}"
+            )
         if not same(outputs, correct_outputs):
             raise AssertionError("Expected outputs to match correct_outputs")
 
@@ -3756,6 +3916,153 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         for n in (7, 11):
             x = torch.randn(n, HIDDEN, device=self.device)
             compiled(x, w, group_size, group_name)
+
+
+class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
+    """
+    The compile time sync runs on a gloo process group over CPU, so unlike the rest of
+    TestSyncDecisionCrossRanks these need no accelerator.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _init_process_group(self, timeout: datetime.timedelta | None = None) -> None:
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+        )
+
+    def test_sync_cache_decision_cross_ranks(self):
+        # A cache hit on one rank and a miss on another leaves only the missing rank
+        # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
+        # must be discarded unless every rank hit.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+
+        with torch._functorch.config.patch(_sync_cache_decision_cross_ranks=True):
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+            counters.clear()
+            # Rank 0 hits, rank 1 misses.
+            self.assertFalse(sync_cache_decision_cross_ranks(self.rank == 0))
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+
+        # Disabled by default, so a lone hit survives and no collective is issued.
+        self.assertEqual(
+            sync_cache_decision_cross_ranks(self.rank == 0), self.rank == 0
+        )
+
+    @torch._functorch.config.patch(
+        enable_autograd_cache=True, _sync_cache_decision_cross_ranks=True
+    )
+    @torch._inductor.config.patch(fx_graph_cache=True, compile_threads=1)
+    def test_cross_rank_miss_recompiles_and_saves(self):
+        # End to end through aot_module_simplified, rank 0 warm and rank 1 cold: rank 1
+        # reaches the partitioner's collective alone while rank 0 sails past on its hit.
+        # Rejecting that hit is only half of it, the rejected rank also has to populate
+        # aot_config.cache_info or its recompile is never saved and the next compile
+        # diverges all over again.
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+
+        self._init_process_group()
+        torch._C._distributed_c10d._register_process_group(
+            "default", torch.distributed.group.WORLD
+        )
+        expected = torch.full((4, 4), self.world_size + 1.0)
+
+        def fn(x):
+            return _functional_collectives.all_reduce(x, "sum", "default") + 1
+
+        def compile_and_run():
+            counters.clear()
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn)(torch.ones(4, 4)), expected)
+
+        # Each rank gets its own cache dir, so the clear below only cools rank 1.
+        with fresh_inductor_cache():
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            if self.rank == 1:
+                AOTAutogradCache.clear()
+
+            compile_and_run()
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"],
+                1 if self.rank == 0 else 0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Both ranks are warm again, so the hit survives the sync and is usable.
+            compile_and_run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_cross_rank_miss"], 0
+            )
+
+    def test_compile_sync_pg_built_for_partitioner_sync_alone(self):
+        # _sync_decision_cross_ranks builds the pg lazily on the partitioner path, which
+        # a partial cache hit leaves to the ranks that missed. Building a group on a
+        # subset of ranks hangs and desyncs _world.group_count, so it has to happen here,
+        # where every rank is, even though the decision itself passes straight through.
+        from torch._dynamo import distributed as dynamo_distributed
+        from torch._functorch._aot_autograd.autograd_cache import (
+            sync_cache_decision_cross_ranks,
+        )
+
+        self._init_process_group()
+        self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+        with torch._functorch.config.patch(_sync_decision_cross_ranks=True):
+            # A build without gloo has nothing to prime, and priming must not be what
+            # surfaces that: the partitioner still raises, and only for the graphs it
+            # syncs, rather than every compile that gets here.
+            with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+                self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertIsNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+            self.assertTrue(sync_cache_decision_cross_ranks(True))
+            self.assertFalse(sync_cache_decision_cross_ranks(False))
+
+        self.assertIsNotNone(dynamo_distributed._COMPILE_SYNC_PG)
+
+    def test_compile_sync_pg_without_gloo(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        self._init_process_group()
+
+        with mock.patch.object(c10d, "is_gloo_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+                get_compile_sync_pg()
+
+    def test_compile_sync_pg_inherits_default_timeout(self):
+        from torch._dynamo.distributed import get_compile_sync_pg
+
+        timeout = datetime.timedelta(seconds=120)
+        self._init_process_group(timeout=timeout)
+
+        pg = get_compile_sync_pg()
+        device = torch.device(c10d.distributed_c10d._get_object_coll_device(pg))
+        self.assertEqual(pg._get_backend(device).options._timeout, timeout)
 
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):

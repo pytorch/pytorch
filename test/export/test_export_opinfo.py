@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
@@ -38,13 +39,11 @@ export_failures = {
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("sparse.sampled_addmm"),
     xfail("tensor_split"),
 }
 
 # following are failing fake export on cuda device
 fake_export_failures = {
-    xfail("geqrf"),
     xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
@@ -57,15 +56,19 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
-    xfail("nn.functional.grid_sample"),
-    xfail("to_sparse"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
+
+# These pass with CUDA enabled but still fail fake CUDA export on CPU-only builds.
+if not torch.backends.cuda.is_built():
+    fake_export_failures.add(xfail("geqrf"))
+    fake_export_failures.add(xfail("sparse.sampled_addmm"))
+    fake_export_failures.add(xfail("to_sparse"))
+    fake_export_failures.add(xfail("__getitem__"))
+    fake_export_failures.add(xfail("nn.functional.batch_norm"))
+    fake_export_failures.add(xfail("nn.functional.grid_sample"))
+    fake_export_failures.add(xfail("nn.functional.instance_norm"))
+    fake_export_failures.add(xfail("nn.functional.multi_margin_loss"))
+    fake_export_failures.add(xfail("nonzero"))
 
 fake_decomposition_failures = {
     xfail("linalg.matrix_rank"),
@@ -121,6 +124,8 @@ def _test_export_helper(self, dtype, op):
 
 
 class TestExportOpInfo(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(export_failures | fake_export_failures)
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
@@ -144,6 +149,8 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
 class TestExportOnFakeCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # In CI, this test runs on a CUDA machine with cuda build
     # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset

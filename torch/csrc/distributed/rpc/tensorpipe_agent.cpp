@@ -281,7 +281,7 @@ std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
 // The multiplexed UV channel encapsulates multiple UV transports (each with its
 // own event loop thread). Each channel will, in turn, contain multiple UV
 // connections, one for each of those contexts. When sending a tensor, its data
-// is split in equal chunks and each chunks is sent on a different connection
+// is split in equal chunks and each chunk is sent on a different connection
 // and thus driven by a different thread. This is needed to reach very high
 // bandwidths.
 C10_REGISTER_CREATOR(

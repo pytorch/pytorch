@@ -485,6 +485,8 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const index_t* offset2bag,  // contiguous
     int64_t num_samples,
     int64_t embedding_features,
+    int64_t num_bags,
+    int64_t num_embeddings,
     scalar_t* output,
     index_t padding_idx) {
   using accscalar_t = acc_type<scalar_t, true>;
@@ -497,8 +499,12 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
   // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
   for (int sample_idx = warp; sample_idx < num_samples; sample_idx += num_warps) {
     accscalar_t result = 0.;
-    const int bag_idx = (int)offset2bag[sample_idx];
-    const int embedding_idx = (int)indices[sample_idx];
+    const index_t bag_idx = offset2bag[sample_idx];
+    const index_t embedding_idx = indices[sample_idx];
+    CUDA_KERNEL_ASSERT(
+        (bag_idx >= 0 && bag_idx < num_bags) &&
+        "Invalid offset2bag value in EmbeddingBag: value out of range [0, numBags)");
+    CUDA_KERNEL_ASSERT((embedding_idx >= 0 && embedding_idx < num_embeddings) && "Invalid input index in EmbeddingBag: index out of range [0, numRows)");
     if (embedding_idx != padding_idx) {
       for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
           feature_idx += C10_WARP_SIZE) {
@@ -562,6 +568,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
             offset2bag.const_data_ptr<index_t>(),
             num_samples,
             embedding_features,
+            grad.size(0),
+            weight.size(0),
             output.mutable_data_ptr<scalar_t>(),
             padding_idx);
         C10_CUDA_KERNEL_LAUNCH_CHECK();

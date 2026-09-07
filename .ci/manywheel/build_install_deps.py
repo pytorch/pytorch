@@ -21,7 +21,7 @@ from pathlib import Path
 # prefix ("cp31") would wrongly capture cp315, so match on the version tuple.
 # Keep in sync with .ci/manywheel/build_common.sh.
 NUMPY_PINS: list[tuple[tuple[int, int], str]] = [
-    ((3, 15), "2.5.1"),
+    ((3, 15), "2.5.2"),
     ((3, 14), "2.3.4"),
     ((3, 10), "2.1.0"),
 ]
@@ -113,7 +113,7 @@ def main() -> None:
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
     if not os.environ.get("SKIP_SETUP_CLEAN"):
-        subprocess.run([sys.executable, "setup.py", "clean"], check=True)
+        subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
     pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
     # auditwheel repacks the manywheel with a valid ZIP64 record for >4GB ROCm

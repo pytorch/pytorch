@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -146,6 +147,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._foreach_addcdiv_,
     aten.lerp,
     aten.lerp_,
+    aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -158,6 +160,22 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.special_log_ndtr])
+def special_log_ndtr(a: torch.Tensor) -> torch.Tensor:
+    # Inductor's C++ codegen compiles with -fno-signed-zeros, which causes the
+    # compiler to optimize away the -0.0 signbit in log_ndtr results (#187336).
+    # We wrap the base decomposition result with copysign to force the sign bit,
+    # since log_ndtr is always non-positive.
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
+    res = torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-torch.erfc(t) / 2),
+    )
+    return torch.copysign(res, -1.0)
 
 
 if torch.distributed.is_available():
@@ -345,13 +363,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -420,7 +443,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -454,6 +494,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -463,7 +504,16 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    def add_input(out: torch.Tensor) -> torch.Tensor:
+        if alpha != 1:
+            out = alpha * out
+        if beta != 1:
+            return out + beta * self
+        return out + self
+
     if mat1.device.type not in ["cpu", "mps"]:
+        if beta == 0 and mat1.device.type == "cuda":
+            return NotImplemented
         if (
             statically_known_true(mat1.size(-1) == 1)
             and statically_known_true(mat1.size(0) != 1)
@@ -471,7 +521,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = mat1 * mat2
-            return alpha * out + beta * self
+            return add_input(out)
 
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
@@ -494,6 +544,7 @@ def addmm(
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,
@@ -926,17 +977,18 @@ def uniform(
     stride: list[int | torch.SymInt],
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
+    storage_len = utils.compute_required_storage_length(
+        cast(list[int], shape), cast(list[int], stride), 0
+    )
+    sample_shape: list[int | torch.SymInt] = [storage_len]
     if generator is None:
-        rand_samples = torch.rand(shape, dtype=dtype, device=device)
+        rand_samples = torch.rand(sample_shape, dtype=dtype, device=device)
     else:
         rand_samples = torch.rand(
-            shape, generator=generator, dtype=dtype, device=device
+            sample_shape, generator=generator, dtype=dtype, device=device
         )
     res = (high - low) * rand_samples + low
-
-    if tuple(stride) != utils.make_contiguous_strides_for(cast(list[int], shape)):
-        return res.as_strided(shape, stride)
-    return res
+    return res.as_strided(shape, stride)
 
 
 @register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)

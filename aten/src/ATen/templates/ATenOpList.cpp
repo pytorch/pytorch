@@ -30,7 +30,7 @@ bool is_custom_op(const c10::OperatorName& opName) {
     ${aten_ops}
     {"", ""}
   };
-  return ops.count(std::make_pair(
-             opName.name.c_str(), opName.overload_name.c_str())) == 0;
+  return !ops.contains(std::make_pair(
+             opName.name.c_str(), opName.overload_name.c_str()));
 }
 }

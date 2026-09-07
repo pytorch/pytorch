@@ -752,47 +752,47 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
 
-class TestRunnerDeterminatorAmdDoExperiment(TestCase):
-    AMD_DO_SETTINGS = """
+class TestRunnerDeterminatorAmdSandboxExperiment(TestCase):
+    AMD_SANDBOX_SETTINGS = """
         experiments:
-            amd-do:
+            amd-sandbox:
                 rollout_perc: 0
         ---
 
         Users:
-        @User1,amd-do
+        @User1,amd-sandbox
         @User2,lf
 
         """
 
-    def test_amd_do_opted_in_returns_prefix(self) -> None:
-        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User1"], USER_BRANCH)
-        self.assertEqual("amd-do-", result.amd_do_prefix)
-        # amd-do is exposed via its own output; the base prefix is the default fleet
+    def test_amd_sandbox_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_SANDBOX_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
+        # amd-sandbox is exposed via its own output; the base prefix is the default fleet
         self.assertEqual("mt-", result.prefix)
 
-    def test_amd_do_not_enabled_returns_default_fleet(self) -> None:
+    def test_amd_sandbox_not_enabled_returns_default_fleet(self) -> None:
         # User2 opts into lf, but lf is not defined here, so it falls back to Meta
-        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User2"], USER_BRANCH)
-        self.assertEqual("", result.amd_do_prefix)
+        result = rd.get_runner_prefix(self.AMD_SANDBOX_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_sandbox_prefix)
         self.assertEqual("mt-", result.prefix)
 
-    def test_amd_do_with_lf_keeps_both(self) -> None:
+    def test_amd_sandbox_with_lf_keeps_both(self) -> None:
         settings_text = """
         experiments:
             lf:
                 rollout_perc: 0
-            amd-do:
+            amd-sandbox:
                 rollout_perc: 0
         ---
 
         Users:
-        @User1,lf,amd-do
+        @User1,lf,amd-sandbox
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf-", result.prefix)
-        self.assertEqual("amd-do-", result.amd_do_prefix)
+        self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
 
 
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
@@ -859,3 +859,51 @@ class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
 
 if __name__ == "__main__":
     main()
+
+
+class TestScaleConfigPrefix(TestCase):
+    """Only wincanary/wincanarylf drive scale-config-label-type."""
+
+    SETTINGS = """
+experiments:
+  lf:
+    rollout_perc: 0
+  wincanary:
+    rollout_perc: 0
+  wincanarylf:
+    rollout_perc: 0
+---
+@lfuser,lf
+@wcuser,wincanary
+@wclfuser,wincanarylf
+@bothuser,lf,wincanarylf
+@plainuser,
+"""
+    ALL = frozenset({"lf", "wincanary", "wincanarylf"})
+
+    def _result(self, user: str) -> rd.RunnerPrefixResult:
+        return rd.get_runner_prefix(
+            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset()
+        )
+
+    def test_no_variant_means_no_prefix(self) -> None:
+        self.assertEqual("", self._result("plainuser").scale_config_prefix)
+
+    def test_lf_alone_does_not_set_a_prefix(self) -> None:
+        # lf rolls out over ALL workflows; it must not relocate Windows builds.
+        self.assertEqual("", self._result("lfuser").scale_config_prefix)
+
+    def test_wincanary(self) -> None:
+        self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
+
+    def test_wincanarylf(self) -> None:
+        self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
+
+    def test_lf_does_not_compose_with_the_variant(self) -> None:
+        # never "lf.wincanarylf."
+        self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
+
+    def test_arc_label_type_is_untouched(self) -> None:
+        self.assertEqual("mt-", self._result("plainuser").prefix)
+        self.assertEqual("lf-", self._result("lfuser").prefix)
+        self.assertEqual("lf-", self._result("bothuser").prefix)

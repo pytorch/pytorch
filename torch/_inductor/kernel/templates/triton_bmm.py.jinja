@@ -48,13 +48,19 @@
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q_clamped*stride_bq)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
+    {% if ASCENDING_K|default(false) %}
+    # XPU renders the K loop ascending (see MMTemplateConfigMixin.ascending_k).
+    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+        k_remaining = K - k_idx * BLOCK_K
+    {% else %}
+    for k_remaining in range(K, 0, -BLOCK_K):
+    {% endif %}
         if EVEN_K:
             a = tl.load(A)
             b = tl.load(B)
         else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
+            a = tl.load(A, mask=rk[None, :] < k_remaining, other=0.)
+            b = tl.load(B, mask=rk[:, None] < k_remaining, other=0.)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk

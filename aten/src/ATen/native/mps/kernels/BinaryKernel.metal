@@ -258,17 +258,61 @@ struct hermite_polynomial_he_functor {
   }
 };
 
+struct laguerre_polynomial_l_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::laguerre_polynomial_l_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::laguerre_polynomial_l_forward(float(a), float(b));
+  }
+};
+
 struct nextafter_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
+  }
+
+  static inline ushort nextafter_bfloat_bits(
+      const bfloat from,
+      const bfloat to) {
+    ushort uf = as_type<ushort>(from);
+    const ushort ut = as_type<ushort>(to);
+    const ushort af = uf & 0x7fff;
+    const ushort at = ut & 0x7fff;
+
+    if (uf == ut || (af == 0 && at == 0)) {
+      return ut;
+    }
+    if (af == 0) {
+      return ushort((ut & 0x8000) | 1);
+    }
+
+    const bool neg = (uf & 0x8000) != 0;
+    const int from_value = neg ? -int(af) : int(af);
+    const int to_value = (ut & 0x8000) ? -int(at) : int(at);
+    uf += ((from_value < to_value) != neg) ? 1 : -1;
+    return uf;
+  }
+
+  inline bfloat operator()(const bfloat from, const bfloat to) {
+    ushort result;
+    if (from != from || to != to) {
+      result = as_type<ushort>(bfloat(from + to));
+    } else {
+      result = nextafter_bfloat_bits(from, to);
+    }
+    return as_type<bfloat>(result);
   }
 };
 
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
+    return static_cast<T>(
+        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
   }
 };
 
@@ -280,6 +324,13 @@ struct atan2_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return precise::atan2(float(a), float(b));
+  }
+};
+
+struct pow_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::pow(a, b));
   }
 };
 
@@ -495,6 +546,28 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
+// Logical ops test truthiness of each operand then combine. cast_to<bool>
+// handles every dtype: scalars as x != 0, complex as the per-component nonzero
+// test.
+struct logical_and_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) && c10::metal::cast_to<bool>(b);
+  }
+};
+struct logical_or_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) || c10::metal::cast_to<bool>(b);
+  }
+};
+struct logical_xor_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) != c10::metal::cast_to<bool>(b);
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
   REGISTER_BINARY_OP(NAME, long, long);          \
   REGISTER_BINARY_OP(NAME, int, int);            \
@@ -548,8 +621,8 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
-// Complex variants for eq/ne only -- lt/le/gt/ge are not well-defined on
-// complex numbers.
+// Complex variants for eq/ne and the logical ops (complex->bool). lt/le/gt/ge
+// are not well-defined on complex numbers, so they don't use this.
 #define REGISTER_COMPLEX_EQ_OP(NAME)              \
   REGISTER_BINARY_OP(NAME, float2, bool);         \
   REGISTER_BINARY_CASTOUT_OP(NAME, float2, bool); \
@@ -598,6 +671,14 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
+REGISTER_FLOAT_BINARY_OP(laguerre_polynomial_l);
+REGISTER_INT2FLOAT_BINARY_OP(laguerre_polynomial_l);
+REGISTER_FLOAT_BINARY_OP(pow);
+REGISTER_INTEGER_BINARY_OP(pow);
+REGISTER_BINARY_OP(pow, float2, float2);
+// chalf pow must accumulate in float2: the polar form exp(y*log(x)) overflows
+// half for moderately large magnitudes (e.g. (300+0j)**1 -> inf), see #195585
+REGISTER_OPMATH_BINARY_OP(pow, half2, half2);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
@@ -631,6 +712,12 @@ REGISTER_COMPARISON_OP(lt);
 REGISTER_COMPARISON_OP(le);
 REGISTER_COMPARISON_OP(gt);
 REGISTER_COMPARISON_OP(ge);
+REGISTER_COMPARISON_OP(logical_and);
+REGISTER_COMPLEX_EQ_OP(logical_and);
+REGISTER_COMPARISON_OP(logical_or);
+REGISTER_COMPLEX_EQ_OP(logical_or);
+REGISTER_COMPARISON_OP(logical_xor);
+REGISTER_COMPLEX_EQ_OP(logical_xor);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);

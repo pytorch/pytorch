@@ -343,7 +343,7 @@ static void mayAddListConstructIntoConcatPartition(
     Node* n,
     OpPartitionMap& opToOwningPartition) {
   // Since prim::ListConstruct is not visible to the LLGA,
-  // it will not be in any partition returned from partfuseritioning results.
+  // it will not be in any partition returned from partitioning results.
   // We need rewrite opToOwningPartition to make the prim::ListConstruct to be
   // 'virtually' in the same partition with the aten::cat, so that
   // prim::ListConstruct can be fused into the fusion group by graph fuser.

@@ -8,6 +8,7 @@ from torch._inductor import config
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
@@ -231,6 +232,22 @@ class TestCustomLowering(InductorTestCase):
         a = torch.tanh(inp)
         b = fn_opt(inp)
         self.assertEqual(a, b)
+
+    @requires_gpu()
+    @skipIfRocm
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
+    def test_reused_inline_asm_realized(self):
+        def fn(inp):
+            y = torch.ops.test_inductor_ops.tanh_approx(inp)
+            return y.sum(dim=0), y.sum(dim=1)
+
+        inp = torch.randn(32, 64, device=GPU_TYPE)
+        expected = (torch.tanh(inp).sum(dim=0), torch.tanh(inp).sum(dim=1))
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
 
     @requires_gpu()
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")

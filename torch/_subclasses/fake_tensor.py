@@ -1380,15 +1380,17 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     # Read layout/sparseness once (hot-path Python properties on FakeTensor).
     layout = t.layout
     _is_sparse_any: bool = is_sparse_any(t)
-    memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
-    # will go badly (guards will be messed up?)
-    if (
-        t._has_symbolic_sizes_strides
-        or _is_sparse_any
-        or not t.is_contiguous(memory_format=memory_format)
-    ):
-        memory_format = None  # type: ignore[assignment]
+    # will go badly (guards will be messed up?). suggest_memory_format walks
+    # sizes and strides, which is symbolic arithmetic for such a tensor, so
+    # skip it too rather than computing a value we are about to discard.
+    memory_format: torch.memory_format | None
+    if t._has_symbolic_sizes_strides or _is_sparse_any:
+        memory_format = None
+    else:
+        memory_format = suggest_memory_format(t)
+        if not t.is_contiguous(memory_format=memory_format):
+            memory_format = None
 
     storage_offset = t.storage_offset()
 
@@ -1839,12 +1841,15 @@ class FakeTensorMode(TorchDispatchMode):
 
             # We have a cache entry.
 
-            output = self._output_from_cache_entry(state, entry, key, func, args)
+            output = self._output_from_cache_entry(state, entry, key, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
-                with disable_fake_tensor_cache(self):
+                with (
+                    disable_fake_tensor_cache(self),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
@@ -1979,9 +1984,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         if torch.Tag.inplace_view in func.tags:
             raise _BypassDispatchCache("inplace view")
-
-        if func is aten._unsafe_view.default:
-            raise _BypassDispatchCache("unsafe view")
 
         if func is torch.ops.prims.as_strided.default:
             raise _BypassDispatchCache("prims.as_strided")
@@ -2140,7 +2142,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Otherwise, create an entry that records the output tensor's metadata.
         view_idx = None
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        # _unsafe_view is a view in every way that matters here: its output
+        # shares the input's storage. It is only "unsafe" in that it does not
+        # record the view for autograd. Treat it like one, so the output
+        # synthesized on a hit aliases its input as the real op would - caching
+        # it as a plain op would hand back a fresh storage and quietly lose the
+        # aliasing.
+        if isinstance(func, torch._ops.OpOverload) and (
+            func.is_view or func is aten._unsafe_view.default
+        ):
             idxs = [i for i, t in enumerate(args) if isinstance(t, Tensor)]
             if len(idxs) != 1:
                 raise AssertionError(
@@ -2176,7 +2186,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         try:
             synth_output = self._output_from_cache_entry(
-                state, entry_for_synth_output, key, func, args
+                state, entry_for_synth_output, key, args
             )
         except GuardOnDataDependentSymNode:
             # This should probably never really happen. If it does it means that
@@ -2306,7 +2316,6 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheEntryOutputInfo,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None:
         if (
@@ -2358,10 +2367,15 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
+        # The set_ below replaces the size, stride and storage of the tensor
+        # created here, so for a view op don't pay to derive them twice. On
+        # symbolic shapes that derivation is the bulk of the cost of both calls.
+        is_view = entry.view_idx is not None
+
         with in_kernel_invocation_manager(self), maybe_suppress():
             empty = torch.empty_strided(
-                shape,
-                stride,
+                () if is_view else shape,
+                () if is_view else stride,
                 dtype=metadata.dtype,
                 layout=metadata.layout,
                 device="meta",
@@ -2373,7 +2387,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        if isinstance(func, torch._ops.OpOverload) and func.is_view:
+        if is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
@@ -2389,25 +2403,28 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheValidEntry,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None | tuple[FakeTensor | None, ...]:
         """
         Create a new FakeTensor from the cache entry.
         """
 
-        if entry.is_output_tuple:
-            outputs = [
-                self._get_output_tensor_from_cache_entry(
-                    state, output_info, key, func, args
+        # Reconstructing a cached FakeTensor may run symbolic checks inside
+        # empty_strided()/set_().  Those checks are cache internals, not user
+        # operations, so they must not be recorded by an active proxy tracer.
+        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+            if entry.is_output_tuple:
+                outputs = [
+                    self._get_output_tensor_from_cache_entry(
+                        state, output_info, key, args
+                    )
+                    for output_info in entry.output_infos
+                ]
+                return tuple(outputs)
+            else:
+                return self._get_output_tensor_from_cache_entry(
+                    state, entry.output_infos[0], key, args
                 )
-                for output_info in entry.output_infos
-            ]
-            return tuple(outputs)
-        else:
-            return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, func, args
-            )
 
     def _crosscheck_cache_output(
         self,

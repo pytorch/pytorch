@@ -8,7 +8,11 @@ from collections import namedtuple
 import torch._C as C
 import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
@@ -55,6 +59,7 @@ def extract_dispatch_table_with_keys(table, dispatch_keys):
 
 
 class TestDispatch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     namespace_index = 0
 
     def test_all_invariants(self):
@@ -988,6 +993,8 @@ CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
 
 
 class TestPythonDispatcher(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         dispatcher = PythonDispatcher()
         dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd"])

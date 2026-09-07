@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_float.py b/test/cpython/v3_13/test_float.py
-index 97f951f1299..9313a1a63d7 100644
+index 97f951f12998a32055c38af1ffb29c6fb3436739..5d0ddc5957ce227a68ee9d63832e062b2061416b 100644
 --- a/test/cpython/v3_13/test_float.py
 +++ b/test/cpython/v3_13/test_float.py
 @@ -1,3 +1,57 @@
@@ -186,16 +186,25 @@ index 97f951f1299..9313a1a63d7 100644
  
      def test_format(self):
          # these should be rewritten to use both format(x, spec) and
-@@ -767,7 +894,7 @@ class FormatTestCase(unittest.TestCase):
+@@ -724,6 +851,7 @@ class FormatTestCase(unittest.TestCase):
+         self.assertEqual(format(INF, 'F'), 'INF')
+ 
+     @support.requires_IEEE_754
++    @torch._dynamo.error_on_graph_break(False)
+     def test_format_testfile(self):
+         with open(format_testfile, encoding="utf-8") as testfile:
+             for line in testfile:
+@@ -767,7 +895,8 @@ class FormatTestCase(unittest.TestCase):
          self.assertEqual(format(-123.34, '00.10e'), '-1.2334000000e+02')
          self.assertEqual(format(-123.34, '00.10g'), '-123.34')
  
 -class ReprTestCase(unittest.TestCase):
 +class ReprTestCase(__TestCase):
++    @torch._dynamo.error_on_graph_break(False)
      def test_repr(self):
          with open(os.path.join(os.path.split(__file__)[0],
                    'mathdata',
-@@ -832,7 +959,29 @@ class ReprTestCase(unittest.TestCase):
+@@ -832,7 +961,29 @@ class ReprTestCase(unittest.TestCase):
              self.assertEqual(repr(float(negs)), str(float(negs)))
  
  @support.requires_IEEE_754
@@ -226,7 +235,7 @@ index 97f951f1299..9313a1a63d7 100644
  
      def test_inf_nan(self):
          self.assertRaises(OverflowError, round, INF)
-@@ -955,7 +1104,7 @@ class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
+@@ -955,7 +1106,7 @@ class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
  
  # Beginning with Python 2.6 float has cross platform compatible
  # ways to create and represent inf and nan
@@ -235,7 +244,7 @@ index 97f951f1299..9313a1a63d7 100644
      def test_inf_from_str(self):
          self.assertTrue(isinf(float("inf")))
          self.assertTrue(isinf(float("+inf")))
-@@ -1056,12 +1205,35 @@ class InfNanTest(unittest.TestCase):
+@@ -1056,12 +1207,35 @@ class InfNanTest(unittest.TestCase):
  
  fromHex = float.fromhex
  toHex = float.hex
@@ -272,7 +281,7 @@ index 97f951f1299..9313a1a63d7 100644
      def identical(self, x, y):
          self.assertFloatsAreIdentical(x, y)
  
-@@ -1500,5 +1672,5 @@ class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
+@@ -1500,5 +1674,5 @@ class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
          self.assertEqual(getattr(f, 'foo', 'none'), 'bar')
  
  

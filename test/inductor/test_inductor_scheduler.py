@@ -1,7 +1,8 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch, PropertyMock
 
 import sympy
 
@@ -11,15 +12,35 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.codegen.common import CSEVariable
+from torch._inductor.codegen.simd import (
+    _GroupedReductionLayout,
+    _PointwiseRemapHandler,
+    _SubParentValueResolver,
+    SIMDScheduling,
+)
+from torch._inductor.codegen.simd_kernel_features import (
+    DisableReduction,
+    EnableReduction,
+)
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
+    ForeachKernelSchedulerNode,
+    FusedNestedReductions,
+    MemoryDepMatch,
     NestedReduction,
+    OrderedParentNodes,
     Scheduler,
+    SchedulerNode,
+    SubParentAccessRelation,
+    SubParentEpilogueCandidate,
+    SubParentEpilogueGrouping,
+    SubParentOutputGroup,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -32,6 +53,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     parametrize,
     run_tests,
     TestCase,
@@ -40,6 +62,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -92,6 +116,18 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
     def _extern_snode_for_op(self, op_overload, python_kernel_name):
         node = object.__new__(ir.ExternKernel)
         node.op_overload = op_overload
@@ -99,6 +135,129 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
+
+    def _mock_schedule_node(
+        self,
+        name,
+        *,
+        reads=(),
+        writes=(),
+        ancestors=(),
+        group=(8, 16),
+        is_reduction=False,
+    ):
+        node = self._mock_base_snode(name)
+        node.group = (None, group)
+        node.ancestors = OrderedSet(ancestors)
+        node.get_operation_names.return_value = OrderedSet([name])
+        node.get_buffer_names.return_value = OrderedSet(writes)
+        node.is_reduction.return_value = is_reduction
+        if is_reduction:
+            node.__class__ = SchedulerNode
+            node.node = Mock(spec=ir.ComputedBuffer)
+            node.node.data = Mock()
+
+        def make_dep(dep_name):
+            return MemoryDep(dep_name, sympy.S.Zero, (), ())
+
+        node.read_writes = ReadWrites(
+            OrderedSet(make_dep(dep_name) for dep_name in reads),
+            OrderedSet(make_dep(dep_name) for dep_name in writes),
+            OrderedSet(),
+        )
+        return node
+
+    def _make_sub_parent_value_resolver(
+        self,
+        access_relations,
+        *,
+        kernel=None,
+        family=None,
+        factor=2,
+    ):
+        """Build a resolver with only the collaborators relevant to a unit case."""
+        if kernel is None:
+            kernel = Mock(_load_mask=None, _load_other=None)
+        return _SubParentValueResolver(
+            Mock(),
+            kernel,
+            Mock(),
+            Mock() if family is None else family,
+            access_relations=access_relations,
+            sub_parent_factor=factor,
+        )
+
+    def test_generate_node_schedule_required_boundary_discards_optional_split(self):
+        first = self._mock_schedule_node(
+            "first", reads=("x",), writes=("a",), is_reduction=True
+        )
+        second = self._mock_schedule_node("second", reads=("y",), writes=("b",))
+        final = self._mock_schedule_node("final", reads=("z",), writes=("c",))
+
+        schedule = SIMDScheduling(None).generate_node_schedule(
+            [first, second, final], 8, 16, required_post_reduction_index=2
+        )
+
+        self.assertEqual(
+            schedule, [first, second, DisableReduction, EnableReduction, final]
+        )
+
+    def test_generate_node_schedule_required_boundary_reuses_enable_marker(self):
+        first = self._mock_schedule_node("first", is_reduction=True)
+        outside = self._mock_schedule_node("outside", group=(8, 1))
+        final = self._mock_schedule_node("final")
+
+        schedule = SIMDScheduling(None).generate_node_schedule(
+            [first, outside, final], 8, 16, required_post_reduction_index=2
+        )
+
+        self.assertEqual(
+            schedule, [first, DisableReduction, outside, EnableReduction, final]
+        )
+
+    def test_generate_node_schedule_required_boundary_reuses_final_loop(self):
+        reduction = self._mock_schedule_node("reduction", is_reduction=True)
+        post_reduction = self._mock_schedule_node(
+            "post_reduction", ancestors=("reduction",)
+        )
+        final = self._mock_schedule_node("final")
+
+        schedule = SIMDScheduling(None).generate_node_schedule(
+            [reduction, post_reduction, final],
+            8,
+            16,
+            required_post_reduction_index=2,
+        )
+
+        self.assertEqual(
+            schedule,
+            [reduction, DisableReduction, EnableReduction, post_reduction, final],
+        )
+
+    def test_generate_node_schedule_rejects_invalid_required_boundary(self):
+        first = self._mock_schedule_node("first")
+        outside = self._mock_schedule_node("outside", group=(8, 1))
+
+        with self.assertRaisesRegex(AssertionError, "unique main-body node"):
+            SIMDScheduling(None).generate_node_schedule(
+                [first, outside], 8, 16, required_post_reduction_index=1
+            )
+
+        second = self._mock_schedule_node("second")
+        with self.assertRaisesRegex(AssertionError, "follow a reduction loop"):
+            SIMDScheduling(None).generate_node_schedule(
+                [first, second], 8, 16, required_post_reduction_index=1
+            )
+
+        reduction = self._mock_schedule_node("reduction", is_reduction=True)
+        later_reduction = self._mock_schedule_node("later_reduction", is_reduction=True)
+        with self.assertRaisesRegex(AssertionError, "main-body pointwise nodes"):
+            SIMDScheduling(None).generate_node_schedule(
+                [reduction, second, later_reduction],
+                8,
+                16,
+                required_post_reduction_index=1,
+            )
 
     def test_get_benchmarkable_extern_fn_uses_op_overload(self):
         self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
@@ -127,6 +286,115 @@ class TestScheduler(TestCase):
                     torch.ops.aten.relu.out, "extern_kernels.relu"
                 )
             )
+        )
+
+    def test_fuse_two_nodes_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        device = torch.device("cuda", 0)
+        node1 = self._mock_base_snode("node1", device)
+        node2 = self._mock_base_snode("node2", device)
+        node3 = self._mock_base_snode("node3", device)
+        node3.get_nodes.return_value = [node1, node2]
+        backend = Mock()
+        backend.fuse.return_value = node3
+        scheduler.get_backend = Mock(return_value=backend)
+        scheduler.node_to_stream = {node1: 0, node2: 0}
+        scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0)}
+        scheduler.name_to_fused_node = {}
+        fused_nodes = OrderedSet([node1, node2])
+
+        self.assertIs(
+            Scheduler.fuse_two_nodes(scheduler, node1, node2, fused_nodes), node3
+        )
+
+        self.assertEqual(scheduler.node_to_mempool[node3], (7, 0))
+        self.assertEqual(scheduler.node_to_stream[node3], 0)
+        self.assertIn(node3, fused_nodes)
+        self.assertNotIn(node1, fused_nodes)
+        self.assertNotIn(node2, fused_nodes)
+
+    def test_nested_reduction_fuse_with_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        node1 = self._mock_base_snode("node1")
+        node2 = self._mock_base_snode("node2")
+        other = self._mock_base_snode("other")
+        grouped_node = self._mock_base_snode("grouped_node")
+        stage = Mock()
+        plan = Mock(nested_stage=stage)
+        scheduler.node_to_mempool = {node2: (7, 0)}
+
+        nested = object.__new__(FusedNestedReductions)
+        nested.scheduler = scheduler
+        nested.node1 = node1
+        nested.node2 = node2
+        with (
+            patch.object(
+                FusedNestedReductions,
+                "_plan_append",
+                return_value=(grouped_node, plan),
+            ),
+            patch.object(FusedNestedReductions, "__init__", return_value=None),
+        ):
+            FusedNestedReductions.fuse_with(nested, other)
+
+        self.assertEqual(scheduler.node_to_mempool[grouped_node], (7, 0))
+
+    def test_nested_reduction_append_requires_complete_domains(self):
+        scheduler = Mock()
+        nested = object.__new__(FusedNestedReductions)
+        nested.scheduler = scheduler
+        nested.node1 = self._mock_base_snode("parent")
+        nested.node2 = self._mock_base_snode("grouped")
+        nested.node2.get_operation_names.return_value = OrderedSet(["grouped"])
+
+        first = self._mock_base_snode("first")
+        second = self._mock_base_snode("second")
+        other = self._mock_base_snode("other")
+        other.get_nodes.return_value = [first, second]
+        other.ancestors = OrderedSet(["grouped"])
+        domains = ((first, NestedReduction.PointwiseDomain.REDUCED),)
+        plan = Mock(nested_stage=Mock(pointwise_domains=domains))
+
+        with patch.object(
+            FusedNestedReductions,
+            "_plan_append",
+            return_value=(Mock(), plan),
+        ):
+            result = nested._plan_fusion_with(other)
+
+        self.assertIsNone(result)
+
+    @inductor_config.patch(combo_kernel_max_num_nodes=16)
+    def test_combo_kernel_grouping_respects_mempool(self):
+        scheduler = Mock()
+        device = torch.device("cuda", 0)
+        pool_node1 = self._mock_base_snode("pool_node1", device)
+        pool_node2 = self._mock_base_snode("pool_node2", device)
+        default_node = self._mock_base_snode("default_node", device)
+        other_pool_node = self._mock_base_snode("other_pool_node", device)
+        scheduler._topological_sort_nodes.return_value = [
+            [pool_node1, default_node, pool_node2, other_pool_node]
+        ]
+        scheduler.node_to_stream = {
+            pool_node1: 0,
+            pool_node2: 0,
+            default_node: 0,
+            other_pool_node: 0,
+        }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
+        scheduler.node_to_mempool = {
+            pool_node1: (7, 0),
+            pool_node2: (7, 0),
+            default_node: None,
+            other_pool_node: (8, 0),
+        }
+
+        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
+            scheduler
+        )
+
+        self.assertEqual(
+            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
@@ -184,116 +452,1055 @@ class TestScheduler(TestCase):
         self.assertEqual(args[1], 1)
         self.assertEqual(kwargs, {})
 
-    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+    def test_sub_parent_resolver_rejects_inconsistent_name_contract(self):
+        d0 = sympy.Symbol("d0", integer=True)
+        access = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
+        direct = SubParentAccessRelation((access,), access, None, False)
+        lane = SubParentAccessRelation((access,), access, 0, False)
+        other_lane = SubParentAccessRelation((access,), access, 1, False)
+        required = SubParentAccessRelation((access,), access, 0, True)
+        other_source = MemoryDep("buf0", d0 + 1, (d0,), (sympy.Integer(16),))
+        other = SubParentAccessRelation((other_source,), access, 0, False)
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            with self.assertRaisesRegex(AssertionError, "mixed direct and lane"):
+                self._make_sub_parent_value_resolver((direct, lane))
+            with self.assertRaisesRegex(
+                AssertionError, "consumer access has multiple lanes"
+            ):
+                self._make_sub_parent_value_resolver((lane, other_lane))
+            with self.assertRaisesRegex(AssertionError, "mixed source roles"):
+                self._make_sub_parent_value_resolver((lane, required))
+            with self.assertRaisesRegex(AssertionError, "mixed source accesses"):
+                self._make_sub_parent_value_resolver((lane, other))
+
+    def test_sub_parent_resolver_uses_planned_lane_set(self):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        source = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
+        relations = tuple(
+            SubParentAccessRelation(
+                (source,),
+                MemoryDep("buf0", 4 * d0 + lane, (d0,), (sympy.Integer(4),)),
+                lane,
+                True,
+            )
+            for lane in (0, 2)
+        )
+        kernel = Mock(_load_mask=None, _load_other=None)
+        kernel.cse.contains_value.return_value = True
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            resolver = self._make_sub_parent_value_resolver(
+                relations,
+                kernel=kernel,
+                family=Mock(lane_index_subs={}, lane_source_sizes=()),
+                factor=4,
+            )
+            source_value = Mock(shape=("X", "PARENT"))
+            lane_values = tuple(Mock() for _ in range(4))
+            resolver._values = {"buf0": [source_value]}
+            resolver._materialize = Mock(return_value=lane_values)
+            self.assertIs(resolver.resolve_load("buf0", 4 * d0), lane_values[0])
+            self.assertIs(resolver.resolve_load("buf0", 4 * d0 + 2), lane_values[2])
+            with self.assertRaisesRegex(AssertionError, "unplanned lane 1"):
+                resolver.resolve_load("buf0", 4 * d0 + 1)
+
+    def test_sub_parent_source_capture_is_role_aware(self):
+        d0 = sympy.Symbol("d0", integer=True)
+        external = MemoryDep("external", d0, (d0,), (sympy.Integer(16),))
+        internal = MemoryDep("internal", d0, (d0,), (sympy.Integer(16),))
+        relations = (
+            SubParentAccessRelation((external,), external, None, False),
+            SubParentAccessRelation((internal,), internal, None, True),
+        )
+        kernel = Mock(_load_mask=None, _load_other=None)
+        resolver = self._make_sub_parent_value_resolver(
+            relations,
+            kernel=kernel,
+        )
+        external_parent = Mock(shape=("X", "PARENT"))
+        external_group = Mock(shape=("X", "GROUP"))
+        external_replacement = Mock(shape=("X", "PARENT"))
+        internal_store = Mock(shape=("X", "GROUP"))
+        internal_replay = Mock(shape=("X", "GROUP"))
+
+        resolver._record("external", external_parent, store=False)
+        resolver._record("external", external_group, store=False)
+        resolver._record("external", Mock(shape=("X", "STORE")), store=True)
+        resolver._record("internal", Mock(shape=("X", "LOAD")), store=False)
+        resolver._record("unplanned", Mock(shape=("X", "OTHER")), store=False)
+        self.assertEqual(
+            resolver._values,
+            {"external": OrderedSet([external_parent, external_group])},
+        )
+
+        resolver._record("external", external_replacement, store=False)
+        resolver._record("internal", internal_store, store=True)
+        self.assertEqual(
+            resolver._values["external"],
+            OrderedSet([external_parent, external_group, external_replacement]),
+        )
+        self.assertEqual(resolver._values["internal"], OrderedSet([internal_store]))
+        resolver._materialized[internal_store] = Mock()
+        resolver._record("internal", internal_replay, store=True)
+        self.assertEqual(resolver._values["internal"], OrderedSet([internal_replay]))
+        self.assertNotIn(internal_store, resolver._materialized)
+
+        materialized = Mock()
+        resolver._kernel.cse.contains_value.return_value = True
+        resolver._materialize = Mock(side_effect=(None, materialized))
+        self.assertIs(resolver.resolve_load("external", sympy.Integer(0)), materialized)
+
+    def test_sub_parent_required_source_must_remain_live(self):
+        d0 = sympy.Symbol("d0", integer=True)
+        access = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
+        relation = SubParentAccessRelation((access,), access, None, True)
+        kernel = Mock(_load_mask=None, _load_other=None)
+        kernel.cse.contains_value.return_value = False
+        resolver = self._make_sub_parent_value_resolver(
+            (relation,),
+            kernel=kernel,
+        )
+
+        with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
+            resolver.resolve_load("buf0", sympy.Integer(0))
+        kernel.cse.contains_value.return_value = True
+        resolver._values = {"buf0": [Mock(shape=("X", "GROUP"))]}
+        resolver._materialize = Mock(return_value=None)
+        with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
+            resolver.materialize_sources((relation,))
+
+    def test_sub_parent_resolver_uses_masked_load_ownership(self):
+        d0 = sympy.Symbol("d0", integer=True)
+        graph_handler = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph_handler):
+            access = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),)).normalize()
+        relation = SubParentAccessRelation((access,), access, None, False)
+        value = Mock()
+        resolver = self._make_sub_parent_value_resolver(
+            (relation,),
+            kernel=Mock(_load_mask="source_mask", _load_other=0.0),
+        )
+        resolver._inner.load.return_value = value
+        with V.set_graph_handler(graph_handler):
+            self.assertIs(resolver.load("buf0", sympy.Integer(0)), value)
+        self.assertEqual(resolver._values, {})
+
+        resolver._values["buf0"] = [value]
+        resolver._kernel.cse.contains_value.return_value = True
+        resolver._kernel._load_mask = "consumer_mask"
+        resolver._kernel._load_other = None
+        (resolved,) = resolver.resolve_sources("buf0")
+        self.assertIs(resolved, value)
+
+        resolver._kernel._load_other = 7.0
+        self.assertEqual(resolver.resolve_sources("buf0"), ())
+
+    def test_sub_parent_external_fallback_and_atomic_store(self):
+        resolver = Mock()
+        resolver.is_planned.return_value = True
+        resolver.resolve_load.return_value = None
+        family = Mock()
+        family.remap_index.return_value = sympy.Integer(7)
+        family.ensure_active.return_value = contextlib.nullcontext()
+        value = Mock(use_count=1)
+        kernel = Mock(num_load=0)
+        kernel.cse.invalidated_stores = OrderedSet()
+        kernel.load.return_value = value
+        inner = Mock()
+        handler = _PointwiseRemapHandler(
+            inner,
+            kernel,
+            family=family,
+            value_resolver=resolver,
+        )
+
+        self.assertIs(handler.load("buf0", sympy.Integer(3)), value)
+        resolver.resolve_load.assert_called_once_with("buf0", sympy.Integer(3))
+        inner.load.assert_not_called()
+        kernel.load.assert_called_once_with("buf0", sympy.Integer(7))
+        resolver = object.__new__(_SubParentValueResolver)
+        resolver._record = Mock()
+        resolver._inner = Mock()
+        for mode in ("atomic_add", "atomic_xchg", "tma"):
+            resolver.store("buf0", sympy.Integer(0), Mock(), mode)
+        resolver._record.assert_not_called()
+
+    def test_group_width_equal_to_child_width_is_direct(self):
+        x_tree, r_tree = Mock(), Mock()
+        layout = _GroupedReductionLayout(x_tree, r_tree, sympy.Integer(2), True)
+        value = Mock(dtype=torch.float32, shape=("X", "CHILD"))
+        family = Mock()
+        kernel = Mock()
+
+        with (
+            patch.object(_GroupedReductionLayout, "child_block", return_value="CHILD"),
+            patch.object(
+                _GroupedReductionLayout,
+                "num_groups_str",
+                new_callable=PropertyMock,
+                return_value="CHILD",
+            ),
+        ):
+            result = layout.materialize_value_at_sub_parent_resolution(
+                kernel, family, 2, value
+            )
+
+        self.assertIs(result, value)
+        family.set_value_masks.assert_called_once_with(kernel, (value,))
+        kernel.emit_broadcast_via_reshape.assert_not_called()
+
+    @parametrize(
+        "load_mask,parent_lanes,shape,returns_raw",
+        (
+            (None, None, ("XBLOCK", "GROUP"), True),
+            ("mask", None, ("XBLOCK", "GROUP"), False),
+            (None, frozenset({0}), ("XBLOCK", "GROUP"), False),
+            (None, None, ("XBLOCK", "CHILD"), False),
+            (None, None, None, False),
+        ),
+    )
+    def test_sub_parent_group_width_raw_resolution(
+        self, load_mask, parent_lanes, shape, returns_raw
+    ):
+        source = CSEVariable(
+            "source", ValueRanges.unknown(), torch.float32, shape=shape
+        )
+        child = CSEVariable(
+            "child", ValueRanges.unknown(), torch.float32, shape=("XBLOCK", "CHILD")
+        )
+        resolver = object.__new__(_SubParentValueResolver)
+        resolver._contracts = {
+            "buf0": Mock(parent_lanes=parent_lanes, source_is_internal=False)
+        }
+        resolver._kernel = Mock(_load_mask=load_mask)
+        resolver._layout = Mock(num_groups_str="GROUP")
+        resolver._layout.parent_dim.side_effect = (
+            lambda candidate: None if candidate is None else str(candidate[-1])
+        )
+        resolver._layout.child_block.return_value = "CHILD"
+        resolver._sub_parent_factor = 2
+        resolver.resolve_sources = Mock(return_value=(source,))
+        resolver.materialize_source = Mock(return_value=child)
+
+        result = resolver.resolve_load("buf0", sympy.Integer(0))
+
+        self.assertIs(result, source if returns_raw else child)
+        if returns_raw:
+            resolver.materialize_source.assert_not_called()
+        else:
+            resolver.materialize_source.assert_called_once_with(
+                "buf0", source, sympy.Integer(0)
+            )
+
+        resolver._layout.child_block.return_value = "GROUP"
+        self.assertFalse(resolver.is_group_width_shape(("XBLOCK", "GROUP")))
+
+    def test_sub_parent_group_width_materialization_boundaries(self):
+        group_shape = ("XBLOCK", "GROUP")
+        child_shape = ("XBLOCK", "CHILD")
+        group = CSEVariable(
+            "group", ValueRanges.unknown(), torch.float32, shape=group_shape
+        )
+        group_product = CSEVariable(
+            "group_product", ValueRanges.unknown(), torch.float32, shape=group_shape
+        )
+        scalar = CSEVariable(
+            "scalar", ValueRanges.unknown(), torch.float32, shape=(1, 1)
+        )
+        fp8 = CSEVariable(
+            "fp8", ValueRanges.unknown(), torch.float8_e4m3fn, shape=group_shape
+        )
+        decoded = CSEVariable(
+            "decoded", ValueRanges.unknown(), torch.float32, shape=group_shape
+        )
+        child = CSEVariable(
+            "child", ValueRanges.unknown(), torch.float16, shape=child_shape
+        )
+        resolver = Mock()
+        resolver.is_group_width_shape.side_effect = lambda shape: shape == group_shape
+        resolver.materialize_group_width.side_effect = (
+            lambda value: child if value is group else value
+        )
+        family = Mock()
+        family.remap_index.return_value = sympy.Integer(7)
+        family.ensure_active.return_value = contextlib.nullcontext()
+        inner = Mock()
+        handler = _PointwiseRemapHandler(
+            inner,
+            Mock(),
+            family=family,
+            value_resolver=resolver,
+        )
+
+        operation_result = Mock()
+        inner.rand.return_value = operation_result
+        self.assertIs(handler.rand(scalar, group), operation_result)
+        self.assertEqual(resolver.materialize_group_width.call_count, 2)
+        resolver.materialize_group_width.assert_any_call(group)
+        inner.rand.assert_called_once_with(scalar, child)
+
+        resolver.materialize_group_width.reset_mock()
+        inner.abs.return_value = group_product
+        self.assertIs(handler.abs(group), group_product)
+        resolver.materialize_group_width.assert_not_called()
+        inner.abs.assert_called_once_with(group)
+
+        resolver.materialize_group_width.reset_mock()
+        handler.store("buf0", sympy.Integer(3), group)
+        resolver.materialize_group_width.assert_called_once_with(group)
+        inner.store.assert_called_once_with("buf0", sympy.Integer(7), child, mode=None)
+
+        resolver.materialize_group_width.reset_mock()
+
+        body = Mock(return_value=group)
+        body.graph = object()
+        inner.masked.side_effect = lambda mask, callback, other: callback()
+        self.assertIs(handler.masked(child, body, 0.0), child)
+        masked_body = inner.masked.call_args.args[1]
+        self.assertIs(masked_body.graph, body.graph)
+        resolver.materialize_group_width.assert_any_call(group)
+
+        resolver.materialize_group_width.reset_mock()
+        inner.mul.return_value = group_product
+        self.assertIs(handler.mul(group, 2.0), group_product)
+        resolver.materialize_group_width.assert_not_called()
+        inner.mul.assert_called_once_with(group, 2.0)
+
+        inner.reciprocal.return_value = group_product
+        self.assertIs(handler.reciprocal(group), group_product)
+        resolver.materialize_group_width.assert_not_called()
+        inner.reciprocal.assert_called_once_with(group)
+
+        inner.truediv.return_value = group_product
+        self.assertIs(handler.truediv(scalar, group), group_product)
+        resolver.materialize_group_width.assert_not_called()
+        inner.truediv.assert_called_once_with(scalar, group)
+
+        inner.mul.reset_mock()
+        inner.mul.return_value = child
+        self.assertIs(handler.mul(group, child), child)
+        resolver.materialize_group_width.assert_any_call(group)
+        inner.mul.assert_called_once_with(child, child)
+
+        resolver.materialize_group_width.reset_mock()
+        inner.to_dtype.return_value = fp8
+        self.assertIs(
+            handler.to_dtype(group, torch.float8_e4m3fn, torch.float32, False), fp8
+        )
+        inner.to_dtype.assert_called_once_with(
+            group, torch.float8_e4m3fn, torch.float32, False
+        )
+        resolver.materialize_group_width.assert_not_called()
+
+        inner.to_dtype.reset_mock()
+        inner.to_dtype.return_value = decoded
+        self.assertIs(
+            handler.to_dtype(fp8, torch.float32, torch.float8_e4m3fn, False), decoded
+        )
+        resolver.materialize_group_width.assert_not_called()
+
+        inner.to_dtype.reset_mock()
+        inner.to_dtype.return_value = child
+        with self.assertRaisesRegex(AssertionError, "did not preserve group width"):
+            handler.to_dtype(group, torch.float16)
+        resolver.materialize_group_width.assert_not_called()
+
+    @parametrize("loop_ordering", [False, True])
+    def test_fusable_read_and_write_requires_exact_index_match(self, loop_ordering):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+        scheduler = Scheduler.__new__(Scheduler)
+
+        # Gapped (stride 33 across a 32 wide dim) so loop merging cannot
+        # collapse these deps and hide which branch accepted them.
+        gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+        extended = MemoryDep("buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7))
+        narrowed = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (64, 32))
+        renamed = MemoryDep("buf", 33 * w0 + w1, (w0, w1), (128, 32))
+        simple_write = MemoryDep("buf", w0, (w0,), (16,))
+        equivalent_only = MemoryDep("buf", d1, (d0, d1), (1024, 16))
+        non_equivalent = MemoryDep("buf", d0 + d1, (d0, d1), (2, 2))
+        aliased_write = MemoryDep("buf", w0 + w1, (w0, w1), (2, 2))
+        quotient_write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+        quotient = MemoryDep("buf", 32 * d0 + FloorDiv(d1, 128), (d0, d1), (128, 4096))
+        quotient_tail = MemoryDep("buf", quotient.index + d1, (d0, d1), (128, 4096))
+        s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+        dense_read = MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1))
+        dense_write = MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1))
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(loop_ordering_after_fusion=loop_ordering),
+        ):
+            # _same_index_with_prefix_size: identical index, and read sizes
+            # that cover the write sizes as a prefix.
+            self.assertTrue(scheduler.fusable_read_and_write(gapped, gapped))
+            self.assertTrue(scheduler.fusable_read_and_write(extended, gapped))
+            self.assertFalse(scheduler.fusable_read_and_write(narrowed, gapped))
+            # Normalization drops the unused d2 loop and canonicalizes symbols.
+            self.assertEqual(
+                scheduler.fusable_read_and_write(extended, renamed),
+                loop_ordering,
+            )
+            self.assertFalse(
+                scheduler.fusable_read_and_write(equivalent_only, simple_write)
+            )
+            self.assertTrue(
+                scheduler._fusable_read_after_index_equivalence(
+                    equivalent_only, simple_write
+                )
+            )
+            self.assertFalse(
+                scheduler._fusable_read_after_index_equivalence(
+                    non_equivalent, aliased_write
+                )
+            )
+            self.assertTrue(
+                scheduler._fusable_read_after_index_equivalence(dense_read, dense_write)
+            )
+            self.assertTrue(
+                scheduler._fusable_read_after_index_equivalence(
+                    quotient, quotient_write
+                )
+            )
+            self.assertFalse(
+                scheduler._fusable_read_after_index_equivalence(
+                    quotient_tail, quotient_write
+                )
+            )
+
+    def test_sub_parent_broadcast_access_relation_frame_contract(self):
+        s0, s1 = sympy.symbols("s0 s1", integer=True, nonnegative=True)
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        source = MemoryDep("buf", 4 * s0 + s1, (s0, s1), (2, 4))
+        good = MemoryDep("buf", 4 * d0 + d1, (d0, d1), (2, 4))
+        used_extra_axis = MemoryDep(
+            "buf", 8 * d0 + 2 * d1 + d2, (d0, d1, d2), (2, 4, 2)
+        )
+        regrouped = MemoryDep("buf", 2 * d0 + d1, (d0, d1), (4, 2))
+
+        source_node = Mock()
+        source_node.read_writes.writes = OrderedSet([source])
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            for read, expected in (
+                (good, True),
+                (used_extra_axis, False),
+                (regrouped, False),
+            ):
+                consumer_node = Mock()
+                consumer_node.read_writes.reads = OrderedSet([read])
+                relation = NestedReduction._sub_parent_broadcast_access_relations(
+                    (source_node,), (consumer_node,), OrderedSet(["buf"])
+                )
+                self.assertEqual(relation is not None, expected)
+
+            source_node.read_writes.writes = OrderedSet([source.normalize()])
+            consumer_node.read_writes.reads = OrderedSet([regrouped.normalize()])
+            self.assertIsNotNone(
+                NestedReduction._sub_parent_broadcast_access_relations(
+                    (source_node,), (consumer_node,), OrderedSet(["buf"])
+                )
+            )
+
+            source_node.read_writes.writes.add(
+                MemoryDep("buf", 4 * s0 + s1 + 1, (s0, s1), (2, 4))
+            )
+            self.assertIsNone(
+                NestedReduction._sub_parent_broadcast_access_relations(
+                    (source_node,), (consumer_node,), OrderedSet(["buf"])
+                )
+            )
+
+            source_node.read_writes.writes = OrderedSet([source])
+            consumer_node.read_writes.reads = OrderedSet([StarDep("buf")])
+            self.assertIsNone(
+                NestedReduction._sub_parent_broadcast_access_relations(
+                    (source_node,), (consumer_node,), OrderedSet(["buf"])
+                )
+            )
+
+    def test_sub_parent_internal_access_relation_preserves_emission_frame(self):
+        s0, s1 = sympy.symbols("s0 s1", integer=True, nonnegative=True)
+        d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
+
+        def node(*, reads=(), writes=()):
+            result = Mock()
+            result.read_writes.reads = OrderedSet(reads)
+            result.read_writes.writes = OrderedSet(writes)
+            return result
+
+        def group(output_lanes, *nodes):
+            return SubParentOutputGroup(output_lanes=output_lanes, nodes=nodes)
+
+        def relations(*groups):
+            return NestedReduction._sub_parent_internal_access_relations(groups)
+
+        source = MemoryDep("same", 4 * s0 + s1, (s0, s1), (2, 4))
+        flattened = MemoryDep("same", d0, (d0,), (8,))
+        broadcast_source = MemoryDep("cross", s0, (s0,), (8,))
+        broadcast_read = MemoryDep("cross", d0, (d0, d1), (8, 3))
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            same_group = relations(
+                group(1, node(writes=(source,)), node(reads=(flattened,)))
+            )
+            self.assertIsNotNone(same_group)
+
+            cross_group = relations(
+                group(1, node(writes=(broadcast_source,))),
+                group(3, node(reads=(broadcast_read,))),
+            )
+            self.assertIsNotNone(cross_group)
+
+            wrong_frame = relations(
+                group(1, node(writes=(source,))),
+                group(3, node(reads=(flattened,))),
+            )
+            self.assertIsNone(wrong_frame)
+
+            duplicate_writer = relations(
+                group(
+                    1,
+                    node(writes=(source,)),
+                    node(writes=(source,)),
+                    node(reads=(flattened,)),
+                )
+            )
+            self.assertIsNone(duplicate_writer)
+
+            consumer_before_writer = relations(
+                group(1, node(reads=(broadcast_read,))),
+                group(3, node(writes=(broadcast_source,))),
+            )
+            self.assertIsNone(consumer_before_writer)
+
+            self.assertIsNone(
+                relations(
+                    group(
+                        1,
+                        node(reads=(flattened,)),
+                        node(writes=(source,)),
+                    )
+                )
+            )
+
+    def test_group_sub_parent_epilogue_nodes(self):
+        first, second, third = Mock(), Mock(), Mock()
+        self.assertEqual(
+            NestedReduction._group_sub_parent_epilogue_nodes(
+                (
+                    SubParentEpilogueCandidate(first, 4, 1),
+                    SubParentEpilogueCandidate(second, 4, 3),
+                    SubParentEpilogueCandidate(third, 4, 3),
+                )
+            ),
+            SubParentEpilogueGrouping(
+                factor=4,
+                output_groups=(
+                    SubParentOutputGroup(1, (first,)),
+                    SubParentOutputGroup(3, (second, third)),
+                ),
+            ),
+        )
+        self.assertIsNone(
+            NestedReduction._group_sub_parent_epilogue_nodes(
+                (
+                    SubParentEpilogueCandidate(first, 2, 1),
+                    SubParentEpilogueCandidate(second, 4, 3),
+                )
+            )
+        )
+        self.assertIsNone(
+            NestedReduction._group_sub_parent_epilogue_nodes(
+                (
+                    SubParentEpilogueCandidate(first, 4, 3),
+                    SubParentEpilogueCandidate(second, 4, 1),
+                )
+            )
+        )
+
+    @parametrize("extra_dep", [None, "memory", "star", "weak"])
+    def test_planned_dependency_matches_only_relax_memory_deps(self, extra_dep):
+        read_var, write_var = sympy.symbols(
+            "read_var write_var", integer=True, nonnegative=True
+        )
+        read = MemoryDep("buf", read_var + 1, (read_var,), (4,))
+        write = MemoryDep("buf", write_var, (write_var,), (4,))
+        deps = OrderedSet([read])
+        if extra_dep == "memory":
+            deps.add(MemoryDep("buf", read_var + 2, (read_var,), (4,)))
+        elif extra_dep == "star":
+            deps.add(StarDep("buf"))
+        elif extra_dep == "weak":
+            deps.add(WeakDep("buf", "mutated"))
+
+        producer = Mock()
+        producer.get_name.return_value = "producer"
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.get_operation_names.return_value = OrderedSet()
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.get_name.return_value = "consumer"
+        consumer.unmet_dependencies = deps
+        consumer.read_writes.writes = OrderedSet()
 
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.mutation_renames = {}
-        scheduler.mode_requires_synchronization = lambda mode: False
+        scheduler.fusable_weak_dep = Mock(return_value=False)
+        scheduler.name_to_buf = {}
+        scheduler.name_to_fused_node = {}
 
+        self.assertFalse(scheduler.can_fuse_vertical(producer, consumer))
+        self.assertEqual(
+            scheduler._can_fuse_vertical_impl(
+                producer,
+                consumer,
+                (MemoryDepMatch(write, read),),
+            ),
+            extra_dep is None,
+        )
+
+    @parametrize(
+        "write_kind,planned_name",
+        (("dense", "buf"), ("alias", "buf"), ("dense", "other")),
+    )
+    def test_nested_dependency_matches_require_injective_producer(
+        self, write_kind, planned_name
+    ):
+        d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
+        index = 2 * d0 + d1 if write_kind == "dense" else d0 + d1
+        write = MemoryDep("buf", index, (d0, d1), (2, 2))
+        read = MemoryDep("buf", d0 + 1, (d0,), (4,))
+        planned_write = write.rename({"buf": planned_name})
+        planned_read = read.rename({"buf": planned_name})
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
+        relation = SubParentAccessRelation((planned_write,), planned_read, None, True)
+        plan = Mock(
+            nested_stage=None,
+            sub_parent_stages=(
+                Mock(access_relations=(relation,), epilogue_nodes=(consumer,)),
+            ),
+        )
+        plan.sub_parent_access_pairs.return_value = ((planned_write, planned_read),)
+        scheduler = Scheduler.__new__(Scheduler)
+        # Plans retain temporal names; mutation aliases are applied only while
+        # matching the producer/read pair for fusion.
+        scheduler.mutation_renames = {"buf": "renamed_buf", "other": "renamed_buf"}
         graph = Mock(sizevars=SizeVarAllocator())
         with V.set_graph_handler(graph):
-            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
-            simple_write = MemoryDep("buf", w0, (w0,), (16,))
-            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
-            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
-            cases = [
-                (
-                    "quotient broadcast",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128),
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    True,
+            matches = scheduler._prove_staged_fusion_dependencies(
+                producer, consumer, plan
+            )
+        expected = (
+            (
+                MemoryDepMatch(
+                    write.rename(scheduler.mutation_renames),
+                    read.rename(scheduler.mutation_renames),
                 ),
-                (
-                    "quotient tail remains",
-                    MemoryDep(
-                        "buf",
-                        32 * d0 + FloorDiv(d1, 128) + d1,
-                        (d0, d1),
-                        (128, 4096),
-                    ),
-                    write,
-                    False,
-                    False,
-                ),
-                (
-                    "pure broadcast",
-                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
-                    simple_write,
-                    False,
-                    True,
-                ),
-                (
-                    "dynamic dense",
-                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
-                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
-                    False,
-                    True,
-                ),
-                (
-                    "exact gapped",
-                    exact_gapped,
-                    exact_gapped,
-                    True,
-                    True,
-                ),
-                (
-                    "producer broadcast",
-                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
-                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
-                    False,
-                    False,
-                ),
-                (
-                    "producer alias",
-                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
-                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
-                    False,
-                    False,
-                ),
-            ]
-            for name, read, write, expected_default, expected_relaxed in cases:
-                with self.subTest(name):
-                    self.assertEqual(
-                        scheduler.fusable_read_and_write(read, write),
-                        expected_default,
-                    )
-                    self.assertEqual(
-                        scheduler.fusable_read_and_write(
-                            read,
-                            write,
-                            allow_index_equivalence=True,
-                        ),
-                        expected_relaxed,
-                    )
+            )
+            if write_kind == "dense" and planned_name == "buf"
+            else None
+        )
+        self.assertEqual(matches, expected)
 
-            normalized_exact_gapped_read = MemoryDep(
-                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
+    @parametrize("ownership", ["nested", "both", "none"])
+    def test_nested_dependency_matches_scope_index_equivalence(self, ownership):
+        d0, d1, w0 = sympy.symbols("d0 d1 w0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", w0, (w0,), (16,))
+        read = MemoryDep("buf", d1, (d0, d1), (1024, 16))
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
+        plan = Mock(
+            nested_stage=Mock(grouped_nodes=(consumer,))
+            if ownership != "none"
+            else None,
+            sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),)
+            if ownership == "both"
+            else (),
+        )
+        plan.sub_parent_access_pairs.return_value = ()
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            matches = scheduler._prove_staged_fusion_dependencies(
+                producer, consumer, plan
             )
-            normalized_exact_gapped_write = MemoryDep(
-                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
+        expected = (MemoryDepMatch(write, read),) if ownership == "nested" else None
+        self.assertEqual(matches, expected)
+
+    @parametrize("reason", ["multiwrite", "tmp", "atomic"])
+    def test_planned_dependency_matches_reject_unsafe_write(self, reason):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        index = make_symbol(SymT.TMP, 0) if reason == "tmp" else d0
+        mode = "atomic_add" if reason == "atomic" else None
+        write = MemoryDep("buf", index, (d0,), (4,), mode)
+        read = MemoryDep("buf", index + 1, (d0,), (4,), mode)
+        writes = OrderedSet([write])
+        if reason == "multiwrite":
+            writes.add(MemoryDep("buf", d0 + 2, (d0,), (4,)))
+
+        producer = Mock()
+        producer.get_buffer_names.return_value = OrderedSet(["buf"])
+        producer.read_writes.writes = writes
+        consumer = Mock()
+        consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
+        plan = Mock(
+            nested_stage=None,
+            sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),),
+        )
+        plan.sub_parent_access_pairs.return_value = ((write, read),)
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+
+        self.assertIsNone(
+            scheduler._prove_staged_fusion_dependencies(producer, consumer, plan)
+        )
+
+    @parametrize("vertical_fusion_legal", [False, True])
+    def test_empty_planned_dependency_matches_prevent_later_loop_rewrites(
+        self, vertical_fusion_legal
+    ):
+        producer = self._mock_base_snode("producer", torch.device("cpu"))
+        consumer = self._mock_base_snode("consumer", torch.device("cpu"))
+        producer.has_strict_reduction.return_value = False
+        consumer.has_strict_reduction.return_value = False
+        producer.ancestors = OrderedSet()
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        consumer.get_operation_names.return_value = OrderedSet(["consumer"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        scheduler._prove_staged_fusion_dependencies = Mock(return_value=())
+        scheduler._score_fusion_memory_for_can_fuse = Mock(
+            side_effect=AssertionError("staged fusion must use staged scoring")
+        )
+        scheduler._score_staged_fusion_memory_for_can_fuse = Mock(return_value=0)
+        scheduler.get_expand_dim_for_pointwise_nodes = Mock(
+            side_effect=AssertionError("staged plan must prevent expansion")
+        )
+        scheduler.shared_data_after_reordering_loop = Mock(
+            side_effect=AssertionError("staged plan must prevent reordering")
+        )
+        scheduler.shared_data_after_inverting_indexing = Mock(
+            side_effect=AssertionError("staged plan must prevent inversion")
+        )
+        scheduler.can_fuse_vertical = Mock(
+            side_effect=AssertionError("staged fusion must use staged legality")
+        )
+        scheduler._can_fuse_vertical_impl = Mock(return_value=vertical_fusion_legal)
+        scheduler._try_reindex_pointwise_for_reduction = Mock(
+            side_effect=AssertionError("staged plan must prevent reindexing")
+        )
+        backend = Mock()
+        backend.can_fuse_vertical.return_value = True
+        scheduler.get_backend = Mock(return_value=backend)
+        graph = Mock(no_fuse_buffer_names=OrderedSet())
+        choices = Mock()
+        choices.can_fuse.return_value = True
+        choices.can_fuse_vertical.return_value = True
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_choices_handler(choices),
+            patch.object(NestedReduction, "is_candidate", return_value=True),
+            patch.object(NestedReduction, "plan", return_value=Mock()),
+            inductor_config.patch(
+                {
+                    "expand_dimension_for_pointwise_nodes": True,
+                    "loop_ordering_after_fusion": True,
+                    "loop_reindexing_after_fusion": True,
+                    "loop_index_inversion_in_fusion": True,
+                }
+            ),
+        ):
+            self.assertEqual(
+                scheduler._can_fuse(
+                    producer,
+                    consumer,
+                    can_reorder=True,
+                ),
+                vertical_fusion_legal,
             )
-            with inductor_config.patch(loop_ordering_after_fusion=True):
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                    )
-                )
-                self.assertTrue(
-                    scheduler.fusable_read_and_write(
-                        normalized_exact_gapped_read,
-                        normalized_exact_gapped_write,
-                        allow_index_equivalence=True,
-                    )
-                )
+
+        scheduler.get_expand_dim_for_pointwise_nodes.assert_not_called()
+        scheduler.shared_data_after_reordering_loop.assert_not_called()
+        scheduler.shared_data_after_inverting_indexing.assert_not_called()
+        scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
+
+    def test_vertical_fusion_retries_after_reindexing(self):
+        producer = self._mock_base_snode("producer", torch.device("cuda"))
+        consumer = self._mock_base_snode("consumer", torch.device("cuda"))
+        producer.has_strict_reduction.return_value = False
+        consumer.has_strict_reduction.return_value = False
+        producer.ancestors = OrderedSet()
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        consumer.get_operation_names.return_value = OrderedSet(["consumer"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
+        scheduler.can_fuse_vertical = Mock(side_effect=[False, True])
+        scheduler._try_reindex_pointwise_for_reduction = Mock(return_value=True)
+        backend = Mock()
+        backend.can_fuse_vertical.return_value = True
+        scheduler.get_backend = Mock(return_value=backend)
+        graph = Mock(no_fuse_buffer_names=OrderedSet())
+        choices = Mock()
+        choices.can_fuse.return_value = True
+        choices.can_fuse_vertical.return_value = True
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_choices_handler(choices),
+            patch.object(NestedReduction, "is_candidate", return_value=False),
+            patch.object(NestedReduction, "_is_enabled_for", return_value=False),
+            inductor_config.patch(loop_reindexing_after_fusion=True),
+        ):
+            self.assertTrue(Scheduler._can_fuse(scheduler, producer, consumer))
+
+        self.assertEqual(scheduler.can_fuse_vertical.call_count, 2)
+        scheduler._try_reindex_pointwise_for_reduction.assert_called_once_with(
+            producer, consumer
+        )
+
+    def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
+        grouped = Mock()
+        grouped.get_ranges.return_value = ([3, 6], [16])
+        sub_parent = Mock()
+        sub_parent.group = (None, (144, 1))
+        sub_parent.get_ranges.return_value = ([3, 6, 8], [])
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.R,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+            x_grouped_context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.X,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+            rate = NestedReduction._nested_sub_parent_rate(sub_parent, context)
+            sub_parent.get_ranges.return_value = ([3, 8, 6], [])
+            cross_group_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, context
+            )
+            x_grouped_rate = NestedReduction._nested_sub_parent_rate(
+                sub_parent, x_grouped_context
+            )
+        self.assertEqual(rate, (2, 1))
+        self.assertIsNone(cross_group_rate)
+        self.assertIsNone(x_grouped_rate)
+
+    def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("reduced",), is_reduction=True
+        )
+        grouped.get_ranges.return_value = ([8], [2])
+        consumer = self._mock_schedule_node(
+            "consumer", reads=("reduced",), ancestors=("grouped",)
+        )
+        consumer.__class__ = SchedulerNode
+        context = Mock(grouped_reduction=grouped, grouped_numel=8, grouped_rnumel=2)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+        ):
+            result = NestedReduction._classify_grouped_pointwise_nodes(
+                context, (grouped, consumer)
+            )
+
+        self.assertIsNone(result)
+
+    def test_nested_reduction_rejects_template_nodes(self):
+        outer = self._mock_schedule_node("outer", is_reduction=True)
+        outer.node = Mock(spec=ir.TemplateBuffer)
+        outer.get_nodes.return_value = (outer,)
+        grouped = self._mock_schedule_node("grouped", is_reduction=True)
+        grouped.get_nodes.return_value = (grouped,)
+        context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
+
+        self.assertFalse(
+            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        )
+
+    @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
+    def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        writer = self._mock_schedule_node(
+            "writer", writes=("source",), is_reduction=writer_role == "reduction"
+        )
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("scale",), is_reduction=True
+        )
+        epilogue = self._mock_schedule_node(
+            "epilogue",
+            reads=("source", "scale"),
+            writes=("packed",),
+            ancestors=("writer", "grouped"),
+        )
+        for node in (outer_reduction, writer, grouped, epilogue):
+            node.has_aliasing_or_mutation.return_value = False
+        outer = Mock()
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        outer.group = (None, (8, 16))
+        context = Mock(grouped_reduction=grouped, grouped_rnumel=2)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        if writer_role == "local_input":
+            domains.append(
+                (writer, NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+            )
+        relation = Mock(requires_live_source=True)
+        relation.consumer_access.name = "source"
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 2
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+            patch.object(
+                NestedReduction,
+                "_group_sub_parent_epilogue_nodes",
+                return_value=grouping,
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_internal_access_relations",
+                return_value=(),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_epilogue_outputs_unread",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_try_get_sub_parent_access_relations",
+                return_value=(relation,),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_broadcast_access_relations",
+                return_value=(),
+            ),
+        ):
+            stage = NestedReduction._plan_nested_sub_parent_stage(
+                outer, (grouped, epilogue), context, domains
+            )
+
+        # Only a value produced inside the parent loop is dead once a looped
+        # parent closes it; displaced and reduction writers stay live.
+        if writer_role == "parent_stage":
+            self.assertIsNone(stage)
+        else:
+            self.assertIsNotNone(stage)
+
+    def test_sub_parent_parent_order_closes_final_loop_dependencies(self):
+        source = self._mock_schedule_node("source", writes=("source",))
+        sibling = self._mock_schedule_node("sibling", writes=("sibling",))
+        reduction = self._mock_schedule_node(
+            "reduction", writes=("reduction",), is_reduction=True
+        )
+        output = self._mock_schedule_node(
+            "output",
+            reads=("source", "sibling"),
+            writes=("output",),
+            ancestors=("source", "sibling"),
+        )
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+        ):
+            result = NestedReduction._order_sub_parent_parent_nodes(
+                (source, sibling, reduction, output),
+                OrderedSet(["source"]),
+                8,
+                16,
+            )
+
+        self.assertEqual(
+            result,
+            OrderedParentNodes(
+                nodes=(reduction, source, sibling, output),
+                required_post_reduction_index=1,
+            ),
+        )
+
+    def test_sub_parent_parent_order_stops_at_reduced_output(self):
+        source_input = self._mock_schedule_node(
+            "source_input", writes=("source_input",)
+        )
+        reduction = self._mock_schedule_node(
+            "reduction", writes=("reduction",), is_reduction=True
+        )
+        source = self._mock_schedule_node(
+            "source",
+            reads=("source_input", "reduction"),
+            writes=("source",),
+            ancestors=("source_input", "reduction"),
+        )
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+        ):
+            result = NestedReduction._order_sub_parent_parent_nodes(
+                (source_input, reduction, source),
+                OrderedSet(["source"]),
+                8,
+                16,
+            )
+
+        self.assertEqual(
+            result,
+            OrderedParentNodes(
+                nodes=(reduction, source_input, source),
+                required_post_reduction_index=1,
+            ),
+        )
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
@@ -699,9 +1906,8 @@ class TestScheduler(TestCase):
             scheduler = Scheduler.__new__(Scheduler)
             scheduler.mutation_renames = {}
             scheduler._has_multi_stream_nodes = Mock(return_value=False)
-            scheduler._nested_index_equivalent_dep_names = Mock(
-                return_value=OrderedSet()
-            )
+            scheduler._mempool_nodes = False
+            scheduler.node_to_mempool = {}
             scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
             scheduler.check_prologue_fusion_heuristics_fusable = Mock(return_value=True)
             scheduler.can_fuse_vertical = Mock(return_value=True)
@@ -913,6 +2119,50 @@ class TestScheduler(TestCase):
 
         with inductor_config.patch(deterministic=True):
             check_realizes()
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize("op", ["select_scatter", "index_put"])
+    # Both settings are pinned so the test can only pass via graph_fanout:
+    # deterministic mode makes expand realize src on its own, and the read
+    # threshold decides whether src counts as expensive at all.
+    @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
+    def test_scatter_realizes_expensive_src(self, op):
+        def src(a, b, c, d, e):
+            return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
+
+        if op == "select_scatter":
+
+            def fn(base, *args):
+                return torch.select_scatter(base, src(*args), dim=2, index=1)
+        else:
+
+            def fn(base, *args):
+                index = torch.arange(base.shape[0], device=base.device)
+                base.index_put_((index,), src(*args))
+                return base
+
+        device = "cuda"
+        torch.manual_seed(0)
+        base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
+        base = torch.rand(base_size, dtype=torch.float32, device=device)
+        args = [
+            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
+            for _ in range(5)
+        ]
+        expected = fn(base.clone(), *args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with DeterministicGuard(False), fresh_inductor_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            actual = compiled(base.clone(), *args)
+
+        self.assertEqual(expected, actual)
+        # src must not be inlined into the scatter loop, which would recompute it
+        # once per element of the broadcast dim.
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
 
 class TestScoreFusionMemory(TestCase):

@@ -98,6 +98,45 @@ for i in range(5):
     gn(torch.ones(3, 3))
 ```
 
+## Unspecializing Integer Attributes on `nn.Module`s
+
+By default, Dynamo specializes on (guards the exact value of) integer attributes of an `nn.Module`.
+An integer that changes every call -- such as a step counter incremented inside `forward` --
+therefore triggers a recompilation on each call, quickly hitting the recompilation limit and falling back to eager.
+
+```{code-cell}
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.c = 0
+
+    def forward(self, x):
+        self.c += 1  # specialized on -> recompiles every call
+        return x * self.c
+
+mod = Mod()
+opt_mod = torch.compile(mod, backend="eager")
+for _ in range(5):
+    opt_mod(torch.randn(4))
+```
+
+If you do not need the integer specialized, set the flag below so Dynamo treats it as dynamic instead of recompiling.
+See {ref}`dynamic_shapes_advanced_control_options` for related static/dynamic control flags.
+
+```{code-cell}
+:tags: [remove-cell]
+torch._dynamo.reset()
+```
+
+```{code-cell}
+torch._dynamo.config.allow_unspec_int_on_nn_module = True
+mod = Mod()
+opt_mod = torch.compile(mod, backend="eager")
+for _ in range(5):
+    opt_mod(torch.randn(4))
+torch._dynamo.config.allow_unspec_int_on_nn_module = False
+```
+
 (programming_model.recompilation.changing_cache_size_limit)=
 ## Changing the Cache Size Limit
 
@@ -133,6 +172,10 @@ def gn(x):
 for i in range(1, 10):
     gn(torch.ones(i))
 ```
+
+Reducing recompilations is one way to lower compile time; for other levers
+(regional and hierarchical compilation, measuring compile time), see
+[Reducing Compile Time](programming_model.reducing_compile_time).
 
 ## Graph Breaking to Reduce Recompilation Costs
 If a large graph is recompiling and causing high compile time, you can intentionally introduce

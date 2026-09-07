@@ -74,8 +74,15 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
+        # target_values must be None or a Sequence for reconstruct / _call_func
+        # etc. to work properly.
+        if not (target_values is None or isinstance(target_values, Sequence)):
+            raise TypeError(
+                "ContextWrappingVariable.target_values must be None or a "
+                f"Sequence, got {type(target_values).__name__}"
+            )
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -173,7 +180,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
-    # Some methods in ContextWrappingVariable assumes the arguments are
+    # Some methods in ContextWrappingVariable assume the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         if cm_obj is None:
@@ -250,10 +257,10 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
             tx
         ):
-            self.old_parameters_var = self.mod.getattro_impl(
+            self.old_parameters_var = self.mod.tp_getattro_impl(
                 tx, "_parameters"
             ).realize()
-            self.old_buffer_var = self.mod.getattro_impl(tx, "_buffers").realize()
+            self.old_buffer_var = self.mod.tp_getattro_impl(tx, "_buffers").realize()
             tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
             tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
             return self.cm_vt.enter(tx)
@@ -1147,12 +1154,16 @@ class NullContextVariable(ContextWrappingVariable):
     This class represents Python contextlib.nullcontext.
     """
 
-    def __init__(self, target_values: Any | None = None, **kwargs: Any) -> None:
-        super().__init__(target_values=target_values, **kwargs)
+    def __init__(
+        self, enter_result: VariableTracker | None = None, **kwargs: Any
+    ) -> None:
+        self.enter_result = enter_result
+        super().__init__(target_values=(), **kwargs)
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        none = variables.ConstantVariable.create(None)
-        return self.target_values if self.target_values else none
+        if self.enter_result is None:
+            return variables.ConstantVariable.create(None)
+        return self.enter_result
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1339,7 +1350,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     ) -> "PreserveVersionContextVariable":
         if tensors.is_tensor():
             versions = variables.TupleVariable(
-                [x.getattro_impl(tx, "_version") for x in [tensors]]
+                [x.tp_getattro_impl(tx, "_version") for x in [tensors]]
             )
             tensors_tuple = variables.TupleVariable([tensors])
         else:
@@ -1348,7 +1359,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
                     f"tensors must be a TupleVariable, got {type(tensors)}"
                 )
             versions = variables.TupleVariable(
-                [x.getattro_impl(tx, "_version") for x in tensors.items]
+                [x.tp_getattro_impl(tx, "_version") for x in tensors.items]
             )
             tensors_tuple = tensors
         return PreserveVersionContextVariable(tensors_tuple, versions)
@@ -1588,11 +1599,23 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     __exit__ method (instead of tracing).
     """
 
+    _nonvar_fields = {
+        "annotation",
+        *ContextWrappingVariable._nonvar_fields,
+    }
+
     def __init__(
-        self, target_values: Any, initial_values: Any = None, **kwargs: Any
+        self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
+        self.annotation = annotation
+        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
+        target_values = (
+            (budget,) if len(annotation) == 1 and type(budget) is float else ()
+        )
         super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
+            target_values=target_values,
+            initial_values=initial_values,
+            **kwargs,
         )
 
     def enter(
@@ -1602,7 +1625,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         # preserve_node_meta context manager is setup. This is important to pass
         # on the metadata to the create_proxy nodes.
         stack = ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.annotate(self.annotation))
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)
@@ -1611,12 +1634,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
+        if self.target_values:
+            return "_dynamo_region_activation_memory_budget"
         return "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        if self.target_values:
+            return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
@@ -1766,7 +1793,7 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -1820,7 +1847,7 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare

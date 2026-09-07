@@ -270,7 +270,7 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   return _get_mobile_model_contained_types(bytecode_values);
 }
 
-// Get deduplicate type table given bytecode, and each string is a atomic type,
+// Get deduplicate type table given bytecode, and each string is an atomic type,
 // like str, Tensor and etc. For example,
 // input: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
 // output: {Dict, int, Tuple, Tensor}
@@ -359,7 +359,7 @@ ModelCompatCheckResult is_compatible(
 
   // Check type table
   for (const auto& type_name : model_info.type_table) {
-    if (supported_type.find(type_name) == supported_type.end()) {
+    if (!supported_type.contains(type_name)) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Primitive type: '" << type_name
@@ -376,8 +376,7 @@ ModelCompatCheckResult is_compatible(
     OperatorInfo model_op_info = op.second;
 
     // Check if operator not present in runtime
-    if (runtime_info.operator_info.find(op_name) ==
-        runtime_info.operator_info.end()) {
+    if (!runtime_info.operator_info.contains(op_name)) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Operator '" << op_name << "' missing from runtime (not found)";

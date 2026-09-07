@@ -114,7 +114,6 @@
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_backward_native.h>
 #include <ATen/ops/masked_select_native.h>
-#include <ATen/ops/nested_to_padded_tensor_native.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_numpy_native.h>
 #include <ATen/ops/nonzero_static_native.h>
@@ -1529,7 +1528,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
 // Check that indices fall within dimension array size
 // Avoid redispatch call to min/max
 template <typename IndexType>
-static void check_indexarray_range(
+[[noreturn]] static void report_index_out_of_bounds(
     const IndexType* indices,
     int64_t n,
     IndexType indexing_axis_dim) {
@@ -1541,6 +1540,22 @@ static void check_indexarray_range(
         idx,
         " axis_dim=",
         indexing_axis_dim);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+template <typename IndexType>
+static void check_indexarray_range(
+    const IndexType* indices,
+    int64_t n,
+    IndexType indexing_axis_dim) {
+  // This version of the loop is autovectorized.
+  int oob = 0;
+  for (const auto i : c10::irange(n)) {
+    oob |= !(0 <= indices[i] && indices[i] < indexing_axis_dim);
+  }
+  if (C10_UNLIKELY(oob != 0)) {
+    report_index_out_of_bounds(indices, n, indexing_axis_dim);
   }
 }
 

@@ -278,10 +278,7 @@ struct TORCH_API Stride {
       const std::optional<size_t>& stride)
       : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
 
-  bool operator==(const Stride& b) const {
-    return stride_index_ == b.stride_index_ && contiguous_ == b.contiguous_ &&
-        stride_ == b.stride_;
-  }
+  bool operator==(const Stride& b) const = default;
 
   bool isComplete() const {
     return stride_index_ && contiguous_ && stride_;
@@ -384,7 +381,7 @@ struct TORCH_API SymbolicShape {
     for(size_t i = 0; i < *rank; ++i) {
       shape_symbols.push_back(ShapeSymbol::newSymbol());
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   // Mix of known and unknown ranks
@@ -398,7 +395,7 @@ struct TORCH_API SymbolicShape {
         shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
       }
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   void dump() const;
@@ -411,7 +408,7 @@ struct TORCH_API SymbolicShape {
     for(int64_t dim : dims) {
       shape_symbols.push_back(ShapeSymbol::fromStaticSize(dim));
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   ShapeSymbol operator[](size_t i) const {

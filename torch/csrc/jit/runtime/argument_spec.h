@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
@@ -18,7 +19,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
-// dimensionalitities and types of inputs.
+// dimensionalities and types of inputs.
 
 struct ArgumentInfo {
   friend struct ArgumentSpec;
@@ -115,9 +116,8 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    ArgumentInfo::plain_data_type arg_data = 0;
-    std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
-    hash_code = c10::hash_combine(hash_code, arg_data);
+    hash_code = c10::hash_combine(
+        hash_code, c10::bit_cast<ArgumentInfo::plain_data_type>(arg));
   }
 
   // equality is fast: check ninputs, and then check the raw array data,
@@ -380,7 +380,7 @@ struct CompleteArgumentInfo {
   }
 
  private:
-  // offsetinto sizes_strides() array where the sizes start for tensor j
+  // offset into sizes_strides() array where the sizes start for tensor j
   // [valid range] valid range is [0, ninputs]
   // (i.e. you can ask for the offset at ninputs, which would be the offset of
   // the next tensor if it existed)

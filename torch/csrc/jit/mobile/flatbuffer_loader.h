@@ -109,7 +109,7 @@ TORCH_API uint64_t get_bytecode_version_from_bytes(char* flatbuffer_content);
 TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
     char* flatbuffer_content);
 
-// The methods below are less efficient because it need to read the stream in
+// The methods below are less efficient because it needs to read the stream in
 // its entirety to a buffer
 TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
