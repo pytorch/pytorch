@@ -2687,6 +2687,39 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
+    @parametrize_test("packed", [False, True])
+    @parametrize_test(
+        "invalid_arg,error_type,error_regex",
+        [
+            ("input_size", RuntimeError, r"input.size\(-1\) must be equal to input_size"),
+            ("input_dtype", ValueError, "RNN input dtype"),
+            ("hidden_layers", RuntimeError, r"Expected hidden\[0\] size"),
+            ("hidden_batch", RuntimeError, r"Expected hidden\[0\] size"),
+            ("hidden_size", RuntimeError, r"Expected hidden\[0\] size"),
+            ("cell_size", RuntimeError, r"Expected hidden\[1\] size"),
+        ],
+    )
+    def test_lstm_forward_args_check(self, packed, invalid_arg, error_type, error_regex):
+        feature_size = 5 if invalid_arg == "input_size" else 4
+        dtype = torch.double if invalid_arg == "input_dtype" else torch.float
+        input = torch.randn(5, 3, feature_size, dtype=dtype)
+        if packed:
+            input = rnn_utils.pack_padded_sequence(input, [5, 3, 2])
+
+        hx = None
+        if invalid_arg == "hidden_layers":
+            hx = (torch.zeros(3, 3, 3), torch.zeros(3, 3, 3))
+        elif invalid_arg == "hidden_batch":
+            hx = (torch.zeros(2, 2, 3), torch.zeros(2, 2, 3))
+        elif invalid_arg == "hidden_size":
+            hx = (torch.zeros(2, 3, 4), torch.zeros(2, 3, 3))
+        elif invalid_arg == "cell_size":
+            hx = (torch.zeros(2, 3, 3), torch.zeros(2, 3, 4))
+
+        lstm = nn.LSTM(4, 3, num_layers=2)
+        with self.assertRaisesRegex(error_type, error_regex):
+            lstm(input, hx)
+
     def test_cudnn_forward_exception(self):
         rnns = [
             (nn.LSTM(10, 20, batch_first=True), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
