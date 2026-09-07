@@ -884,10 +884,10 @@ class TestDynamoDecompositionsAcceleratorOnly(TestCase):
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcdiv_scalar_value(self, device):
-        """Compiled addcdiv_ with scalar value matches eager on accelerators.
+        """Compiled addcdiv_ with scalar value matches eager on CUDA/XPU.
 
         Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
         x = torch.randn(64, 64, device=device)
@@ -904,10 +904,10 @@ class TestDynamoDecompositionsAcceleratorOnly(TestCase):
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcdiv_tensor_value(self, device):
-        """Compiled addcdiv_ with tensor value matches eager on accelerators.
+        """Compiled addcdiv_ with tensor value matches eager on CUDA/XPU.
 
         Not bitwise: ATen inlines the division into fma(alpha, t1/t2, input)
-        which nvcc can optimize differently than separate div + fma kernels.
+        which nvcc/icpx can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
         x = torch.randn(64, 64, device=device)
