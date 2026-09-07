@@ -67,39 +67,66 @@ CUDA_AARCH64_ARCHES = [
 ]
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
-    ),
-    "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
-    ),
-    "13.2": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
-    ),
-    "13.4": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
-    ),
+    "12.6": {
+        "linux": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
+            "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
+            "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
+            "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
+            "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
+            "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
+            "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
+        ),
+        "windows": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Windows' and platform_machine == 'AMD64'"
+        ),
+    },
+    "13.0": {
+        "linux": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
+            "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+            "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+            "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+            "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+            "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        ),
+        "windows": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Windows' and platform_machine == 'AMD64'"
+        ),
+    },
+    "13.2": {
+        "linux": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
+            "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+            "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+            "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+            "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+            "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        ),
+        "windows": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.7.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Windows' and platform_machine == 'AMD64'"
+        ),
+    },
+    "13.4": {
+        "linux": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
+            "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+            "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+            "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
+            "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+            "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        ),
+    },
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
@@ -173,7 +200,8 @@ NIGHTLY_SOURCE_MATRIX.update(XPU_NIGHTLY_SOURCE_MATRIX)
 
 def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
-        str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
+        str.strip,
+        re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]["linux"]),
     )
     return next(x for x in requirements if x.startswith("nvidia-nccl")).split("==")[1]
 
@@ -458,14 +486,18 @@ def generate_wheels_matrix(
             ):
                 continue
 
-            # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
+            # CUDA wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+            # to install CUDA runtime libraries from PyPI.
 
             if (
-                arch_version in ["13.4", "13.2", "13.0", "12.6"]
-                and os == "linux"
-                or arch_version in CUDA_AARCH64_ARCHES
-            ):
+                arch_version in CUDA_ARCHES and os in ("linux", "windows")
+            ) or arch_version in CUDA_AARCH64_ARCHES:
                 desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
+                cuda_version = (
+                    f"{desired_cuda[2:4]}.{desired_cuda[4:]}"
+                    if os == "linux-aarch64"
+                    else arch_version
+                )
                 ret.append(
                     {
                         "python_version": python_version,
@@ -480,11 +512,9 @@ def generate_wheels_matrix(
                         ].split(":")[1],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
-                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}"  # for cuda-aarch64: cu126 -> 12.6
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[cuda_version][
+                                os if os == "windows" else "linux"
                             ]
-                            if os == "linux-aarch64"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                         ),
                         "build_name": (
                             f"{package_type}-py{python_version}-{gpu_arch_type}"
@@ -520,9 +550,6 @@ def generate_wheels_matrix(
                                 gpu_arch_version, ""
                             )
                             if gpu_arch_type == "rocm"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
-                            if gpu_arch_type == "cpu"
-                            and os in ("windows", "macos-arm64")
                             else ""
                         ),
                     }
