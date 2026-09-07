@@ -804,6 +804,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         # kwargs might contain a callable that generates kwargs
+        explicit_capture = kwargs.pop("_explicit_capture", False)
         torch._dynamo.reset()
         kwarg_gen_fn = kwargs.get("_gen_fn")
         if kwarg_gen_fn is not None:
@@ -894,6 +895,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
                     save_guards=True,
+                    explicit_capture=explicit_capture,
                 )
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
@@ -1006,6 +1008,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_pruned_shared_closure_cell_stays_shared(self):
+        # An unguarded shared cell prunes to a single _Missing cell, and the two
+        # functions closing over it must still share that one pruned cell;
+        # _prune_cell memoizes by the original cell's id. Rebuilding a fresh
+        # pruned cell per function would silently unshare them. See _prune_cell.
+        def outer():
+            shared = UnpicklableDefault()
+
+            def a():
+                return shared
+
+            def b():
+                return shared
+
+            return a, b
+
+        a, b = outer()
+        self.assertIs(a.__closure__[0], b.__closure__[0])
+        buf = io.BytesIO()
+        # Only the functions are rooted; the shared cell and its contents are
+        # omitted from guard_tree_values, so the cell is pruned.
+        gtv = {id(a): a, id(b): b}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_snapshot_globals_function_preserves_module(self):
@@ -1598,8 +1627,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
         loaded = torch._dynamo.package.load_guard_manager(state, f_code, f_globals)
         inputs = {"x": torch.randn(3), "func": inner}
         self._test_check_fn(ref, loaded, inputs, True)
-        inner.__name__ = "renamed"
-        self._test_check_fn(ref, loaded, inputs, False)
+        old_name = inner.__name__
+        try:
+            inner.__name__ = "renamed"
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__name__ = old_name
 
     @parametrize("guard_type,cls,mutation", FQN_MISMATCH_CASES)
     def test_guard_rooted_at_fqn_mismatched_function(self, guard_type, cls, mutation):
@@ -2567,6 +2600,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
 
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
+
+    def test_duplicate_input_survives_separate_save_build(self):
+        # An explicit capture builds the serialized guards on a SECOND builder
+        # and prunes values the guard tree does not reach. DuplicateInputs
+        # guard managers -- and the input tensors they name -- are registered
+        # inside compile_check_fn, AFTER that builder is forked, so the merge
+        # that seeds it must run after compile_check_fn or the duplicated
+        # tensor prunes to _Missing and the loaded check misfires.
+        def fn(x, x_):
+            return x + x_
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "DUPLICATE_INPUT", fn, x, x, _explicit_capture=True
+        )
         self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
         self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
