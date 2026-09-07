@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import importlib
 import math
 import operator
@@ -222,15 +223,6 @@ if hasattr(DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes"):
         MI350_ARCH
     )(DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes)
 
-if hasattr(DynamicShapesGPUTests, "test_AllenaiLongformerBase_repro_dynamic_shapes"):
-    # With tensorify enabled, SymInt div no longer graph-breaks; the full
-    # model compiles but Inductor hangs on the complex dynamic-shape graph.
-    DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes = (
-        unittest.skip("Skipped! SymInt div no longer graph-breaks")(
-            DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes
-        )
-    )
-
 if not TEST_WITH_ASAN:
     instantiate_device_type_tests(
         DynamicShapesGPUTests,
@@ -239,6 +231,41 @@ if not TEST_WITH_ASAN:
         allow_mps=True,
         except_for="cpu",
     )
+
+    # copy_tests used to consult `test_failures` per device suffix when
+    # creating the GPU variant classes. instantiate_device_type_tests has
+    # no equivalent mechanism, so re-attach the non-CPU xfail/skip markers
+    # to the generated variant classes, matching the copy_tests semantics.
+    # NB: the template tests are exposed on the variant classes through MRO
+    # inheritance under their original (unsuffixed) names; wrapping a
+    # variant's attribute only affects that variant, not the shared template
+    # method used by the other device variants.
+    for _name, _failure in test_failures.items():
+        for _suffix in _failure.suffixes:
+            if _suffix == "cpu":
+                # CPU entries are still applied by copy_tests above.
+                continue
+            _variant_cls = globals().get(f"DynamicShapesGPUTests{_suffix.upper()}")
+            _test = getattr(_variant_cls, _name, None)
+            if _test is None:
+                # Variant class not generated on this machine (e.g. no XPU).
+                continue
+
+            # unittest.expectedFailure mutates the test item in place on
+            # Python >= 3.12, which would mark the shared template method for
+            # every device variant. Bind the method into a per-variant copy
+            # first (same technique as copy_tests) so the marker only applies
+            # to this variant.
+            @functools.wraps(_test)
+            def _copy(self, _test=_test):
+                return _test(self)
+
+            _marker = (
+                unittest.skip("Skipped!")
+                if _failure.is_skip
+                else unittest.expectedFailure
+            )
+            setattr(_variant_cls, _name, _marker(_copy))
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
