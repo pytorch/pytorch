@@ -5125,14 +5125,13 @@ class AlgorithmSelectorCache(PersistentCache):
         unique_example_inputs_extern = unique_example_inputs
 
         if extern_choice is not None:
-            if len(extern_choice.input_nodes) != len(input_nodes):
-                raise AssertionError(
-                    "extern_choice.input_nodes length must match input_nodes: "
-                    f"{len(extern_choice.input_nodes)} != {len(input_nodes)}"
-                )
-            extern_input_nodes = extern_choice.input_nodes
-
             if cls._is_extern(extern_choice) and extern_choice.name == "addmm":
+                if len(extern_choice.input_nodes) != len(input_nodes):
+                    raise AssertionError(
+                        "extern_choice.input_nodes length must match input_nodes: "
+                        f"{len(extern_choice.input_nodes)} != {len(input_nodes)}"
+                    )
+                extern_input_nodes = extern_choice.input_nodes
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())

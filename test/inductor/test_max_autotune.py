@@ -4263,6 +4263,117 @@ class TestMaxAutotuneSubproc(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
+    def _get_inputs_graph(self):
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        return GraphLowering(gm)
+
+    @skipIfXpu(msg="XPU not supported for this get_inputs regression check")
+    def test_get_inputs_non_addmm_extern_mismatched_length(self):
+        """
+        A non-addmm extern choice whose ``input_nodes`` length differs from the
+        scheduler's ``input_nodes`` must not trip the AssertionError guarded
+        for addmm. Regression test for the fix that restricted the
+        ``extern_input_nodes`` substitution (and its length assertion) to
+        ``addmm`` only. The extern benchmark inputs must resolve to the
+        scheduler's input_nodes, in scheduler order.
+        """
+        from torch._inductor.kernel.mm import aten_mm
+
+        with V.set_graph_handler(self._get_inputs_graph()):
+            mat1 = self._create_buffer("mat1", (2, 3))
+            mat2 = self._create_buffer("mat2", (3, 2))
+            extra = self._create_buffer("extra", (2, 2))
+            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (2, 2))
+
+            # extern choice bound to (mat1, mat2) only, while the scheduler
+            # also tracks ``extra`` (e.g. an intermediate buffer the extern
+            # fallback does not consume).
+            extern_choice = aten_mm.bind((mat1, mat2), layout)
+
+            # Must not raise AssertionError for non-addmm extern choices.
+            autotune_args = AlgorithmSelectorCache.get_inputs(
+                choices=[extern_choice],
+                input_nodes=[mat1, mat2, extra],
+                layout=layout,
+                input_gen_fns=None,
+            )
+
+            # Non-addmm path keeps the scheduler's input_nodes for the extern
+            # loop, so every scheduler input must resolve to a benchmark
+            # tensor and the extern input list must mirror the scheduler's
+            # input_nodes in order and shape.
+            sched_nodes = [mat1, mat2, extra]
+            self.assertEqual(len(autotune_args.extern.input_tensors), len(sched_nodes))
+            self.assertEqual(len(autotune_args.triton.input_tensors), len(sched_nodes))
+            for node, tensor in zip(sched_nodes, autotune_args.extern.input_tensors):
+                self.assertEqual(tuple(tensor.size()), tuple(node.get_size()))
+
+    @skipIfXpu(msg="XPU not supported for this get_inputs regression check")
+    def test_get_inputs_addmm_vanilla_1d_bias(self):
+        """
+        For vanilla addmm, the aten extern choice benchmarks the original 1D
+        bias while the triton template benchmarks the expanded 2D bias.
+        ``get_inputs`` must substitute the extern's 1D-bias IR node and back
+        it with the same values as the 2D bias (all rows identical, collapsed
+        to the first row).
+        """
+        from torch._inductor.kernel.mm import aten_addmm
+
+        with V.set_graph_handler(self._get_inputs_graph()):
+            inp_1d = self._create_buffer("bias_1d", (6,))
+            inp_2d = self._create_buffer("bias_2d", (4, 6))
+            mat1 = self._create_buffer("mat1", (4, 8))
+            mat2 = self._create_buffer("mat2", (8, 6))
+            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (4, 6))
+
+            # aten_addmm consumes the 1D bias; the scheduler (and triton
+            # templates) track the expanded 2D bias.
+            extern_choice = aten_addmm.bind((inp_1d, mat1, mat2), layout)
+
+            autotune_args = AlgorithmSelectorCache.get_inputs(
+                choices=[extern_choice],
+                input_nodes=[inp_2d, mat1, mat2],
+                layout=layout,
+                input_gen_fns=None,
+            )
+
+            triton_inputs = autotune_args.triton.input_tensors
+            extern_inputs = autotune_args.extern.input_tensors
+
+            # Triton benchmarks the 2D bias; aten benchmarks the 1D bias.
+            self.assertEqual(tuple(triton_inputs[0].size()), (4, 6))
+            self.assertEqual(tuple(extern_inputs[0].size()), (6,))
+
+            # The 1D bias is the first row of the (now row-broadcast) 2D bias.
+            self.assertTrue(torch.equal(extern_inputs[0], triton_inputs[0][0]))
+
+    @skipIfXpu(msg="XPU not supported for this get_inputs regression check")
+    def test_get_inputs_addmm_mismatched_length_still_guarded(self):
+        """
+        The length assertion is intentionally kept for the ``addmm`` extern
+        choice to guard the ``zip(input_nodes, extern_input_nodes)`` in
+        ``addmm_unique_example_inputs_extern``. A mismatched-length addmm
+        extern must still raise AssertionError.
+        """
+        from torch._inductor.kernel.mm import aten_addmm
+
+        with V.set_graph_handler(self._get_inputs_graph()):
+            inp_1d = self._create_buffer("bias_1d", (6,))
+            mat1 = self._create_buffer("mat1", (4, 8))
+            mat2 = self._create_buffer("mat2", (8, 6))
+            extra = self._create_buffer("extra", (4, 6))
+            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (4, 6))
+
+            extern_choice = aten_addmm.bind((inp_1d, mat1, mat2), layout)
+
+            with self.assertRaises(AssertionError):
+                AlgorithmSelectorCache.get_inputs(
+                    choices=[extern_choice],
+                    input_nodes=[inp_1d, mat1, mat2, extra],
+                    layout=layout,
+                    input_gen_fns=None,
+                )
+
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("autotune_multi_device", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
