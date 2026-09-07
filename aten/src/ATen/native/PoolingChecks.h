@@ -198,53 +198,41 @@ pool3d_backward_shape_check(
   }
 }
 
-// TODO(#196230): remove this shim once the torch-xpu-ops pin in
+// TODO(#196230): remove this alias once the torch-xpu-ops pin in
 // third_party/xpu.txt calls pool3d_backward_shape_check directly. Its
-// DilatedMaxPool3d kernel still uses the pre-merge name; torch-xpu-ops compiles
-// every TU with -DUSE_XPU (see its cmake/BuildFlags.cmake), while in-tree
-// USE_XPU is PRIVATE to torch_xpu, so this stays out of torch_cpu.
+// DilatedMaxPool3d kernel still uses the pre-merge name, with the same argument
+// order (Tensor converts to the optional indices). torch-xpu-ops compiles every
+// TU with -DUSE_XPU (see its cmake/BuildFlags.cmake), while in-tree USE_XPU is
+// PRIVATE to torch_xpu, so this stays out of torch_cpu.
 #ifdef USE_XPU
-inline void
-max_pool3d_backward_shape_check(
-  const Tensor& input,
-  const Tensor& gradOutput,
-  const Tensor& indices,
-  int64_t nslices,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
-  int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth,
-  const char* fn_name)
-{
-  pool3d_backward_shape_check(
-    input, gradOutput, indices, nslices,
-    kT, kH, kW,
-    dT, dH, dW,
-    pT, pH, pW,
-    dilationT, dilationH, dilationW,
-    itime, iheight, iwidth,
-    otime, oheight, owidth, fn_name);
-}
-#endif // USE_XPU
+#define max_pool3d_backward_shape_check pool3d_backward_shape_check
+#endif
 
-// MaxUnpool2d/MaxUnpool3d
-inline void max_unpooling2d_shape_check(
+// MaxUnpool2d/MaxUnpool3d. Only max_unpool3d takes stride/padding, which it
+// validates but never uses; 2d callers leave them empty.
+inline void max_unpooling_shape_check(
     const Tensor& input,
     const Tensor& indices,
     IntArrayRef output_size,
+    int64_t pooling_dims,
     const char* fn_name,
+    IntArrayRef stride = {},
+    IntArrayRef padding = {},
     const std::optional<Tensor>& gradOutput = std::nullopt) {
+  const int64_t ndim = input.ndimension();
+  const char* dims_desc =
+      pooling_dims == 2 ? "two elements (height, width)" : "three elements (depth, height, width)";
+
   TORCH_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got: ", indices.scalar_type());
   TORCH_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
+      ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
+      "Input to max_unpooling", pooling_dims, "d should be a ", pooling_dims + 1, "d or ", pooling_dims + 2,
+      "d Tensor, but got a tensor with ", ndim, " dimensions.");
   TORCH_CHECK(
-      (input.ndimension() == 3 || input.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with ", input.ndimension(), " dimensions.");
+      static_cast<int64_t>(output_size.size()) == pooling_dims,
+      "There should be exactly ", dims_desc, " in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
       "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
@@ -252,81 +240,34 @@ inline void max_unpooling2d_shape_check(
 
   check_non_empty_dims(input, /*first_dim=*/1, fn_name, "input");
 
-  int64_t oH = output_size[0];
-  int64_t oW = output_size[1];
-  TORCH_CHECK(
-      oH >= 0 && oW >= 0,
-      "max_unpooling2d(): output_size must contain non-negative spatial dimensions, but got output_size=(",
-      oH, ", ", oW, ")");
-
-  if (gradOutput.has_value()) {
-    int64_t dimh = input.ndimension() == 4 ? 2 : 1;
-    int64_t dimw = dimh + 1;
+  if (pooling_dims == 3) {
     TORCH_CHECK(
-        oH == gradOutput->size(dimh) && oW == gradOutput->size(dimw),
-        "Inconsistent gradOutput size. output height: ", oH,
-        ", output width= ", oW,
-        ", gradOutput: ", gradOutput->size(dimh), "x", gradOutput->size(dimw));
+        static_cast<int64_t>(stride.size()) == pooling_dims,
+        "There should be exactly ", dims_desc, " in stride, but got: ", stride.size(), " elements.");
+    TORCH_CHECK(
+        static_cast<int64_t>(padding.size()) == pooling_dims,
+        "There should be exactly ", dims_desc, " in padding, but got: ", padding.size(), " elements.");
+    TORCH_CHECK(
+        stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
+        "strides should be greater than zero, but got stride: ", stride);
   }
-}
 
-inline void max_unpooling3d_shape_check(
-    const Tensor& input,
-    const Tensor& indices,
-    IntArrayRef output_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    const char* fn_name,
-    const std::optional<Tensor>& gradOutput = std::nullopt) {
-  TORCH_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64 but got: ", indices.scalar_type());
-  TORCH_CHECK(
-      (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with ", input.ndimension(), " dimensions.");
-  TORCH_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size, but got ", output_size.size(), " elements.");
-  TORCH_CHECK(
-      stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stride, but got: ", stride.size(), " elements.");
-  TORCH_CHECK(
-      padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
-  TORCH_CHECK(
-      input.sizes() == indices.sizes(),
-      "Expected shape of indices to be same as that of the input tensor (", input.sizes(),
-      ") but got indices tensor with shape: ", indices.sizes());
-
-  check_non_empty_dims(input, /*first_dim=*/1, fn_name, "input");
-
-  TORCH_CHECK(
-      stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
-      "strides should be greater than zero, but got stride: ",
-      stride);
-
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
-  TORCH_CHECK(
-      oT >= 0 && oH >= 0 && oW >= 0,
-      "max_unpooling3d(): output_size must contain non-negative spatial dimensions, but got output_size=(",
-      oT, ", ", oH, ", ", oW, ")");
-
-  int64_t dimn = input.ndimension() == 5 ? 1 : 0;
-  int64_t dimt = dimn + 1;
-  int64_t dimh = dimt + 1;
-  int64_t dimw = dimh + 1;
+  for (const auto i : c10::irange(pooling_dims)) {
+    TORCH_CHECK(
+        output_size[i] >= 0,
+        "max_unpooling", pooling_dims,
+        "d(): output_size must contain non-negative spatial dimensions, but got output_size=", output_size);
+  }
 
   if (gradOutput.has_value()) {
+    const int64_t leading_dims = ndim - pooling_dims;
     TORCH_CHECK(
-        oT == gradOutput->size(dimt) && oH == gradOutput->size(dimh) && oW == gradOutput->size(dimw),
-        "Inconsistent gradOutput size. oT= ", oT, ", oH= ", oH, ", oW= ", oW,
-        ". gradOutput: ", gradOutput->size(dimt), "x", gradOutput->size(dimh), "x", gradOutput->size(dimw));
-    TORCH_CHECK(
-        gradOutput->ndimension() == input.ndimension() &&
-            gradOutput->size(dimn) == input.size(dimn),
+        gradOutput->ndimension() == ndim && gradOutput->size(leading_dims - 1) == input.size(leading_dims - 1),
         "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
+    TORCH_CHECK(
+        output_size == gradOutput->sizes().slice(leading_dims, pooling_dims),
+        "Inconsistent gradOutput size. Expected output_size ", output_size,
+        ", but gradOutput has ", gradOutput->sizes().slice(leading_dims, pooling_dims));
   }
 }
 

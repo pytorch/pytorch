@@ -23,7 +23,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   // Nondeterministic with duplicate indices
   at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
 
-  max_unpooling2d_shape_check(self_, indices_, output_size, "max_unpooling2d_forward_out_cpu()");
+  max_unpooling_shape_check(self_, indices_, output_size, /*pooling_dims=*/2, "max_unpooling2d_forward_out_cpu()");
 
   auto oheight = output_size[0];
   auto owidth = output_size[1];
@@ -73,8 +73,8 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   auto self = self_.contiguous();
   auto indices = indices_.contiguous();
 
-  max_unpooling3d_shape_check(
-      self_, indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
+  max_unpooling_shape_check(
+      self_, indices_, output_size, /*pooling_dims=*/3, "max_unpooling3d_forward_out_cpu()", stride, padding);
 
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];

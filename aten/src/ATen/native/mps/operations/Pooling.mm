@@ -597,11 +597,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
                                         Tensor& output,
                                         const int32_t pooling_dims,
                                         const std::string& op_name) {
-  if (pooling_dims == 2) {
-    max_unpooling2d_shape_check(input, indices, output_size_, op_name.c_str());
-  } else {
-    max_unpooling3d_shape_check(input, indices, output_size_, stride, padding, op_name.c_str());
-  }
+  max_unpooling_shape_check(input, indices, output_size_, pooling_dims, op_name.c_str(), stride, padding);
 
   auto dims = input.dim();
   auto leading_dims = dims - pooling_dims;

@@ -123,7 +123,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
   at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
 
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
-  max_unpooling2d_shape_check(self_, indices_, output_size, "max_unpooling2d_forward_out_cuda()");
+  max_unpooling_shape_check(self_, indices_, output_size, /*pooling_dims=*/2, "max_unpooling2d_forward_out_cuda()");
 
   TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
       indices_arg{indices_, "indices_", 3};
@@ -204,8 +204,8 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
   at::globalContext().alertNotDeterministic("max_unpooling3d_forward_out");
 
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
-  max_unpooling3d_shape_check(
-      self_, indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cuda()");
+  max_unpooling_shape_check(
+      self_, indices_, output_size, /*pooling_dims=*/3, "max_unpooling3d_forward_out_cuda()", stride, padding);
 
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
@@ -312,8 +312,9 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
     IntArrayRef output_size,
     Tensor& grad_input) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  max_unpooling2d_shape_check(
-      self_, indices_, output_size, "max_unpooling2d_backward_out_cuda()", grad_output_);
+  max_unpooling_shape_check(
+      self_, indices_, output_size, /*pooling_dims=*/2, "max_unpooling2d_backward_out_cuda()",
+      /*stride=*/{}, /*padding=*/{}, grad_output_);
 
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2},
@@ -392,8 +393,9 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
     Tensor& grad_input) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
-  max_unpooling3d_shape_check(
-      self_, indices_, output_size, stride, padding, "max_unpooling3d_backward_out_cuda()", grad_output_);
+  max_unpooling_shape_check(
+      self_, indices_, output_size, /*pooling_dims=*/3, "max_unpooling3d_backward_out_cuda()",
+      stride, padding, grad_output_);
 
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
