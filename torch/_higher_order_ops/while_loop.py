@@ -21,6 +21,7 @@ from torch._higher_order_ops.utils import (
     get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
+    materialize_bdim_at_front,
     move_bdim_to_front,
     reenter_make_fx,
     validate_subgraph_args_types,
@@ -209,6 +210,13 @@ def while_loop(cond_fn, body_fn, carried_inputs):
           requires masking the carries of the ones that already exited via torch.where.
           Pytree containers (dict, list, tuple) of tensors are supported.
 
+        - Under torch.vmap, the loop runs until *every* batch element is done, so both
+          cond_fn and body_fn keep being called with the frozen carries of the elements
+          that already exited. Their results are discarded, but they must not fault: a
+          body_fn that indexes with a counter carry, for example, has to tolerate the
+          counter sitting at its exit value. Any in-place mutation permitted by the rule
+          above therefore also happens more often than the element's own trip count.
+
     """
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
@@ -264,6 +272,32 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     )
 
 
+def _validate_cond_output(pred):
+    if (
+        isinstance(pred, torch.Tensor)
+        and pred.size() == torch.Size([])
+        and pred.dtype == torch.bool
+    ) or isinstance(pred, bool):
+        return
+    else:
+        raise RuntimeError(
+            f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
+        )
+
+
+def _validate_vmap_tensor_carries(carries, description):
+    non_tensor_carries = [
+        (i, type(carry).__name__)
+        for i, carry in enumerate(carries)
+        if not isinstance(carry, torch.Tensor)
+    ]
+    if non_tensor_carries:
+        raise RuntimeError(
+            "torch.while_loop only supports tensor carries under vmap, but "
+            f"{description} at (index, type) {non_tensor_carries}."
+        )
+
+
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(
     cond_fn,
@@ -274,18 +308,6 @@ def while_loop_dense(
     mutated_arg_indices="",
 ):
     carried_vals = carried_inputs
-
-    def _validate_cond_output(pred):
-        if (
-            isinstance(pred, torch.Tensor)
-            and pred.size() == torch.Size([])
-            and pred.dtype == torch.bool
-        ) or isinstance(pred, bool):
-            return
-        else:
-            raise RuntimeError(
-                f"cond_fn must return a boolean scalar tensor or a boolean but got {pred}"
-            )
 
     if not isinstance(carried_inputs, (tuple, list)):
         raise RuntimeError(
@@ -674,10 +696,16 @@ def while_loop_func(
 # NOTE: [vmap of while_loop]
 # while_loop runs a single loop for the whole batch, but under vmap each batch element's
 # cond_fn can turn False at a different iteration. So we keep looping until *every* element
-# is done, i.e. the batched predicate is reduced with .any(), and freeze the carries of the
-# elements that already exited by selecting between the new and the old carry with
-# torch.where. This is the same trick cond's batching rule uses for a batched predicate,
-# except that cond_fn has to be re-evaluated inside body_fn to get the mask.
+# is done, i.e. the per-element predicate is reduced with .any(), and freeze the carries of
+# the elements that already exited by selecting between the new and the old carry with
+# torch.where. This is the same trick cond's batching rule uses for a batched predicate.
+#
+# The per-element predicate is threaded through as an extra leading carry rather than
+# recomputed by both cond_fn and body_fn, so that the user's cond_fn runs exactly once per
+# iteration as it does without vmap. Evaluating it twice would double the in-place mutations
+# the docstring permits during inference, and with randomness="different" the two
+# evaluations would draw different random values (each restore_vmap opens a fresh vmap
+# nesting), so the mask could contradict the predicate that gated the iteration.
 #
 # Freezing requires every carry to hold a per-element value, so unbatched carries are
 # broadcast to the batch size up front. That also keeps the carry metadata stable across
@@ -695,10 +723,7 @@ def while_loop_batch_rule(
         raise RuntimeError(
             f"torch.while_loop doesn't support vmap when cond_fn or body_fn mutates its inputs, got {mutated_arg_indices}."
         )
-    if not all(isinstance(carry, torch.Tensor) for carry in carried_inputs):
-        raise RuntimeError(
-            f"torch.while_loop only supports tensor carries under vmap, but got {carried_inputs}."
-        )
+    _validate_vmap_tensor_carries(carried_inputs, "got non-tensor carried_inputs")
 
     batch_size = interpreter.batch_size()
     randomness = interpreter.randomness()
@@ -708,14 +733,26 @@ def while_loop_batch_rule(
 
     # Prepare the batched carry.
     init_carries = tuple(
-        move_bdim_to_front(carry, bdim, batch_size)
+        materialize_bdim_at_front(carry, bdim, batch_size)
         for carry, bdim in zip(unbatched_carries, carry_bdims)
     )
-    # Unbatched additional inputs stay unbatched, but the backward of while_loop carries
-    # the gradients of the additional inputs, which start out as zeros with the same
-    # layout, so the batched ones need the same normalization as the carries.
+    # Tensor carries are required under vmap. With no carries, a tensor additional input
+    # is what dispatched this batching rule and supplies the predicate device.
+    pred_device = (
+        init_carries[0].device
+        if init_carries
+        else next(
+            value.device
+            for value in unbatched_additional
+            if isinstance(value, torch.Tensor)
+        )
+    )
+    # Batched additional inputs need their batch dim at the front to be passed with
+    # in_dims = 0 below. Materializing them as well keeps the backward happy: it carries a
+    # gradient accumulator per additional input, and a zeros_like of a permuted view does
+    # not have the same strides as the contiguous accumulator update.
     additional = tuple(
-        move_bdim_to_front(t, bdim, batch_size) if bdim is not None else t
+        materialize_bdim_at_front(t, bdim, batch_size) if bdim is not None else t
         for t, bdim in zip(unbatched_additional, additional_bdims)
     )
     # cond_fn and body_fn take the carries followed by the additional inputs
@@ -727,34 +764,45 @@ def while_loop_batch_rule(
         pred, pred_bdim = restore_vmap(cond_fn, in_dims, batch_size, randomness)(
             *flat_args
         )
-        if pred_bdim is None:
-            return pred, None
-        return pred.movedim(pred_bdim, 0), 0
+        # Validate the per-element predicate: the .any() below turns anything into a 0-dim
+        # bool, which would hide a malformed cond_fn behind an error from torch.where.
+        per_element = pred.select(pred_bdim, 0) if pred_bdim is not None else pred
+        _validate_cond_output(per_element)
+        if not isinstance(pred, torch.Tensor):
+            pred = torch.tensor(pred, device=pred_device)
+        return materialize_bdim_at_front(pred, pred_bdim, batch_size)
 
-    def batched_cond_fn(*flat_args):
-        pred, pred_bdim = batched_pred(flat_args)
-        return pred.any() if pred_bdim is not None else pred
+    def batched_cond_fn(mask, *flat_args):
+        return mask.any()
 
-    def batched_body_fn(*flat_args):
-        pred, pred_bdim = batched_pred(flat_args)
+    def batched_body_fn(mask, *flat_args):
         outs, out_bdims = restore_vmap(body_fn, in_dims, batch_size, randomness)(
             *flat_args
         )
-        outs = tuple(
-            move_bdim_to_front(out, bdim, batch_size)
-            for out, bdim in zip(outs, out_bdims)
+        _validate_vmap_tensor_carries(
+            outs, "body_fn returned non-tensor carried outputs"
         )
-        if pred_bdim is None:
-            return outs
-        masked_outs = []
-        for out, carry in zip(outs, flat_args[: len(init_carries)]):
-            mask = pred.reshape((batch_size,) + (1,) * (out.dim() - 1))
-            masked_outs.append(torch.where(mask, out, carry))
-        return tuple(masked_outs)
+        new_carries = []
+        for out, out_bdim, carry in zip(outs, out_bdims, flat_args):
+            out = move_bdim_to_front(out, out_bdim, batch_size)
+            # torch.where allocates a fresh output, so out itself does not need
+            # materializing, but the output can pick up out's layout while the carry
+            # metadata has to stay contiguous across iterations.
+            selected = torch.where(
+                mask.reshape((batch_size,) + (1,) * (out.dim() - 1)), out, carry
+            )
+            new_carries.append(selected.contiguous())
+        carries = tuple(new_carries)
+        # An element that exited keeps its carries, so cond_fn on them stays False. The
+        # explicit "and" makes that hold even for a cond_fn that is not a pure function.
+        return (mask & batched_pred(carries + flat_args[len(carries) :]),) + carries
 
     with interpreter.lower():
-        out = while_loop_op(batched_cond_fn, batched_body_fn, init_carries, additional)
-    return wrap_batched(out, (0,) * len(out), interpreter.level())
+        init_mask = batched_pred(init_carries + additional)
+        _, *out = while_loop_op(
+            batched_cond_fn, batched_body_fn, (init_mask,) + init_carries, additional
+        )
+    return wrap_batched(tuple(out), (0,) * len(out), interpreter.level())
 
 
 class WhileLoopStackOutputOp(HigherOrderOperator):
@@ -950,9 +998,10 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ]
 
         init_idx = torch.zeros((), dtype=torch.int64)
-        # Autograd can pass view gradients. The generated backward while_loop
-        # needs stable carry metadata across iterations, so canonicalize tensor
-        # gradients before they become carries.
+        # Autograd can pass view gradients, and zeros_like defaults to preserve_format,
+        # so a non-contiguous additional input would seed a non-contiguous accumulator.
+        # The generated backward while_loop needs stable carry metadata across iterations,
+        # so canonicalize both halves of the carry tuple the same way body_fn does below.
         init_grad_carries = tuple(
             grad.clone(memory_format=torch.contiguous_format)
             if isinstance(grad, torch.Tensor)
@@ -960,7 +1009,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             for grad in filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
         )
         init_grad_additional_inputs = tuple(
-            torch.zeros_like(t)
+            torch.zeros_like(t, memory_format=torch.contiguous_format)
             for need_keep, t in zip(
                 additional_inputs_tensor_masks, ctx.additional_inputs
             )
