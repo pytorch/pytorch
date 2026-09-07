@@ -7350,6 +7350,50 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    def test_gradcheck_equal_nan(self):
+        class AlwaysNaN(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * torch.nan
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.where(
+                    grad_output == 0,
+                    torch.zeros_like(grad_output),
+                    torch.full_like(grad_output, torch.nan),
+                )
+
+        x = torch.ones(1, dtype=torch.double, requires_grad=True)
+        for fast_mode in (False, True):
+            self.assertFalse(
+                gradcheck(
+                    AlwaysNaN.apply,
+                    (x,),
+                    raise_exception=False,
+                    check_batched_grad=False,
+                    fast_mode=fast_mode,
+                )
+            )
+            self.assertTrue(
+                gradcheck(
+                    AlwaysNaN.apply,
+                    (x,),
+                    equal_nan=True,
+                    check_batched_grad=False,
+                    fast_mode=fast_mode,
+                )
+            )
+
+        self.assertTrue(
+            gradgradcheck(
+                lambda y: y.sin(),
+                (x,),
+                equal_nan=True,
+                check_batched_grad=False,
+            )
+        )
+
     def test_gradcheck_dense_and_sparse_inputs(self):
         def check(fast_mode):
             def fn(x, y):
