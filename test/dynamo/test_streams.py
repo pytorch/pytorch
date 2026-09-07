@@ -23,6 +23,7 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -52,6 +53,8 @@ def strip_annotation_desc(gm_str: str) -> str:
 
 
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
         pass
@@ -469,6 +472,8 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
 @requires_accelerator
 class TestStreams(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -2731,6 +2736,8 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_wait_stream_anchors_following_record(self) -> None:
         """A record_event on the WAITING stream after a wait_stream must chain to
         the wait_stream (which runs on that stream), not float above it as a bare
@@ -2992,6 +2999,8 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
 
 @requires_xpu
 class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def test_dynamo_registry_no_dangling_weakref(self):
         reset_user_object_tracking()
 
