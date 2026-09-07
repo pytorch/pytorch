@@ -149,8 +149,9 @@ Load a previously saved AOT-compiled function from a file.
   rebound after loading is seen on the next call, and a guarded global the dict
   lacks fails the guard -- there is no fallback to the values serialized with
   the artifact. Loading mutates it: the `__import_*` module aliases and the
-  `__builtins_dict___N` key recorded at capture are inserted (never overwriting
-  an existing key). When omitted, the reconstructed capture-time globals are
+  `__builtins_dict___N` key recorded at capture are inserted, plus `__builtins__`
+  when the dict lacks it (never overwriting an existing key). When omitted, the
+  reconstructed capture-time globals are
   used. Pass it when the original function references user-defined types or
   other non-standard globals.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
