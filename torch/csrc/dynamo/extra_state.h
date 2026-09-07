@@ -371,9 +371,12 @@ void enable_precompile_cache_keys();
 
 } // extern "C"
 
-// Extracts the backend fn from the callback. Returns an OWNED reference; lives
+// Extracts the backend from the callback. Returns an OWNED reference; lives
 // outside the extern "C" block because it returns a py::object. Only called
-// from C++ (cache_entry.cpp, the frame evaluator).
+// from C++ (cache_entry.cpp, the frame evaluator). Normally the backend
+// callable, but once enable_precompile_cache_keys has fired this returns the
+// backend's _torchdynamo_cache_key value instead (the non-callable key used for
+// BACKEND_MATCH), so callers must not assume the result is callable.
 py::object get_backend(PyObject* callback);
 
 // Attribute lookup that returns an owned reference on success and an empty
