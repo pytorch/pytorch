@@ -40,7 +40,6 @@ kernel void histogramdd(
     constant uint8_t& algorithm [[buffer(8)]],
     constant int64_t& weight_stride [[buffer(9)]],
     uint tid [[thread_position_in_grid]]) {
-  constexpr auto eps = T(4e-6);
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
@@ -51,11 +50,7 @@ kernel void histogramdd(
     const T rightmost_edge = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
 
     // Skips elements which fall outside the specified bins and NaN elements
-    // Adding an eps to the edges to eliminate precision issues that cause
-    // elements accidentally skipped, this is likely due to the minuscule
-    // implementation differences between the CPU and MPS's linspace.
-    if (!(element >= (leftmost_edge - eps) &&
-          element <= (rightmost_edge + eps))) {
+    if (!(element >= leftmost_edge && element <= rightmost_edge)) {
       skip_element = true;
       break;
     }
