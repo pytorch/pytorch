@@ -221,6 +221,18 @@ class _InverseTransform(Transform):
         super().__init__(cache_size=transform._cache_size)
         self._inv: Transform | None = transform
 
+    def __getstate__(self):
+        # Unlike in the base class, _inv here is the wrapped transform
+        # itself rather than a droppable cache slot, so keep it.
+        return self.__dict__.copy()
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if self._inv is not None:
+            # Rebuild the wrapped transform's cache link so that
+            # `t.inv.inv is t` also holds for unpickled inverses.
+            self._inv._inv = self
+
     @constraints.dependent_property(is_discrete=False)
     # pyrefly: ignore [bad-override]
     def domain(self):
