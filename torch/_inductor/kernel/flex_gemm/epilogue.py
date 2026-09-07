@@ -44,7 +44,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
-    local_reduce_unsupported_tensorssa_error,
+    ungrouped_reduction_error,
+    unsupported_reduction_op_error,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
@@ -380,6 +381,7 @@ class FlexGemmLocalReduceAnalysis:
     matches: dict[torch.fx.Node, FlexGemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
     )
+    gemm: torch.fx.Node | None = None
     gemm_shape: tuple[Any, ...] | None = None
 
     @classmethod
@@ -392,6 +394,7 @@ class FlexGemmLocalReduceAnalysis:
         gemm_shape = tensor_meta_shape(gemm) if gemm is not None else None
         analysis = cls(
             FlexGemmEpilogueGraph.from_nodes(tuple(graph_module.graph.nodes)),
+            gemm=gemm,
             gemm_shape=gemm_shape,
         )
         for node in graph_module.graph.nodes:
@@ -425,13 +428,18 @@ class FlexGemmLocalReduceAnalysis:
             if propagated or grouped:
                 return
         normalized = self.graph.normalized_nodes.get(node)
-        if isinstance(normalized, NormalizedReduction) and self.bind_grouped_reduction(
-            node, normalized
-        ):
-            return
-        if isinstance(normalized, NormalizedUnsupportedReduction):
-            if normalized.source in self.grouped_tensors:
-                raise local_reduce_unsupported_tensorssa_error(normalized.target)
+        if isinstance(normalized, NormalizedReduction):
+            if self.bind_grouped_reduction(node, normalized):
+                return
+            if (
+                normalized.source not in self.grouped_tensors
+                and self.gemm is not None
+                and self.graph.depends_on(normalized.source, self.gemm)
+            ):
+                op_name = str(getattr(node.target, "overloadpacket", node.target))
+                raise ungrouped_reduction_error(op_name)
+        elif isinstance(normalized, NormalizedUnsupportedReduction):
+            raise unsupported_reduction_op_error(normalized.target)
         if self.propagate_local_reduce_match(node, squeeze_source_node(node)):
             return
         if node.target is operator.getitem and self.propagate_local_reduce_match(
