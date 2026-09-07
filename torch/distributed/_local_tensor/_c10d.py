@@ -103,20 +103,16 @@ def _prepare_collective_groups(
     ranks = torch.distributed.get_process_group_ranks(process_group)
     if not ranks:
         raise AssertionError
-    # TODO: We can handle permutations but the layout inference algorithm will
-    # lose the permutation so we will have to reapply it
-    if ranks != sorted(ranks):
-        raise AssertionError(ranks)
-    offset = ranks[0]
-    ranks = [r - offset for r in ranks]
-
-    shape, strides = _indices_to_layout(ranks)
+    # Sort for layout; return original order so sibling fibers mirror the PG.
+    ranks_sorted = sorted(ranks)
+    offset = ranks_sorted[0]
+    shape, strides = _indices_to_layout([r - offset for r in ranks_sorted])
     layout = _FlatLayout(shape, strides)
 
     global_pg = _get_default_group()
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
 
-    return ranks, group_offsets, offset
+    return [r - offset for r in ranks], group_offsets, offset
 
 
 # NB: There are two flavors of the collectives: regular and functional. Regular collectives
@@ -330,11 +326,7 @@ def _local_broadcast_(
         raise AssertionError
     tensor = tensors[0]
 
-    ranks, group_offsets, offset = _prepare_collective_groups(process_group_so)
-
-    # We're going to assume SPMD where for every rank group the root_rank is
-    # the same relative to others
-    relative_root_rank = root_rank - offset
+    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     if not isinstance(tensor, LocalTensor):
         raise AssertionError("Input tensor must be a LocalTensor")
@@ -346,7 +338,7 @@ def _local_broadcast_(
         if not all(rank in tensor._local_tensors for rank in group_ranks):
             continue
 
-        source_rank = group_offset + relative_root_rank
+        source_rank = group_ranks[root_rank]
         source_tensor = tensor._local_tensors[source_rank]
 
         # Broadcast the source tensor to all ranks in this group
@@ -783,11 +775,7 @@ def _local_scatter_(
     # pyrefly: ignore [bad-assignment]
     input_tensors = input_tensors[0]
 
-    ranks, group_offsets, offset = _prepare_collective_groups(process_group_so)
-
-    # We're going to assume SPMD where for every rank group the root_rank is
-    # the same relative to others
-    relative_root_rank = root_rank - offset
+    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     if not isinstance(output_tensor, LocalTensor):
         raise AssertionError("Output tensor must be a LocalTensor")
@@ -807,9 +795,7 @@ def _local_scatter_(
             if not isinstance(input_tensor, LocalTensor):
                 raise AssertionError
             # Each rank i gets the i-th input tensor from the root
-            source_tensor = input_tensor._local_tensors[
-                group_offset + relative_root_rank
-            ]
+            source_tensor = input_tensor._local_tensors[group_ranks[root_rank]]
             output_tensor._local_tensors[rank].copy_(source_tensor)
 
     work = FakeWork()
