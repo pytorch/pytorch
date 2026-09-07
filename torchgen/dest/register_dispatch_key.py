@@ -410,17 +410,35 @@ class RegisterDispatchKey:
             out_args_bindings[:-num_out_args] if num_out_args > 0 else out_args_bindings
         )
 
-        # Only the inplace variant is derived here: its output is 'self', so the dtype is correct
-        # by construction. The functional variant never reaches this method -- gen_unstructured
-        # either defers it to the in-tree CompositeExplicitAutogradNonFunctional kernel (for
-        # natively-structured ops) or rejects it (no native meta to compute the output dtype).
-        if k is not SchemaKind.inplace:
-            return None
-        # Inplace passes 'self' into the 'out' argument slot.
         call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
-        # Usually self is the first arg in 'out' variants.
-        call_args.append(f.func.arguments.self_arg.argument.name)
-        return_statement = f"return {f.func.arguments.self_arg.argument.name};"
+        prologue = ""
+        epilogue = ""
+        if k is SchemaKind.inplace:
+            # Inplace passes 'self' into the 'out' argument slot.
+            self_name = f.func.arguments.self_arg.argument.name
+            call_args.append(self_name)
+            return_statement = f"return {self_name};"
+        elif k is SchemaKind.functional:
+            # No native meta exists for these ops, so the kernel is the only authority on the
+            # output dtype: pass undefined outs for it to allocate, and check that it did.
+            outs = [
+                f"out{i}" if len(f.func.returns) > 1 else "out"
+                for i in range(len(f.func.returns))
+            ]
+            prologue = "".join(f"  at::Tensor {o};\n" for o in outs)
+            call_args.extend(outs)
+            epilogue = "".join(
+                f'  TORCH_CHECK({o}.defined(), "{f.func.name}: out-as-primary kernel must '
+                f'allocate an undefined out");\n'
+                for o in outs
+            )
+            return_statement = (
+                f"return {outs[0]};"
+                if len(outs) == 1
+                else f"return std::make_tuple({', '.join(outs)});"
+            )
+        else:
+            return None
 
         # Determine the kernel name for the 'out' variant
         out_meta = self.backend_index.get_kernel(g.out)
@@ -452,8 +470,8 @@ class RegisterDispatchKey:
         return f"""\
 {sig.defn()} {{
   {device_guard}
-  {impl_name}({", ".join(call_args)});
-  {return_statement}
+{prologue}  {impl_name}({", ".join(call_args)});
+{epilogue}  {return_statement}
 }}
 """
 
@@ -526,10 +544,12 @@ class RegisterDispatchKey:
                     # CompositeExplicitAutogradNonFunctional kernel: it runs op.meta() for the
                     # output dtype and redispatches to this backend's .out (PrivateUse1 is in
                     # non_functional_backend_dispatch_keyset), which also keeps eager and
-                    # FakeTensor dtypes in agreement.
+                    # FakeTensor dtypes in agreement. Any other functional is delegated to the
+                    # kernel by gen_func_inplace_wrapper, unless its .out cannot carry it.
                     if f.func.kind() is SchemaKind.functional:
                         if g.structured:
                             return None
+                        reason = None
                         if f.func.arguments.tensor_options is not None:
                             reason = (
                                 "a factory op resolves dtype/layout/device in its functional "
@@ -539,14 +559,13 @@ class RegisterDispatchKey:
                             reason = (
                                 "its returns do not map one-to-one onto out arguments"
                             )
-                        else:
-                            reason = "there is no native meta to derive the output dtype from"
-                        raise AssertionError(
-                            f"'{g.out.func.name}' is registered out-as-primary via its '.out' "
-                            f"only, but its functional cannot be derived: {reason}. Register "
-                            f"'{g.functional.func.name}' instead; its '.out' and inplace are "
-                            "then derived from it."
-                        )
+                        if reason is not None:
+                            raise AssertionError(
+                                f"'{g.out.func.name}' is registered out-as-primary via its "
+                                f"'.out' only, but its functional cannot be derived: {reason}. "
+                                f"Register '{g.functional.func.name}' instead; its '.out' and "
+                                "inplace are then derived from it."
+                            )
                     gets_func_inplace_wrapper = True
                 elif (
                     # Out-of-tree only: in-tree keys reach their out/inplace variants through

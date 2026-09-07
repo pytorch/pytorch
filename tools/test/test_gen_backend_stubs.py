@@ -459,26 +459,6 @@ supported:
     # Deriving the functional from a multi-output op's '.out' would type every output as the input
     # dtype, but multi-output ops mix dtypes (a Long index). Reject it for both a structured op
     # (sort) and a non-structured one (_ctc_loss); a single-output op like div still derives.
-    # Non-structured ops have no native meta to derive the output dtype from, so the
-    # functional is refused (at any arity) and the message names the escape.
-    def test_non_structured_out_as_primary_rejected(self) -> None:
-        for out, functional in (
-            ("_ctc_loss.out", "_ctc_loss"),
-            ("bucketize.Tensor_out", "bucketize.Tensor"),
-        ):
-            with self.subTest(op=out):
-                _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
-                output_error = self.get_errors_from_gen_backend_stubs(
-                    f"backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
-                    f"use_out_as_primary: true\nsupported:\n- {out}"
-                )
-                self.assertIn(
-                    f"'{out}' is registered out-as-primary via its '.out' only, but its "
-                    f"functional cannot be derived: there is no native meta",
-                    output_error,
-                )
-                self.assertIn(f"Register '{functional}' instead", output_error)
-
     # A factory op resolves dtype/layout/device inside its functional body (arange from the
     # scalar values, zeros_like from self) and its .out schema has no options argument, so
     # the functional is refused even though it is single-output.
@@ -539,13 +519,9 @@ supported:
                 else:
                     raises(structured_yaml, "is not defined as a structured operator")
                 # use_out_as_primary with only the out: a natively-structured op defers its
-                # functional to the in-tree composite at any arity; a non-structured op has
-                # no meta to derive the output dtype from and is refused.
-                naive_yaml = f"{head}{oap}supported:\n- {out}"
-                if structured:
-                    generates(naive_yaml)
-                else:
-                    raises(naive_yaml, "functional cannot be derived")
+                # functional to the in-tree composite; a non-structured one is delegated to
+                # the kernel with an undefined out. Both generate.
+                generates(f"{head}{oap}supported:\n- {out}")
 
     # structured kernels are out-primary; structured: true without use_out_as_primary would
     # silently emit a plain non-structured out kernel (no meta reuse, no functional), so reject.
@@ -829,6 +805,38 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         self.assertIn("wrapper_PrivateUse1_values_stable_sort_out", anon)
         self.assertNotIn("wrapper_PrivateUse1_stable_sort(", anon)
 
+
+    # A non-structured op has no native meta, so its functional is delegated to the kernel:
+    # the wrapper passes undefined outs (one per return) for the kernel to allocate and checks
+    # that it did, so a kernel that forgets fails here instead of leaking an undefined tensor.
+    def test_non_structured_out_as_primary_delegates(self) -> None:
+        anon = self.anonymous_definitions("- angle.out\n- native_dropout.out")
+        self.assertIn(
+            """\
+at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
+  const OptionalDeviceGuard device_guard(device_of(self));
+  at::Tensor out;
+  at::priv1::native::PrivateUse1NativeFunctions::angle_out(self, out);
+  TORCH_CHECK(out.defined(), "angle: out-as-primary kernel must allocate an undefined out");
+  return out;
+}
+""",
+            anon,
+        )
+        self.assertIn(
+            """\
+::std::tuple<at::Tensor,at::Tensor> wrapper_PrivateUse1__native_dropout(const at::Tensor & input, double p, ::std::optional<bool> train) {
+  const OptionalDeviceGuard device_guard(device_of(input));
+  at::Tensor out0;
+  at::Tensor out1;
+  at::priv1::native::PrivateUse1NativeFunctions::native_dropout_out(input, p, train, out0, out1);
+  TORCH_CHECK(out0.defined(), "native_dropout: out-as-primary kernel must allocate an undefined out");
+  TORCH_CHECK(out1.defined(), "native_dropout: out-as-primary kernel must allocate an undefined out");
+  return std::make_tuple(out0, out1);
+}
+""",
+            anon,
+        )
 
     # A mutable variant (writes some arguments, returns the rest) is not derivable from the
     # .out; neither codegen pass may emit anything for it, or the registration pass would
