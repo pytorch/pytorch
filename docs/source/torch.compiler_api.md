@@ -344,6 +344,26 @@ deprecation cycle.
    pickled state blob, so it is locked to the Python version that produced it and to a
    compatible torch build, unlike make_fx source. Frozen dataclass.
 
+   :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
+       entry. It composes with the default filter (which drops only the identity guards
+       that cannot be serialized), so it can drop more guards, never fewer. Live capture
+       retains all guards so later calls trigger their recompiles. Risky dropped guards are
+       rejected by default when saving, and every drop a custom filter adds beyond the
+       default's counts as risky.
+   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
+       and overrides a lower ambient accumulated-recompile limit for this capture.
+   :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
+   :param invariants: Optional path receiving the multi-graph invariant report.
+   :param require_complete: defaults to ``True``. Refuse to produce an artifact whose
+       capture summary is not complete -- a frame that produced no guarded code, hit the
+       recompile limit, or was bypassed, or a capture that compiled no graph at all.
+   :param require_no_risky_drops: defaults to ``True``. Refuse to produce an artifact that
+       dropped a guard whose loss could change the answer (every drop made by a custom
+       ``guard_filter_fn`` counts as risky).
+   :param require_no_dropped_guards: defaults to ``False``. Refuse to produce an artifact
+       that dropped any guard at all. Off by default because every model drops identity
+       guards that cannot be serialized.
+
 .. py:class:: precompile.Capture
 
    The object :func:`precompile.capture` returns. Enter it as a context manager and call
