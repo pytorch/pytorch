@@ -6117,12 +6117,59 @@ def max_pool2d_with_indices_backward(
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
-    if grad_output.is_xpu:
-        return NotImplemented
-
     # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
     # (#163327) and numerical differences on macOS 15+.
     if grad_output.device.type == "mps":
+        return NotImplemented
+
+    if not stride:
+        stride = kernel_size
+
+    def to_pair(value):
+        if isinstance(value, IntLike):
+            return [value, value]
+        if len(value) == 1:
+            return [value[0], value[0]]
+        return list(value)
+
+    kernel_size = to_pair(kernel_size)
+    stride = to_pair(stride)
+    padding = to_pair(padding)
+    dilation = to_pair(dilation)
+
+    nonoverlap = (
+        self.dim() in (3, 4)
+        and all(p == 0 for p in padding)
+        and all(d == 1 for d in dilation)
+        and all(s >= k for s, k in zip(stride, kernel_size))
+    )
+    if nonoverlap:
+        in_height, in_width = self.shape[-2:]
+        out_height, out_width = grad_output.shape[-2:]
+        h = torch.arange(in_height, device=self.device)
+        w = torch.arange(in_width, device=self.device)
+        ph = h // stride[0]
+        pw = w // stride[1]
+        valid_h = (ph < out_height) & (h < ph * stride[0] + kernel_size[0])
+        valid_w = (pw < out_width) & (w < pw * stride[1] + kernel_size[1])
+        ph = ph.clamp(0, out_height - 1)
+        pw = pw.clamp(0, out_width - 1)
+
+        # indices is produced by max_pool2d_with_indices with the same parameters.
+        # With non-overlapping windows, an input can belong to at most one output.
+        # Index the trailing H/W dims via Ellipsis so this handles both the
+        # unbatched (C, H, W) and batched (N, C, H, W) layouts.
+        selected_indices = indices[..., ph, :][..., pw]
+        selected_grads = grad_output[..., ph, :][..., pw]
+        input_indices = h[:, None] * in_width + w[None, :]
+        grad_input = torch.where(
+            valid_h[:, None] & valid_w[None, :] & (selected_indices == input_indices),
+            selected_grads,
+            0,
+        )
+        return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
+
+    if grad_output.is_xpu:
         return NotImplemented
 
     # Get spatial dimensions

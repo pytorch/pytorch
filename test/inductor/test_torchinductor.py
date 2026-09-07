@@ -13122,6 +13122,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 a, b, [3, 3], [2, 2], [1, 1], [1, 1], True, c
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([2, 4, 40, 56])
         result, indices = aten.max_pool2d_with_indices(
             x,
@@ -13140,6 +13141,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
+        if self.device == "xpu":
+            assertGeneratedKernelCountEqual(self, 0)
+        else:
+            assertGeneratedKernelCountGreater(self, 0)
 
     # From https://github.com/pytorch/torchdynamo/issues/1200
     def test_max_pool2d_with_indices_backward3(self):
@@ -13165,6 +13170,61 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
+
+    @parametrize(
+        "shape,kernel_size,stride,padding,dilation,ceil_mode",
+        [
+            subtest(
+                ((2, 4, 5, 7), [2, 2], [2, 2], [0, 0], [1, 1], False),
+                name="nondivisible",
+            ),
+            subtest(
+                ((2, 4, 10, 11), [2, 2], [3, 3], [0, 0], [1, 1], False),
+                name="stride_gap",
+            ),
+            subtest(
+                ((2, 4, 6, 6), [2], [2], [0], [1], False),
+                name="single_value_args",
+            ),
+            subtest(
+                ((4, 5, 1), [2, 1], [2, 1], [0, 0], [1, 1], False),
+                name="unbatched_width_one",
+            ),
+            subtest(
+                ((2, 4, 5, 7), [2, 2], [2, 2], [0, 0], [1, 1], True),
+                name="ceil_mode_partial_window",
+            ),
+            subtest(
+                ((2, 4, 7, 10), [2, 2], [3, 3], [0, 0], [1, 1], True),
+                name="ceil_mode_stride_gap",
+            ),
+        ],
+    )
+    def test_max_pool2d_with_indices_backward_nonoverlap_edge_cases(
+        self, shape, kernel_size, stride, padding, dilation, ceil_mode
+    ):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a,
+                b,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+                c,
+            )
+
+        x = torch.randn(shape)
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
+        self.common(fn, [torch.randn_like(result), x, indices])
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
     @xfail_if_mps  # Small tolerances bug
@@ -13262,21 +13322,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    def test_max_pool2d_with_indices_backward_fallback(self):
+    @parametrize(
+        "kernel_size,ceil_mode",
+        [
+            subtest(([2, 2], False), name="two_by_two"),
+            subtest(([2, 2], True), name="ceil_mode"),
+            subtest(([5, 5], False), name="five_by_five"),
+        ],
+    )
+    def test_max_pool2d_with_indices_backward_nonoverlap_codegen(
+        self, kernel_size, ceil_mode
+    ):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
-                a, b, [2, 2], [2, 2], [0, 0], [1, 1], False, c
+                a,
+                b,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                c,
             )
 
         torch._inductor.metrics.generated_kernel_count = 0
-        x = torch.randn([2, 4, 18, 14])
+        x = torch.randn([2, 4, 21, 23]).contiguous(memory_format=torch.channels_last)
         result, indices = aten.max_pool2d_with_indices(
             x,
-            [2, 2],
-            [2, 2],
+            kernel_size,
+            kernel_size,
             [0, 0],
             [1, 1],
-            False,
+            ceil_mode,
         )
         self.common(
             fn,
@@ -13286,10 +13363,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        if self.device == "xpu":
-            assertGeneratedKernelCountEqual(self, 0)
-        else:
-            assertGeneratedKernelCountGreater(self, 0)
+        assertGeneratedKernelCountGreater(self, 0)
+
+        if self.device in ("cuda", "xpu"):
+            x = x.to(self.device, dtype=torch.float16)
+            result, indices = aten.max_pool2d_with_indices(
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+            )
+            grad_output = torch.randn_like(result)
+            compiled = torch.compile(fn, fullgraph=True)
+            actual, codes = run_and_get_code(
+                compiled,
+                grad_output,
+                x,
+                indices,
+            )
+            self.assertEqual(
+                actual,
+                fn(grad_output, x, indices),
+                exact_stride=True,
+            )
+            source = "\n".join(codes)
+            FileCheck().check(
+                "triton_poi_fused_max_pool2d_with_indices_backward"
+            ).check("tl.store(").run(source)
+            FileCheck().check_not("tl.atomic_add(").run(source)
 
     def test_issue102546(self):
         def fn(x):

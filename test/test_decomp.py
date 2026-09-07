@@ -34,9 +34,11 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    subtest,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -646,6 +648,108 @@ class TestDecomp(TestCase):
         res = hann_window_periodic(8, dtype=torch.float64, device=device)
         self.assertEqual(ref, res)
         self.assertEqual(res.dtype, torch.float64)
+
+    @onlyCPU
+    @parametrize(
+        "kernel_size,stride,ceil_mode,expect_scatter",
+        [
+            subtest(([2, 2], [2, 2], False, False), name="two_by_two"),
+            subtest(([2, 2], [2, 2], True, False), name="ceil_mode"),
+            subtest(([2, 2], [3, 3], False, False), name="stride_gap"),
+            subtest(([5, 5], [5, 5], False, False), name="five_by_five"),
+            subtest(([2, 13], [2, 13], False, False), name="larger_than_25_area"),
+            subtest(([2, 2], [1, 1], False, True), name="overlap"),
+        ],
+    )
+    def test_max_pool2d_backward_nonoverlap_decomp(
+        self, device, kernel_size, stride, ceil_mode, expect_scatter
+    ):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        decomp = get_decompositions([aten.max_pool2d_with_indices_backward])[
+            aten.max_pool2d_with_indices_backward.default
+        ]
+        x = torch.randn(2, 4, 15, 16, device=device).contiguous(
+            memory_format=torch.channels_last
+        )
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            kernel_size,
+            stride,
+            [0, 0],
+            [1, 1],
+            ceil_mode,
+        )
+        grad_output = torch.randn_like(result)
+        graph = make_fx(
+            lambda grad, inp, ind: decomp(
+                grad,
+                inp,
+                kernel_size,
+                stride,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                ind,
+            )
+        )(grad_output, x, indices)
+        targets = {node.target for node in graph.graph.nodes}
+
+        self.assertEqual(
+            aten.scatter_add.default in targets,
+            expect_scatter,
+        )
+        self.assertEqual(
+            graph(grad_output, x, indices),
+            aten.max_pool2d_with_indices_backward(
+                grad_output,
+                x,
+                kernel_size,
+                stride,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                indices,
+            ),
+            exact_stride=True,
+        )
+
+    @onlyCPU
+    def test_max_pool2d_backward_nonoverlap_decomp_symbolic(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        kernel_size = [2, 2]
+        decomp = get_decompositions([aten.max_pool2d_with_indices_backward])[
+            aten.max_pool2d_with_indices_backward.default
+        ]
+
+        def fn(grad_output, x, indices):
+            return decomp(
+                grad_output,
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                True,
+                indices,
+            )
+
+        def inputs(shape):
+            x = torch.randn(shape, device=device)
+            result, indices = aten.max_pool2d_with_indices(
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                True,
+            )
+            return torch.randn_like(result), x, indices
+
+        graph = make_fx(fn, tracing_mode="symbolic")(*inputs((2, 4, 15, 16)))
+        args = inputs((3, 4, 17, 19))
+        self.assertEqual(graph(*args), fn(*args), exact_stride=True)
 
     def test_uniform(self, device):
         size = (2, 3, 4, 5)
