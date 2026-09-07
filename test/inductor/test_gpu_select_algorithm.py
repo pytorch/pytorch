@@ -18,10 +18,9 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
-    TEST_CUDA,
     TEST_WITH_SLOW_GRADCHECK,
-    TEST_XPU,
 )
 
 
@@ -72,6 +71,7 @@ def patches(fn):
 
 
 class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
+    hw_classification = HardwareClassification.ACCELERATOR
     common = check_model
 
     @inductor_config.patch(
@@ -87,7 +87,6 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
     @parametrize("mid_dim", (1, 8))
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not available")
     @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
     def test_int8_woq_mm_gpu(
         self, device, dtype, batch_size, mid_dim, in_features, out_features
@@ -142,7 +141,6 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
     @parametrize("mid_dim", (1, 8))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not available")
     @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
     def test_int8_woq_mm_concat_gpu(
         self, device, dtype, batch_size, mid_dim, in_features, out_features
@@ -210,7 +208,10 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
 
 
 instantiate_device_type_tests(
-    TestSelectAlgorithmGpu, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestSelectAlgorithmGpu,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 
 
