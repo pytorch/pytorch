@@ -146,6 +146,7 @@ __all__ = [
     "clamp_max",
     "copysign",
     "div",
+    "divmod",
     "eq",
     "float_power",
     "floor_divide",
@@ -1337,6 +1338,36 @@ def div(
     else:
         msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
         raise ValueError(msg)
+
+
+@register_decomposition(aten.divmod)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def divmod(
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
+) -> tuple[TensorLikeType, TensorLikeType]:
+    if isinstance(a, Number) and isinstance(b, Number):
+        # pyrefly: ignore [bad-argument-type]
+        a, b = scalar_tensor(a), scalar_tensor(b)
+    elif isinstance(a, Number) and isinstance(b, Tensor):
+        # pyrefly: ignore [bad-argument-type]
+        a = scalar_tensor(a, device=b.device, dtype=b.dtype)
+    elif isinstance(a, Tensor) and isinstance(b, Number):
+        # pyrefly: ignore [bad-argument-type]
+        b = scalar_tensor(b, device=a.device, dtype=a.dtype)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device.type == "cpu":
+            raise RuntimeError(
+                f"Expected all tensors to be on the same device, but found at least two devices, cpu and {b.device}!"
+            )
+        b = prims.device_put(b, device=a.device)
+
+    q = aten.floor_divide(a, b)
+    r = aten.remainder(a, b)
+    return torch.return_types.divmod((q, r))
 
 
 @_make_elementwise_binary_reference(
