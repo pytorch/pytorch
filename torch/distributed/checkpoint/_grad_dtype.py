@@ -89,16 +89,17 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
 
 def _patch_consolidate_hf_safetensors() -> None:
     from . import _consolidate_hf_safetensors as consolidate
-    from ._hf_utils import (
-        DEFAULT_EXTRA_METADATA_KEY,
-        DTYPE_KEY,
-        SAVED_OFFSETS_KEY,
-        SHAPE_KEY,
-        _get_dcp_custom_metadata,
-    )
-    from safetensors.torch import _getdtype
 
     def parse_input_metadata(input_files_data, output_files_data):
+        from ._hf_utils import (
+            DEFAULT_EXTRA_METADATA_KEY,
+            DTYPE_KEY,
+            SAVED_OFFSETS_KEY,
+            SHAPE_KEY,
+            _get_dcp_custom_metadata,
+        )
+        from safetensors.torch import _getdtype
+
         fqn_to_size_mapping = {}
         for file_data in input_files_data.values():
             metadata = file_data.metadata
