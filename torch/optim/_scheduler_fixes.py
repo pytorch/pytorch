@@ -3,6 +3,7 @@ import torch
 from . import lr_scheduler
 
 
+_original_lrscheduler_init = lr_scheduler.LRScheduler.__init__
 _original_constant_lr_init = lr_scheduler.ConstantLR.__init__
 _original_linear_lr_init = lr_scheduler.LinearLR.__init__
 _original_step_lr_init = lr_scheduler.StepLR.__init__
@@ -10,6 +11,13 @@ _original_polynomial_lr_init = lr_scheduler.PolynomialLR.__init__
 _original_cosine_lr_init = lr_scheduler.CosineAnnealingLR.__init__
 _original_cyclic_lr_init = lr_scheduler.CyclicLR.__init__
 _original_one_cycle_lr_init = lr_scheduler.OneCycleLR.__init__
+
+
+def _lrscheduler_init(self, optimizer, last_epoch=-1):
+    _original_lrscheduler_init(self, optimizer, last_epoch)
+    self.base_lrs = [
+        lr.clone() if isinstance(lr, torch.Tensor) else lr for lr in self.base_lrs
+    ]
 
 
 def _constant_lr_init(self, optimizer, factor=1.0 / 3, total_iters=5, last_epoch=-1):
@@ -157,8 +165,7 @@ def _reduce_lr(self, epoch):
                 self.min_lrs[i], device=old_lr.device, dtype=old_lr.dtype
             )
             new_lr = torch.maximum(old_lr * self.factor, min_lr)
-            if bool(torch.any(old_lr - new_lr > self.eps)):
-                lr_scheduler._update_param_group_val(param_group, "lr", new_lr)
+            lr_scheduler._update_param_group_val(param_group, "lr", new_lr)
         else:
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
             if old_lr - new_lr > self.eps:
@@ -171,6 +178,7 @@ def _composite_initial_step(self):
 
 
 def install() -> None:
+    lr_scheduler.LRScheduler.__init__ = _lrscheduler_init
     lr_scheduler.ConstantLR.__init__ = _constant_lr_init
     lr_scheduler.LinearLR.__init__ = _linear_lr_init
     lr_scheduler.StepLR.__init__ = _step_lr_init
