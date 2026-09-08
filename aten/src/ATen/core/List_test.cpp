@@ -21,6 +21,43 @@ static_assert(list_iterators_conform<
               int64_t,
               at::Tensor,
               std::optional<std::string>>);
+
+// The random_access_iterator check above alone doesn't prove the
+// basic_common_reference specialization in List.h is doing anything: on
+// libstdc++/libc++, common_reference_t<ListElementReference&&, T&> already
+// resolves to T via the stdlib's own fallback, specialization or not. Only
+// MSVC's STL lacks that fallback (see #196002, #196245), which this
+// translation unit can't exercise -- but instantiating the specialization's
+// ::type directly does verify it exists and is well-formed: the primary
+// basic_common_reference template has no ::type member, so this fails to
+// compile if the specialization is ever removed.
+template <class T>
+using ListRef =
+    c10::impl::ListElementReference<T, c10::detail::ListImpl::list_type::iterator>;
+
+template <class... Ts>
+constexpr bool list_element_reference_has_basic_common_reference =
+    ((std::is_same_v<
+          typename std::basic_common_reference<
+              Ts,
+              ListRef<Ts>,
+              std::type_identity_t,
+              std::type_identity_t>::type,
+          Ts> &&
+      std::is_same_v<
+          typename std::basic_common_reference<
+              ListRef<Ts>,
+              Ts,
+              std::type_identity_t,
+              std::type_identity_t>::type,
+          Ts>) &&
+     ...);
+
+static_assert(list_element_reference_has_basic_common_reference<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
 } // namespace
 
 using std::string;

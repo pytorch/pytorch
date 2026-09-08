@@ -2,7 +2,6 @@
 
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/ivalue.h>
-#include <type_traits>
 
 namespace c10 {
 
@@ -365,37 +364,3 @@ void List<T>::unsafeSetElementType(TypePtr t) {
 }
 
 }
-
-// Lets indirectly_readable's common_reference_with<ListElementReference&&,
-// T&> hold consistently, instead of depending on each stdlib's own fallback.
-namespace std {
-template <
-    class T,
-    class Iterator,
-    template <class>
-    class TQual,
-    template <class>
-    class UQual>
-struct basic_common_reference<
-    T,
-    c10::impl::ListElementReference<T, Iterator>,
-    TQual,
-    UQual> {
-  using type = T;
-};
-
-template <
-    class T,
-    class Iterator,
-    template <class>
-    class TQual,
-    template <class>
-    class UQual>
-struct basic_common_reference<
-    c10::impl::ListElementReference<T, Iterator>,
-    T,
-    TQual,
-    UQual> {
-  using type = T;
-};
-} // namespace std

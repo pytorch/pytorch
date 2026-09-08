@@ -11,6 +11,7 @@
 #include <compare>
 #include <iterator>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace at {
@@ -228,6 +229,48 @@ private:
   friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
+
+} // namespace impl
+} // namespace c10
+
+// Lets indirectly_readable's common_reference_with<ListElementReference&&,
+// T&> hold consistently instead of depending on each stdlib's own fallback
+// for the pair: MSVC's STL doesn't accept it (see #196002, #196245), while
+// libstdc++ and libc++ happen to.
+namespace std {
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    T,
+    c10::impl::ListElementReference<T, Iterator>,
+    TQual,
+    UQual> {
+  using type = T;
+};
+
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    c10::impl::ListElementReference<T, Iterator>,
+    T,
+    TQual,
+    UQual> {
+  using type = T;
+};
+} // namespace std
+
+namespace c10 {
+namespace impl {
 
 template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T>&& list);
