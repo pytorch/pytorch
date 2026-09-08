@@ -98,8 +98,7 @@ inline void leading_dimension_matches(TensorList tensors, int64_t dim) {
   auto tensor_zero_size = tensors[0].sizes();
   std::vector<c10::SymInt> leading_dim_sizes(
       tensor_zero_size.begin(), tensor_zero_size.begin() + dim);
-  for (const auto& tensors_elem : tensors) {
-    at::Tensor tensor = tensors_elem;
+  for (const auto& tensor : tensors) {
     for (const auto j : c10::irange(dim)) {
       TORCH_CHECK(
           tensor.size(j) == leading_dim_sizes[j],
@@ -117,14 +116,13 @@ inline int64_t preprocess_chunk_cat_inputs(
       !tensors.empty(), "_chunk_cat expects a non-empty input tensor list");
   auto expected_dtype = tensors[0].dtype();
   auto expected_device = tensors[0].device();
-  for (const auto& tensors_elem : tensors) {
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(tensor.numel() > 0, "_chunk_cat expects non-empty tensor");
     TORCH_CHECK(
-        tensors_elem.numel() > 0, "_chunk_cat expects non-empty tensor");
-    TORCH_CHECK(
-        tensors_elem.dtype() == expected_dtype,
+        tensor.dtype() == expected_dtype,
         "_chunk_cat expects all input tensors with the same dtype");
     TORCH_CHECK(
-        tensors_elem.device() == expected_device,
+        tensor.device() == expected_device,
         "_chunk_cat expects all inputs tensors on the same device");
   }
   if (have_same_ndims(tensors)) {

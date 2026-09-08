@@ -80,8 +80,8 @@ inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
 inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());
-  // Named explicitly: auto would deduce the iterator's proxy type, which
-  // converts to any of to_meta's overloads and makes the call ambiguous.
+  // Named explicitly: the proxy converts to Tensor, tying to_meta(const
+  // Tensor&) against to_meta(ITensorListRef) (constructible from one Tensor).
   for (const Tensor& t_list_elem : t_list) {
     outputs.push_back(to_meta(t_list_elem));
   }

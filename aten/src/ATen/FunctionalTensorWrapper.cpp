@@ -725,7 +725,7 @@ bool isFunctionalTensor(const std::optional<Tensor>& t) {
 bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) { return false; }
   auto functional_count = 0;
-  for (const std::optional<Tensor> e : t_list) {
+  for (const std::optional<Tensor>& e : t_list) {
     if (!e.has_value() || !e->defined()) { continue; }
     if (isFunctionalTensor(e)) {
       ++functional_count;

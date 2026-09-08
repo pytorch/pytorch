@@ -1896,6 +1896,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0) {
     std::vector<c10::SymInt> new_reps(size_diff, 1);
+    new_reps.reserve(size_diff + static_cast<int64_t>(reps.size()));
     for (const auto& rep : reps) {
       new_reps.emplace_back(rep);
     }

@@ -68,10 +68,10 @@ inline std::string toString(const c10::Layout& layout) {
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    if (!tensors[i].options().type_equal(type.options())) {
+  for (const auto& tensor : tensors) {
+    if (!tensor.options().type_equal(type.options())) {
       const std::string expected = type.toString();
-      const std::string actual = tensors[i].toString();
+      const std::string actual = tensor.toString();
       throw std::invalid_argument(
           // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed types (" + expected + " and " + actual + ")");
