@@ -122,20 +122,24 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except its annotations and
-            # type params. The runtime assigns those back verbatim and never
-            # evaluates them, so a value this pickler cannot serialize (a
-            # <locals> annotation class, a PEP 695 function-scoped TypeVar) is
-            # dropped rather than left to fail the whole dump. Known limitation:
-            # the top-level function's own annotations ride on
-            # CompileArtifacts.signature, which serialize() dumps unpruned, so
-            # this only protects the nested functions reached here.
+            # pickler nothing it holds is pruned -- except annotations, type
+            # params, and __dict__ entries that will not pickle. The runtime
+            # assigns those back and never forces the pruned ones, so a value
+            # this pickler cannot serialize (a <locals> annotation class, a PEP
+            # 695 function-scoped TypeVar, or a __dict__ entry like the
+            # __wrapped__ functools.wraps stashes, which can drag an unrelated
+            # lock/Module in) is dropped rather than left to fail the whole
+            # dump. Known limitation: the top-level function's own annotations
+            # ride on CompileArtifacts.signature, which serialize() dumps
+            # unpruned, so this only protects the nested functions reached here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
-                attributes=obj.__dict__,
+                attributes={
+                    k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
+                },
                 annotations=self._pickleable_annotations(obj),
                 doc=obj.__doc__,
                 type_params=self._pickleable_type_params(obj),
@@ -287,7 +291,14 @@ class AOTCompiledFunction:
                 # Dynamo mints __import_* aliases and a __builtins_dict___N key
                 # into the tracing process's globals and roots guards at them;
                 # a process that only loads never traced, so seed them here.
-                # Mirrors the precompile load path in package.py.
+                # This diverges from the precompile load path in package.py: it
+                # leaves an already-bound alias in place, whereas install()'s
+                # builtins branch raises on a mismatched binding. The alias
+                # names are deterministic (__import_<dotted module> always holds
+                # that module), a wrong binding fails the guard rather than
+                # passing it, and a caller-supplied guard_scope may legitimately
+                # already carry these -- so keep what is there rather than fight
+                # over it.
                 from .output_graph import get_builtins_dict
                 from .utils import CleanupHook
 
@@ -632,9 +643,11 @@ class AOTCompiledModel:
     compiled_results: list[AOTCompiledFunction]
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # guard_check() evaluates guards regardless of _guard_check_enabled, so
+        # scan EVERY result for a real match first -- skipping opted-out results
+        # here would, when all of them opted out, fall through to the first
+        # result below and silently serve the wrong graph.
         for result in self.compiled_results:
-            if not result._guard_check_enabled:
-                continue
             if result.guard_check(self.model, *args, **kwargs):
                 # guard_check already passed; call fn directly so result()
                 # does not re-run the guard eval on this hot dispatch path.
