@@ -113,6 +113,36 @@ size
 float2half_scalar
 half2float_scalar
 
+# torch/headeronly/native/cpu/zmath.h
+zabs
+angle_impl
+real_impl
+imag_impl
+conj_impl
+ceil_impl
+sgn_impl
+floor_impl
+round_impl
+trunc_impl
+max_impl
+min_impl
+
+# torch/headeronly/native/Math.h
+calc_erfinv
+calc_digamma
+calc_i0
+calc_i0e
+calc_igamma
+calc_igammac
+chbevl
+polevl
+exp2_impl
+
+# torch/headeronly/util/jiterator_macros.h
+JITERATOR_HOST_DEVICE
+jiterator_code
+jiterator_also_stringify_as
+
 # torch/headeronly/macros/Export.h
 C10_API
 

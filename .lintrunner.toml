@@ -279,6 +279,8 @@ exclude_patterns = [
     'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/irange.h',
     'torch/headeronly/util/MathConstants.h',
+    'torch/headeronly/cpu/vec/zmath.h',
+    'torch/headeronly/native/Math.h',
 ]
 init_command = [
     'python3',
