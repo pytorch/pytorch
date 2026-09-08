@@ -50,7 +50,7 @@ class FlyDSLTemplate(KernelTemplate):
             log.debug("FlyDSL template choice generation failed: %s", e)
             return e
         except Exception as e:
-            log.debug("FlyDSL template choice generation error: %s", e)
+            log.warning("FlyDSL template choice generation error: %s", e, exc_info=True)
             return NotImplementedError(f"FlyDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:

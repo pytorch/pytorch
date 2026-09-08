@@ -14,7 +14,6 @@ from ...ir import FlyDSLTemplateBuffer
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
-    FusedSchedulerNode,
     SchedulerNode,
 )
 from ...select_algorithm import PartialRender
@@ -38,9 +37,6 @@ class FlyDSLScheduling(BaseScheduling):
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, FlyDSLTemplateBuffer
         )
-
-    def is_flydsl_fused_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, FusedSchedulerNode) and self.is_flydsl_template(node)
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

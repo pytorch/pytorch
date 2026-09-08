@@ -5,7 +5,7 @@ from . import (
     base,
     contiguous_mm,
     decompose_k,
-    flydsl_gemm,
+    flydsl,
     nv_universal_gemm,
     registry,
     tlx,
