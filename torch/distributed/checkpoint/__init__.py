@@ -21,6 +21,7 @@ from .state_dict_loader import load, load_state_dict
 from .state_dict_saver import async_save, save, save_state_dict
 from .storage import StorageReader, StorageWriter
 from . import state_dict as _state_dict
-from ._grad_dtype import _init_optim_state
+from ._grad_dtype import _init_optim_state, _patch_consolidate_hf_safetensors
 
 _state_dict._init_optim_state = _init_optim_state
+_patch_consolidate_hf_safetensors()
