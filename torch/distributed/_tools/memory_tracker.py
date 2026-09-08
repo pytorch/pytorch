@@ -211,6 +211,7 @@ class MemoryTracker:
             "memories_active": self.memories_active,
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
+            "op_index": self._op_index,
             "num_alloc_retries": self._num_alloc_retries,
         }
 
@@ -226,6 +227,9 @@ class MemoryTracker:
         self.memories_active = stats["memories_active"]
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
+        self._op_index = stats.get(
+            "op_index", max(self.memories_allocated, default=-1) + 1
+        )
         self._num_alloc_retries = stats["num_alloc_retries"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
