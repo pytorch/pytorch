@@ -3115,11 +3115,7 @@ class AOTInductorTestsTemplate:
                 for _ in range(n_iteration):
                     fb_l, fb_r, fb_t, fb_b = self.neighbors(fb)
                     unknown = (
-                        w_l * fb_l
-                        + w_r * fb_r
-                        + w_t * fb_t
-                        + w_b * fb_b
-                        + aximage
+                        w_l * fb_l + w_r * fb_r + w_t * fb_t + w_b * fb_b + aximage
                     )
                     unknown_f, unknown_b = unknown[0:1], unknown[1:2]
                     fb = torch.clip(
