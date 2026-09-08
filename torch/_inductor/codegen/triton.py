@@ -6809,8 +6809,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.topk_sort_k = max(self.topk_sort_k, top_k)
                 line = (
                     f"triton_helpers.topk_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
-                    f" {rnumel}, {top_k}, {dim}, descending={descending},"
-                    f" key_dtype={triton_type(key_dtype)})"
+                    f" {rnumel}, {top_k}, {dim}, {descending}, {triton_type(key_dtype)})"
                 )
             result_vars = cse_multiple(line, broadcasted_values, masks, dtypes)
         else:
