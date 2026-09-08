@@ -934,7 +934,7 @@ bool try_lookup_without_guard_eval(
   return true;
 }
 
-CacheEntry* create_cache_entry(
+void create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend,
@@ -972,13 +972,13 @@ CacheEntry* create_cache_entry(
       py::cast(*new_iter, py::return_value_policy::reference);
   guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
-  // Handed out under the lock: once it releases, a concurrent reset_code (the
-  // GIL is not held for the wait on a free-threaded build) can destroy the
-  // node, so the caller must not touch the returned pointer again.
+  // Copy the entry's code (owned) and trace annotation out under the lock: a
+  // concurrent reset_code (the GIL is not held for the wait on a free-threaded
+  // build) can destroy the node the moment the lock releases, so the entry
+  // itself is never handed back to the caller.
   *code_out = py::reinterpret_borrow<py::object>(
       (PyObject*)CacheEntry_get_code(&*new_iter));
   *trace_annotation_out = CacheEntry_get_trace_annotation(&*new_iter);
-  return &*new_iter;
 }
 
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {

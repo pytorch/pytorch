@@ -2516,6 +2516,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             region9 = get_code_region_exec_strategy(code, 9)
             self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
             self.assertEqual(region9.recursive_action, FrameAction.DEFAULT)
+            # Region -1 itself reads back its raw global unfiltered: the
+            # SKIP-only inheritance filter applies to id >= 0, so hoisting it
+            # above the id < 0 early return would silently disable a
+            # recompile-limit RUN_ONLY for every non-isolated frame.
+            self.assertEqual(
+                get_code_region_exec_strategy(code, -1).cur_action,
+                FrameAction.RUN_ONLY,
+            )
             # ...but a global SKIP (a deliberate do-not-trace mark) applies
             # everywhere, except where a region's own strategy wins.
             set_code_region_exec_strategy(
