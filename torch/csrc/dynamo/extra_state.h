@@ -100,15 +100,21 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // entry's code/backend/old guard_manager can fire a user __del__ under the
   // lock. A __del__ that takes compile_lock is a residual ABBA this design does
   // NOT rule out; it is accepted because a drain on the hot path is rare. The
-  // other sites that run Python while holding cache_mutex are exempt because
-  // they run only at compile/debug time: drain from _debug_get_cache_entry_list
-  // and create_cache_entry's CacheEntry ctor (try_lookup_without_guard_eval,
-  // like lookup(), releases cache_mutex before backend_match). A second cycle
-  // needs no compile_lock at all:
-  // create_cache_entry (and the py::cast bindings) can hold cache_mutex(X)
-  // while a __del__ calls a compiled function that blocks on cache_mutex(Y);
-  // invalidate() and _reset_precompile_entries_for_owner park rather than block
-  // for that reason, but those sites do not.
+  // other sites that run Python while holding cache_mutex are exempt from the
+  // GIL and the cache_mutex-vs-cache_mutex cycles because they run only at
+  // compile/debug time: drain from _debug_get_cache_entry_list and
+  // create_cache_entry's CacheEntry ctor (try_lookup_without_guard_eval, like
+  // lookup(), releases cache_mutex before backend_match). create_cache_entry is
+  // NOT exempt from the compile_lock ABBA, though: it runs after the callback
+  // returns holding no compile_lock but does hold cache_mutex, so a __del__ its
+  // ctor triggers that takes compile_lock is the same residual compile_lock ->
+  // cache_mutex cycle as the hot-path drain above -- accepted, not ruled out,
+  // for the same reason (it fires only at compile time and only on a __del__).
+  // A second cycle needs no compile_lock at all: create_cache_entry (and the
+  // py::cast bindings) can hold cache_mutex(X) while a __del__ calls a compiled
+  // function that blocks on cache_mutex(Y); invalidate() and
+  // _reset_precompile_entries_for_owner park rather than block for that reason,
+  // but those sites do not.
   mutable std::recursive_mutex cache_mutex;
   // Frame-id source for the default compile scope: holds only "_id", the
   // counter behind CompileId.frame_id for this code object. Dynamic-shape
