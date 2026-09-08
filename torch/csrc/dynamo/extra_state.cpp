@@ -165,6 +165,12 @@ void ExtraState::invalidate_locked(
 }
 
 void ExtraState::drain_pending_invalidations() {
+  // Invariant every caller must uphold: orig_code stays alive across this
+  // call. Applying an invalidation can NULL a CacheEntry's code and free
+  // orig_code, which destroys `this`. The frame-evaluator callers hold the
+  // executing frame's f_code (== orig_code); the pybind callers hold their
+  // code_obj py::handle argument; invalidate() increfs orig_code explicitly
+  // because it is reached from weakref.finalize with no such holder.
   if (this->cache_python_depth != 0) {
     // invalidate_locked relinks a list that a lookup below this frame on this
     // thread is iterating; the next depth-zero holder drains instead.
@@ -609,6 +615,46 @@ static bool cache_entry_has_no_guards(
   return torch::dynamo::root_guard_manager_has_no_guards(cache_entry.root_mgr);
 }
 
+// Drop candidates named by an invalidation this state accepted but could not
+// yet drain: drain_pending_invalidations no-ops when cache_python_depth != 0,
+// and depth is a cross-thread atomic, so ANOTHER thread's in-flight lookup can
+// keep an invalidation parked here. invalidate fires from weakref.finalize when
+// a guarded object is deallocated -- the id-reuse safety net -- so serving its
+// target would run a graph guarded by an ID_MATCH on an id that may already be
+// reused, a wrong-graph hit. invalidate_locked names its target the same way,
+// by live guard-manager identity. Guarded on has_pending_invalidations so the
+// common (nothing parked) path takes no extra lock. Only cache entries are
+// affected; invalidate_locked never touches precompile entries. Must be called
+// under cache_mutex (lock order cache_mutex -> pending_invalidation_mutex,
+// matching invalidate/drain).
+template <typename Candidates>
+static void drop_pending_invalidated_candidates(
+    ExtraState* extra_state,
+    Candidates& cache_candidates) {
+  if (!extra_state->has_pending_invalidations.load(std::memory_order_acquire) ||
+      cache_candidates.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> pending_lock(
+      extra_state->pending_invalidation_mutex);
+  if (extra_state->pending_invalidations.empty()) {
+    return;
+  }
+  auto is_pending = [&](const auto& candidate) {
+    PyObject* gm = candidate.entry->guard_manager.ptr();
+    for (const auto& live : extra_state->pending_invalidations) {
+      if (live.second.ptr() == gm) {
+        return true;
+      }
+    }
+    return false;
+  };
+  cache_candidates.erase(
+      std::remove_if(
+          cache_candidates.begin(), cache_candidates.end(), is_pending),
+      cache_candidates.end());
+}
+
 void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
@@ -693,6 +739,7 @@ void lookup(
         }
       }
     }
+    drop_pending_invalidated_candidates(extra_state, cache_candidates);
   }
 
   // ---- guard evaluation, cache_mutex NOT held (depth stays raised) ----
@@ -825,6 +872,10 @@ bool try_lookup_without_guard_eval(
         }
       }
     }
+    // The drain above no-ops under another thread's depth, so filter here too:
+    // this fast path serves without re-checking guards, so a parked-invalidated
+    // guardless entry would otherwise be served indefinitely.
+    drop_pending_invalidated_candidates(extra_state, cache_candidates);
   }
 
   // ---- cache_mutex NOT held (depth stays raised) ----
@@ -1045,7 +1096,9 @@ void _clear_cache_entries_for_region(
       } else {
         auto it = extra->cache_entry_map.find(isolate_recompiles_id);
         if (it != extra->cache_entry_map.end()) {
-          TORCH_CHECK(extra->total_cache_entry_count >= it->second.size());
+          TORCH_CHECK(
+              extra->total_cache_entry_count >= it->second.size(),
+              "cache entry count underflow while clearing a region");
           extra->total_cache_entry_count -= it->second.size();
           evicted = std::move(it->second);
           extra->cache_entry_map.erase(it);
@@ -1171,6 +1224,13 @@ void _reset_precompile_entries_for_owner(
   // the interpreter may be finalizing, where importing types to read CodeType
   // can fail. Matches the sibling bindings added in this commit.
   TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  // None is the "no owner" sentinel for loads that do not track ownership, and
+  // Py_None is a singleton, so scoping a reset by it would match every
+  // no-owner entry in the region. Owner-scoped teardown must pass the unique
+  // object() the install minted, never None.
+  TORCH_CHECK(
+      !owner.is_none(),
+      "_reset_precompile_entries_for_owner requires a non-None owner");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
