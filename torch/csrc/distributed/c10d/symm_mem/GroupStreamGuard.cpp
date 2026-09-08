@@ -8,6 +8,7 @@
 #include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #include <unordered_map>
 #include <utility>
@@ -92,13 +93,16 @@ void GroupStreamGuard::init_(
   if (last.has_value() && *last != cur) {
     if (c10::cuda::captureIdMayInitCtx(cur.stream()) != state_->done_capture) {
       // The previous event belongs to a different capture context, so
-      // waiting on it is invalid.
-      TORCH_WARN_ONCE(
-          "symm_mem: signal-pad operation for group \"",
-          group_name,
-          "\" switched to a stream in a different CUDA graph capture context "
-          "than the previous operation; the cross-stream dependency is not "
-          "inserted for this switch.");
+      // waiting on it is invalid. Warming up on one stream and capturing on
+      // another reaches this on the first captured operation, which is the
+      // normal pattern and leaves the caller nothing to act on, so this is a
+      // debug log rather than a warning.
+      C10D_DEBUG(
+          "symm_mem: signal-pad operation for group \"{}\" switched to a "
+          "stream in a different CUDA graph capture context than the previous "
+          "operation; the cross-stream dependency is not inserted for this "
+          "switch.",
+          group_name);
     } else {
       // Waits for the previous pad operation only: the event was recorded
       // just after its launch.
