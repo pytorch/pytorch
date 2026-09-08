@@ -1312,7 +1312,7 @@ def _uninstall_abandoned_package(
     installed_globals: dict[types.ModuleType, list[_InstalledGlobal]],
     skipped_codes: list[types.CodeType],
     region_skipped_codes: list[types.CodeType],
-    precompile_codes: list[types.CodeType],
+    precompile_codes: dict[int, types.CodeType],
     region_id: int,
     owner: object,
 ) -> None:
@@ -1329,7 +1329,7 @@ def _uninstall_abandoned_package(
         set_code_region_exec_strategy,
     )
 
-    for code in precompile_codes:
+    for code in precompile_codes.values():
         _reset_precompile_entries_for_owner(code, region_id, owner)
     default_strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
     for code in region_skipped_codes:
@@ -1389,7 +1389,9 @@ class CompilePackage:
         # clear all of them. install() covers resume functions and any frame
         # reached through code_source, not just the entry frame; code_context()
         # adds the live frames an uncovered call compiled inside the region.
-        self._installed_precompile_codes: list[types.CodeType] = []
+        # Keyed on id() so distinct frames with identical bytecode do not
+        # collapse and install() stays linear (see setdefault in install()).
+        self._installed_precompile_codes: dict[int, types.CodeType] = {}
         # One of those codes that actually received entries, used to notice a
         # torch._dynamo.reset() wiping the install out from under us. A frame
         # with no guarded code is installed but gets no entries, so it cannot
@@ -1606,10 +1608,8 @@ class CompilePackage:
         # The two compare EQUAL, so match on identity: region_codes() has to
         # hand a region-wide clear the LIVE code, or the live frame keeps one
         # entry per load until accumulated_recompile_limit refuses to compile it.
-        if self._installed_precompile_region_id >= 0 and not any(
-            installed is code for installed in self._installed_precompile_codes
-        ):
-            self._installed_precompile_codes.append(code)
+        if self._installed_precompile_region_id >= 0:
+            self._installed_precompile_codes.setdefault(id(code), code)
 
         entry = self._codes[code]
         self._current_entry = entry
@@ -1768,7 +1768,7 @@ class CompilePackage:
         what it installed onto. _region_skipped_codes is a strict subset of
         _installed_precompile_codes, so it needs no separate entry here.
         """
-        return (*self._codes, *self._installed_precompile_codes)
+        return (*self._codes, *self._installed_precompile_codes.values())
 
     def bypass_current_entry(self, reason: str | None = None) -> None:
         if self._current_entry is None:
@@ -1982,11 +1982,11 @@ class CompilePackage:
                 )
         self._region_skipped_codes = []
 
-        for code in self._installed_precompile_codes:
+        for code in self._installed_precompile_codes.values():
             _reset_precompile_entries_for_owner(
                 code, self._installed_precompile_region_id, self._install_owner
             )
-        self._installed_precompile_codes = []
+        self._installed_precompile_codes = {}
         self._installed_precompile_probe = None
         self._installed_precompile_region_id = -1
 
@@ -2162,22 +2162,20 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
-                # Dedup on identity: code objects compare structurally, so two
-                # distinct frames with identical bytecode would collapse under
-                # ``in``. input_codes above already keys on id() for the same
-                # reason.
-                if not any(target_code is c for c in self._installed_precompile_codes):
-                    # Deliberately NOT clearing the region here. A frame reached
-                    # through code_source is shared -- a library block two
-                    # loaded models both call -- and several packages may hold
-                    # entries for it in one region, which lookup handles by
-                    # evaluating each entry's guards. Clearing the region would
-                    # evict a live neighbour, and since lookup is region-exact
-                    # the neighbour cannot be served by what is left. This
-                    # package's own stale entries are already gone: install()
-                    # runs uninstall() first, which removes exactly the ones it
-                    # owns.
-                    self._installed_precompile_codes.append(target_code)
+                # Dedup on identity via id(): code objects compare structurally,
+                # so two distinct frames with identical bytecode would collapse
+                # under ``in``, and a linear identity scan makes install() O(n^2)
+                # in the entry count. input_codes above keys on id() for the same
+                # reason. Deliberately NOT clearing the region here: a frame
+                # reached through code_source is shared -- a library block two
+                # loaded models both call -- and several packages may hold
+                # entries for it in one region, which lookup handles by
+                # evaluating each entry's guards. Clearing the region would evict
+                # a live neighbour, and since lookup is region-exact the
+                # neighbour cannot be served by what is left. This package's own
+                # stale entries are already gone: install() runs uninstall()
+                # first, which removes exactly the ones it owns.
+                self._installed_precompile_codes[id(target_code)] = target_code
                 if entry.guarded_codes and self._installed_precompile_probe is None:
                     self._installed_precompile_probe = target_code
                 for backend_id in entry.backend_ids:
