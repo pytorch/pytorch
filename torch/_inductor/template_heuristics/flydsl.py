@@ -1,0 +1,160 @@
+from dataclasses import asdict, dataclass
+from itertools import product
+
+import torch._inductor.config as config
+
+
+@dataclass(frozen=True)
+class FlyDSLGemmConfig:
+    TILE_M: int = 128
+    TILE_N: int = 128
+    TILE_K: int = 64
+    STAGES: int = 2
+    SPLIT_K: int = 1
+    BLOCK_M_WARPS: int = 4
+    BLOCK_N_WARPS: int = 4
+    BLOCK_K_WARPS: int = 1
+    GROUP_M: int = 0
+    B_TO_LDS: bool = True
+
+
+def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
+    block_m = int(gemm_config["TILE_M"])
+    block_n = int(gemm_config["TILE_N"])
+    block_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    m_waves = int(gemm_config["BLOCK_M_WARPS"])
+    n_waves = int(gemm_config["BLOCK_N_WARPS"])
+    group_m = int(gemm_config["GROUP_M"])
+    mma_m = 16
+    mma_n = 16
+    mma_k = 32
+
+    if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
+        return False
+    if stages < 2:
+        return False
+    if m_waves <= 0 or n_waves <= 0:
+        return False
+    if group_m < 0:
+        return False
+
+    in_dbytes = 2
+    smem_capacity = 163840
+    smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
+    if smem_bytes > smem_capacity:
+        return False
+
+    async_load_vec_size = 16 // in_dbytes
+    ldg_x_threads = block_k // async_load_vec_size
+    if ldg_x_threads * async_load_vec_size != block_k:
+        return False
+
+    block_threads = m_waves * n_waves * 64
+    load_elems_per_iter = block_threads * async_load_vec_size
+    if (block_m * block_k) % load_elems_per_iter != 0:
+        return False
+    if (block_n * block_k) % load_elems_per_iter != 0:
+        return False
+    ldg_a_iters = (block_m * block_k) // load_elems_per_iter
+    ldg_b_iters = (block_n * block_k) // load_elems_per_iter
+    if ldg_a_iters <= 0 or ldg_b_iters <= 0:
+        return False
+    if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
+        return False
+
+    mma_m_repeat = block_m // m_waves // mma_m
+    mma_n_repeat = block_n // n_waves // mma_n
+    if mma_m_repeat * m_waves * mma_m != block_m:
+        return False
+    if mma_n_repeat * n_waves * mma_n != block_n:
+        return False
+    if block_k % mma_k != 0:
+        return False
+    return True
+
+
+def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """
+    Returns the exhaustive configuration set for the gfx950 FlyDSL HGEMM kernel.
+    """
+    selections = {
+        "TILE_M": [16, 32, 48, 64, 96, 128, 256],
+        "TILE_N": [64, 96, 128, 256],
+        "TILE_K": [64, 128, 256],
+        "STAGES": [i for i in range(2, 7)],
+        "BLOCK_M_WARPS": [1, 2, 4],
+        "BLOCK_N_WARPS": [1, 2, 4],
+        "SPLIT_K": [1],
+        "BLOCK_K_WARPS": [1],
+        "GROUP_M": [0, 4],
+        "B_TO_LDS": [True],
+    }
+    keys = selections.keys()
+    values = selections.values()
+    configs = [dict(zip(keys, combo)) for combo in product(*values)]
+    valid_configs: list[FlyDSLGemmConfig] = []
+    for gemm_config in configs:
+        mma_m_iters = gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
+        mma_n_iters = gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
+        if mma_m_iters > 4 or mma_n_iters > 4:
+            continue
+        if not _is_valid_gemm_config(gemm_config):
+            continue
+        try:
+            valid_configs.append(FlyDSLGemmConfig(**gemm_config))
+        except Exception:
+            pass
+    return valid_configs
+
+
+def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """
+    Returns the default configuration set for the gfx950 FlyDSL HGEMM kernel.
+    """
+    config_tuples = [
+        (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
+        (128, 128, 64, 4, 1, 4, 4, 1, 0, True),
+        (256, 256, 64, 2, 1, 4, 4, 1, 0, True),
+        (128, 256, 64, 2, 1, 4, 4, 1, 0, True),
+        (256, 128, 64, 2, 1, 4, 4, 1, 0, True),
+        (64, 256, 64, 2, 1, 2, 4, 1, 0, True),
+        (256, 64, 64, 2, 1, 4, 2, 1, 0, True),
+        (64, 128, 64, 2, 1, 2, 4, 1, 0, True),
+        (128, 64, 64, 2, 1, 4, 2, 1, 0, True),
+        (96, 128, 64, 2, 1, 2, 4, 1, 0, True),
+        (128, 96, 64, 2, 1, 4, 2, 1, 0, True),
+        (64, 64, 64, 2, 1, 2, 2, 1, 0, True),
+        (128, 128, 128, 2, 1, 4, 4, 1, 0, True),
+        (64, 128, 128, 2, 1, 2, 4, 1, 0, True),
+        (128, 64, 128, 2, 1, 4, 2, 1, 0, True),
+        (64, 64, 128, 2, 1, 2, 2, 1, 0, True),
+        (64, 64, 256, 2, 1, 2, 2, 1, 0, True),
+        (128, 128, 64, 4, 1, 4, 4, 1, 4, True),
+        (256, 256, 64, 2, 1, 4, 4, 1, 4, True),
+    ]
+    configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
+    return [
+        gemm_config
+        for gemm_config in configs
+        if _is_valid_gemm_config(asdict(gemm_config))
+    ]
+
+
+def get_gemm_configs() -> list[dict[str, object]]:
+    """
+    Returns the configuration set for the gfx950 FlyDSL HGEMM kernel.
+
+    Shape compatibility is checked in the lowering before this function is called.
+    By default, autotuning is disabled and we return only a single baseline config.
+    """
+    if (
+        config.flydsl_enable_autotuning
+        and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+    ):
+        configs = get_exhaustive_gemm_configs()
+    elif config.flydsl_enable_autotuning:
+        configs = get_default_gemm_configs()
+    else:
+        configs = [get_default_gemm_configs()[0]]
+    return [asdict(gemm_config) for gemm_config in configs]
