@@ -305,16 +305,13 @@ class TestSumCuteDSLOverride(TestCase):
 
     @skipIfRocm
     def test_entry_point_bits_at_every_plan_shape(self):
-        # The kernel picks a different shape per N (rows inside one thread, warps over baked
-        # batches, a partials pass plus a combine), and the entry point must carry the same bits
-        # for ALL of them. Asserted through ``x.sum`` rather than by calling the kernel, because
-        # what this catches is a launch-shape preference quietly serving some N another way --
-        # which a tolerance compare cannot see, and which happened at the two largest N here.
+        # The kernel picks a different shape per N and the entry point must carry the same bits for
+        # all of them, so this asserts through `x.sum` rather than the kernel -- a launch-shape
+        # preference quietly serving some N another way is invisible to a tolerance compare.
         #
-        # The BITS ALONE cannot carry this claim, because the reference kernel they are compared
-        # against is also what the override falls back to: with the new kernel declining every
-        # call, this whole file still passed, in 0.5s instead of 84s. So assert the ROUTE too --
-        # that the ordered kernel was asked and accepted -- which is the part this commit adds.
+        # The BITS ALONE cannot carry the claim, because the reference they are compared against is
+        # also the fallback: with the new kernel declining every call this file still passed, in 0.5s
+        # instead of 84s. So assert the ROUTE too.
         from torch._native.ops.reductions import (
             inner_tree_kernel as ref,
             kernel_rowtile as rt,
@@ -351,16 +348,10 @@ class TestSumCuteDSLOverride(TestCase):
 
     @skipIfRocm
     def test_misaligned_input_is_served_by_the_order(self):
-        # A compact input at a non-zero storage offset (`buf[1:].view(M, N)`) has fine strides and a
-        # base pointer four bytes off, which is less than the wrap would otherwise declare from N.
-        # MEASURED before this was handled: `RuntimeError: Tensor data pointer is not aligned to 16
-        # bytes` through `torch.sum`, at every shape and both offsets.
-        #
-        # It must be SERVED, not declined: the reference kernel this order replaces is going away,
-        # so a fallback would eventually mean these calls change order or stop working. So assert
-        # both halves -- the order took the call, and the bits are the reference kernel's. A
-        # tolerance compare would pass either way, and so would a bitwise compare on its own if the
-        # call had quietly fallen back to the very kernel it is compared against.
+        # A compact input at a non-zero storage offset has fine strides and a base pointer four bytes
+        # off, which raised "not aligned to 16 bytes" through torch.sum at every shape. It must be
+        # SERVED, not declined -- the reference kernel is going away -- so assert both halves: the
+        # order took the call, and the bits are the reference's.
         from torch._native.ops.reductions import (
             inner_tree_kernel as ref,
             kernel_rowtile as rt,

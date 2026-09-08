@@ -1,9 +1,8 @@
-# COLUMN reduction (dim 0 of a contiguous 2D input): a DRIVER over tile.TileReduce at axis="col",
-# owning the measured launch policy and the plan cache. Differs from the row case in two ways: one
-# output per THREAD with no lane merge, and vectorization along the KEPT axis (tile.fold_cols_rolled).
-# The REDUCED axis must be split P ways or the reduction carries no parallelism -- unsplit,
-# (65536, 256) took 7830us against ATen's 15.8. The partial LAYOUT follows stage 2's mapping: (P, C)
-# thread-per-column, (C, P) block-per-column.
+# COLUMN reduction (dim 0 of a contiguous 2D input): a DRIVER over tile.TileReduce, owning the
+# measured launch policy and the plan cache. It differs from the row case in two ways -- one
+# output per THREAD with no lane merge, and vectorization along the KEPT axis. The REDUCED axis
+# must be split or the reduction carries no parallelism: unsplit, (65536, 256) took 7830us
+# against ATen's 15.8.
 
 from cutlass import Int32
 
@@ -20,48 +19,27 @@ _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
 
-# Rows per chunk of the reduced axis. MEASURED: the optimal split factor across (4096,4096),
-# (16384,1024), (65536,256) and (1024,16384) is P = 64/256/1024/16 -- i.e. a constant ~64 ROWS
-# per chunk in every case, not a constant P. Capping P at 64 instead (the first cut) left the
-# tall-narrow (65536,256) at a quarter of the throughput the rows-per-chunk rule reaches.
+# Rows per chunk of the reduced axis. MEASURED: the optimal split factor is a constant ~64
+# ROWS per chunk across every shape, not a constant P -- capping P instead left the
+# tall-narrow case at a quarter of the throughput.
 _Q_TARGET = 64
 _P_MAX = 4096
-# Stage 2's work mapping, chosen like stage 1's and for the same reason. thread-per-column
-# gives C threads (C/nt blocks); block-per-column gives C blocks. MEASURED (us, thread- vs
-# block-per-column): C=256 82.4/15.7, C=1024 28.1/10.6, C=4096 15.2/11.7, C=16384 11.5/18.1,
-# C=65536 10.5/16.6 -- so block wins while C is small enough that C blocks is not itself the
-# cost, and thread wins once C/nt alone fills the device. Crossover bracketed 4096..16384.
+# Stage 2's work mapping. Block-per-column wins while C is small enough that C blocks is not
+# itself the cost, thread-per-column once C/nt alone fills the device; the crossover measured
+# between 4096 and 16384.
 _C_THREAD_STAGE2 = 8192
-# Columns per thread. For a COLUMN reduction `vec` sets the load width AND the live ACCUMULATOR
-# count per thread, a tension the row case does not have. Capped at 4 because the registers a wider
-# width costs outweigh the load: bf16 at vec=8 is 0.77-0.83x of vec=4. A no-op for fp32 and fp64.
+# Columns per thread. Here `vec` sets the load width AND the live ACCUMULATOR count, a tension
+# the row case does not have. Capped at 4: bf16 at 8 is 0.77-0.83x of 4.
 _VEC_MAX = 4
-# Threads per block. SMALL on purpose: a block covers nt column-chunks, so a wide block idles
-# most of its threads whenever the column count is short (C=256 at vec=4 is 64 chunks -- 64 of
-# 256 threads busy), and the reduced-axis split already supplies blocks. The tall-narrow case
-# is where that matters most: bf16 (65536,256) measured 17.3us at nt=256 vs 9.9 at 64.
+# Threads per block, SMALL on purpose: a block covers nt column-chunks, so a wide block idles
+# most of its threads whenever the column count is short, and the reduced-axis split already
+# supplies blocks. Measured 17.3us at nt=256 against 9.9 at 64 on the tall-narrow case.
 #
-# RE-MEASURED once the body became shared with the row axis. Timings on this box drift over a
-# long run, so this is an INTERLEAVED A/B (both kernels in one process, alternating rounds,
-# minimum of 4) of the pre-shared kernel at nt=64 against the shared one at 32 and at 64:
-#
-#   shape          op      nf   pre@64   new@32   new@64
-#   (65536, 256)   sum      1    10.52    10.66    12.16
-#   (65536, 256)   amax     1    13.12    13.23    14.05
-#   (65536, 256)   argmax   2    31.08    28.71    29.49
-#   (65536, 256)   var      3    34.79    41.33    34.85
-#   (16384, 1024)  sum      1    11.03    12.04    12.56
-#   (16384, 1024)  argmax   2    31.57    29.66    29.98
-#   (16384, 1024)  var      3    33.29    33.84    33.27
-#   (4096, 4096)   sum      1    12.41    12.52    14.38
-#   (4096, 4096)   var      3    38.91    38.85    38.89
-#   (256, 65536)   sum      1    11.25     9.58     9.09
-#
-# So 32 for 1- and 2-field traits and 64 for 3-field: a Welford accumulator is `vec` x 3
-# values per thread, register-heavy enough that it wants a second warp per block to hide
-# latency, while the lean traits want the narrower block. That pair holds the merged body at
-# 0.92-1.01x of the pre-merge kernel everywhere except (16384, 1024) sum/amax, which lose
-# 7-9%; argmax gains 6-8% and a wide-short (256, 65536) sum gains 15%.
+# 32 for 1- and 2-field traits and 64 for 3-field, from an interleaved A/B against the
+# pre-shared kernel: a Welford accumulator is register-heavy enough to want a second warp per
+# block to hide latency, while the lean traits want the narrower one. That pair holds the
+# merged body at 0.92-1.01x of the pre-merge kernel except (16384, 1024) sum/amax, which lose
+# 7-9%, against argmax gaining 6-8% and a wide-short sum 15%.
 _NT = 32
 _NT_WIDE_ACC = 64  # 3-field traits (Welford): see above
 
@@ -80,9 +58,8 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     R, C = x.shape
     vec = min(tile.vec_size(C, x.element_size()), _VEC_MAX) if vec is None else vec
     if C % vec:
-        # nchunks = C // vec, so the trailing C % vec columns would never be stored and
-        # `out` would keep whatever torch.empty gave them. The derived vec always divides
-        # C; an explicit one is the caller's, so check it.
+        # nchunks = C // vec, so a trailing partial group would never be stored and `out` would keep
+        # whatever torch.empty gave it. The derived vec always divides C; an explicit one may not.
         raise AssertionError(f"vec must divide the column count: {C=} {vec=}")
     if npar is None:
         npar = _split_p(R)
@@ -113,10 +90,8 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     dsts = [out] if single else parts
 
     def _fake():
-        # Compile-time descriptors; both input extents dynamic, mode 1 divisible by vec.
-        # nwaves belongs to the ROW axis: None, not a dummy -- an unused Int32 param costs
-        # 1.27x here (see tile.TileReduce.kernel). project_n carries the reduced extent,
-        # which is also what the per-block chunk bound is measured against.
+        # Compile-time descriptors; both extents dynamic, the inner one divisible by vec. The row
+        # axis's arg is None, not a dummy -- an unused Int32 param costs 1.27x here.
         return (
             [
                 _L.fake_compact(
