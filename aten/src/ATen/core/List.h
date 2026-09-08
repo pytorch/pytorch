@@ -267,14 +267,15 @@ struct basic_common_reference<
 };
 } // namespace std
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T>&& list);
 template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-}
+} // namespace c10::impl
+
+namespace c10 {
 
 /**
  * An object of this class stores a list of values of type T.
