@@ -231,7 +231,6 @@ S390X_BLOCKLIST = [
     "lazy/test_meta_kernel",
     "profiler/test_profiler",
     "test_jit",
-    "dynamo/test_utils",
     "test_nn",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
