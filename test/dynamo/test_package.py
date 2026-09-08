@@ -173,8 +173,14 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # only the build macro tells them apart.
         with self.assertRaisesRegex(RuntimeError, "vector ISA 'asimd'"):
             check(neon, sve128)
-        with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
-            check(("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None), avx2)
+        # simdlen and march are recorded for diagnostics but do not gate:
+        # pick_vec_isa() already folds them into the resolved ISA, so a host
+        # that lands on the same (ISA, width, macro) can rebuild the kernels
+        # whatever knob got it there. An artifact built under cpp.simdlen=256
+        # loads on a host whose default already picks the same 256-bit ISA;
+        # gating on the raw knob would reject it and make the cpp.simdlen escape
+        # hatch trade an ISA error for a simdlen error.
+        check(("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None), avx2)
         with self.assertRaisesRegex(RuntimeError, "reports no CPU codegen target"):
             check(avx2, None)
 
