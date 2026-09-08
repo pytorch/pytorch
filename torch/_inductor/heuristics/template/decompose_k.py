@@ -16,9 +16,7 @@ from ...kernel.decompose_k import (
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import (
     get_k_splits,
-    use_aten_gemm_kernels,
     use_triton_blackwell_tma_template,
-    use_triton_template,
 )
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
@@ -73,6 +71,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
+        bmm_backends = {
+            backend.strip().upper()
+            for backend in config.triton.decompose_k_bmm_backends.split(",")
+        }
         k_splits = get_k_splits(m, n, k)
         exact_k_splits = [
             k_split
@@ -82,15 +84,17 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
         ]
 
-        if use_aten_gemm_kernels():
+        if "ATEN" in bmm_backends:
             for k_split in exact_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
+
+        if "TRITON" not in bmm_backends:
+            return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
         layout = kernel_inputs.output_layout()
         if not (
             config.triton.enable_blackwell_decompose_k
-            and use_triton_template(layout, check_max_autotune=True)
             and use_triton_blackwell_tma_template(
                 mat1,
                 mat2,
