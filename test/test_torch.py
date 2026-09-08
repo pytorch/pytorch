@@ -7909,6 +7909,23 @@ class TestTorch(TestCase):
         # doesn't accept floating point variables
         self.assertRaises(TypeError, lambda: torch.cumsum(torch.ones(5, 5), torch.tensor(0.)))
 
+    def test_python_arg_parser_unexpected_keyword(self):
+        x = torch.ones(3, 3)
+        self.assertEqual(
+            torch.mean(x, dim=(0, 1), keepdim=True), torch.ones(1, 1)
+        )
+
+        with self.assertRaises(TypeError) as cm:
+            torch.mean(x, dims=(0, 1), keepdim=True)
+        self.assertEqual(
+            str(cm.exception), "mean() got an unexpected keyword argument 'dims'"
+        )
+
+        with self.assertRaises(TypeError) as cm:
+            torch.mean(x, dim="bad", keepdim=True)
+        self.assertIn("received an invalid combination of arguments", str(cm.exception))
+        self.assertNotIn("unexpected keyword argument", str(cm.exception))
+
     def test_parsing_double(self):
         # accepts floating point and integer arguments
         x = torch.randn(2, 3)
