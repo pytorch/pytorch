@@ -227,7 +227,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 and isinstance(arg.source.base, AttrSource)
                 and arg.source.base.member == "param_groups"
             ):
-                return self.value.param_groups[arg.source.index]
+                index = arg.source.index
+                if type(index) is not int:
+                    raise ArgMappingException
+                return self.value.param_groups[index]
 
             raise ArgMappingException
 
