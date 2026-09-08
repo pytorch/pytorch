@@ -14,7 +14,7 @@
 #      col tile) mapping is resolved ON DEVICE from it, rather than from a
 #      constexpr M_G.
 #   2. `row0 = m_start + r_base` instead of `g * M_G + r_base`.
-#   3. The epilogue store masks on `active & (r_ < m_end)`: a row tile may
+#   3. The epilogue store masks on `r_ < m_end`: a row tile may
 #      overhang its group, and those rows hold this expert's weights applied to
 #      the next group's tokens.
 #   4. The compile key drops M_G and M_TOTAL, keeping only (K, N, E, BLOCK_C).
@@ -22,9 +22,9 @@
 #      count -- invisible under balanced routing, a per-step JIT under real
 #      routing.
 #
-# Host side: the grid is over-provisioned to ceildiv(M, BLOCK_R) + E row tiles
-# and the output is zero-initialised, because a masked store no longer covers
-# every row.
+# Host side: cap a row-tile upper bound at one workgroup per CU. Workgroups
+# traverse actual tiles in N-fast order. When the upper bound fits in the grid,
+# specialize away persistence. Rows beyond OFFS[-1] remain untouched.
 #
 # Two structural consequences of the short contraction (K/128 = 11-16 steps):
 #   * The K-loop is fully unrolled at compile time; the loop-carried a0/b0
@@ -41,7 +41,6 @@
 
 import dataclasses
 import functools
-import logging
 import os
 
 import torch
@@ -144,41 +143,7 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
     return br, bc
 
 
-log = logging.getLogger(__name__)
-
 _STARVED_TILES = 256  # one full wave on MI350X's 256 CUs; see pick_tile
-
-_guard_fallback_warned = set()
-
-# (K, N, E, BLOCK_C, BLOCK_R) whose guarded kernel failed to TRACE. FlyDSL
-# traces on first launch, not at compile, so this is discovered at the launch
-# site and remembered here -- see `launch_for` / `launch_guarded`.
-_guard_broken = set()
-
-
-def _warn_guard_fallback(K, N, E, BLOCK_C, BLOCK_R, err) -> None:
-    """Say once, per shape, that the surplus-slot guard did not compile.
-
-    Loud enough to notice (this shape is now paying for its surplus row-tile
-    slots, up to 1.74x) but not per call, and never fatal.
-    """
-    key = (K, N, E, BLOCK_C, BLOCK_R)
-    if key in _guard_fallback_warned:
-        return
-    _guard_fallback_warned.add(key)
-    log.warning(
-        "FlyDSL MXFP8 grouped GEMM: surplus-slot guard failed to compile at "
-        "K=%d N=%d E=%d BLOCK_C=%d BLOCK_R=%d (%s: %s); falling back to the "
-        "unguarded kernel, which is correct but pays for its surplus slots.",
-        K,
-        N,
-        E,
-        BLOCK_C,
-        BLOCK_R,
-        type(err).__name__,
-        str(err).splitlines()[0][:120],
-    )
-
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -189,6 +154,7 @@ from flydsl.expr.typing import T, Vector as Vec
 
 from . import mxfp8_buffer_ops as buffer_ops
 from .grouped_config import grouped_row_tiles_upper_bound
+from .grouped_scheduling import for_each_grouped_tile_static
 from .mxfp8_gemm_utils import (
     compute_global_swizzle,
     G2SLoader,
@@ -254,7 +220,12 @@ class _VmCounter:
 
 
 def _compile(
-    K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int = BLOCK_R, GUARD: bool = True
+    K: int,
+    N: int,
+    E: int,
+    BLOCK_C: int,
+    BLOCK_R: int = BLOCK_R,
+    PERSISTENT: bool = True,
 ):
     """Compile a RAGGED forward grouped GEMM for one (K, N, E) shape.
 
@@ -370,88 +341,13 @@ def _compile(
     ):
         F8_IR_t = fx.Float8E4M3FN.ir_type
 
-        # ── Block -> (group, row tile, col tile), resolved ON DEVICE ──
-        # Groups partition the OUTPUT ROWS here, not the contraction, so
-        # unlike the wgrad kernel nothing about the K-walk changes: K is
-        # uniform across experts. Only this mapping and the epilogue mask
-        # care that the groups are ragged.
-        bid = fx.block_idx.x
-        slot = ArithValue(bid) // n_c_tiles  # which row tile overall
-        c_base = (ArithValue(bid) % n_c_tiles) * fx.Int32(BLOCK_C)
+        lds = fx.SharedAllocator().allocate(SharedStorage).peek()
 
-        offs_rsrc = buffer_ops.create_buffer_resource(
-            OFFS, max_size=False, num_records_bytes=E * 4
-        )
-        # Uniform (SGPR) loads: every lane in the block wants the same
-        # boundaries, so this is E scalar loads, not E per-lane loads.
-        ends = [
-            ArithValue(
-                buffer_ops.buffer_load(
-                    offs_rsrc, fx.Int32(i), vec_width=1, dtype=T.i32, is_scalar=True
-                )
-            )
-            for i in range(E)
-        ]
-        starts = [ArithValue(fx.Int32(0))] + ends[:-1]
-
-        # Walk the groups accumulating row tiles until the slot lands in one.
-        # E is constexpr, so this unrolls to E selects on the SALU against a
-        # K-walk of many iterations -- the same O(E) prologue the wgrad
-        # kernel pays. `active` is false for slots past the last group's
-        # tiles, which predicates those blocks off in the epilogue.
-        g = ArithValue(fx.Int32(0))
-        r_base = ArithValue(fx.Int32(0))
-        m_start = ArithValue(fx.Int32(0))
-        m_end = ArithValue(fx.Int32(0))
-        active = fx.Int32(0) > fx.Int32(0)  # false
-        cum = ArithValue(fx.Int32(0))
-        # range_constexpr, not range: the AST rewriter turns a plain `range`
-        # into a device-side scf.for, whose induction variable is an
-        # ArithValue and cannot index the `ends`/`starts` Python lists. This
-        # loop must unroll at trace time.
-        for i in range_constexpr(E):
-            m_i = ends[i] - starts[i]
-            t_i = (m_i + fx.Int32(BLOCK_R - 1)) // fx.Int32(BLOCK_R)
-            hit = (slot >= cum) & (slot < cum + t_i)
-            g = arith.select(hit, fx.Int32(i), g)
-            r_base = arith.select(hit, (slot - cum) * fx.Int32(BLOCK_R), r_base)
-            m_start = arith.select(hit, starts[i], m_start)
-            m_end = arith.select(hit, ends[i], m_end)
-            active = active | hit
-            cum = cum + t_i
-
-        # A is offset by the group's first token row, B by the expert's
-        # weight plane. Both are plain row offsets at the same stride K --
-        # the "dynamic per-group stride" problem the MXFP8-MoE post
-        # describes does not arise on this axis.
-        row0 = m_start + r_base
-        wrow0 = ArithValue(g) * fx.Int32(N) + c_base
-
-        # ── SURPLUS SLOTS EXIT HERE, BEFORE ANY GLOBAL TRAFFIC ──
-        # The host cannot know how many row tiles the groups actually need
-        # -- that is sum_g ceildiv(m_g, BLOCK_R), and the m_g live on the
-        # device -- so it launches the upper bound, ceildiv(M, BLOCK_R) + E.
-        # The slack is real: at g8x512x4096x4096 it is 24 slots launched for
-        # 16 needed, and since n_blocks = n_slots * n_c that is 384 blocks
-        # where 256 would do. On 256 CUs that is the difference between one
-        # wave and two, which is why the surplus cost 1.74x there and
-        # 1.12-1.68x across the shapes -- far more than its 33% share of the
-        # blocks, because it is wave quantization and not just wasted bytes.
-        #
-        # `active` was already computed for the store mask; consulting it
-        # here instead skips the K-walk entirely. It is BLOCK-UNIFORM (it
-        # depends only on block_idx and on scalar loads of OFFS), so every
-        # thread takes the same branch and the barriers inside stay legal.
-        # `GUARD` is a plain Python bool from the compile key, so the tracer
-        # resolves this at TRACE time: True leaves `proceed` dynamic and the
-        # rewriter builds the scf.if; False makes it a Python True and the
-        # body is traced unconditionally, reproducing the pre-guard kernel
-        # byte for byte. One copy of the body, two kernels. The fallback
-        # exists because the guard does not compile everywhere -- see
-        # `cached_launch`.
-        proceed = active if GUARD else True
-        if proceed:
-            lds = fx.SharedAllocator().allocate(SharedStorage).peek()
+        def compute_tile(g, bid_m, bid_n, m_g, row_base):
+            row0 = row_base + bid_m * BLOCK_R
+            c_base = bid_n * BLOCK_C
+            m_end = row_base + m_g
+            wrow0 = g * N + c_base
             a_cur0, a_cur1 = lds.A_lds_cur_0, lds.A_lds_cur_1
             a_next0, a_next1 = lds.A_lds_next_0, lds.A_lds_next_1
             b_cur0, b_cur1 = lds.B_lds_cur_0, lds.B_lds_cur_1
@@ -478,26 +374,9 @@ def _compile(
             a_div = fx.logical_divide(gA, fx.make_layout(1, 1))
             b_div = fx.logical_divide(gB, fx.make_layout(1, 1))
 
-            # BOUND THE SCALE DESCRIPTORS. `max_size=True` sets num_records to
-            # 0xFFFFFFFF, so an out-of-range e8m0 read is NOT clamped by the
-            # hardware -- it touches unmapped memory and faults. This kernel
-            # over-provisions row tiles (`n_slots = ceildiv(M, BLOCK_R) + E`) and
-            # relies on `active` to predicate the surplus blocks off in the
-            # epilogue, so a scale read issued before that predicate goes past
-            # the plane whenever the group boundaries leave a slot mapping past
-            # the last group.
-            #
-            # This is observed, not theoretical: group boundaries that leave a
-            # slot mapping past the last group fault with hipErrorIllegalAddress,
-            # reliably when every boundary sits on a row-tile boundary and
-            # intermittently otherwise.
-            #
-            # A bounded descriptor returns 0 for an out-of-range read, and 0 as
-            # an e8m0 is 2**-127, which underflows the product exactly as the
-            # epilogue mask intends.
-            #
-            # A is (M, K/32) with M a runtime value; B is (E, N, K/32), all
-            # constexpr, so its bound folds to a constant.
+            # Bound scale descriptors: a partial row/column tile can read past
+            # the operand allocation. The hardware returns zero for those
+            # reads, and the epilogue masks the corresponding output elements.
             sa_bytes = arith.index_cast(
                 T.i64, arith.index_cast(T.index, out_m * fx.Int32(K // SCALE_BLOCK))
             )
@@ -826,13 +705,12 @@ def _compile(
                             # overhang its group, in which case the overhanging
                             # rows hold this expert's weights applied to the
                             # NEXT group's tokens -- correct arithmetic, wrong
-                            # expert -- so they must not be stored. `active`
-                            # kills whole slots past the last group's tiles.
+                            # expert -- so they must not be stored.
                             # Reading those A rows is harmless: each output
                             # element is one A row dotted with one B column, so
                             # nothing leaks across rows, and any fp8 NaN in the
                             # pad region past m_total lands only in rows we drop.
-                            ok = active & (r_ < m_end) & (r_ < out_m) & col_ok
+                            ok = (r_ < m_end) & (r_ < out_m) & col_ok
                             off = arith.select(ok, r_ * out_n + col, oob)
                             buffer_ops.buffer_store(vec[e].to(fx.BFloat16), o_rsrc, off)
 
@@ -842,6 +720,16 @@ def _compile(
             store_group(
                 c11, base_row + fx.Int32(LDS_BLOCK_R), base_col + fx.Int32(LDS_BLOCK_C)
             )
+
+            if PERSISTENT:
+                # Reset vmcnt as well as synchronizing LDS reuse. Outstanding
+                # epilogue stores must not enter the next tile's hand-counted
+                # load pipeline (loads and stores need not retire in order).
+                wait_barrier(0)
+
+        for_each_grouped_tile_static(
+            OFFS, E, N, BLOCK_R, BLOCK_C, PERSISTENT, compute_tile
+        )
 
     @flyc.jit
     def launch_fwd(
@@ -878,72 +766,10 @@ def _compile(
 
 @functools.lru_cache(maxsize=None)
 def cached_launch(
-    K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int = 256, GUARD: bool = True
+    K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int = 256, PERSISTENT: bool = True
 ):
-    """Build the launcher. GUARD is part of the key -- see `launch_for`.
-
-    NOTE: this does NOT trace. FlyDSL traces lazily, on the first call
-    through `fast_launch`, so a tracer error surfaces at LAUNCH time and
-    cannot be caught here. That is what `launch_for` is for.
-    """
-    return _compile(K, N, E, BLOCK_C, BLOCK_R, GUARD=GUARD)
-
-
-def launch_for(K: int, N: int, E: int, BLOCK_C: int, BLOCK_R: int):
-    """The guarded launcher, unless this shape already failed to trace.
-
-    The surplus-slot guard is worth 1.2-1.74x but does not trace on every
-    shape: as a bare `if active:` it can raise "cannot evaluate dynamic
-    'Boolean' as Python bool", and only once enough other kernels have been
-    traced in the same process, so it is not reliably reproducible from a
-    single shape.
-
-    The fallback therefore has to live at the LAUNCH site: an untraceable
-    shape would otherwise raise RuntimeError out of the op rather than
-    degrading to an unguarded launch. GUARD=False is verified bitwise-identical
-    to GUARD=True; it costs throughput, nothing else.
-    """
-    return cached_launch(
-        K,
-        N,
-        E,
-        BLOCK_C,
-        BLOCK_R,
-        GUARD=(K, N, E, BLOCK_C, BLOCK_R) not in _guard_broken,
-    )
-
-
-def launch_guarded(launch, key, compile_args_factory, dispatch_args, param):
-    """Run `launch`, and on a tracer error retry once unguarded, forever.
-
-    Compilation goes through Inductor's FlyDSL cache so the compiled dispatcher
-    is shared with the rest of the Inductor-generated FlyDSL kernels and is
-    keyed the same way (pid, device, constexpr param).
-    """
-    try:
-        return run_cached_flydsl(
-            launch,
-            constexpr_param=param,
-            compiler=flyc.compile,
-            dispatch_args=dispatch_args,
-            compile_args_factory=compile_args_factory,
-        )
-    except Exception as e:
-        # The guard fallback exists for ONE failure mode: the surplus-slot `if`
-        # not tracing on some shapes. An out-of-memory is not that, and treating
-        # it as such both misreports the cause and permanently pins this shape
-        # to the unguarded kernel (up to 1.74x slower). Re-raise it instead.
-        if isinstance(e, torch.OutOfMemoryError) or key in _guard_broken:
-            raise
-        _guard_broken.add(key)
-        _warn_guard_fallback(*key, e)
-        return run_cached_flydsl(
-            cached_launch(*key, GUARD=False),
-            constexpr_param=param.unguarded(),
-            compiler=flyc.compile,
-            dispatch_args=dispatch_args,
-            compile_args_factory=compile_args_factory,
-        )
+    """Build one of two traversal specializations; token counts remain dynamic."""
+    return _compile(K, N, E, BLOCK_C, BLOCK_R, PERSISTENT=PERSISTENT)
 
 
 def ceildiv(a: int, b: int) -> int:
@@ -970,24 +796,28 @@ class MXFP8GroupedGemmParam:
     group_count: int
     block_c: int
     block_r: int
-    guarded: bool = True
+    persistent: bool = True
 
-    def key(self) -> tuple[int, int, int, int, int]:
-        """The tuple ``cached_launch`` / ``_guard_broken`` are keyed on."""
-        return (self.k, self.n, self.group_count, self.block_c, self.block_r)
-
-    def unguarded(self) -> "MXFP8GroupedGemmParam":
-        return dataclasses.replace(self, guarded=False)
+    def key(self) -> tuple[int, int, int, int, int, bool]:
+        """Only traversal mode, not exact token count, specializes the launcher."""
+        return (
+            self.k,
+            self.n,
+            self.group_count,
+            self.block_c,
+            self.block_r,
+            self.persistent,
+        )
 
     def __cache_signature__(self) -> tuple[int, int, int, int, int, bool]:
-        return (*self.key(), self.guarded)
+        return self.key()
 
 
 def make_mxfp8_grouped_gemm_kernel_name(param: MXFP8GroupedGemmParam) -> str:
     return (
         f"mxfp8_grouped_gemm_k{param.k}_n{param.n}_e{param.group_count}"
         f"_t{param.block_r}x{param.block_c}"
-        f"_guard{int(param.guarded)}"
+        f"_persistent{int(param.persistent)}"
     )
 
 
@@ -1046,11 +876,17 @@ def get_mxfp8_grouped_gemm_grid_size(
     """(n_blocks, n_c_tiles) for a launch covering `rows` tokens.
 
     Group sizes are device-resident, so the host uses a row-tile upper bound.
-    Surplus blocks are predicated off by the kernel's active-tile guard.
+    The scheduler visits only actual tiles; surplus workgroups do no GEMM work.
     """
     n_c_tiles = ceildiv(param.n, param.block_c)
     n_slots = grouped_row_tiles_upper_bound(rows, param.group_count, param.block_r)
     return n_slots * n_c_tiles, n_c_tiles
+
+
+def get_mxfp8_grouped_gemm_persistent_grid_size(param, rows, device_properties) -> int:
+    """Cap the grid at one four-wave workgroup per CU, without reading offsets."""
+    tile_bound, _ = get_mxfp8_grouped_gemm_grid_size(param, rows)
+    return max(1, min(tile_bound, device_properties.multi_processor_count))
 
 
 def launch_mxfp8_grouped_gemm_gfx950(
@@ -1094,7 +930,7 @@ def launch_mxfp8_grouped_gemm_gfx950(
     `compile_only` warms the disk cache and returns without dispatching. It is
     what Inductor's precompile entry point uses, where the tensors are fake and
     the only thing wanted is the compiled artifact. Only the first window is
-    compiled: every window traces the same kernel, and the layout-dynamic
+    compiled in both traversal modes, and the layout-dynamic
     compile args make the window's row count a runtime slot.
     """
     if tensor_arg is None:
@@ -1112,11 +948,20 @@ def launch_mxfp8_grouped_gemm_gfx950(
     b_sc = scale_b.view(torch.uint8).view(-1)
     offs_i32 = offs.view(torch.int32)
 
-    key = param.key()
     for row_start, rows, offs_window in _row_windows(
         total_m, param.k, param.n, offs_i32, param.block_r
     ):
-        n_blocks, n_c_tiles = get_mxfp8_grouped_gemm_grid_size(param, rows)
+        tile_bound, n_c_tiles = get_mxfp8_grouped_gemm_grid_size(param, rows)
+        if compile_only:
+            n_blocks = 1
+            launch_param = param
+        else:
+            n_blocks = get_mxfp8_grouped_gemm_persistent_grid_size(
+                param, rows, torch.cuda.get_device_properties(out.device)
+            )
+            # If even the upper bound fits, no CTA can have a second tile.
+            # Specialize out the loop and its live-across-tile scheduler state.
+            launch_param = dataclasses.replace(param, persistent=tile_bound > n_blocks)
         dispatch_args = (
             a.narrow(0, row_start, rows).view(-1),
             b,
@@ -1142,11 +987,20 @@ def launch_mxfp8_grouped_gemm_gfx950(
             )
 
         if compile_only:
-            flyc.compile(launch_for(*key), *compile_args_factory())
+            # Metadata-only compilation cannot query the target's CU count.
+            # Warm both bounded traversal modes; runtime selects using the grid.
+            for persistent in (False, True):
+                compile_param = dataclasses.replace(param, persistent=persistent)
+                flyc.compile(
+                    cached_launch(*compile_param.key()), *compile_args_factory()
+                )
             return out
-        # A window that fell back re-resolves, so later windows skip the retry.
-        launch_guarded(
-            launch_for(*key), key, compile_args_factory, dispatch_args, param
+        run_cached_flydsl(
+            cached_launch(*launch_param.key()),
+            constexpr_param=launch_param,
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+            compile_args_factory=compile_args_factory,
         )
     return out
 
