@@ -6,7 +6,6 @@ import unittest
 from types import SimpleNamespace
 
 import sympy
-
 import torch
 from torch._dynamo.source import ConstantSource
 from torch._inductor import config
@@ -1262,6 +1261,25 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 
 @instantiate_parametrized_tests
 class ReductionInvariantIndexingTests(InductorTestCase):
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    def test_reuse_reduction_numel_for_indexing(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn(7, 37, device=GPU_TYPE)
+        expected = fn(x)
+
+        with config.patch({"force_disable_caches": True}):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True, dynamic=True),
+                x,
+                remove_quote=True,
+            )
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(1, len(kernels))
+        FileCheck().check("r0_1 + r0_numel*x0").check_not("ks0").run(kernels[0])
+
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @parametrize("persistent_reductions", [False, True])
     def test_reduction_invariant_masked_index_load(self, persistent_reductions):

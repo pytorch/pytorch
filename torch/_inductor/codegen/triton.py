@@ -19,11 +19,10 @@ from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
-from sympy.printing.precedence import PRECEDENCE
-
 import torch
 import torch._logging
 import torch.utils._pytree as pytree
+from sympy.printing.precedence import PRECEDENCE
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
@@ -3314,6 +3313,90 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
 
+    def finalize_indexing(self, indices: Sequence[sympy.Expr]) -> None:
+        super().finalize_indexing(indices)
+        self._reuse_reduction_numel_for_indexing = False
+        # Staged reductions emit some indexing outside this prepass, so their
+        # complete scalar-argument liveness is not available here.
+        if self.features.indexing_node_schedule is not self.features.node_schedule:
+            return
+
+        allowed_symbol_types = (
+            SymT.SIZE,
+            SymT.UNBACKED_INT,
+            SymT.PRECOMPUTED_SIZE,
+        )
+
+        def size_symbols(exprs: Iterable[sympy.Expr]) -> OrderedSet[sympy.Symbol]:
+            return OrderedSet(
+                symbol
+                for expr in exprs
+                for symbol in expr.free_symbols
+                if symbol_is_type(symbol, allowed_symbol_types)
+            )
+
+        all_indices = [
+            *indices,
+            *(entry.expr for entry in self.range_tree_nodes.values()),
+        ]
+        original_symbols = size_symbols(all_indices)
+        rewritten_symbols = size_symbols(
+            self._replace_reduction_numel_in_index(index, force=True)
+            for index in all_indices
+        )
+        self._reuse_reduction_numel_for_indexing = bool(
+            original_symbols - rewritten_symbols
+        )
+
+    def _replace_reduction_numel_in_index(
+        self, index: sympy.Expr, *, force: bool = False
+    ) -> sympy.Expr:
+        if not force and not self._reuse_reduction_numel_for_indexing:
+            return index
+
+        reduction_numel = self.numels.get("r0_")
+        if reduction_numel is None:
+            return index
+
+        sizevars = V.graph.sizevars
+        reduction_numel = sizevars.simplify(
+            sizevars.remove_precomputed_replacements(reduction_numel)
+        )
+        if not reduction_numel.free_symbols:
+            return index
+
+        r0_numel = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
+        allowed_symbol_types = (
+            SymT.SIZE,
+            SymT.UNBACKED_INT,
+            SymT.PRECOMPUTED_SIZE,
+        )
+
+        def matches(candidate: sympy.Basic) -> bool:
+            if not isinstance(candidate, sympy.Expr):
+                return False
+            if candidate == r0_numel or not candidate.free_symbols:
+                return False
+            if any(
+                not symbol_is_type(symbol, allowed_symbol_types)
+                for symbol in candidate.free_symbols
+            ):
+                return False
+
+            candidate = sizevars.simplify(
+                sizevars.remove_precomputed_replacements(candidate)
+            )
+            return candidate == reduction_numel or sizevars.statically_known_equals(
+                candidate, reduction_numel
+            )
+
+        return index.replace(matches, lambda _: r0_numel)
+
+    def index_to_str(self, index: sympy.Expr) -> str:
+        if not isinstance(index, list):
+            index = self._replace_reduction_numel_in_index(index)
+        return super().index_to_str(index)
+
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
@@ -3327,6 +3410,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self._reuse_reduction_numel_for_indexing = False
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
@@ -7855,7 +7939,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TritonCSEVariable(*args, **kwargs)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
-        line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
+        line = f"{entry.name} = {self.index_to_str(entry.expr)}"
 
         # mix order reduction introduces an extra loop across the x
         # dimension
