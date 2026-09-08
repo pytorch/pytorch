@@ -411,7 +411,7 @@ index 0000000..53e0c8b
 +    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
 +    return to_dtype(x, dtype)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 1b56f44..3c9fff6 100644
+index 1b56f44..b6d9e6b 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -163 +163 @@ from typing import NamedTuple, Optional
@@ -650,7 +650,15 @@ index 1b56f44..3c9fff6 100644
 +                config_constraints=constraints,
 @@ -1411,0 +1551 @@ class EpiMod:
 +                concat_layout=concat_layout,
-@@ -1442,0 +1583 @@ class EpiMod:
+@@ -1439,4 +1579,5 @@ class EpiMod:
+-                # Pinned configs key by identity: they are module-level
+-                # constants in practice; a recreated equal config just
+-                # re-records (correct, one extra cold pass).
+-                None if config is None else id(config),
++                # GemmConfig is a frozen dataclass; key by value so callers
++                # may rebuild an equal config per call (identity keys can
++                # alias a freed config's address and replay its plan).
++                config,
 +                constraints,
 @@ -1526 +1667 @@ class EpiMod:
 -                shape_key = (lead[-1], n, l, str(A.device), num_seqs)

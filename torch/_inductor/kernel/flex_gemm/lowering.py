@@ -7,6 +7,7 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import importlib.util
 from typing import Any, TYPE_CHECKING
@@ -886,9 +887,14 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
     if backend == "QUACK":
+        # The QUACK path rewrites the body in place (1-D capture folding); the
+        # fallback below must re-lower the untouched original.
+        quack_subgraph = dataclasses.replace(
+            subgraph, graph_module=copy.deepcopy(subgraph.graph_module)
+        )
         try:
             return lower_quack_flex_gemm(
-                body_gemm_op, subgraph, args, gemm_kwargs, kernel_options
+                body_gemm_op, quack_subgraph, args, gemm_kwargs, kernel_options
             )
         except QuackScaledMmUnsupported as error:
             fallback_reason = str(error)
