@@ -332,6 +332,15 @@ void destroy_extra_state(void* obj);
 // Python-side snapshot of this code's cache entries) must additionally hold
 // convert_frame.compile_lock, as torch._dynamo.reset() and remove_from_cache
 // do; this function only makes the reset safe against concurrent lookups.
+// Caveat: when a clear parks behind cache_python_depth > 0, the node
+// destruction it defers runs from whichever thread next drains at depth zero,
+// which holds no compile_lock. The compile_lock ordering therefore does NOT
+// cover that deferred drain: a COMPILE that snapshotted raw entry pointers via
+// _get_cache_entries_for_region (non-owning py::cast wrappers, not counted by
+// the lookup-snapshot mechanism) can race it. Reaching this needs a park (a
+// reset() racing a depth>0 lookup) concurrent with a compile on a third
+// thread; the durable fix is to hand back owning references there the way
+// lookup()/create_cache_entry now do.
 // Ownership contract
 // args
 //  - code: Borrowed
