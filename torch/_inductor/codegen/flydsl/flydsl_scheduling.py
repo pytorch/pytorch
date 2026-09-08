@@ -242,7 +242,7 @@ class FlyDSLScheduling(BaseScheduling):
         precompile_shapes = {}
         precompile_strides = {}
         precompile_dtypes = {}
-        output_layout = output_node.get_layout()
+        output_layout = output_node.layout
 
         try:
             for arg_name, input_node in kernel._template_input_args:
