@@ -3600,6 +3600,13 @@ class OutputGraph(OutputGraphCommon):
         """
         # NB: unique_id is unique, even across torch.compile instances
         name = unique_id(prefix)
+        # unique_id is a fresh per-process counter, but a name can already be
+        # bound by another process's baked-in globals: AOTCompiledModel.deserialize
+        # and CompilePackage.install() seed a captured __builtins_dict___N key
+        # into the live module dict, and a later compile in that module would
+        # otherwise regenerate the same name and crash in CleanupHook.create.
+        while name in self.global_scope:
+            name = unique_id(prefix)
         self.install_global_unsafe(name, value)
         return name
 
