@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch._inductor.ir import ComputedBuffer, Pointwise
 from torch._inductor.ops_handler import OpsHandler
@@ -17,27 +17,19 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
-class _Expr:
-    def __init__(self, source: str):
-        self.source = source
-
-    def __str__(self) -> str:
-        return self.source
-
-
-class _EpilogueOps(OpsHandler[Any]):
+class _EpilogueOps(OpsHandler[str]):
     def __init__(self, accumulator_name: str):
         self.accumulator_name = accumulator_name
 
-    def _binary(self, op: str, a: Any, b: Any) -> _Expr:
-        return _Expr(f"({a} {op} {b})")
+    def _binary(self, op: str, x0: str, x1: str) -> str:
+        return f"({x0} {op} {x1})"
 
-    def load(self, name: str, index: Any) -> _Expr:
+    def load(self, name: str, index: str) -> str:
         if name != self.accumulator_name:
             raise NotImplementedError(
                 "FlyDSL GEMM epilogues only support accumulator reads"
             )
-        return _Expr("acc")
+        return "acc"
 
     def constant(self, value: bool | float | int, dtype: torch.dtype) -> str:
         if isinstance(value, float) and not math.isfinite(value):
@@ -46,29 +38,29 @@ class _EpilogueOps(OpsHandler[Any]):
             )
         return repr(value)
 
-    def add(self, x0: Any, x1: Any) -> _Expr:
+    def add(self, x0: str, x1: str) -> str:
         return self._binary("+", x0, x1)
 
-    def sub(self, x0: Any, x1: Any) -> _Expr:
+    def sub(self, x0: str, x1: str) -> str:
         return self._binary("-", x0, x1)
 
-    def mul(self, x0: Any, x1: Any) -> _Expr:
+    def mul(self, x0: str, x1: str) -> str:
         return self._binary("*", x0, x1)
 
-    def neg(self, x0: Any) -> _Expr:
-        return _Expr(f"-({x0})")
+    def neg(self, x0: str) -> str:
+        return f"-({x0})"
 
-    def gt(self, x0: Any, x1: Any) -> _Expr:
+    def gt(self, x0: str, x1: str) -> str:
         return self._binary(">", x0, x1)
 
-    def where(self, condition: Any, input: Any, other: Any) -> _Expr:
-        return _Expr(f"({condition}).select({input}, {other})")
+    def where(self, condition: str, input: str, other: str) -> str:
+        return f"({condition}).select({input}, {other})"
 
-    def maximum(self, x0: Any, x1: Any) -> _Expr:
+    def maximum(self, x0: str, x1: str) -> str:
         return self.where(self.gt(x0, x1), x0, x1)
 
-    def relu(self, x0: Any) -> _Expr:
-        return self.maximum(x0, 0)
+    def relu(self, x0: str) -> str:
+        return self.maximum(x0, "0")
 
 
 def materialize_flydsl_scheduler_epilogue(

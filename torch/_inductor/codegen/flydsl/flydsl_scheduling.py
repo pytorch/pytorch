@@ -63,6 +63,9 @@ class FlyDSLScheduling(BaseScheduling):
             node.get_template_node(), FlyDSLTemplateBuffer
         )
 
+    def is_flydsl_template_or_fused(self, node: BaseSchedulerNode) -> bool:
+        return self.is_flydsl_template(node) or self.is_flydsl_fused_template(node)
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -79,11 +82,6 @@ class FlyDSLScheduling(BaseScheduling):
 
         epilogue_nodes = list(node2.get_nodes())
         if len(epilogue_nodes) != 1:
-            log.debug(
-                "Rejecting FlyDSL GEMM epilogue fusion: expected one epilogue "
-                "node, got %d",
-                len(epilogue_nodes),
-            )
             return False
         epilogue_node = epilogue_nodes[0]
         node = epilogue_node.node
@@ -94,12 +92,6 @@ class FlyDSLScheduling(BaseScheduling):
         ):
             return False
         if node.get_dtype() != template.get_dtype():
-            log.debug(
-                "Rejecting FlyDSL GEMM epilogue fusion: output dtype %s "
-                "does not match GEMM dtype %s",
-                node.get_dtype(),
-                template.get_dtype(),
-            )
             return False
 
         reads = list(epilogue_node.read_writes.reads)
@@ -135,11 +127,6 @@ class FlyDSLScheduling(BaseScheduling):
         if scheduler is None or not scheduler.can_buffer_be_removed_through_fusion(
             template.get_name(), fused_node_names
         ):
-            log.debug(
-                "Rejecting FlyDSL GEMM epilogue fusion: GEMM output %s has "
-                "additional users",
-                template.get_name(),
-            )
             return False
 
         try:
