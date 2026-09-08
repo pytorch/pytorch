@@ -121,7 +121,12 @@ py::object get_backend(PyObject* callback) {
   while (true) {
     if (check_cache_key) {
       py::object key = lookup_optional(current, cache_key_name);
-      if (key) {
+      // operator bool on py::object is a NULL test, not a truthiness test.
+      // A present-but-falsy _torchdynamo_cache_key (None, or the False that
+      // lookup() short-circuits on) is not a real key: treat it as absent and
+      // fall through to the orig-backend chain, so falsy-keyed backends do not
+      // all compare equal under backend_match and cross-serve.
+      if (key && !key.is_none() && !Py_IsFalse(key.ptr())) {
         return key;
       }
     }
