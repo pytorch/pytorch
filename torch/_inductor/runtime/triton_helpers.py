@@ -334,15 +334,9 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
 
 
 @triton.jit
-def min_with_index(value, index, dim):
-    min_value = min2(value, dim)
-    keep = tl.expand_dims(min_value, dim)
-    hit = tl.where(keep != keep, value != value, value == keep)
-    return min_value, _first_index_where(hit, index, dim)
-
-
-@triton.jit
-def _first_index_where(hit, index, dim):
+def _first_index_of(value, result, index, dim):
+    # min2/max2 propagate NaN, so a NaN result is attained by the NaN lanes.
+    hit = (value == tl.expand_dims(result, dim)) | (value != value)
     sentinel = tl.full(
         [1], (1 << (index.dtype.primitive_bitwidth - 1)) - 1, index.dtype
     )
@@ -350,13 +344,29 @@ def _first_index_where(hit, index, dim):
 
 
 @triton.jit
+def min_with_index(value, index, dim):
+    min_value = min2(value, dim)
+    return min_value, _first_index_of(value, min_value, index, dim)
+
+
+@triton.jit
 def max_with_index(value, index, dim):
     # Two native reductions (NaN-propagating max, then the smallest index that
     # attains it) are much cheaper than a tuple reduce with a NaN-aware combine.
     max_value = max2(value, dim)
-    keep = tl.expand_dims(max_value, dim)
-    hit = tl.where(keep != keep, value != value, value == keep)
-    return max_value, _first_index_where(hit, index, dim)
+    return max_value, _first_index_of(value, max_value, index, dim)
+
+
+@triton.jit
+def min_with_index_strict(value, index, dim):
+    return tl.reduce((value, index), dim, minimum_with_index)
+
+
+@triton.jit
+def max_with_index_strict(value, index, dim):
+    # The tuple reduce returns the value of the winning lane, which differs
+    # from the two-pass form only for a tie between -0.0 and 0.0.
+    return tl.reduce((value, index), dim, maximum_with_index)
 
 
 @triton.jit

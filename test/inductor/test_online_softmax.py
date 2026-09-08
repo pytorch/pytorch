@@ -553,14 +553,11 @@ class TestScalarOnlineSoftmax(TestCase):
     }
 
     def check_codegen(
-        self, fn, *args, uses_scalar=True, rtol=1e-3, atol=1e-3, marker=None
+        self, fn, *args, uses_scalar=True, rtol=1e-3, atol=1e-3, marker=MARKER
     ):
         act, (code,) = run_and_get_code(torch.compile(fn), *args)
         self.assertEqual(fn(*args), act, rtol=rtol, atol=atol, equal_nan=True)
-        if uses_scalar:
-            self.assertIn(marker or self.MARKER, code)
-        else:
-            self.assertNotIn(marker or self.MARKER, code)
+        (self.assertIn if uses_scalar else self.assertNotIn)(marker, code)
         return act, code
 
     @inductor_config.patch("triton.scalar_accumulators", False)
@@ -713,7 +710,7 @@ class TestScalarOnlineSoftmax(TestCase):
     def test_strict_signed_zero_max_stays_vector(self):
         x = torch.randn(4, 8193, device=GPU_TYPE)
         _, code = self.check_codegen(
-            lambda t: t.amax(-1), x, uses_scalar=False, marker=self.HINT
+            lambda t: (t.amax(-1), t.argmax(-1)), x, uses_scalar=False, marker=self.HINT
         )
         self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
 
@@ -763,6 +760,15 @@ class TestScalarOnlineSoftmax(TestCase):
         ref_max = torch.compile(lambda t: t.amax(dim=-1, keepdim=True))(x)
         act, _ = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
         self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
+
+    @inductor_config.patch(strict_signed_zero=True)
+    @parametrize("n", [33, 8193])
+    def test_strict_signed_zero_arg_value(self, n):
+        x = torch.zeros(2, n, device=GPU_TYPE)
+        x[:, 0] = -0.0
+        values, indices = torch.compile(lambda t: torch.max(t, -1))(x)
+        self.assertTrue(torch.signbit(values).all())
+        self.assertEqual(indices, torch.zeros_like(indices))
 
     @inductor_config.patch({"triton.max_tiles": 3, "triton.prefer_nd_tiling": True})
     def test_3d_tiling(self):
