@@ -1975,6 +1975,21 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_source_name must not be empty")
             if not callable(base_example_value):
                 raise AssertionError("base_example_value must be callable")
+            # The generic edge above keys on id(base_example_value), which for a
+            # DefaultsSource is the FUNCTION, not the __defaults__/__kwdefaults__
+            # container that actually holds this element. Record the edge on the
+            # real container too, so _keep_container_verbatim can prune an
+            # unpicklable sibling default instead of carrying the whole container
+            # verbatim on the ordinary call-site binding shape.
+            if source_name != "":
+                container = (
+                    base_example_value.__kwdefaults__
+                    if source.is_kw
+                    else base_example_value.__defaults__
+                )
+                self.guard_tree_children.setdefault(id(container), set()).add(
+                    id(example_value)
+                )
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
                     source=base_source_name,
