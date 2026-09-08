@@ -48,7 +48,15 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
     try:
         for param in params:
             param.requires_grad_(True)
-        return _original_unflatten_optim_state_dict(optim, state_dict, info)
+        result = _original_unflatten_optim_state_dict(optim, state_dict, info)
+        empty = [param for param, value in optim.state.items() if not value]
+        for param in empty:
+            optim.state.pop(param, None)
+        if empty:
+            result["state"] = {
+                key: value for key, value in result["state"].items() if value
+            }
+        return result
     finally:
         for param, value in zip(params, requires_grad):
             param.requires_grad_(value)
