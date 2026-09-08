@@ -5,12 +5,10 @@
 name: inductor-rocm-mi350
 
 on:
-  #push:
-  #  branches:
-  #    - main
-  #    - release/*
-  #  tags:
-  #    - ciflow/inductor-rocm-mi350/*
+  push:
+    tags:
+      # temporary: re-comment before merge
+      - ciflow/inductor-rocm-mi350/*
   workflow_dispatch:
 
 concurrency:

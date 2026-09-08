@@ -8,11 +8,10 @@ on:
   #schedule:
   #  - cron: 0 0,3,6,9,12,15,18,21 * * *
   #  - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
-  #push:
-  #  tags:
-  #    - ciflow/periodic-rocm-mi350/*
-  #  branches:
-  #    - release/*
+  push:
+    tags:
+      # temporary: re-comment before merge
+      - ciflow/periodic-rocm-mi350/*
   workflow_dispatch:
 
 concurrency:

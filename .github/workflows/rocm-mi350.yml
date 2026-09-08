@@ -5,9 +5,10 @@
 name: rocm-mi350
 
 on:
-  #push:
-  #  tags:
-  #    - ciflow/rocm-mi350/*
+  push:
+    tags:
+      # temporary: re-comment before merge
+      - ciflow/rocm-mi350/*
   workflow_dispatch:
   #schedule:
   #  - cron: 29 8 * * *  # about 1:29am PDT
