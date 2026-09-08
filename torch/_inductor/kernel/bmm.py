@@ -137,7 +137,7 @@ def _bmm_shared_a_configs(dtype):
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
+    "at::bmm_dtype_out",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
