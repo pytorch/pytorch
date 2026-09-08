@@ -9,6 +9,8 @@ import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
 
+import sympy
+
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -583,6 +585,77 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_default_configs_gated_on_arch_name(self):
+        """A gfx target gets tuned flex defaults only if registered for them.
+
+        get_device_capability() on ROCm reports the gfx major/minor, which
+        neither orders by capability nor identifies the product line, so gating
+        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
+        hands them tables measured on gfx950.
+        """
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.utils import rocm_gfx_arch
+
+        heuristic = ROCmConfigHeuristic()
+        dtype, head_dim = torch.float16, 128
+
+        # the registries are keyed on the bare target, so the features that
+        # gcnArchName carries ("gfx950:sramecc+:xnack-") have to be stripped
+        self.assertNotIn(":", rocm_gfx_arch())
+        self.assertTrue(
+            torch.cuda.get_device_properties(0).gcnArchName.startswith(rocm_gfx_arch())
+        )
+
+        # stands in for any target that has no measured values of its own, and
+        # gives the fallback to compare against without pinning its values here
+        unregistered = "gfx000"
+        # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
+        # length rather than by target, so it is not part of this dispatch.
+        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
+
+        def configs_for(arch, get_configs):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
+                    lambda: arch,
+                ),
+                patch(
+                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                    lambda: False,
+                ),
+            ):
+                return get_configs()
+
+        paths = (
+            (
+                "forward",
+                heuristic.flex_fwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_fwd_configs(
+                    head_dim, sympy.Integer(1024), dtype
+                ),
+            ),
+            (
+                "backward",
+                heuristic.flex_bwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_bwd_configs(head_dim, dtype),
+            ),
+        )
+        for path, registry, get_configs in paths:
+            with self.subTest(path=path):
+                self.assertIn("gfx950", registry)
+                self.assertNotIn(unregistered, registry)
+                fallback = configs_for(unregistered, get_configs)
+                for arch in targets:
+                    configs = configs_for(arch, get_configs)
+                    tuned = registry.get(arch, {}).get((dtype, head_dim))
+                    if tuned is None:
+                        self.assertEqual(configs, fallback, msg=arch)
+                    else:
+                        self.assertEqual(configs, [tuned], msg=arch)
+                        self.assertNotEqual(configs, fallback, msg=arch)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
