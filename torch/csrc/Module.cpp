@@ -93,6 +93,7 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -886,6 +887,22 @@ static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   }
   return THPUtils_packString(
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_getSymbolizeMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  switch (torch::get_symbolize_mode()) {
+    case torch::unwind::Mode::addr2line:
+      return THPUtils_packString("addr2line");
+    case torch::unwind::Mode::fast:
+      return THPUtils_packString("fast");
+    case torch::unwind::Mode::dladdr:
+      return THPUtils_packString("dladdr");
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unknown symbolize mode");
   END_HANDLE_TH_ERRORS
 }
 
@@ -2297,6 +2314,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_get_symbolize_mode", THModule_getSymbolizeMode, METH_NOARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
@@ -2778,6 +2796,25 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_set_cached_tensors_enabled", [](bool enabled) {
     at::caching::set_cached_tensors_enabled(enabled);
+  });
+
+  py_module.def("_set_native_aot_enabled", [](bool enabled) {
+    at::globalContext().setAllowNativeAot(enabled);
+  });
+
+  py_module.def("_get_native_aot_enabled", []() {
+    return at::globalContext().allowNativeAot();
+  });
+
+  // Not a user-facing switch, unlike _set_native_aot_enabled: it masks ops
+  // whose AOT kernels ARE the implementation, changing what the op computes.
+  // Called only by torch._native._unconditional_masked().
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
   });
 
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
