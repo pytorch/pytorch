@@ -144,15 +144,7 @@ jiterator_also_stringify_as(
           return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) /
               std::sqrt(x);
         }),
-    i0e_string) // i0e_string
-
-    // Upcast bfloat16/half input to float for numerical accuracy purposes
-    inline BFloat16 calc_i0e(BFloat16 a) {
-  return calc_i0e(static_cast<float>(a));
-}
-inline Half calc_i0e(Half a) {
-  return calc_i0e(static_cast<float>(a));
-}
+    i0e_string); // i0e_string
 
 #define CENTRAL_RANGE 0.7
 
