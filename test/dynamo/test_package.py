@@ -966,11 +966,14 @@ def add(x, y):
         pkg.uninstall()
 
     def test_failed_install_is_torn_down_when_the_package_dies(self):
-        # install() registers its teardown finalizer BEFORE binding any global,
-        # so a mid-install failure leaves nothing behind: whatever it bound is
-        # gone once the package dies, even though install() raised and handed
-        # the caller no handle to undo it. Force the failure by handing
-        # install() a backends dict missing a required backend.
+        # install() hands the caller no handle to undo a partial install, so
+        # when it fails partway it unwinds its own work before re-raising:
+        # whatever global it bound and entry it installed are gone the moment
+        # install() returns, without waiting for the package to die. The
+        # finalizer stays a backstop for a SUCCESSFUL install dropped without
+        # uninstall() (see test_abandoned_package_uninstalls_on_gc). Force the
+        # failure by handing install() a backends dict missing a required
+        # backend.
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -994,13 +997,20 @@ def add(x, y):
         del backends[resume_entry.backend_ids[0]]
         with self.assertRaisesRegex(RuntimeError, "is not found in the given backends"):
             pkg.install(backends)
-        # Reaching that error means install() bound the resume global and an
-        # entry before it raised: a genuinely partial install to tear down.
+        # install() bound the resume global and installed the earlier entry,
+        # then hit the missing backend and unwound both: the state is already
+        # clean here, before the package dies. A full install of this artifact
+        # binds a resume global and an entry (test_abandoned_package_uninstalls_on_gc
+        # pins counts[0] > 0), so this teardown is over a real partial install,
+        # not a vacuous empty one. Only the shared builtins dict, left in place
+        # by design, may remain.
+        leaked = set(module_dict) - before
+        self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
         del pkg, backends
         gc.collect()
-        # Nothing partial survives -- only the shared builtins dict, left in
-        # place by design, may remain -- and no entries are left.
+        # Death changes nothing install() had not already cleaned up.
         leaked = set(module_dict) - before
         self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
@@ -1165,7 +1175,7 @@ def add(x, y):
             raise AssertionError("pkg_a resume served in pkg_b's region")
 
         for name in resume_a:
-            self.addCleanup(module_dict.__setitem__, name, module_dict[name])
+            self.addCleanup(module_dict.pop, name, None)
             module_dict[name] = _poison
 
         with torch.compiler.set_stance("fail_on_recompile"):
