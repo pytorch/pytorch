@@ -68,7 +68,7 @@ class FlyDSLScheduling(BaseScheduling):
 
     @staticmethod
     def _is_fusable_epilogue(
-        template: FlyDSLTemplateBuffer, epilogue_node: SchedulerNode
+        template: FlyDSLTemplateBuffer, epilogue_node: BaseSchedulerNode
     ) -> bool:
         node = epilogue_node.node
         if not isinstance(node, ComputedBuffer) or not isinstance(node.data, Pointwise):
