@@ -4,7 +4,8 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
-#include <atomic>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,27 +34,14 @@ using TeamPool = std::vector<nvshmem_team_t>;
 class TeamManager {
  public:
   // Constructor
-  explicit TeamManager(const c10::Device device) : device_(device) {
-    instance_.store(this, std::memory_order_release);
-  }
+  explicit TeamManager(const c10::Device device) : device_(device) {}
 
   // Get single, global manager.
-  static TeamManager& get(const c10::Device device) {
-    static TeamManager manager(device);
-    TORCH_CHECK(
-        manager.device_ == device,
-        "Detected use of TeamManager on multiple devices. This is not supported.");
-    return manager;
-  }
+  static TeamManager& get(const c10::Device device);
 
   // Release a group's teams without constructing the singleton if NVSHMEM
   // collectives have not been used in this process.
-  static void release_group_if_initialized(const std::string& group_name) {
-    auto* manager = instance_.load(std::memory_order_acquire);
-    if (manager != nullptr) {
-      manager->release_group(group_name);
-    }
-  }
+  static void release_group_if_initialized(const std::string& group_name);
 
   // Get a team for a group.
   nvshmem_team_t get_team(
@@ -201,12 +189,45 @@ class TeamManager {
 
  private:
   // Device where the team manager is created
+  struct State;
+  static State& state();
+
   const c10::Device device_;
-  inline static std::atomic<TeamManager*> instance_{nullptr};
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
   std::unordered_map<std::string, nvshmem_team_t*> team_pool_devptrs_;
 };
+
+struct TeamManager::State {
+  std::mutex mutex;
+  std::unique_ptr<TeamManager> manager;
+};
+
+inline TeamManager::State& TeamManager::state() {
+  static State state;
+  return state;
+}
+
+inline TeamManager& TeamManager::get(const c10::Device device) {
+  auto& state = TeamManager::state();
+  std::lock_guard lock(state.mutex);
+  if (state.manager == nullptr) {
+    state.manager = std::make_unique<TeamManager>(device);
+  }
+  TORCH_CHECK(
+      state.manager->device_ == device,
+      "Detected use of TeamManager on multiple devices. This is not supported.");
+  return *state.manager;
+}
+
+inline void TeamManager::release_group_if_initialized(
+    const std::string& group_name) {
+  auto& state = TeamManager::state();
+  std::lock_guard lock(state.mutex);
+  if (state.manager != nullptr) {
+    state.manager->release_group(group_name);
+  }
+}
 
 } // namespace c10d::nvshmem_extension
