@@ -1,4 +1,4 @@
-name: Apply MPS bool fix
+name: Repair MPS bool fix
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  repair:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -17,28 +17,49 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Fetch upstream PR
+      - name: Restore Metal file and apply bool-only diff
         run: |
-          git remote add pytorch https://github.com/pytorch/pytorch.git
-          git fetch pytorch 47a43e0ac5ebe768ae78bd88ff8a406764fc94c6
-
-      - name: Apply header
-        run: |
-          git checkout 47a43e0ac5ebe768ae78bd88ff8a406764fc94c6 -- aten/src/ATen/native/mps/kernels/LinearAlgebra.h
+          git checkout e1e34f5f6e9e7b088a4ba3b0fd39a7bfb391c6e6 -- aten/src/ATen/native/mps/kernels/LinearAlgebra.metal
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aten/src/ATen/native/mps/kernels/LinearAlgebra.metal')
+          s = p.read_text()
+          replacements = [
+              ('if (params.transposed == 0u)', 'if (!params.transposed)'),
+              ('(params.transposed == 0u) ? U_b : V_b', 'params.transposed ? V_b : U_b'),
+              ('(params.transposed == 0u) ? params.u_ld : params.v_ld', 'params.transposed ? params.v_ld : params.u_ld'),
+              ('const bool compute_v = params.compute_v != 0u;', 'const bool compute_v = params.compute_v;'),
+              ('const bool upper = params.upper != 0u;', 'const bool upper = params.upper;'),
+          ]
+          for old, new in replacements:
+              assert old in s, old
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add aten/src/ATen/native/mps/kernels/LinearAlgebra.h
-          git commit -m 'fix(mps): treat linear algebra bool params as bool'
-
-      - name: Apply Metal kernel
-        run: |
-          git checkout 47a43e0ac5ebe768ae78bd88ff8a406764fc94c6 -- aten/src/ATen/native/mps/kernels/LinearAlgebra.metal
           git add aten/src/ATen/native/mps/kernels/LinearAlgebra.metal
-          git commit -m 'fix(mps): use bool linear algebra kernel flags'
+          git commit -m 'fix(mps): preserve existing Metal kernel changes with bool flags'
 
-      - name: Apply host code
+      - name: Restore host file and apply bool-only diff
         run: |
-          git checkout 47a43e0ac5ebe768ae78bd88ff8a406764fc94c6 -- aten/src/ATen/native/mps/operations/LinearAlgebra.mm
+          git checkout e1e34f5f6e9e7b088a4ba3b0fd39a7bfb391c6e6 -- aten/src/ATen/native/mps/operations/LinearAlgebra.mm
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aten/src/ATen/native/mps/operations/LinearAlgebra.mm')
+          s = p.read_text()
+          replacements = [
+              ('static_cast<uint32_t>(compute_uv ? 1 : 0)', 'compute_uv'),
+              ('static_cast<uint32_t>(transposed ? 1 : 0)', 'transposed'),
+              ('static_cast<uint32_t>(stage_v ? 1 : 0)', 'stage_v'),
+              ('static_cast<uint32_t>(compute_eigenvectors ? 1 : 0)', 'compute_eigenvectors'),
+              ('static_cast<uint32_t>(upper ? 1 : 0)', 'upper'),
+          ]
+          for old, new in replacements:
+              assert old in s, old
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
           git add aten/src/ATen/native/mps/operations/LinearAlgebra.mm
-          git commit -m 'fix(mps): pass linear algebra bool params as bool'
+          git commit -m 'fix(mps): preserve host linear algebra changes with bool flags'
           git push origin main
