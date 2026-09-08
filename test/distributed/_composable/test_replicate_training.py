@@ -30,6 +30,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -42,17 +43,16 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     get_cycles_per_ms,
     run_tests,
     wrapSwapTensorsTest,
-    HardwareClassification,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
@@ -92,7 +92,9 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
         model(x, ys)
 
 
-instantiate_device_type_tests(TestReplicateForwardInputs, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateForwardInputs, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateRegisteredParams(FSDPTestMultiThread):
@@ -198,7 +200,9 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
 
-instantiate_device_type_tests(TestReplicateRegisteredParams, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateRegisteredParams, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateCastAfterInitPrecision(FSDPTestMultiThread):
@@ -259,7 +263,9 @@ class TestReplicateCastAfterInitPrecision(FSDPTestMultiThread):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
-instantiate_device_type_tests(TestReplicateCastAfterInitPrecision, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateCastAfterInitPrecision, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicate1DTrainingCore(FSDPTest):
@@ -459,7 +465,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-instantiate_device_type_tests(TestReplicate1DTrainingCore, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicate1DTrainingCore, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicate1DTrainingCoreNoHpu(FSDPTest):
@@ -630,7 +638,9 @@ class TestReplicate1DTrainingCoreNoHpu(FSDPTest):
             fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
         ) -> None:
             post_optim_event = (
-                torch.get_device_module(self.device_type).current_stream().record_event()
+                torch.get_device_module(self.device_type)
+                .current_stream()
+                .record_event()
             )
             fsdp_module.set_post_optim_event(post_optim_event)
 
@@ -656,12 +666,19 @@ class TestReplicate1DTrainingCoreNoHpu(FSDPTest):
             losses.append(model(inp).sum())
             losses[-1].backward()
             optim.step()
-            torch.get_device_module(self.device_type)._sleep(int(25 * get_cycles_per_ms()))
+            torch.get_device_module(self.device_type)._sleep(
+                int(25 * get_cycles_per_ms())
+            )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 
 
-instantiate_device_type_tests(TestReplicate1DTrainingCoreNoHpu, globals(), except_for=["cpu", "hpu"], allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicate1DTrainingCoreNoHpu,
+    globals(),
+    except_for=["cpu", "hpu"],
+    allow_xpu=True,
+)
 
 
 class TestReplicateTrainingCompose(FSDPTest):
@@ -798,7 +815,9 @@ class TestReplicateTrainingCompose(FSDPTest):
                 )
 
 
-instantiate_device_type_tests(TestReplicateTrainingCompose, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateTrainingCompose, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateSharedParams(FSDPTest):
@@ -857,7 +876,9 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-instantiate_device_type_tests(TestReplicateSharedParams, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateSharedParams, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateGradientAccumulation(FSDPTest):
@@ -1094,7 +1115,9 @@ class TestReplicateGradientAccumulation(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
-instantiate_device_type_tests(TestReplicateGradientAccumulation, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateGradientAccumulation, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateCustomForwardMethod(FSDPTest):
@@ -1147,7 +1170,9 @@ class TestReplicateCustomForwardMethod(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
-instantiate_device_type_tests(TestReplicateCustomForwardMethod, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateCustomForwardMethod, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 class TestReplicateTPTraining(FSDPTest):
@@ -1246,7 +1271,9 @@ class TestReplicateTPTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp_replicate", "tp"))
 
 
-instantiate_device_type_tests(TestReplicateTPTraining, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateTPTraining, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
