@@ -70,12 +70,12 @@ bool validate_allocation_plan(
     } else if (event.type == EventType::Free) {
       auto it = allocations.find(mem_block);
       TORCH_CHECK(
-          (*it).end_offset == end_offset,
-          "Enf offset of allocation being freed must match the one recorded.");
-      TORCH_CHECK(
           it != allocations.end(),
           "ProfilingAllocator: Allocate event "
           "must have preceded deallocate event.");
+      TORCH_CHECK(
+          (*it).end_offset == end_offset,
+          "End offset of allocation being freed must match the one recorded.");
       allocations.erase(it);
     } else {
       TORCH_CHECK(false, "ProfilingAllocator: Invalid event type.");

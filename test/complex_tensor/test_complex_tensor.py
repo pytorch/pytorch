@@ -32,7 +32,11 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    unMarkDynamoStrictTest,
+)
 
 
 if TYPE_CHECKING:
@@ -128,6 +132,7 @@ EXTRA_KWARGS = {
 
 
 class TestComplexTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _default_dtype_check_enabled = True
 
     @ops(
@@ -141,6 +146,11 @@ class TestComplexTensor(TestCase):
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
+
+
+class TestComplexTensorGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+    _default_dtype_check_enabled = True
 
     def test_get_set_components(self):
         from torch._subclasses.complex_tensor import ComplexTensor
@@ -182,6 +192,7 @@ class TestComplexTensor(TestCase):
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _default_dtype_check_enabled = True
 
     @ops(
@@ -202,6 +213,8 @@ if dist.is_available():
 
     @unMarkDynamoStrictTest
     class TestComplexDistributed(TestCase, MultiProcessTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
         @ops(implemented_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
         def test_distributed(self, device, dtype, op: OpInfo):
             self.check_consistency(device, dtype, op, Variant.Distributed)

@@ -928,19 +928,33 @@ class DTensorRedistributePlanner:
         # Case 6. Replicate() -> Partial(), local math op, applies to:
         #   R* -> P[..., x]
         #
-        # (TODO) Case 7. _StridedShard(a) -> Shard(b), use all-to-all (a2a), applies to:
+        # Case 7. Shard() -> Partial("sum"), local zero-fill, generated only as
+        # a destination-directed transition in find_min_cost_path(), applies to:
+        #   S(a)[..., x] -> P[..., x]
+        # This transition is available only for explicit redistribution.
+        #
+        # Strategy planning assigns it infinite cost. A zero communication cost
+        # would ignore the logical-shape allocation, zero-fill, and shard copy,
+        # causing the planner to over-prefer it.
+        #
+        # Transform planning assigns an explicit request zero search cost because
+        # it requires no communication. This difference is intentional: the
+        # transform planner supports strategy-selected transitions plus additional
+        # explicit-only transitions.
+
+        # (TODO) Case 8. _StridedShard(a) -> Shard(b), use all-to-all (a2a), applies to:
         #   SS(a)[..., x] -> S(b)[..., x]
         #
-        # Case 8. _StridedShard() -> Replicate(), use all-gather, applies to:
+        # Case 9. _StridedShard() -> Replicate(), use all-gather, applies to:
         #   SS(a)[..., x, y, z] -> SS(a)[..., x, y]
         #
-        # (TODO) Case 9. Shard(a) -> _StridedShard(b), use all-to-all (a2a), applies to:
+        # (TODO) Case 10. Shard(a) -> _StridedShard(b), use all-to-all (a2a), applies to:
         #   S(a)[..., x] -> SS(b)[..., x]
         #
-        # (TODO) Case 10. Partial() -> _StridedShard(), use reduce-scatter, applies to:
+        # (TODO) Case 11. Partial() -> _StridedShard(), use reduce-scatter, applies to:
         #   P[..., x, y] -> P[..., x]SS(a)[..., y] or P[..., x, y] -> P[..., y]SS(a)[..., x]
         #
-        # Case 11. Replicate() -> _StridedShard(), use chunk, applies to:
+        # Case 12. Replicate() -> _StridedShard(), use chunk, applies to:
         #   R* -> SS(a)[..., x]
         #
         # NB: Regarding `_StridedShard``, we only allow changing `Replicate` into
@@ -1106,10 +1120,10 @@ class DTensorRedistributePlanner:
         # Additional cases handling for _StridedShard
 
         ######################################################################
-        # TODO(zpcore): handle case 7: _StridedShard() -> Shard() on the same dim
+        # TODO(zpcore): handle case 8: _StridedShard() -> Shard() on the same dim
 
         ######################################################################
-        # handle case 8: _StridedShard() -> Replicate()
+        # handle case 9: _StridedShard() -> Replicate()
         for entry in tensor_mesh_dim_tuple:
             src_tensor_dim = entry.tensor_dim
             src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
@@ -1133,13 +1147,13 @@ class DTensorRedistributePlanner:
             return all_next_state
 
         ######################################################################
-        # TODO(zpcore): handle case 9: Shard() -> _StridedShard()
+        # TODO(zpcore): handle case 10: Shard() -> _StridedShard()
 
         ######################################################################
-        # TODO(zpcore): handle case 10: Partial() -> _StridedShard()
+        # TODO(zpcore): handle case 11: Partial() -> _StridedShard()
 
         ######################################################################
-        # handle case 11: Replicate() -> _StridedShard()
+        # handle case 12: Replicate() -> _StridedShard()
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 continue
@@ -1162,6 +1176,39 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         return all_next_state
+
+    def _get_shard_to_partial_target_states(
+        self, current_state: DistState, dst_state: DistState
+    ) -> dict[DistState, float]:
+        """Generate explicit-only Shard -> Partial("sum") target steps.
+
+        Zero weight means no communication; allocation and copy costs are omitted.
+        This edge is generated only when Partial("sum") is the requested target,
+        so path search cannot use it as an intermediate step to another layout.
+        """
+        next_states: dict[DTensorRedistributePlanner.DistState, float] = {}
+        shard_order = self._ShardOrder_to_dict(current_state.tensor_dim_to_mesh_dim)
+        for entry in current_state.tensor_dim_to_mesh_dim:
+            tensor_dim = entry.tensor_dim
+            mesh_dim = shard_order[tensor_dim][-1]
+            current = current_state.placements[mesh_dim]
+            target = dst_state.placements[mesh_dim]
+            if not (
+                isinstance(current, Shard)
+                and type(target) is Partial
+                and target.reduce_op == "sum"
+            ):
+                continue
+
+            shard_order[tensor_dim].pop()
+            placements = list(current_state.placements)
+            placements[mesh_dim] = target
+            next_state = self.DistState(
+                tuple(placements), self._dict_to_ShardOrder(shard_order)
+            )
+            shard_order[tensor_dim].append(mesh_dim)
+            next_states[next_state] = 0.0
+        return next_states
 
     # TODO(zpcore): if the dst_state contains special placement like
     # `_MaskPartial`, we will never reach that state. Need to support this case.
@@ -1206,7 +1253,11 @@ class DTensorRedistributePlanner:
             visited.add(current_state)
             # get all possible next states and their costs
             next_states = self.get_next_state(
-                current_state.placements, current_state.tensor_dim_to_mesh_dim
+                current_state.placements,
+                current_state.tensor_dim_to_mesh_dim,
+            )
+            next_states.update(
+                self._get_shard_to_partial_target_states(current_state, dst_state)
             )
             for next_state, transition_cost in next_states.items():
                 if next_state not in visited:
@@ -1510,7 +1561,9 @@ def _gen_transform_infos_non_cached(
         # overloaded for two purposes.
         try:
             transform_infos = drp.generate_graph_based_transform_infos(
-                src_spec, dst_spec, src_spec.shape
+                src_spec,
+                dst_spec,
+                src_spec.shape,
             )
         except _StridedShardNotDecodableError:
             transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
@@ -1526,7 +1579,9 @@ def _gen_transform_infos(
     use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
-        src_spec, dst_spec, use_graph_based_transform
+        src_spec,
+        dst_spec,
+        use_graph_based_transform,
     )
 
 
@@ -1571,11 +1626,15 @@ def redistribute_local_tensor(
 
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(
-            current_spec, target_spec, use_graph_based_transform
+            current_spec,
+            target_spec,
+            use_graph_based_transform,
         )
     else:
         transform_infos = _gen_transform_infos(
-            current_spec, target_spec, use_graph_based_transform
+            current_spec,
+            target_spec,
+            use_graph_based_transform,
         )
 
     # Optimize by grouping same-type collectives into flattened operations
@@ -1620,9 +1679,10 @@ def redistribute_local_tensor(
             # This is safe because _StridedShard.is_shard() returns False, so
             # _comm_type_key() returns None and flattening is never attempted.
             if isinstance(current, _StridedShard) or isinstance(target, _StridedShard):
-                assert mesh_to_use is device_mesh, (  # noqa: S101
-                    "_StridedShard redistribute assumes no flattened transforms"
-                )
+                if mesh_to_use is not device_mesh:
+                    raise AssertionError(
+                        "_StridedShard redistribute assumes no flattened transforms"
+                    )
 
             num_chunks = mesh_to_use.size(mesh_dim=i)
 
@@ -1715,8 +1775,19 @@ def redistribute_local_tensor(
                         local_tensor, mesh_to_use, i
                     )
                 elif _is_shard_like(current):
-                    raise RuntimeError(
-                        f"redistribute from {current} to {target} not supported yet"
+                    if (
+                        not isinstance(current, Shard)
+                        or type(target) is not Partial
+                        or target.reduce_op != "sum"
+                    ):
+                        raise RuntimeError(
+                            f"redistribute from {current} to {target} not supported yet"
+                        )
+                    new_local_tensor = current._to_partial_tensor(
+                        local_tensor,
+                        mesh_to_use,
+                        i,
+                        transform_info.logical_shape,
                     )
                 else:
                     if current != target:

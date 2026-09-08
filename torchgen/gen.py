@@ -1490,6 +1490,67 @@ def get_grouped_native_functions(
     )
 
 
+# Windows: merge native forward decls while aggregating per namespace, using a DLL-macro-insensitive
+# equivalence key so the merged header never lists the same symbol twice with different TORCH_* / static prefixes.
+# Tuple entries must include trailing space so we only strip whole macro tokens, not identifiers.
+_NATIVE_DECL_DEDUPE_EXPORT_PREFIXES = (
+    "TORCH_CUDA_CPP_API ",
+    "TORCH_XPU_API ",
+    "TORCH_API ",
+)
+
+
+# Remove leading TORCH_* from one line (including after 'struct '). Used only for compare keys.
+def _strip_native_decl_export_prefix(line: str) -> str:
+    def without_leading_export(s: str) -> str:
+        for p in _NATIVE_DECL_DEDUPE_EXPORT_PREFIXES:
+            if s.startswith(p):
+                return s.removeprefix(p).lstrip()
+        return s
+
+    s = line.strip()
+    if not s:
+        return ""
+    if s.startswith("struct "):
+        return "struct " + without_leading_export(s.removeprefix("struct ").lstrip())
+    return without_leading_export(s)
+
+
+# Join normalized non-empty lines so decls that differ only by TORCH_* DLL export macros share one equivalence key.
+def _decl_equivalence_key_for_dll_macros(decl: str) -> str:
+    parts: list[str] = []
+    for ln in decl.splitlines():
+        normalized = _strip_native_decl_export_prefix(ln)
+        if normalized:
+            parts.append(normalized)
+    return "\n".join(parts)
+
+
+# Collide variants with the same DLL-macro equivalence key; prefer TORCH_API, else keep the first.
+# Only TORCH_* prefixes are stripped when building the key, so a "static " decl (external backends,
+# which do not reach this path anyway) can never share a key with a TORCH_* variant.
+# A TORCH_CUDA_CPP_API / TORCH_XPU_API collision (a "CUDA, XPU: foo" kernel) matches no preference
+# and keeps backend_indices order, i.e. the CUDA variant.
+def _merge_native_decl_variants(existing: str | None, incoming: str) -> str:
+    if existing is None:
+        return incoming
+
+    def first_sig_line(decl: str) -> str:
+        for ln in decl.splitlines():
+            t = ln.strip()
+            if t:
+                return (
+                    t.removeprefix("struct ").lstrip() if t.startswith("struct ") else t
+                )
+        return ""
+
+    pair = (existing, incoming)
+    return (
+        next((v for v in pair if first_sig_line(v).startswith("TORCH_API ")), None)
+        or pair[0]
+    )
+
+
 def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
@@ -1498,7 +1559,7 @@ def get_ns_grouped_kernels(
         [NativeFunctionsGroup | NativeFunction, BackendIndex], list[str]
     ] = dest.compute_native_function_declaration,
 ) -> dict[str, list[str]]:
-    ns_grouped_kernels: dict[str, list[str]] = defaultdict(list)
+    ns_grouped_kernels: dict[str, OrderedDict[str, str]] = defaultdict(OrderedDict)
     for f in grouped_native_functions:
         native_function_namespaces = set()
         dispatch_keys = set()
@@ -1515,10 +1576,21 @@ def get_ns_grouped_kernels(
                     f"Codegen only supports one namespace per operator, "
                     f"got {native_function_namespaces} from {dispatch_keys}"
                 )
-            ns_grouped_kernels[namespace].extend(
-                native_function_decl_gen(f, backend_idx)
-            )
-    return ns_grouped_kernels
+            decls_merged_by_equivalence_key = ns_grouped_kernels[namespace]
+            for decl in native_function_decl_gen(f, backend_idx):
+                if not decl.strip():
+                    continue
+                # Collapse decls that differ only by TORCH_* / static prefix (Windows linkage).
+                equivalence_key = _decl_equivalence_key_for_dll_macros(decl)
+                decls_merged_by_equivalence_key[equivalence_key] = (
+                    _merge_native_decl_variants(
+                        decls_merged_by_equivalence_key.get(equivalence_key), decl
+                    )
+                )
+    return {
+        namespace: list(merged.values())
+        for namespace, merged in ns_grouped_kernels.items()
+    }
 
 
 def get_native_function_declarations_from_ns_grouped_kernels(
@@ -1533,8 +1605,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
             entity_name="",
             max_level=4,
         )
-        # Convert to a set first to remove duplicate kernel names. Backends are
-        # allowed to repeat kernel names; only generate the declaration once!
+        # Backends may repeat kernel names; keep one declaration per string.
         ordered_kernels = list(OrderedDict.fromkeys(kernels))
         declarations.extend(
             f"""
@@ -2959,6 +3030,7 @@ def main() -> None:
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
+    dest.native_functions.validate_cpu_dll_cuda_kernels(backend_indices)
 
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
