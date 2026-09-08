@@ -1732,8 +1732,11 @@ class GuardBuilder(GuardBuilderBase):
             )
             # Record the container->element edge so _keep_container_verbatim can
             # tell an element guarded THROUGH this container from one that merely
-            # shares an id() with an unrelated guarded value elsewhere.
-            if example_value is not None:
+            # shares an id() with an unrelated guarded value elsewhere. Gate on
+            # source_name, the same condition that populated example_value above:
+            # a guard rooted at a None-valued element still records its edge, so
+            # an unpicklable sibling in the same container is still pruned.
+            if source_name != "":
                 self.guard_tree_children.setdefault(id(base_example_value), set()).add(
                     id(example_value)
                 )
