@@ -1,5 +1,6 @@
 import builtins
 import dataclasses
+import functools
 import importlib
 import inspect
 import io
@@ -60,7 +61,9 @@ class CompileArtifacts:
     source_info: "SourceInfo"
     device_type: str
     backend_name: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
     # device_type keeps the collapsed accelerator-wins value for BC; a mixed
     # cpu+accelerator graph still emits native CPU code, so keep the full set.
     device_types: frozenset[str] = frozenset()

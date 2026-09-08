@@ -58,7 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
+    reset_code as _reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
@@ -690,6 +690,21 @@ class OptimizedModule(torch.nn.Module):
         ]
 
 
+def reset_code(code: types.CodeType) -> None:
+    """
+    Drop all cached compiled products for ``code``, forcing a recompile.
+
+    Wraps the raw C binding under ``compile_lock``: an in-flight compile holds
+    a snapshot of this code's cache entries (recompile-reason logging,
+    cache-size accounting) and the reset frees those nodes in place, so a
+    concurrent COMPILE must be excluded per the contract in ``extra_state.h``.
+    """
+    from .convert_frame import compile_lock
+
+    with compile_lock:
+        _reset_code(code)
+
+
 def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
@@ -701,11 +716,11 @@ def remove_from_cache(f: Any) -> None:
     # cache-size accounting) and reset_code frees them in place.
     with compile_lock:
         if isinstance(f, types.CodeType):
-            reset_code(f)
+            _reset_code(f)
         elif hasattr(f, "__code__"):
-            reset_code(f.__code__)
+            _reset_code(f.__code__)
         elif hasattr(getattr(f, "forward", None), "__code__"):
-            reset_code(f.forward.__code__)
+            _reset_code(f.forward.__code__)
         else:
             from . import reset  # type: ignore[attr-defined]
 
