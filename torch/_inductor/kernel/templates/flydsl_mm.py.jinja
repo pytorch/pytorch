@@ -4,7 +4,7 @@ import os
 from flydsl.compiler import jit_argument as flydsl_jit_argument
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
-    launch_gemm_gfx950_no_bias,
+    launch_gemm_gfx950,
     make_gemm_param_and_validate,
 )
 from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
@@ -53,7 +53,7 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
     if executor is None:
         ensure_flydsl_cache_dir()
         executor = flyc.compile(
-            launch_gemm_gfx950_no_bias,
+            launch_gemm_gfx950,
             _static_tensor_arg(output_mn),
             _static_tensor_arg(mat1_mk),
             _static_tensor_arg(mat2_nk),

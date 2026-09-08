@@ -469,48 +469,6 @@ def launch_gemm_gfx950(
     out: fx.Tensor,
     a: fx.Tensor,
     b: fx.Tensor,
-    bias: fx.Tensor,
-    m: fx.Constexpr[int],
-    n: fx.Constexpr[int],
-    k: fx.Constexpr[int],
-    param: GemmGfx950Param,
-    stream: fx.Stream = fx.Stream(None),
-):
-    mma_atom = fx.make_mma_atom(
-        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, fx.BFloat16)
-    )
-    k_per_mfma_group = param.mma_k // 4
-    tiled_mma = fx.make_tiled_mma(
-        mma_atom,
-        fx.make_layout(
-            (param.m_waves, param.n_waves, 1),
-            (param.n_waves, 1, 0),
-        ),
-        fx.make_tile(
-            None,
-            None,
-            fx.make_layout(
-                (k_per_mfma_group, 4),
-                (1, k_per_mfma_group),
-            ),
-        ),
-    )
-    num_pid_m = (m + param.block_m - 1) // param.block_m
-    num_pid_n = (n + param.block_n - 1) // param.block_n
-    gemm_gfx950_kernel._known_block_size = [param.block_threads, 1, 1]
-    gemm_gfx950_kernel._func.__name__ = make_gemm_gfx950_kernel_name(param)
-    gemm_gfx950_kernel(out, a, b, bias, m, n, k, tiled_mma, param).launch(
-        grid=(num_pid_m * num_pid_n, 1, 1),
-        block=(param.block_threads, 1, 1),
-        stream=stream,
-    )
-
-
-@flyc.jit
-def launch_gemm_gfx950_no_bias(
-    out: fx.Tensor,
-    a: fx.Tensor,
-    b: fx.Tensor,
     m: fx.Constexpr[int],
     n: fx.Constexpr[int],
     k: fx.Constexpr[int],
