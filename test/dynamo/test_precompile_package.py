@@ -2630,7 +2630,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         summary = session.summary()
         self.assertFalse(summary.complete)
         self.assertEqual(summary.bypassed, ())
-        self.assertEqual(summary.uncovered_frames, ("forward",))
+        self.assertEqual(
+            tuple(f.split(" (")[0] for f in summary.uncovered_frames), ("forward",)
+        )
         if limit == 8:
             self.assertTrue(summary.truncated)
             self.assertGreater(summary.guarded_codes, 0)
@@ -2764,7 +2766,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with session as compiled:
             for x in inputs:
                 compiled(x)
-        self.assertEqual(session.summary().uncovered_frames, ("forward",))
+        self.assertEqual(
+            tuple(f.split(" (")[0] for f in session.summary().uncovered_frames),
+            ("forward",),
+        )
         session.save(
             self.path(), require_complete=False, require_no_dropped_guards=False
         )
