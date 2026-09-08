@@ -1,12 +1,11 @@
 #pragma once
 
-#include <ATen/AccumulateType.h>
-#include <ATen/NumericUtils.h>
-#include <ATen/jiterator_macros.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/MathConstants.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/MathConstants.h>
+#include <torch/headeronly/util/NumericUtils.h>
+#include <torch/headeronly/util/jiterator_macros.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -18,6 +17,8 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 /* The next function is taken from
 https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
@@ -68,7 +69,6 @@ Output was modified to be inf or -inf when input is 1 or -1. */
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-namespace {
 /*
  * This function is derived from the implementation of the i0e function in the
  * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
@@ -145,7 +145,14 @@ jiterator_also_stringify_as(
               std::sqrt(x);
         }),
     i0e_string) // i0e_string
-} // namespace
+
+    // Upcast bfloat16/half input to float for numerical accuracy purposes
+    inline BFloat16 calc_i0e(BFloat16 a) {
+  return calc_i0e(static_cast<float>(a));
+}
+inline Half calc_i0e(Half a) {
+  return calc_i0e(static_cast<float>(a));
+}
 
 #define CENTRAL_RANGE 0.7
 
@@ -197,10 +204,10 @@ inline typename std::enable_if_t<std::is_floating_point_v<T>, T> calc_erfinv(
   /* Two steps of Newton-Raphson correction */
   x = x -
       (std::erf(x) - y) /
-          ((static_cast<T>(2.0) * c10::frac_1_sqrt_pi<T>)*std::exp(-x * x));
+          ((static_cast<T>(2.0) * frac_1_sqrt_pi<T>)*std::exp(-x * x));
   x = x -
       (std::erf(x) - y) /
-          ((static_cast<T>(2.0) * c10::frac_1_sqrt_pi<T>)*std::exp(-x * x));
+          ((static_cast<T>(2.0) * frac_1_sqrt_pi<T>)*std::exp(-x * x));
 
   return x;
 }
@@ -292,7 +299,7 @@ inline double calc_digamma(double x) {
     // error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * r);
+    return calc_digamma(1 - x) - pi<double> / tan(pi<double> * r);
   }
 
   // Push x to be >= 10
@@ -352,8 +359,7 @@ inline float calc_digamma(float x) {
     // error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    float pi_over_tan_pi_x =
-        (float)(c10::pi<double> / tan(c10::pi<double> * r));
+    float pi_over_tan_pi_x = (float)(pi<double> / tan(pi<double> * r));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
@@ -386,11 +392,11 @@ inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
-inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
+inline BFloat16 calc_digamma(BFloat16 a) {
   return calc_digamma(static_cast<float>(a));
 }
 
-inline c10::Half calc_digamma(c10::Half a) {
+inline Half calc_digamma(Half a) {
   return calc_digamma(static_cast<float>(a));
 }
 
@@ -911,8 +917,8 @@ static scalar_t _igam_helper_asymptotic_series(
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum /
-      std::sqrt(2 * c10::pi<float> * a);
+  res +=
+      sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * pi<float> * a);
 
   return res;
 }
@@ -1105,57 +1111,29 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
-    c10::BFloat16 a,
-    c10::BFloat16 x) {
+[[maybe_unused]] inline BFloat16 calc_igamma<BFloat16>(BFloat16 a, BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
-    c10::Half a,
-    c10::Half x) {
+[[maybe_unused]] inline Half calc_igamma<Half>(Half a, Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
-    c10::BFloat16 a,
-    c10::BFloat16 x) {
+[[maybe_unused]] inline BFloat16 calc_igammac<BFloat16>(
+    BFloat16 a,
+    BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
-    c10::Half a,
-    c10::Half x) {
+[[maybe_unused]] inline Half calc_igammac<Half>(Half a, Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
-inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) {
+inline BFloat16 calc_erfinv(BFloat16 a) {
   return calc_erfinv(float(a));
-}
-
-template <typename T>
-inline T abs_impl(T v) {
-  return std::abs(v);
-}
-
-template <>
-[[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
-  return v;
-}
-
-template <typename T>
-inline typename std::enable_if_t<std::is_integral_v<T>, T> calc_gcd(T a, T b) {
-  a = abs_impl(a);
-  b = abs_impl(b);
-  while (a != 0) {
-    T c = a;
-    a = b % a;
-    b = c;
-  }
-  return b;
 }
 
 template <typename T>
@@ -1164,17 +1142,17 @@ C10_HOST_DEVICE T exp2_impl(T x) {
 }
 
 template <typename T>
-C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
+C10_HOST_DEVICE complex<T> exp2_impl(complex<T> x) {
   // There is no std::exp2 overload for complex, so instead
   // use the identity 2^x = e^(ln(2) * x)
-  constexpr auto ln2 = c10::ln_2<T>;
+  constexpr auto ln2 = ln_2<T>;
   return std::exp(ln2 * x);
 }
 
 /*
  * This function is derived from the implementation of the chbevl function in
- * the Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
- * Library].
+ * the Cephes Math Library. See note
+ * [3-Clause BSD License for the Cephes Math Library].
  *
  * Evaluates the series
  *
@@ -1186,16 +1164,17 @@ C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
  *
  * of Chebyshev polynomials Ti at argument x/2.
  *
- * Coefficients are stored in reverse order, i.e. the zero order term is last in
- * the array.  Note len is the number of coefficients, not the order.
+ * Coefficients are stored in reverse order, i.e. the zero order term is last
+ * in the array. Note len is the number of coefficients, not the order.
  *
- * If coefficients are for the interval a to b, x must have been transformed to
- * x -> 2(2x - b - a)/(b-a) before entering the routine.  This maps x from (a,
- * b) to (-1, 1), over which the Chebyshev polynomials are defined.
+ * If coefficients are for the interval a to b, x must have been transformed
+ * to x -> 2(2x - b - a)/(b-a) before entering the routine. This maps x from
+ * (a, b) to (-1, 1), over which the Chebyshev polynomials are defined.
  *
- * If the coefficients are for the inverted interval, in which (a, b) is mapped
- * to (1/b, 1/a), the transformation required is x -> 2(2ab/x - b - a)/(b-a). If
- * b is infinity, this becomes x -> 4a/x - 1.
+ * If the coefficients are for the inverted interval, in which (a, b) is
+ * mapped to (1/b, 1/a), the transformation required is
+ * x -> 2(2ab/x - b - a)/(b-a). If b is infinity, this becomes
+ * x -> 4a/x - 1.
  */
 template <typename T>
 inline typename std::enable_if_t<std::is_floating_point_v<T>, T> chbevl(
@@ -1292,11 +1271,28 @@ inline typename std::enable_if_t<std::is_floating_point_v<T>, T> calc_i0(T _x) {
 }
 
 // Upcast bfloat16/half input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i0(c10::BFloat16 a) {
+inline BFloat16 calc_i0(BFloat16 a) {
   return calc_i0(static_cast<float>(a));
 }
-inline c10::Half calc_i0(c10::Half a) {
+inline Half calc_i0(Half a) {
   return calc_i0(static_cast<float>(a));
 }
 
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
 C10_CLANG_DIAGNOSTIC_POP()
+
+using torch::headeronly::calc_digamma;
+using torch::headeronly::calc_erfinv;
+using torch::headeronly::calc_i0;
+using torch::headeronly::calc_i0e;
+using torch::headeronly::calc_igamma;
+using torch::headeronly::calc_igammac;
+using torch::headeronly::chbevl;
+using torch::headeronly::chebyshev_coefficients_i0e_A;
+using torch::headeronly::chebyshev_coefficients_i0e_B;
+using torch::headeronly::exp2_impl;
+using torch::headeronly::polevl;
+#if defined(__CUDACC__) || defined(__HIPCC__)
+using torch::headeronly::i0e_string;
+#endif
