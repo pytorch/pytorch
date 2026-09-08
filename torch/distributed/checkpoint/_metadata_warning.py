@@ -9,6 +9,9 @@ _warning_lock = threading.Lock()
 def install() -> None:
     from .filesystem import FileSystemReader
 
+    if getattr(FileSystemReader, "_native_neo_metadata_warning_installed", False):
+        return
+
     original_read_metadata = FileSystemReader.read_metadata
 
     def read_metadata(self, *args, **kwargs):
@@ -27,5 +30,6 @@ def install() -> None:
         return result
 
     FileSystemReader.read_metadata = read_metadata
+    FileSystemReader._native_neo_metadata_warning_installed = True
 
 __all__ = ["install"]
