@@ -133,6 +133,8 @@ def _patch_consolidate_hf_safetensors() -> None:
     consolidate._parse_input_metadata = parse_input_metadata
 
 
-_state_dict._unflatten_optim_state_dict = _unflatten_optim_state_dict
+if not getattr(_state_dict, "_native_neo_grad_dtype_installed", False):
+    _state_dict._unflatten_optim_state_dict = _unflatten_optim_state_dict
+    _state_dict._native_neo_grad_dtype_installed = True
 
 __all__ = ["_init_optim_state", "_patch_consolidate_hf_safetensors"]
