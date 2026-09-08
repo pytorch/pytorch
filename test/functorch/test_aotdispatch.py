@@ -90,6 +90,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCUDAIf,
     skipOps,
+    skipXPUIf,
     tol,
     toleranceOverride,
 )
@@ -6655,6 +6656,8 @@ def _make_effectful_op(name):
 
 
 class TestPartitioning(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -10036,21 +10039,22 @@ def forward(self, primals_1, tangents_1):
 class TestPartitioningDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @onlyAccelerator
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
+    def test_autocast(self, device):
+        mod = torchvision.models.resnet18().to(device)
         mod.train()
 
-        x = torch.randn(16, 3, 32, 32, device="cuda")
+        x = torch.randn(16, 3, 32, 32, device=device)
         aot_mod = memory_efficient_fusion(mod)
 
         # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
+        device_type = torch.device(device).type
+        with torch.amp.autocast(device_type, enabled=True):
             res = aot_mod(x)
         res.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @onlyAccelerator
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
 
@@ -10137,7 +10141,7 @@ class TestPartitioningDevice(AOTTestCase):
         finally:
             handle.destroy()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @onlyAccelerator
     def test_force_save_effectful_ops_nested_tuple(self):
         """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
 
@@ -10231,8 +10235,9 @@ class TestPartitioningDevice(AOTTestCase):
 
     # --- FunctionalizedRngRuntimeWrapper codegen tests ---
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_emitted(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_emitted(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
             with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -10240,7 +10245,7 @@ class TestPartitioningDevice(AOTTestCase):
                 def f(x):
                     return torch.rand_like(x) + x
 
-                x = torch.randn(4, device="cuda")
+                x = torch.randn(4, device=device)
                 f(x)
 
         self.assertEqual(
@@ -10252,23 +10257,25 @@ class TestPartitioningDevice(AOTTestCase):
         self.assertIn("_get_rng_state_", source)
         self.assertIn("_set_offset_", source)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_correctness(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_correctness(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
 
             @torch.compile(backend="aot_eager")
             def f(x):
                 return torch.rand_like(x)
 
-            x = torch.randn(8, device="cuda")
+            x = torch.randn(8, device=device)
             out = f(x)
 
         self.assertEqual(out.shape, x.shape)
         self.assertEqual(out.device, x.device)
         self.assertTrue((out >= 0).all() and (out <= 1).all())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_multi_output(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_multi_output(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
 
             @torch.compile(backend="aot_eager")
@@ -10276,21 +10283,22 @@ class TestPartitioningDevice(AOTTestCase):
                 noise = torch.rand_like(x)
                 return x + noise, x * 2
 
-            x = torch.randn(4, device="cuda")
+            x = torch.randn(4, device=device)
             out1, out2 = f(x)
 
         self.assertEqual(out2, x * 2)
         self.assertEqual(out1.shape, x.shape)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_advances_state(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_advances_state(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
 
             @torch.compile(backend="aot_eager")
             def f(x):
                 return torch.rand_like(x)
 
-            x = torch.randn(100, device="cuda")
+            x = torch.randn(100, device=device)
             out1 = f(x)
             out2 = f(x)
 
@@ -10299,8 +10307,9 @@ class TestPartitioningDevice(AOTTestCase):
             "Successive calls should produce different random outputs",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_source_structure(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_source_structure(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
             with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -10308,7 +10317,7 @@ class TestPartitioningDevice(AOTTestCase):
                 def f(x):
                     return torch.rand_like(x)
 
-                f(torch.randn(4, device="cuda"))
+                f(torch.randn(4, device=device))
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
@@ -10316,15 +10325,16 @@ class TestPartitioningDevice(AOTTestCase):
         self.assertIn("extend", source)
         self.assertIn("outs[", source)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_training(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_functionalized_rng_codegen_training(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
 
             @torch.compile(backend="aot_eager")
             def f(x):
                 return torch.rand_like(x) * x
 
-            x = torch.randn(4, device="cuda", requires_grad=True)
+            x = torch.randn(4, device=device, requires_grad=True)
             out = f(x)
             out.sum().backward()
 
@@ -10334,8 +10344,9 @@ class TestPartitioningDevice(AOTTestCase):
 
     # --- Backward prologue codegen tests ---
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_backward_prologue_rng_codegen(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_backward_prologue_rng_codegen(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
             with capture_codegen_source("backward_prologue") as captured:
 
@@ -10343,7 +10354,7 @@ class TestPartitioningDevice(AOTTestCase):
                 def f(x):
                     return torch.rand_like(x) + x
 
-                x = torch.randn(4, device="cuda", requires_grad=True)
+                x = torch.randn(4, device=device, requires_grad=True)
                 out = f(x)
                 out.sum().backward()
 
@@ -10353,8 +10364,9 @@ class TestPartitioningDevice(AOTTestCase):
 
     # --- CompiledFunction.forward codegen tests ---
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_compiled_forward_rng_codegen(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5255")
+    def test_compiled_forward_rng_codegen(self, device):
         # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
         # requires recomputable RNG ops (e.g. from activation checkpointing).
         from torch.utils.checkpoint import checkpoint
@@ -10368,7 +10380,7 @@ class TestPartitioningDevice(AOTTestCase):
             def f(x):
                 return checkpoint(gn, x, use_reentrant=False)
 
-            x = torch.randn(4, device="cuda", requires_grad=True)
+            x = torch.randn(4, device=device, requires_grad=True)
             out = f(x)
             out.sum().backward()
 
@@ -10378,8 +10390,9 @@ class TestPartitioningDevice(AOTTestCase):
 
     # --- CompiledFunction.backward codegen tests ---
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_compiled_backward_rng_codegen(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5255")
+    def test_compiled_backward_rng_codegen(self, device):
         # _rng_add_ is emitted when num_graphsafe_rng_states > 0, which
         # requires recomputable RNG ops (e.g. from activation checkpointing),
         # not functionalize_rng_ops (a separate mechanism using seed/offset).
@@ -10394,7 +10407,7 @@ class TestPartitioningDevice(AOTTestCase):
             def f(x):
                 return checkpoint(gn, x, use_reentrant=False)
 
-            x = torch.randn(4, device="cuda", requires_grad=True)
+            x = torch.randn(4, device=device, requires_grad=True)
             out = f(x)
             out.sum().backward()
 
@@ -10402,23 +10415,25 @@ class TestPartitioningDevice(AOTTestCase):
         source = captured[0]
         self.assertIn("_rng_add_(_ctx_", source)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_compiled_backward_rng_correctness(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_compiled_backward_rng_correctness(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
 
             @torch.compile(backend="aot_eager")
             def f(x):
                 return torch.rand_like(x) + x
 
-            x = torch.randn(4, device="cuda", requires_grad=True)
+            x = torch.randn(4, device=device, requires_grad=True)
             out = f(x)
             out.sum().backward()
             self.assertEqual(x.grad, torch.ones_like(x))
 
     # --- Backward epilogue codegen tests ---
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_backward_epilogue_rng_codegen(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_backward_epilogue_rng_codegen(self, device):
         with torch._functorch.config.patch(functionalize_rng_ops=True):
             with capture_codegen_source("backward_epilogue") as captured:
 
@@ -10426,7 +10441,7 @@ class TestPartitioningDevice(AOTTestCase):
                 def f(x):
                     return torch.rand_like(x) + x
 
-                x = torch.randn(4, device="cuda", requires_grad=True)
+                x = torch.randn(4, device=device, requires_grad=True)
                 out = f(x)
                 out.sum().backward()
 
@@ -10434,12 +10449,13 @@ class TestPartitioningDevice(AOTTestCase):
         source = captured[0]
         self.assertIn("_set_offset_", source)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_backward_epilogue_rng_correctness(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_backward_epilogue_rng_correctness(self, device):
         def f(x):
             return torch.rand_like(x) + x * 2
 
-        x_ref = torch.randn(4, device="cuda", requires_grad=True)
+        x_ref = torch.randn(4, device=device, requires_grad=True)
         torch.manual_seed(42)
         out_ref = f(x_ref)
         out_ref.sum().backward()
@@ -10457,8 +10473,9 @@ class TestPartitioningDevice(AOTTestCase):
 
         self.assertEqual(x.grad, x_ref.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_backward_epilogue_tokens_and_rng_codegen(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_backward_epilogue_tokens_and_rng_codegen(self, device):
         from torch._higher_order_ops.effects import _register_effectful_op
         from torch._library.effects import EffectType
 
@@ -10484,7 +10501,7 @@ class TestPartitioningDevice(AOTTestCase):
                             x
                         ) * 2 + torch.rand_like(x)
 
-                    x = torch.randn(4, device="cuda", requires_grad=True)
+                    x = torch.randn(4, device=device, requires_grad=True)
                     f(x).sum().backward()
 
             self.assertEqual(len(captured), 1)
@@ -10498,8 +10515,9 @@ class TestPartitioningDevice(AOTTestCase):
             h1.destroy()
             h2.destroy()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_backward_epilogue_tokens_and_rng_correctness(self):
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1970")
+    def test_backward_epilogue_tokens_and_rng_correctness(self, device):
         from torch._higher_order_ops.effects import _register_effectful_op
         from torch._library.effects import EffectType
 
@@ -10524,16 +10542,16 @@ class TestPartitioningDevice(AOTTestCase):
                         x
                     )
 
-                x = torch.randn(4, device="cuda", requires_grad=True)
+                x = torch.randn(4, device=device, requires_grad=True)
                 f(x).sum().backward()
 
-            self.assertEqual(x.grad, torch.full((4,), 2.0, device="cuda"))
+            self.assertEqual(x.grad, torch.full((4,), 2.0, device=device))
         finally:
             h1.destroy()
             h2.destroy()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_in_checkpoint_accumulated_grad(self):
+    @onlyAccelerator
+    def test_register_hook_in_checkpoint_accumulated_grad(self, device):
         def body(y):
             y.register_hook(lambda grad: grad * 0.5)
             return y.clone()
@@ -10543,7 +10561,7 @@ class TestPartitioningDevice(AOTTestCase):
             z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
             return z + y
 
-        x = torch.randn(4, device="cuda", requires_grad=True)
+        x = torch.randn(4, device=device, requires_grad=True)
         out = fn(x)
         out.sum().backward()
         eager_grad = x.grad.clone()
@@ -10554,29 +10572,30 @@ class TestPartitioningDevice(AOTTestCase):
         out2.sum().backward()
         self.assertEqual(x2.grad, eager_grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_control_deps_mixed_fwd_bw_deps_e2e(self):
+    @onlyAccelerator
+    def test_control_deps_mixed_fwd_bw_deps_e2e(self, device):
         """Forward compilation and backward must not crash when
         wait_stream's control_deps collects forward deps."""
+        device_type = torch.device(device).type
 
         def fn(x, w):
-            s1 = torch.cuda.Stream()
-            s1.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s1):
+            s1 = torch.get_device_module(device_type).Stream()
+            s1.wait_stream(torch.get_device_module(device_type).current_stream())
+            with torch.get_device_module(device_type).stream(s1):
                 h = x @ w
-            ev = torch.cuda.Event()
+            ev = torch.get_device_module(device_type).Event()
             ev.record(s1)
             ev.wait()
             return h
 
-        w = torch.randn(64, 64, device="cuda", requires_grad=True)
-        x = torch.randn(4, 64, device="cuda", requires_grad=True)
+        w = torch.randn(64, 64, device=device, requires_grad=True)
+        x = torch.randn(4, 64, device=device, requires_grad=True)
         compiled = torch.compile(fn, backend="aot_eager")
         out = compiled(x, w)
         out.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_device_valued_node(self):
+    @onlyAccelerator
+    def test_min_cut_partitions_device_valued_node(self, device):
         """A device-valued node must be placeable, not just sizeable.
 
         Sizing it as zero (test_size_of_device_valued_node) only gets past the first
@@ -10603,10 +10622,10 @@ class TestPartitioningDevice(AOTTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+                self.w = torch.nn.Parameter(torch.randn(64, 64, device=device))
 
             def forward(self, x):
-                w = self.w.to(device="cuda", dtype=torch.bfloat16)
+                w = self.w.to(device=device, dtype=torch.bfloat16)
                 return (x @ w).relu().sum()
 
         backend = aot_autograd(
@@ -10615,8 +10634,8 @@ class TestPartitioningDevice(AOTTestCase):
             partition_fn=min_cut_rematerialization_partition,
         )
         torch._dynamo.reset()
-        model = M().cuda()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        model = M().to(device)
+        x = torch.randn(64, 64, device=device, dtype=torch.bfloat16, requires_grad=True)
         with torch.compiler.config.patch(compile_on_one_rank=True):
             torch.compile(model, backend=backend, fullgraph=True)(x).backward()
         self.assertIsNotNone(x.grad)
@@ -12845,7 +12864,9 @@ instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
-instantiate_device_type_tests(TestPartitioningDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestPartitioningDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
