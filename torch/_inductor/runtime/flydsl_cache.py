@@ -12,7 +12,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
 
 # Serialize cold compiles process-wide; warm cache hits bypass this lock.
@@ -112,3 +112,39 @@ def configure_flydsl_cache_dir() -> str:
     resolved = str(_cache_dir())
     os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = resolved
     return resolved
+
+
+def flydsl_tensor_arg(tensor: Any) -> Any:
+    import flydsl.compiler as flyc
+
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+def precompile_flydsl(
+    kernel: Callable[..., Any],
+    shapes: Mapping[str, Sequence[int]],
+    strides: Mapping[str, Sequence[int]],
+    dtypes: Mapping[str, str],
+    flydsl_gpu_arch: str | None = None,
+) -> None:
+    """Warm the disk cache without allocating tensors or launching a kernel."""
+    import torch
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    updates = {"COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+    # Cold launches must not observe FlyDSL's process-global compile-only mode.
+    # Warm launches call the cached dispatcher directly and do not read it.
+    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
+        tensors = {
+            name: torch.empty_strided(
+                tuple(shape),
+                tuple(strides[name]),
+                dtype=getattr(torch, dtypes[name]),
+                device="cpu",
+            )
+            for name, shape in shapes.items()
+        }
+        configure_flydsl_cache_dir()
+        kernel(**tensors, stream=0, compile_only=True)
