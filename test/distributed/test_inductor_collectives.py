@@ -798,6 +798,191 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    @unittest.skipUnless(TEST_XPU, "XPUGraph test requires XPU")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_into_tensor_inductor_xpugraph(self):
+        def example(a, b, *, tag, ranks, group_size):
+            c = torch.matmul(a, b)
+            ag = torch.ops.c10d_functional.all_gather_into_tensor(
+                c, tag, ranks, group_size
+            )
+            ag = torch.ops.c10d_functional.wait_tensor(ag)
+            return ag * 2
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            static_a = torch.ones(4, 4, device=self.device) + self.rank
+            static_b = torch.ones(4, 4, device=self.device) + self.rank
+
+            compiled_fn = torch.compile(
+                example,
+                backend="inductor",
+                fullgraph=True,
+            )
+
+            # Compile the function and initialize XCCL resources before capture.
+            compiled_out = compiled_fn(static_a, static_b)
+            for _ in range(2):
+                compiled_out = compiled_fn(static_a, static_b)
+            torch.xpu.synchronize()
+
+            static_output = torch.empty_like(compiled_out)
+            graph = torch.xpu.XPUGraph()
+
+            with torch.xpu.graph(graph):
+                static_output.copy_(compiled_fn(static_a, static_b))
+
+            torch.xpu.synchronize()
+
+            for iteration in range(10):
+                value = float(self.rank + iteration + 1)
+                static_a.fill_(value)
+                static_b.fill_(value)
+
+                graph.replay()
+                torch.xpu.synchronize()
+
+                expected = torch.cat(
+                    [
+                        torch.full(
+                            (4, 4),
+                            8.0 * float(rank + iteration + 1) ** 2,
+                            device=self.device,
+                        )
+                        for rank in range(self.world_size)
+                    ],
+                    dim=0,
+                )
+                if not same(expected, static_output, tol=0.001):
+                    self.fail(
+                        f"rank={self.rank}, iteration={iteration}, "
+                        f"expected={expected.cpu()}, actual={static_output.cpu()}"
+                    )
+
+            graph.reset()
+
+    @unittest.skipUnless(TEST_XPU, "XPUGraph test requires XPU")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_inductor_xpugraph(self):
+        def example(a, b, *, tag, ranks, group_size):
+            c = torch.matmul(a, b)
+            rs = torch.ops.c10d_functional.reduce_scatter_tensor(
+                c, "sum", tag, ranks, group_size
+            )
+            rs = torch.ops.c10d_functional.wait_tensor(rs)
+            return rs * 2
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            static_a = torch.ones(4, 4, device=self.device) + self.rank
+            static_b = torch.ones(4, 4, device=self.device) + self.rank
+
+            compiled_fn = torch.compile(
+                example,
+                backend="inductor",
+                fullgraph=True,
+            )
+
+            # Compile the function and initialize XCCL resources before capture.
+            compiled_out = compiled_fn(static_a, static_b)
+            for _ in range(2):
+                compiled_out = compiled_fn(static_a, static_b)
+            torch.xpu.synchronize()
+
+            static_output = torch.empty_like(compiled_out)
+            graph = torch.xpu.XPUGraph()
+
+            with torch.xpu.graph(graph):
+                static_output.copy_(compiled_fn(static_a, static_b))
+
+            torch.xpu.synchronize()
+
+            for iteration in range(10):
+                value = float(self.rank + iteration + 1)
+                static_a.fill_(value)
+                static_b.fill_(value)
+
+                graph.replay()
+                torch.xpu.synchronize()
+
+                expected_value = 8.0 * sum(
+                    float(rank + iteration + 1) ** 2 for rank in range(self.world_size)
+                )
+                expected = torch.full_like(static_output, expected_value)
+                if not same(expected, static_output, tol=0.001):
+                    self.fail(
+                        f"rank={self.rank}, iteration={iteration}, "
+                        f"expected={expected.cpu()}, actual={static_output.cpu()}"
+                    )
+
+            graph.reset()
+
+    @unittest.skipUnless(TEST_XPU, "XPUGraph test requires XPU")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_inductor_xpugraph(self):
+        def example(a, b, *, tag, ranks, group_size):
+            c = torch.matmul(a, b)
+            ar = torch.ops.c10d_functional.all_reduce(c, "sum", tag, ranks, group_size)
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            return ar * 2
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            static_a = torch.ones(4, 4, device=self.device) + self.rank
+            static_b = torch.ones(4, 4, device=self.device) + self.rank
+
+            compiled_fn = torch.compile(
+                example,
+                backend="inductor",
+                fullgraph=True,
+            )
+
+            # Compile and initialize XCCL resources before XPUGraph capture.
+            compiled_out = compiled_fn(static_a, static_b)
+            for _ in range(2):
+                compiled_out = compiled_fn(static_a, static_b)
+            torch.xpu.synchronize()
+
+            static_output = torch.empty_like(compiled_out)
+            graph = torch.xpu.XPUGraph()
+
+            with torch.xpu.graph(graph):
+                static_output.copy_(compiled_fn(static_a, static_b))
+
+            torch.xpu.synchronize()
+
+            for iteration in range(10):
+                value = float(self.rank + iteration + 1)
+                static_a.fill_(value)
+                static_b.fill_(value)
+
+                graph.replay()
+                torch.xpu.synchronize()
+
+                expected_value = 8.0 * sum(
+                    float(rank + iteration + 1) ** 2 for rank in range(self.world_size)
+                )
+                expected = torch.full_like(static_output, expected_value)
+                if not same(expected, static_output, tol=0.001):
+                    self.fail(
+                        f"rank={self.rank}, iteration={iteration}, "
+                        f"expected={expected.cpu()}, actual={static_output.cpu()}"
+                    )
+
+            graph.reset()
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
