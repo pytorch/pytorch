@@ -4737,6 +4737,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         guard reads it, which pruning would break). When a guard is rooted at a
         value INSIDE a plain container it is pruned per value -- else an unguarded
         unpicklable sibling (a threading.Lock a decorator stashed) fails the dump.
+
+        The verbatim and per-value cases are not framed as mutually exclusive by
+        accident: for every plain-container guard shape emitted today, at most
+        one holds. A whole-container EQUALS_MATCH/length guard records no
+        child->element edge (so the container stays verbatim), and a dict
+        EQUALS_MATCH decomposes into per-element guards that each register their
+        value (so pruning stays lossless). A future guard that both reads a plain
+        container whole AND roots an edge at one of its elements would fall here
+        and prune it -- a silent cache miss, not an error; a tracked limitation
+        should such a shape ever be added.
         """
         if not self._keep(container):
             return False
@@ -5469,9 +5479,9 @@ def pickle_guards_state(
         # that never memoizes, overflows the recursion limit here. That is a
         # serialization limit, not a compiler bug: bypass it (or raise under
         # strict_precompile) like any other unpicklable value, rather than
-        # hard-failing a program that compiled fine before. The path diagnostic
-        # is skipped deliberately -- it would recurse again off an already
-        # exhausted stack.
+        # hard-failing a program that compiled fine before. Walking the object
+        # graph to report WHERE the overflow happened is skipped deliberately --
+        # it would recurse again off an already exhausted stack.
         raise torch._dynamo.exc.PackageError(
             "guard state exceeded the recursion limit while pickling"
         ) from e
