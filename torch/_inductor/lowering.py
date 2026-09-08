@@ -3114,6 +3114,75 @@ def inductor_force_stride_order(input_tensor, stride):
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
+@register_lowering(
+    inductor_prims.to_padded_blocked,
+    type_promotion_kind=None,
+)
+def to_padded_blocked(
+    values,
+    logical_row_chunk,
+    physical_row_chunk,
+    row_inner,
+    col_inner,
+    padding_value,
+):
+    """Convert values to a padded, two-way interleaved blocked layout."""
+    values_size = list(values.get_size())
+    if len(values_size) != 2:
+        raise AssertionError("values must be two-dimensional")
+    inductor_prims.check_padded_blocked_layout(
+        logical_row_chunk, physical_row_chunk, row_inner, col_inner
+    )
+
+    rows, cols = values_size
+    col_chunk = 2 * col_inner
+    padded_rows = CeilDiv(rows, logical_row_chunk) * physical_row_chunk
+    padded_cols = CeilDiv(cols, col_chunk) * col_chunk
+    output_numel = padded_rows * padded_cols
+
+    values_loader = values.make_loader()
+
+    def inner_fn(index):
+        # Invert the physical layout: recover which logical (row, col) each
+        # padded output element draws from. Elements with no source are padding.
+        linear = index[0]
+        row_half = Mod(linear, 2)
+        linear = FloorDiv(linear, 2)
+        col_half = Mod(linear, 2)
+        linear = FloorDiv(linear, 2)
+        row_lane = Mod(linear, row_inner)
+        linear = FloorDiv(linear, row_inner)
+        col_lane = Mod(linear, col_inner)
+        linear = FloorDiv(linear, col_inner)
+        col_blocks = FloorDiv(padded_cols, col_chunk)
+        col_outer = Mod(linear, col_blocks)
+        row_outer = FloorDiv(linear, col_blocks)
+        physical_row = row_outer * (2 * row_inner) + row_lane + row_half * row_inner
+        physical_row_in_chunk = Mod(physical_row, physical_row_chunk)
+        logical_row = (
+            FloorDiv(physical_row, physical_row_chunk) * logical_row_chunk
+            + physical_row_in_chunk
+        )
+        logical_col = col_outer * col_chunk + col_lane + col_half * col_inner
+        valid = ops.and_(
+            ops.index_expr(physical_row_in_chunk < logical_row_chunk, torch.bool),
+            ops.and_(
+                ops.index_expr(logical_row < rows, torch.bool),
+                ops.index_expr(logical_col < cols, torch.bool),
+            ),
+        )
+        return ops.masked(
+            valid, lambda: values_loader([logical_row, logical_col]), padding_value
+        )
+
+    return Pointwise.create(
+        device=values.get_device_or_error(),
+        dtype=values.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[output_numel],
+    )
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
