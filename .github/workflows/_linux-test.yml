@@ -39,6 +39,21 @@ on:
         type: string
         default: ""
         description: Space-separated tests to exclude (empty string implies none)
+      force-keep-going:
+        required: false
+        type: boolean
+        default: false
+        description: Enable keep-going regardless of the PR label or body setting.
+      force-no-td:
+        required: false
+        type: boolean
+        default: false
+        description: Explicitly disable target determination.
+      soft-fail-tests:
+        required: false
+        type: boolean
+        default: false
+        description: Allow the test step to fail without failing the job.
       use-gha:
         required: false
         type: string
@@ -142,7 +157,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@gh/georgehong/3/head
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
@@ -162,7 +177,7 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@gh/georgehong/3/head
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
@@ -170,7 +185,7 @@ jobs:
 
       - name: Download TD artifacts
         continue-on-error: true
-        uses: pytorch/pytorch/.github/actions/download-td-artifacts@main
+        uses: pytorch/pytorch/.github/actions/download-td-artifacts@gh/georgehong/3/head
         with:
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
 
@@ -230,7 +245,7 @@ jobs:
         # checks for labels and re-enabled test issues. It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
-        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        uses: pytorch/pytorch/.github/actions/filter-test-configs@gh/georgehong/3/head
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
@@ -261,7 +276,9 @@ jobs:
 
       - name: Test
         id: test
-        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        continue-on-error: ${{ inputs.soft-fail-tests }}
+        # TEST-ONLY: let the job timeout fire first so it cannot be soft-failed.
+        timeout-minutes: ${{ inputs.soft-fail-tests && inputs.timeout-minutes || fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -282,11 +299,11 @@ jobs:
           EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
           OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
-          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ inputs.force-keep-going && '1' || steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          NO_TD: ${{ inputs.force-no-td && '1' || steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
@@ -345,6 +362,11 @@ jobs:
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
           ${TEST_COMMAND}
 
+      - name: Report soft-failed tests
+        if: always() && inputs.soft-fail-tests && steps.test.outcome == 'failure'
+        shell: bash
+        run: echo "::warning title=Soft-failed tests::The test step failed; inspect the test artifacts for details."
+
       - name: Configure AWS credentials
         id: aws-creds-benchmark
         continue-on-error: true
@@ -354,7 +376,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload pytest cache if tests failed
-        uses: pytorch/pytorch/.github/actions/pytest-cache-upload@main
+        uses: pytorch/pytorch/.github/actions/pytest-cache-upload@gh/georgehong/3/head
         continue-on-error: true
         if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && steps.aws-creds-benchmark.outcome == 'success'
         with:
@@ -380,7 +402,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@main
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@gh/georgehong/3/head
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
