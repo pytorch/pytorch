@@ -40,10 +40,13 @@ def _state_dict(self):
 
 
 def install() -> None:
+    if getattr(Optimizer, "_native_neo_state_copy_installed", False):
+        return
     Optimizer.state_dict = _state_dict
     Optimizer._process_value_according_to_param_policy = staticmethod(
         _copy_state_value
     )
+    Optimizer._native_neo_state_copy_installed = True
 
 
 __all__ = ["install"]
