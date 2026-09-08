@@ -229,7 +229,6 @@ S390X_BLOCKLIST = [
     # these tests fail due to various reasons
     "inductor/test_cpu_repro",
     "lazy/test_meta_kernel",
-    "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_jit",
     "dynamo/test_utils",
@@ -285,6 +284,8 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
+    # depends on torchvision
+    "onnx/test_utility_funs",
 ]
 
 XPU_BLOCKLIST = [
