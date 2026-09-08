@@ -11,6 +11,8 @@ from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 
 {{gen_defines()}}
 
+{{gen_epilogue()}}
+
 
 _gemm_call_entry = None
 
@@ -44,6 +46,7 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
                 "group_m": GROUP_M,
                 "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
                 "has_bias": False,
+                "has_epilogue": HAS_EPILOGUE,
                 "has_k_tail": has_k_tail,
             },
         )
@@ -64,6 +67,7 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
             n,
             k,
             param,
+            EPILOGUE_FN,
             stream,
         )
         if not os.environ.get("COMPILE_ONLY"):
@@ -77,6 +81,7 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
             n,
             k,
             param,
+            EPILOGUE_FN,
             stream,
         )
 

@@ -77,6 +77,23 @@ class FlyDSLTemplateKernel(Kernel):
             params.writeline(f"{name}: fx.Constexpr = {val!r}")
         return params.getvalue()
 
+    def gen_epilogue(self) -> str:
+        epilogue_nodes = getattr(self, "epilogue_nodes", None)
+        if not epilogue_nodes:
+            return (
+                "HAS_EPILOGUE: fx.Constexpr = False\n"
+                "EPILOGUE_FN = lambda acc: acc\n"
+            )
+
+        from torch._inductor.kernel.flydsl.epilogue import (
+            materialize_flydsl_scheduler_epilogue,
+        )
+
+        _, code = materialize_flydsl_scheduler_epilogue(
+            self.original_output_name, list(epilogue_nodes)
+        )
+        return code
+
     def render(self, template, **kwargs):
         from torch._inductor.select_algorithm import PartialRender
 
@@ -84,6 +101,7 @@ class FlyDSLTemplateKernel(Kernel):
         template_env = {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
+            "gen_epilogue": self.gen_epilogue,
             "get_output": self.get_output,
         }
 

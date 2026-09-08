@@ -112,6 +112,37 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("_flydsl_mm", code)
         self.assertTrue(torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2))
 
+    @unittest.skipUnless(HAS_FLYDSL, "requires flydsl")
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        epilogue_fusion=True,
+    )
+    def test_flydsl_gemm_accumulator_epilogue_fusion(self):
+        from torch._inductor.codegen.flydsl import flydsl_utils
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        def fn(a, b):
+            return torch.mm(a, b.t()) + 1.0
+
+        for dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=dtype):
+                a = torch.randn(32, 128, device="cuda", dtype=dtype)
+                b = torch.randn(128, 128, device="cuda", dtype=dtype)
+                compiled_fn = torch.compile(fn, backend="inductor")
+                result, (code,) = run_and_get_code(compiled_fn, a, b)
+
+                self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
+                self.assertIn("EPILOGUE_FN", code)
+                self.assertTrue(
+                    torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2)
+                )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
