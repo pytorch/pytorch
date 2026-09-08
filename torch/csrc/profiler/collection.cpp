@@ -1778,8 +1778,13 @@ RecordQueue::getRecords(
   if (python_tracer_) {
     std::vector<std::shared_ptr<torch::profiler::impl::Result>> ev;
     try {
+      const auto max_stack_events = static_cast<size_t>(
+          config_.experimental_config.max_stack_events.value_or(0));
       ev = python_tracer_->getEvents(
-          converter, python_enters, static_cast<c10::time_t>(end_time_ns));
+          converter,
+          python_enters,
+          static_cast<c10::time_t>(end_time_ns),
+          max_stack_events);
     } catch (std::exception&) {
       // Normally addKinetoEvents() below will stop the trace - but if an
       // exception happens here then the events will never be stopped and future

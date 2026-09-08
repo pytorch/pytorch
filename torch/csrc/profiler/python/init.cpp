@@ -429,7 +429,8 @@ void initPythonBindings(PyObject* module) {
               bool /* expose_kineto_event_metadata */,
               std::string /* custom_profiler_config*/,
               bool /* adjust_timestamps */,
-              bool /* trace_only */
+              bool /* trace_only */,
+              std::optional<int64_t> /* max_stack_events */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -449,7 +450,9 @@ void initPythonBindings(PyObject* module) {
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n"
           "    adjust_timestamps (bool) : whether to adjust timestamps for Vulkan events\n"
           "    trace_only (bool) : when True, skip building Python event objects during __exit__.\n"
-          "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n",
+          "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n"
+          "    max_stack_events (int, optional) : maximum number of Python stack events\n"
+          "       allowed per trace cycle. If exceeded, all Python stack events are omitted.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
@@ -463,7 +466,8 @@ void initPythonBindings(PyObject* module) {
           py::arg("expose_kineto_event_metadata") = false,
           py::arg("custom_profiler_config") = "",
           py::arg("adjust_timestamps") = false,
-          py::arg("trace_only") = false)
+          py::arg("trace_only") = false,
+          py::arg("max_stack_events") = std::nullopt)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -491,7 +495,8 @@ void initPythonBindings(PyObject* module) {
                 p.expose_kineto_event_metadata,
                 p.custom_profiler_config,
                 p.adjust_timestamps,
-                p.trace_only);
+                p.trace_only,
+                p.max_stack_events);
           },
           [](const py::tuple& t) { // __setstate__
             TORCH_CHECK(t.size() >= 12, "Expected at least 12 values in state");
@@ -524,7 +529,9 @@ void initPythonBindings(PyObject* module) {
                 t[10].cast<bool>(),
                 t[11].cast<std::string>(),
                 t.size() > 12 ? t[12].cast<bool>() : false,
-                t.size() > 13 ? t[13].cast<bool>() : false);
+                t.size() > 13 ? t[13].cast<bool>() : false,
+                t.size() > 14 ? t[14].cast<std::optional<int64_t>>()
+                              : std::nullopt);
           }))
       // profiler_metrics, profiler_measure_per_kernel and adjust_profiler_step
       // are deprecated no-ops, exposed read-only so the Python layer can detect
@@ -537,7 +544,8 @@ void initPythonBindings(PyObject* module) {
           "adjust_profiler_step", &ExperimentalConfig::adjust_profiler_step)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
-      .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
+      .def_readwrite("trace_only", &ExperimentalConfig::trace_only)
+      .def_readonly("max_stack_events", &ExperimentalConfig::max_stack_events);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(

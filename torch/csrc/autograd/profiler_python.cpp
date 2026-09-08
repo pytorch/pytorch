@@ -704,7 +704,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
-      c10::time_t end_time_ns) override;
+      c10::time_t end_time_ns,
+      size_t max_stack_events) override;
 
   struct StartFrame {
     TraceKey trace_key_;
@@ -1483,7 +1484,20 @@ struct PythonIDVisitor {
 std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     std::function<c10::time_t(c10::approx_time_t)> time_converter,
     std::vector<python_tracer::CompressedEvent>& enters,
-    c10::time_t end_time_ns) {
+    c10::time_t end_time_ns,
+    size_t max_stack_events) {
+  const auto stack_event_count = enters.size() + start_frames_.size();
+  if (max_stack_events > 0 && stack_event_count > max_stack_events) {
+    TORCH_WARN(
+        "Profiler collected ",
+        stack_event_count,
+        " Python stack events, exceeding max_stack_events=",
+        max_stack_events,
+        ". All Python stack traces and Python function events will be "
+        "omitted. CPU and device activities are preserved.");
+    return {};
+  }
+
   for (auto& tls : thread_local_results_) {
     tls.value_cache_.trimPrefixes();
   }

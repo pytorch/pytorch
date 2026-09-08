@@ -987,6 +987,7 @@ class TestProfiler(TestCase):
             pickled = pickle.dumps(config)
             unpickled = pickle.loads(pickled)
             self.assertIsInstance(unpickled, _ExperimentalConfig)
+            self.assertIsNone(unpickled.max_stack_events)
 
             # Test with non-default values
             config = _ExperimentalConfig(
@@ -1002,14 +1003,23 @@ class TestProfiler(TestCase):
                 record_python_gc_info=True,
                 expose_kineto_event_metadata=True,
                 custom_profiler_config="custom_config",
+                max_stack_events=123,
             )
             pickled = pickle.dumps(config)
             unpickled = pickle.loads(pickled)
             self.assertIsInstance(unpickled, _ExperimentalConfig)
+            self.assertEqual(unpickled.max_stack_events, 123)
 
             # Test deepcopy (which uses pickle internally)
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
+            self.assertEqual(copied.max_stack_events, 123)
+
+            for max_stack_events in (0, -1):
+                with self.assertRaisesRegex(
+                    RuntimeError, "max_stack_events must be greater than zero"
+                ):
+                    _ExperimentalConfig(max_stack_events=max_stack_events)
 
     def test_profiler_range_metrics_deprecated(self):
         # profiler_metrics and profiler_measure_per_kernel are deprecated
@@ -2084,6 +2094,62 @@ class TestProfiler(TestCase):
         events = p.events()
         self.assertGreater(len(events), 0)
         self.assertTrue(any("aten::mm" in e.name for e in events))
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_max_stack_events_preserves_stacks_within_limit(self):
+        config = _ExperimentalConfig(verbose=True, max_stack_events=100_000)
+
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            experimental_config=config,
+            with_stack=True,
+        ) as p:
+            with record_function("stack_preserved"):
+                pass
+
+        events = p.profiler.kineto_results.events()
+        self.assertTrue(any(event.is_python_function() for event in events))
+        preserved = next(event for event in events if event.name() == "stack_preserved")
+        self.assertGreater(len(preserved.stack()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_max_stack_events_omits_all_stacks_over_limit(self):
+        config = _ExperimentalConfig(verbose=True, max_stack_events=1)
+        event_names = [f"limited_event_{i}" for i in range(10)]
+
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            experimental_config=config,
+            with_stack=True,
+        ) as p:
+            for name in event_names:
+                with record_function(name):
+                    pass
+
+        events = p.profiler.kineto_results.events()
+        retained_names = [
+            event.name()
+            for event in events
+            if event.name().startswith("limited_event_")
+        ]
+        self.assertEqual(retained_names, event_names)
+        self.assertFalse(any(event.is_python_function() for event in events))
+        for event in events:
+            if event.name().startswith("limited_event_"):
+                self.assertEqual(event.stack(), [])
+
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace_events = json.load(f)["traceEvents"]
+        trace_names = {event["name"] for event in trace_events}
+        self.assertEqual(
+            [name for name in event_names if name in trace_names],
+            event_names,
+        )
+        self.assertFalse(
+            any(event.get("cat") == "python_function" for event in trace_events)
+        )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_public_api_post_processing_timeout_large(self):
