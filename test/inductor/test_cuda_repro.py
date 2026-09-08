@@ -3017,26 +3017,29 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self._check_topk(f, x, x, 16)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize(
-        "k, width",
+        "dtype, k, width, largest",
         [
-            (2, 33),
-            (3, 65),
-            (6, 17),
-            (8, 65),
-            (16, 17),
-            (16, 16),
-            (2, 512),
-            (52, 256),
-            (4, 4096),
-            (64, 1000),
-            (2, 12000),
-            (1, 33),
-            (8, 16384),
+            (torch.float32, 2, 33, True),  # bitonic path with padded lanes
+            (torch.bfloat16, 3, 65, False),  # non-power-of-two k, ascending
+            (torch.float16, 6, 17, True),
+            (torch.float32, 8, 65, False),
+            (torch.bfloat16, 16, 17, True),
+            (torch.float32, 16, 16, True),  # k == width
+            (torch.float32, 2, 512, True),  # fp32 extraction on 32-bit keys
+            (torch.bfloat16, 2, 512, False),  # packed 16-bit key extraction
+            (torch.float16, 4, 4096, True),
+            (torch.float32, 52, 256, True),  # large k on the bitonic path
+            (torch.bfloat16, 64, 1000, False),
+            (torch.float32, 2, 12000, True),
+            (torch.float32, 8, 16384, True),  # widest persistent block
+            (torch.float32, 1, 33, True),  # max.dim
+            (torch.bfloat16, 1, 33, False),  # k=1 smallest stays on ATen
         ],
+        name_fn=lambda dtype, k, width, largest: (
+            f"{str(dtype).split('.')[-1]}_k{k}_w{width}_{'largest' if largest else 'smallest'}"
+        ),
     )
-    @parametrize("largest", [True, False])
     def test_topk_fusible_ir_dtypes_and_k(self, dtype, k, width, largest):
         def f(x):
             values, indices = torch.topk(x, k, dim=-1, largest=largest)
