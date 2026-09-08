@@ -1,28 +1,36 @@
-import tempfile
 import warnings
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_utils import TestCase
 
+from torch.distributed.checkpoint import _metadata_warning
 from torch.distributed.checkpoint.filesystem import FileSystemReader
 
 
 class TestMetadataWarning(TestCase):
-    def test_read_metadata_warns_about_pickle(self):
-        with tempfile.TemporaryDirectory() as path:
-            reader = FileSystemReader(path)
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                for _ in range(2):
-                    try:
-                        reader.read_metadata()
-                    except FileNotFoundError:
-                        pass
+    def test_read_metadata_warns_about_pickle_once(self):
+        original_warned = _metadata_warning._warned
 
-        pickle_warnings = [
-            w for w in caught if "deserialized with pickle" in str(w.message)
-        ]
-        self.assertEqual(len(pickle_warnings), 1)
+        def read_metadata(_self, *_args, **_kwargs):
+            return object()
+
+        try:
+            _metadata_warning._warned = False
+            with patch.object(FileSystemReader, "read_metadata", read_metadata):
+                _metadata_warning.install()
+                reader = FileSystemReader(".")
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    reader.read_metadata()
+                    reader.read_metadata()
+
+            pickle_warnings = [
+                w for w in caught if "deserialized with pickle" in str(w.message)
+            ]
+            self.assertEqual(len(pickle_warnings), 1)
+        finally:
+            _metadata_warning._warned = original_warned
 
 
 if __name__ == "__main__":
