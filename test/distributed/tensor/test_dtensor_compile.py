@@ -49,10 +49,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import (
-    deviceCountAtLeast,
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -2825,14 +2822,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     "DeviceMesh should not appear as get_attr in the joint graph",
                 )
 
-    @deviceCountAtLeast(2)
-    def test_stable_hash_for_caching_cuda_ranks(self, devices):
+    @skip_if_lt_x_gpu(2)
+    def test_stable_hash_for_caching_cuda_ranks(self, device):
         # Exercise the exact scenario from #188390: two DTensors with identical
         # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        mesh = DeviceMesh(torch.device(devices[0]).type, torch.arange(self.world_size))
-        local0 = torch.empty(2, 4, device=devices[0])
-        local1 = torch.empty(2, 4, device=devices[1])
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device=torch.device(device_type, 0))
+        local1 = torch.empty(2, 4, device=torch.device(device_type, 1))
         dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
         dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
         h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
