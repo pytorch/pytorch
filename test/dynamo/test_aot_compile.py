@@ -1373,12 +1373,10 @@ from user code:
             self.assertEqual(model(x), expected["mean"])
 
     def test_all_results_disabled_still_dispatches_by_guard(self):
-        # Disabling the check on EVERY result (the only way to skip guard
-        # overhead on a module artifact -- there is no model-level API) must
-        # still dispatch by guard, not fall through to compiled_results[0]:
-        # guard_check() evaluates guards regardless of the flag, so the scan
-        # can still pick the right graph, and only a genuine no-match falls back
-        # to an opted-out result.
+        # Disabling the check on EVERY result must still dispatch by guard, not
+        # fall through to compiled_results[0]: guard_check() evaluates guards
+        # regardless of the flag, so the scan can still pick the right graph,
+        # and only a genuine no-match falls back to an opted-out result.
         mod = GlobalConfigModule()
         model = torch.compile(
             mod,
