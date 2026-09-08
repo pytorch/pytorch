@@ -274,6 +274,25 @@ class CreateBackendTest(TestCase):
         ):
             create_backend(self._params_filestore)
 
+    def test_create_backend_closes_tempfile_descriptor(self) -> None:
+        # Regression test for https://github.com/pytorch/pytorch/issues/191394:
+        # _create_file_store must close the descriptor returned by mkstemp,
+        # otherwise repeated rendezvous creation leaks descriptors until the
+        # process hits its open-file limit.
+        self._params_filestore.endpoint = ""
+
+        with (
+            mock.patch("tempfile.mkstemp", wraps=tempfile.mkstemp) as mkstemp_mock,
+            mock.patch(
+                "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.os.close",
+                wraps=os.close,
+            ) as close_mock,
+        ):
+            create_backend(self._params_filestore)
+
+        fd = mkstemp_mock.spy_return[0]
+        close_mock.assert_called_once_with(fd)
+
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
     )
