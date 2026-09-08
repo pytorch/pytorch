@@ -141,6 +141,21 @@ class _BufferMutate(torch.nn.Module):
         return x + self.b
 
 
+class _ParamMutateNoGrad(torch.nn.Module):
+    # A parameter mutated in place under no_grad inside a joint forward+backward
+    # reaches AOTAutograd's runtime mutation epilogue via _replay_input_mutation
+    # (an inference capture folds the mutation into the graph instead), which is
+    # what binds the warn-once ``_warned_inputs`` set the export must reset.
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 3)
+
+    def forward(self, x):
+        with torch.no_grad():
+            self.lin.bias.add_(x.sum())
+        return self.lin(x)
+
+
 def _two_views_of_intermediate(x, w):
     h = torch.tanh(x @ w)
     return h[:2], h[2:]
@@ -921,25 +936,35 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
 
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation"
+    )
     def test_input_mutation_epilogue_emits_fresh_warned_inputs_set(self):
         # The mutation epilogue's warn-once set is live runtime state that must not
-        # leak into the artifact. Pin that it is emitted as a fresh empty set (so the
-        # exported module round-trips deterministically and starts its own warn-once
-        # cycle) and that the composed call still reflects the mutation like eager.
-        m = _BufferMutate().eval()
-        x = torch.randn(4)
-        src, _cache = _compose(m, x)
-        _assert_composed(self, src)
+        # leak into the artifact. A parameter mutated under no_grad in a joint
+        # forward+backward reaches the runtime epilogue via _replay_input_mutation
+        # (an inference capture folds the mutation into the graph, so it never emits
+        # the epilogue). Pin that the warn-once set is emitted as a fresh empty set --
+        # not the live set([...]) baked verbatim -- so the exported module round-trips
+        # deterministically and starts its own warn-once cycle, and that the mutation
+        # is replayed onto the passed-in parameter like eager.
+        m = _ParamMutateNoGrad()
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertIn("_replay_input_mutation", src)
         self.assertIn("_warned_inputs = set()", src)
         self.assertNotIn("_warned_inputs = set([", src)
 
-        eager = _BufferMutate().eval()
-        eager_out = eager(x)
-        buf = torch.zeros(4)
-        with torch.no_grad():
-            composed_out = _exec(src)([buf, x])[0]
-        self.assertEqual(composed_out, eager_out)
-        self.assertEqual(buf, eager.b)
+        flat = _flat_inputs(m, x)
+        bias = m.lin.bias
+        before = bias.detach().clone()
+        out = _exec(src)(flat)
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        self.assertIsNotNone(out.grad_fn)
+        self.assertEqual(bias.detach(), before + x.sum())
 
     def test_output_alias_regen_runs_like_eager(self):
         # An output that aliases an input exercises AOTAutograd's output-alias regeneration
