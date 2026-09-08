@@ -22,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config, distributed_autotune
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
+from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -51,6 +52,7 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
+    use_flydsl_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
@@ -122,6 +124,11 @@ scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_main_loop_scaling",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_main_loop_scaled_mm"),
+)
+
+flydsl_mm_template = FlyDSLTemplate(
+    name="mm_flydsl",
+    source=load_kernel_template("flydsl_mm"),
 )
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
@@ -204,6 +211,79 @@ def check_supported_striding(mat_a, mat_b) -> None:
         is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
         lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
     )
+
+
+def _static_int_or_none(x) -> int | None:
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        try:
+            return int(V.graph.sizevars.size_hint(x))
+        except (TypeError, ValueError):
+            return None
+
+
+def get_flydsl_mm_template_kwargs(
+    layout, mat1, mat2, static_shape, is_nonzero
+) -> list[dict[str, Any]]:
+    from ..template_heuristics.flydsl import get_gemm_configs
+
+    if not (
+        static_shape
+        and is_nonzero
+        and use_flydsl_template(layout)
+    ):
+        return []
+
+    if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
+        return []
+
+    sizevars = V.graph.sizevars
+    mat1_stride = mat1.get_stride()
+    mat2_stride = mat2.get_stride()
+    out_stride = layout.stride
+
+    if not sizevars.statically_known_equals(mat1_stride[1], 1):
+        return []
+    if not sizevars.statically_known_equals(out_stride[1], 1):
+        return []
+
+    dtype = mat1.get_dtype()
+    if mat2.get_dtype() != dtype or layout.dtype != dtype:
+        return []
+
+    if dtype != torch.bfloat16:
+        return []
+
+    # FlyDSL GEMM consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
+    # the RHS as a [K, N] transpose view with stride[0] == 1.
+    if not sizevars.statically_known_equals(mat2_stride[0], 1):
+        return []
+
+    m = mat1.get_size()[0]
+    _, n = mat2.get_size()
+    k = mat1.get_size()[1]
+    m_static = _static_int_or_none(m)
+    n_static = _static_int_or_none(n)
+    k_static = _static_int_or_none(k)
+    if m_static is None or n_static is None or k_static is None:
+        return []
+    if n_static % 32 != 0 or k_static % 32 != 0:
+        return []
+
+    # The FlyDSL GEMM template consumes the RHS as contiguous [N, K].  The
+    # aten.mm lowering sees B.T as a [K, N] ReinterpretView, so pass the
+    # underlying B buffer and bake the static GEMM dimensions into the template.
+    return [
+        {
+            **gemm_config,
+            "MAT2_IS_NK": True,
+            "GEMM_M": m_static,
+            "GEMM_N": n_static,
+            "GEMM_K": k_static,
+        }
+        for gemm_config in get_gemm_configs()
+    ]
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
@@ -465,6 +545,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
+
+    flydsl_configs = get_flydsl_mm_template_kwargs(
+        layout, mat1, mat2, static_shape, is_nonzero
+    )
+    if out_dtype is None:
+        for flydsl_kwargs in flydsl_configs:
+            flydsl_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=kernel_inputs.nodes(),
+                layout=layout,
+                **flydsl_kwargs,
+            )
 
     if (
         out_dtype is None
