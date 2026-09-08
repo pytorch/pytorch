@@ -299,6 +299,46 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    def test_embedding_bag_include_last_offset_invalid_offsets(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/190044
+        error_msg = (
+            r"embedding_bag: when include_last_offset is True and indices are non-empty, "
+            r"offsets must have at least 2 elements"
+        )
+        indices = torch.tensor([0, 1, 2], dtype=torch.int64, device=device)
+        offsets = torch.tensor([0], dtype=torch.int64, device=device)
+
+        for dtype in (torch.float32, torch.float64):
+            weight = torch.randn(5, 3, dtype=dtype, device=device)
+            for mode in (0, 2):  # SUM and MAX
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.embedding_bag(
+                        weight,
+                        indices,
+                        offsets,
+                        False,
+                        mode,
+                        False,
+                        None,
+                        True,
+                        None,
+                    )
+
+        # nn.EmbeddingBag with explicit offsets
+        embeddingbag = nn.EmbeddingBag(
+            5, 3, include_last_offset=True
+        ).to(device=device, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            embeddingbag(indices, offsets)
+
+        # 0 bags with 0 indices is still valid
+        empty_indices = torch.tensor([], dtype=torch.int64, device=device)
+        weight = torch.randn(5, 3, dtype=torch.float64, device=device)
+        result = torch.embedding_bag(
+            weight, empty_indices, offsets, False, 0, False, None, True, None
+        )
+        self.assertEqual(result[0].shape, (0, 3))
+
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)

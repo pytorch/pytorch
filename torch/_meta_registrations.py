@@ -4585,6 +4585,15 @@ def meta_embedding_bag(
             num_bags >= 1,
             lambda: "include_last_offset: numBags should be at least 1",
         )
+        torch._check(
+            num_bags >= 2 or indices.numel() == 0,
+            lambda: (
+                "embedding_bag: when include_last_offset is True and indices are "
+                f"non-empty, offsets must have at least 2 elements to define at "
+                f"least one bag, but got offsets of size {num_bags} with "
+                f"{indices.numel()} indices"
+            ),
+        )
         num_bags -= 1
 
     output = weight.new_empty(num_bags, weight.size(1))
@@ -4646,6 +4655,15 @@ def meta_embedding_bag(
                 torch._check(
                     numBags >= 1,
                     lambda: "include_last_offset: numBags should be at least 1",
+                )
+                torch._check(
+                    numBags >= 2 or indices.numel() == 0,
+                    lambda: (
+                        "embedding_bag: when include_last_offset is True and indices "
+                        f"are non-empty, offsets must have at least 2 elements to "
+                        f"define at least one bag, but got offsets of size {numBags} "
+                        f"with {indices.numel()} indices"
+                    ),
                 )
                 numBags -= 1
             max_indices = offsets.new_empty(numBags, weight.shape[1])
