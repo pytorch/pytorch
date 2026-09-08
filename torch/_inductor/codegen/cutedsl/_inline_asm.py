@@ -2,9 +2,11 @@
 
 Each assembly invocation consumes `pack` adjacent fragment elements. LLVM
 constraints select the physical register type for every operand, so inputs are
-bitcast into those registers rather than numerically converted. Multiple outputs
-are returned as an LLVM struct and extracted before rebuilding the fragment.
-Partial packs are zero-padded, and outputs for padded elements are discarded.
+bitcast into those registers rather than numerically converted. TensorSSA
+fragments and two-lane tuple values share the same packed lowering. Multiple
+outputs are returned as an LLVM struct and extracted before rebuilding the
+input representation. Partial packs are zero-padded, and outputs for padded
+elements are discarded.
 
 Integer register results are narrowed to the requested element width. E8M0 codes
 1 through 254 map directly to the matching Float32 exponent bits; codes 0 and 255
@@ -84,11 +86,17 @@ def decode_e8m0(value: ir.Value) -> ir.Value:
     return arith.bitcast(T.f32(), bits)
 
 
-def convert_output(value: ir.Value, result_type) -> ir.Value:
-    """Convert a register result to the requested logical element type."""
+def convert_output(
+    value: ir.Value, result_type, *, scalar_integer: bool = False
+) -> ir.Value:
+    """Convert a register result to its fragment or scalar compute type."""
     if result_type == cutlass.Float8E8M0FNU:
         return decode_e8m0(value)
     target = result_type.mlir_type
+    if scalar_integer:
+        value = narrow_integer(value, result_type.width)
+        convert = arith.sitofp if result_type.signed else arith.uitofp
+        return convert(T.f32(), value)
     if value.type == target:
         return value
     if ir.IntegerType.isinstance(value.type):
@@ -97,14 +105,21 @@ def convert_output(value: ir.Value, result_type) -> ir.Value:
 
 
 def fragment_element(source, index: int) -> ir.Value:
-    """Extract element `index` from a TensorSSA, or unwrap a scalar value."""
+    """Extract one lane from a TensorSSA, tuple pair, or scalar value."""
     if isinstance(source, cute.TensorSSA):
         return vector.extract(source.ir_value(), [], [index])
+    if isinstance(source, tuple):
+        return fragment_element(source[index], 0)
     if isinstance(source, ir.Value):
         return source
     if isinstance(source, (int, float)):
         return cutlass.Float32(source).ir_value()
     return source.ir_value()
+
+
+def rebuild_pair(template, lanes):
+    """Rebuild a tuple-like lane bundle without importing its owning frontend."""
+    return tuple(lanes) if type(template) is tuple else type(template)(*lanes)
 
 
 def zero_for_constraint(letter: str) -> ir.Value:
@@ -159,7 +174,8 @@ def inline_asm_elementwise_intrinsic(
         asm: PTX text using `$N` operand syntax, output first.
         constraints: LLVM constraint list, e.g. `"=h,r"`.
         result_type: Logical cutlass numeric type of the produced fragment, or
-            a tuple of types for multiple results.
+            a tuple of types for multiple results. E8M0 integer results are
+            decoded to Float32 for fused consumers.
         is_pure: Whether the block may be reordered and CSEd.
         pack: Elements consumed per asm invocation. Missing tail elements are
             zero-padded and their corresponding outputs are discarded.
@@ -198,14 +214,17 @@ def inline_asm_elementwise_intrinsic(
     if len(output_types) > 1:
         fields = ", ".join(str(output_type) for output_type in output_types)
         asm_result_type = ir.Type.parse(f"!llvm.struct<({fields})>")
-    compute_types = tuple(
-        cutlass.Float32 if ty == cutlass.Float8E8M0FNU else ty for ty in result_types
-    )
     fragments = [
         source
         for source, is_scalar in zip(sources, scalar_sources)
         if isinstance(source, cute.TensorSSA) and not is_scalar
     ]
+    pairs = [
+        source
+        for source, is_scalar in zip(sources, scalar_sources)
+        if isinstance(source, tuple) and not is_scalar
+    ]
+    pair_template = None
     if fragments:
         shape = fragments[0].shape
         if any(source.shape != shape for source in fragments[1:]):
@@ -222,10 +241,27 @@ def inline_asm_elementwise_intrinsic(
             if isinstance(source, cute.TensorSSA) and not is_scalar
         )
         count = math.prod(ir.VectorType(first_fragment.ir_value().type).shape)
+        if any(len(source) != count for source in pairs):
+            raise ValueError(
+                "inline asm tuple sources must match the TensorSSA fragment size"
+            )
+    elif pairs:
+        pair_template = pairs[0]
+        count = len(pair_template)
+        if any(len(source) != count for source in pairs[1:]):
+            raise ValueError("inline asm tuple sources must have equal lane counts")
+        shape = None
     else:
         count = 1
         shape = None
 
+    scalar_integer_results = tuple(
+        not fragments and ir.IntegerType.isinstance(ty.mlir_type) for ty in result_types
+    )
+    compute_types = tuple(
+        cutlass.Float32 if ty == cutlass.Float8E8M0FNU or scalar_integer else ty
+        for ty, scalar_integer in zip(result_types, scalar_integer_results)
+    )
     converted = [[] for _ in result_types]
     for base in range(0, count, pack):
         produced = llvm.inline_asm(
@@ -243,16 +279,22 @@ def inline_asm_elementwise_intrinsic(
                 for index, output_type in enumerate(output_types)
             ]
         valid_outputs = min(pack, count - base)
-        for result_index, ty in enumerate(result_types):
+        for result_index, (ty, scalar_integer) in enumerate(
+            zip(result_types, scalar_integer_results)
+        ):
             output_start = result_index * pack
             converted[result_index].extend(
-                convert_output(output, ty)
+                convert_output(output, ty, scalar_integer=scalar_integer)
                 for output in outputs[output_start : output_start + valid_outputs]
             )
 
     results = []
     for values, compute_type in zip(converted, compute_types):
-        if shape is None:
+        if pair_template is not None:
+            results.append(
+                rebuild_pair(pair_template, (compute_type(value) for value in values))
+            )
+        elif shape is None:
             results.append(compute_type(values[0]))
         else:
             vector_type = ir.VectorType.get([count], compute_type.mlir_type)
