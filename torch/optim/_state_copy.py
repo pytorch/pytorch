@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 import torch
 
 from .optimizer import Optimizer
