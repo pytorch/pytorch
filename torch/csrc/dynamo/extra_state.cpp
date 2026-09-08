@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -247,6 +248,15 @@ void ExtraState::apply_pending_evictions(
           auto& dst = dead_cache[eviction.region_id];
           dst.splice(dst.end(), it->second);
           this->cache_entry_map.erase(it);
+        }
+        // Reset the region strategy here, where the parked clear finally
+        // drains: _clear_cache_entries_for_region defers the reset onto this
+        // eviction so the region stays RUN_ONLY (no recompiles) until now.
+        // strategy_mutex holds only FrameExecStrategy (no py::object), so
+        // nesting it under cache_mutex here runs no Python and cannot deadlock.
+        {
+          std::lock_guard<std::mutex> strategy_lock(this->strategy_mutex);
+          this->region_strategy_map.erase(eviction.region_id);
         }
         break;
       }
@@ -660,13 +670,25 @@ static void drop_pending_invalidated_candidates(
       cache_candidates.end());
 }
 
+// Copy a null-terminated trace annotation into the caller's small buffer,
+// including the terminator, so the consumer can read it as a C string via
+// .data() without touching the CacheEntry (which a concurrent unload may free).
+static void set_trace_annotation(
+    c10::SmallVectorImpl<char>* out,
+    const char* src,
+    size_t len) {
+  out->resize(len + 1);
+  std::memcpy(out->data(), src, len);
+  (*out)[len] = '\0';
+}
+
 void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    std::string* trace_annotation,
+    c10::SmallVectorImpl<char>* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   // reaped_* are declared before python_depth so they destruct AFTER it: depth
   // returns to 0 and cache_mutex is released before any reaped node runs its
@@ -813,7 +835,10 @@ void lookup(
       extra_state->move_to_front(found, *found_list);
     }
     *maybe_cached_code = found->code.inc_ref().ptr();
-    *trace_annotation = found->trace_annotation;
+    set_trace_annotation(
+        trace_annotation,
+        found->trace_annotation.data(),
+        found->trace_annotation.size());
     return;
   }
   *maybe_cached_code = py::none().release().ptr();
@@ -824,7 +849,7 @@ bool try_lookup_without_guard_eval(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    std::string* trace_annotation,
+    c10::SmallVectorImpl<char>* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   // Mirrors lookup(): snapshot candidates under cache_mutex, raise
   // CachePythonDepth, RELEASE the lock, then run backend_match (backend __eq__
@@ -930,7 +955,10 @@ bool try_lookup_without_guard_eval(
       extra_state->move_to_front(found, *found_list);
     }
     *maybe_cached_code = found->code.inc_ref().ptr();
-    *trace_annotation = found->trace_annotation;
+    set_trace_annotation(
+        trace_annotation,
+        found->trace_annotation.data(),
+        found->trace_annotation.size());
     return true;
   }
 
@@ -943,7 +971,7 @@ void create_cache_entry(
     PyObject* guarded_code,
     PyObject* backend,
     py::object* code_out,
-    std::string* trace_annotation_out) {
+    c10::SmallVectorImpl<char>* trace_annotation_out) {
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
@@ -982,7 +1010,9 @@ void create_cache_entry(
   // itself is never handed back to the caller.
   *code_out = py::reinterpret_borrow<py::object>(
       (PyObject*)CacheEntry_get_code(&*new_iter));
-  *trace_annotation_out = CacheEntry_get_trace_annotation(&*new_iter);
+  const char* annotation = CacheEntry_get_trace_annotation(&*new_iter);
+  set_trace_annotation(
+      trace_annotation_out, annotation, std::strlen(annotation));
 }
 
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
@@ -1025,6 +1055,9 @@ py::list _get_cache_entries_for_region(
   TORCH_CHECK(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= -1,
+      "isolate_recompiles_id must be >= -1 (-1 is the default region)");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
@@ -1053,6 +1086,9 @@ size_t _get_cache_entry_count_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id) {
   TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= -1,
+      "isolate_recompiles_id must be >= -1 (-1 is the default region)");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
@@ -1082,6 +1118,7 @@ void _clear_cache_entries_for_region(
   if (extra == nullptr) {
     return;
   }
+  bool parked = false;
   {
     // Evicted entries die AFTER the lock releases: a CacheEntry destructor
     // drops py::objects whose __del__ can re-enter this state -- e.g. unload
@@ -1098,6 +1135,7 @@ void _clear_cache_entries_for_region(
             ExtraState::PendingEviction::CACHE_REGION,
             isolate_recompiles_id,
             py::none()});
+        parked = true;
       } else {
         auto it = extra->cache_entry_map.find(isolate_recompiles_id);
         if (it != extra->cache_entry_map.end()) {
@@ -1111,11 +1149,20 @@ void _clear_cache_entries_for_region(
       }
     }
   }
-  {
+  if (!parked) {
+    // Reset the region strategy alongside the entries we just cleared. When the
+    // clear was parked instead, this reset rides with the CACHE_REGION eviction
+    // and is applied where it drains (apply_pending_evictions): resetting a
+    // RUN_ONLY region (from a recompile-limit hit) back to DEFAULT now would
+    // let it recompile while its eviction is still queued, and the drain would
+    // then discard those fresh entries, re-entering the compile/limit cycle.
     std::lock_guard<std::mutex> lock(extra->strategy_mutex);
     extra->region_strategy_map.erase(isolate_recompiles_id);
   }
   {
+    // Frame state is reset unconditionally: with the strategy reset deferred on
+    // the parked path, the region stays RUN_ONLY until its eviction drains, so
+    // no compile repopulates this map before then.
     // Same rule as extract_frame_state: the dict's decref can free arbitrary
     // Python objects, so it must not happen under the plain mutex. Move it out
     // and let it die after the lock is released.
@@ -1193,6 +1240,9 @@ void _reset_precompile_entries_for_region(
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= -1,
+      "isolate_recompiles_id must be >= -1 (-1 is the default region)");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
@@ -1236,6 +1286,9 @@ void _reset_precompile_entries_for_owner(
   TORCH_CHECK(
       !owner.is_none(),
       "_reset_precompile_entries_for_owner requires a non-None owner");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= -1,
+      "isolate_recompiles_id must be >= -1 (-1 is the default region)");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra != nullptr) {
@@ -1281,6 +1334,9 @@ void _load_precompile_entry(
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
+  TORCH_CHECK_VALUE(
+      isolate_recompiles_id >= -1,
+      "isolate_recompiles_id must be >= -1 (-1 is the default region)");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
