@@ -58,7 +58,11 @@ def fetch_url(
         with urlopen(Request(url, headers=headers)) as conn:
             return reader(conn)
     except urllib.error.HTTPError as err:
-        if isinstance(retries, (int, float)) and retries > 0:
+        # A depleted core quota resets on GitHub's schedule, up to an hour out, so
+        # retrying inside the backoff cannot succeed and only multiplies the burn
+        # against a limit every concurrent job in the repo shares.
+        quota_depleted = err.headers.get("X-RateLimit-Remaining") == "0"
+        if not quota_depleted and isinstance(retries, (int, float)) and retries > 0:
             time.sleep(backoff_timeout)
             return fetch_url(
                 url,
