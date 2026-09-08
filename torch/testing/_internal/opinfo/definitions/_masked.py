@@ -354,9 +354,22 @@ def sample_inputs_masked_softmax(
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs
     ):
+        dim = sample_input.args[0]
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
+            if mask is not None:
+                # A softmax/softmin/log_softmax slice whose elements are all
+                # masked out has an undefined result (see torch/masked/_ops.py),
+                # which makes gradient checks compare against nan. Skip masks
+                # that leave any slice along ``dim`` fully masked out.
+                expanded = torch.broadcast_to(mask, sample_input.input.shape)
+                if expanded.ndim == 0:
+                    unmasked_per_slice = expanded
+                else:
+                    unmasked_per_slice = expanded.any(dim=dim, keepdim=True)
+                if not unmasked_per_slice.all():
+                    continue
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
                 *sample_input.args,
