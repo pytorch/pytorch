@@ -238,11 +238,7 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__annotations__ = annotations
         # Assign __dict__ before __type_params__: on Python < 3.12 the function
         # has no __type_params__ slot, so that write lands in __dict__ and a
-        # wholesale __dict__ assignment afterwards would discard it. Assigning
-        # the dict wholesale (rather than copying entries in) also lets the AOT
-        # pickler, which passes obj.__dict__ verbatim, round-trip a helper that
-        # stashed `self.d is self.__dict__` as the same object; the guard pickler
-        # rebuilds a fresh dict, so that identity holds only on the AOT path.
+        # wholesale __dict__ assignment afterwards would discard it.
         fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
