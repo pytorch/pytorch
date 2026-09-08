@@ -359,9 +359,10 @@ void ExtraState::clear_in_place() {
       // Nothing a parked eviction OR invalidation could still remove survives
       // this clear, so both drain here. On the park branch above the entries
       // stay live, so their pending invalidations must stay parked too --
-      // draining them there would resurrect an entry whose guarded object was
-      // freed. Swapped out, destroyed after the locks release like everything
-      // else here: an owner's decref may run Python.
+      // discarding them here would leave the later drop-invalidated-candidates
+      // filter nothing to work with, so an entry whose guarded object was
+      // freed would stay servable. Swapped out, destroyed after the locks
+      // release like everything else here: an owner's decref may run Python.
       std::lock_guard<std::mutex> pending(this->pending_invalidation_mutex);
       dead_evictions.swap(this->pending_evictions);
       this->has_pending_evictions.store(false, std::memory_order_release);
