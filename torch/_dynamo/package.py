@@ -1126,7 +1126,7 @@ def _compile_frame_context(
 
 def _uninstall_abandoned_package(
     installed_globals: dict[types.ModuleType, dict[str, object]],
-    precompile_codes: list[types.CodeType],
+    precompile_codes: dict[int, types.CodeType],
     region_id: int,
     owner: object,
 ) -> None:
@@ -1142,7 +1142,7 @@ def _uninstall_abandoned_package(
         for name, value in values_by_name.items():
             if module.__dict__.get(name) is value:
                 del module.__dict__[name]
-    for code in precompile_codes:
+    for code in precompile_codes.values():
         _reset_precompile_entries_for_owner(code, region_id, owner)
 
 
@@ -1185,7 +1185,7 @@ class CompilePackage:
         # clear all of them -- and only them. Clearing the code object wholesale
         # would take every OTHER region's entries with it, and since lookup() is
         # region-exact those owners can no longer be served by what is left.
-        self._installed_precompile_codes: list[types.CodeType] = []
+        self._installed_precompile_codes: dict[int, types.CodeType] = {}
         self._installed_precompile_region_id = -1
         # Identity token stamped onto every precompile entry this package
         # installs, so uninstall() can remove its own and leave a neighbour
@@ -1628,7 +1628,7 @@ class CompilePackage:
         # Rebind, do not mutate: a pending finalizer still references the old
         # containers, so a reinstall must not be undone by it later.
         self._installed_globals = {}
-        self._installed_precompile_codes = []
+        self._installed_precompile_codes = {}
         self._installed_precompile_region_id = -1
 
     def install(
@@ -1723,22 +1723,20 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
-                # Dedup on identity: code objects compare structurally, so two
-                # distinct frames with identical bytecode would collapse under
-                # ``in``. input_codes above already keys on id() for the same
-                # reason.
-                if not any(target_code is c for c in self._installed_precompile_codes):
-                    # Deliberately NOT clearing the region here. A frame reached
-                    # through code_source is shared -- a library block two
-                    # loaded models both call -- and several packages may hold
-                    # entries for it in one region, which lookup handles by
-                    # evaluating each entry's guards. Clearing the region would
-                    # evict a live neighbour, and since lookup is region-exact
-                    # the neighbour cannot be served by what is left. This
-                    # package's own stale entries are already gone: install()
-                    # runs uninstall() first, which removes exactly the ones it
-                    # owns.
-                    self._installed_precompile_codes.append(target_code)
+                # Dedup on identity via id(): code objects compare structurally,
+                # so two distinct frames with identical bytecode would collapse
+                # under ``in``, and a linear identity scan makes install() O(n^2)
+                # in the entry count. input_codes above keys on id() for the same
+                # reason. Deliberately NOT clearing the region here: a frame
+                # reached through code_source is shared -- a library block two
+                # loaded models both call -- and several packages may hold
+                # entries for it in one region, which lookup handles by
+                # evaluating each entry's guards. Clearing the region would evict
+                # a live neighbour, and since lookup is region-exact the
+                # neighbour cannot be served by what is left. This package's own
+                # stale entries are already gone: install() runs uninstall()
+                # first, which removes exactly the ones it owns.
+                self._installed_precompile_codes[id(target_code)] = target_code
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
