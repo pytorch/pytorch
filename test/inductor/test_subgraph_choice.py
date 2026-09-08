@@ -291,29 +291,51 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
         # from the 2CTA cluster geometry (M_PAD=256).
         self._run_forced_triton_plan(True, use_meta_ws=False, m=128)
 
-    def test_mixed_backend_plan_enumeration(self):
+    def _run_backend_selection(
+        self, outer_backends: str, nested_backends: str | None
+    ) -> str:
         m, k, n = 256, 131072, 128
         a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        with config.patch(
-            max_autotune_gemm=True,
-            max_autotune_gemm_backends="ATEN,TRITON",
-            compile_threads=1,
-            assume_aligned_inputs=True,
-            **{
-                "triton.enable_template_tma_store": True,
-                "triton.enable_persistent_tma_matmul": True,
-                "triton.enable_blackwell_decompose_k": True,
-                "triton.num_decompose_k_splits": 4,
-                "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
-            },
-        ):
+        patch = {
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": outer_backends,
+            "compile_threads": 1,
+            "assume_aligned_inputs": True,
+            "triton.enable_template_tma_store": True,
+            "triton.enable_persistent_tma_matmul": True,
+            "triton.enable_blackwell_decompose_k": True,
+            "triton.num_decompose_k_splits": 4,
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+        }
+        if nested_backends is not None:
+            patch["triton.decompose_k_bmm_backends"] = nested_backends
+
+        with config.patch(patch):
             actual, codes = run_and_get_code(
                 torch.compile(lambda x, y: x @ y, fullgraph=True), a, b
             )
 
         torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
-        source = "\n".join(codes)
+        return "\n".join(codes)
+
+    def test_outer_aten_only_excludes_decompose_k(self):
+        source = self._run_backend_selection("ATEN", "ATEN,TRITON")
+        self.assertNotIn("_split_aten", source)
+        self.assertNotIn("_split_triton_config_", source)
+
+    def test_default_nested_backend_is_aten(self):
+        source = self._run_backend_selection("TRITON", None)
+        self.assertIn("_split_aten", source)
+        self.assertNotIn("_split_triton_config_", source)
+
+    def test_nested_triton_backend(self):
+        source = self._run_backend_selection("TRITON", "triton")
+        self.assertNotIn("_split_aten", source)
+        self.assertIn("_split_triton_config_", source)
+
+    def test_mixed_backend_plan_enumeration(self):
+        source = self._run_backend_selection("TRITON", "aten, TRITON")
         self.assertIn("_split_aten", source)
         self.assertIn("_split_triton_config_", source)
 
