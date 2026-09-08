@@ -1042,7 +1042,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                     t.fill_(self.rank + 1.0)
                     first_done.record()
                     first_recorded.set()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 first_recorded.set()
                 errors.append(e)
 
@@ -1057,7 +1057,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                     self.assertTrue(first_recorded.wait(timeout=30))
                     s1.wait_event(first_done)
                     t.fill_(self.rank + 10.0)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(e)
 
         th0 = threading.Thread(target=worker_first)
