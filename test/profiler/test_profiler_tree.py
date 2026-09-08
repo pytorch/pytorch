@@ -12,6 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
@@ -231,8 +232,7 @@ class ProfilerTree:
                     raise AssertionError(f"{parent_name} vs. {caller_name}")
 
 
-@unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(TestCase):
+class _TestProfilerTreeBase(TestCase):
     def assertTreesMatch(self, actual: str, expected: str, allow_failure: bool = False):
         # Warning: Here be dragons
         #   Different platforms will have subtly different behavior for Python
@@ -274,6 +274,11 @@ class TestProfilerTree(TestCase):
                     print(msg.split("AssertionError:")[-1])
                 else:
                     raise
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CPU
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
@@ -575,6 +580,11 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTree(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
@@ -786,6 +796,11 @@ class TestProfilerTree(TestCase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
