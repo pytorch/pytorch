@@ -6,26 +6,18 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/LegacyBatchedTensorImpl.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/GridSamplerUtils.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
-#include <c10/util/SmallBuffer.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -849,7 +841,7 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value) {
   return areAnyTensorSubclassLike({tensor, mask})

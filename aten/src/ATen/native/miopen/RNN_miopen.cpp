@@ -1,13 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RNN.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -58,6 +55,8 @@ namespace at::native {
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
+
+#include <ATen/hip/HIPGeneratorImpl.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -1078,13 +1077,21 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 
     Tensor dropout_state = at::empty({0}, input.options());
 
-    auto miopen_output = at::miopen_rnn(
-        input, params, has_biases ? 4 : 2,
-        hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
-        dropout_p, train, bidirectional, batch_sizes, dropout_state);
+    // On failure clear any pending HIP error before propagating, so the
+    // native fallback (see miopen_rnn_probe in RNN.cpp, a CPU translation
+    // unit that cannot clear HIP state itself) starts from a clean context.
+    try {
+        auto miopen_output = at::miopen_rnn(
+            input, params, has_biases ? 4 : 2,
+            hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
+            dropout_p, train, bidirectional, batch_sizes, dropout_state);
 
-    return {std::get<0>(miopen_output),
-        pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+        return {std::get<0>(miopen_output),
+            pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+    } catch (...) {
+        (void)hipGetLastError();
+        throw;
+    }
 }
 
 template<typename hidden_type>
@@ -1097,13 +1104,20 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 
     Tensor dropout_state = at::empty({0}, input.options());
 
-    auto miopen_output = at::miopen_rnn(
-        input, params, has_biases ? 4 : 2,
-        hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
-        train, bidirectional, /*batch_sizes=*/{}, dropout_state);
+    // See the batched overload above: clear pending HIP errors on failure so
+    // the native fallback starts from a clean context.
+    try {
+        auto miopen_output = at::miopen_rnn(
+            input, params, has_biases ? 4 : 2,
+            hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
+            train, bidirectional, /*batch_sizes=*/{}, dropout_state);
 
-    return {std::get<0>(miopen_output),
-        pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+        return {std::get<0>(miopen_output),
+            pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+    } catch (...) {
+        (void)hipGetLastError();
+        throw;
+    }
 }
 
 #define ONE_HIDDEN_RNN(NAME, MODE)                                             \

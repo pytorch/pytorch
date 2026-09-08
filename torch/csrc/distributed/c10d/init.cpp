@@ -1009,7 +1009,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -1501,8 +1513,24 @@ Example:
       // rendezvoused with -- each group owns a separate set of logical
       // endpoints over the same allocation. Requires the group's communicator
       // to have been created with `host_cft_mode` enabled.
-      .def("get_peer_cft_handle", getPeerCftHandle, py::arg("peer"))
-      .def("get_multimem_cft_handle", getMultimemCftHandle)
+      .def(
+          "get_peer_cft_handle",
+          getPeerCftHandle,
+          py::arg("peer"),
+          "Return the (le_id, le_offset) CFT logical-endpoint coordinates "
+          "addressing `peer`'s copy of this buffer, for use with the "
+          "device-side ncclCft put/get/reduce API. NCCL backend only; the "
+          "group's communicator must have been created with host_cft_mode "
+          "enabled (see ncclConfig_t.host_cft_mode), and raises RuntimeError "
+          "if the endpoints do not exist (unsupported GPU/driver/NCCL or "
+          "host_cft_mode fallback on an unsupported stack).")
+      .def(
+          "get_multimem_cft_handle",
+          getMultimemCftHandle,
+          "Return the (le_id, le_offset) multicast CFT logical-endpoint "
+          "coordinates for this buffer. Requires NVLS multicast support in "
+          "addition to the get_peer_cft_handle requirements; the first call "
+          "may be collective, so every rank of the group must reach it.")
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -2141,9 +2169,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2206,9 +2233,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3750,8 +3775,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",
@@ -4022,12 +4047,19 @@ for details.
           })
 #endif
 #ifdef NCCL_HAS_HOST_CFT_MODE
-      // ncclHostCftMode_t: 1 = enable, 2 = disable, 3 = fallback (try to
-      // create the CFT logical endpoints, disable host-side CFT on error).
-      // Opt-in: NCCL leaves host-side CFT off unless this is set, since the
-      // endpoints are a limited per-device resource. Must be identical on
-      // every rank of a communicator.
-      .def_readwrite("host_cft_mode", &ncclConfig_t::hostCftMode)
+      .def_readwrite(
+          "host_cft_mode",
+          &ncclConfig_t::hostCftMode,
+          "Whether NCCL creates CFT (Compute Fabric Transport) logical "
+          "endpoints for this communicator (ncclHostCftMode_t): 1 = enable "
+          "(fail communicator init if the stack cannot support them), 2 = "
+          "disable, 3 = fallback (create them if possible, silently proceed "
+          "without otherwise). Defaults to disable: the endpoints are a "
+          "limited per-device resource, so host-side CFT is opt-in. Must be "
+          "identical on every rank and set before the communicator is "
+          "created. Requires NCCL >= 2.31.2 built with CUDA >= 13.3, a "
+          "driver reporting CUDA >= 13.3, and a GPU with logical-endpoint "
+          "support (sm_100+); NCCL_CFT_ENABLE=0 disables CFT globally.")
 #endif
       .def(
           "unsafe_get_ptr",
@@ -4658,6 +4690,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4673,6 +4708,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4681,8 +4723,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(

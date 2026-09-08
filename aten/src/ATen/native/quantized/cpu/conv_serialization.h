@@ -152,11 +152,11 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(const c10::IValue& v) 
 
     std::vector<std::optional<at::Tensor>> tensors;
     tensors.emplace_back();
-    tensors.emplace_back(weight);
-    tensors.emplace_back(bias);
+    tensors.emplace_back(std::move(weight));
+    tensors.emplace_back(std::move(bias));
 
     int64_t version = 3;
-    return std::tie(version, config_vals, tensors);
+    return std::make_tuple(version, std::move(config_vals), std::move(tensors));
   } else if (version == 2) {
     // version 2
     const auto& elements = v.toTupleRef().elements();
@@ -189,11 +189,11 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(const c10::IValue& v) 
 
     std::vector<std::optional<at::Tensor>> tensors;
     tensors.emplace_back();
-    tensors.emplace_back(weight);
-    tensors.emplace_back(bias);
+    tensors.emplace_back(std::move(weight));
+    tensors.emplace_back(std::move(bias));
 
     int64_t version = 3;
-    return std::tie(version, config_vals, tensors);
+    return std::make_tuple(version, std::move(config_vals), std::move(tensors));
   } else if (version == 3) {
     return v.to<ConvParamsSerializationTypeV3>();
   } else {
@@ -242,7 +242,8 @@ ConvParamsSerializationTypeV2 serialize_conv(
   non_optional.emplace_back(std::move(weight));
   optional.emplace_back(std::move(bias));
 
-  return std::tie(version, non_optional, optional);
+  return std::make_tuple(
+      std::move(version), std::move(non_optional), std::move(optional));
 }
 
 #elif QCONV_SERIALIZATION_VERSION == 3
@@ -269,11 +270,11 @@ ConvParamsSerializationTypeV3 serialize_conv(
 
   std::vector<std::optional<at::Tensor>> tensors;
   tensors.emplace_back();
-  tensors.emplace_back(weight);
-  tensors.emplace_back(bias);
+  tensors.emplace_back(std::move(weight));
+  tensors.emplace_back(std::move(bias));
 
   int64_t version = 3;
-  return std::tie(version, config_vals, tensors);
+  return std::make_tuple(version, std::move(config_vals), std::move(tensors));
 }
 
 #else

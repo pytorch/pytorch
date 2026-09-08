@@ -1264,6 +1264,44 @@ class TestSerialization(TestCase, SerializationMixin):
                 loaded_p = torch.load(f, weights_only=True)
                 self.assertEqual(loaded_p, p)
 
+    # SECURITY: This prevents malformed pickles from exposing uninitialized
+    # pybind11 objects. Do not remove this regression test.
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
+    def test_weights_only_newobj_requires_build(self):
+        from torch.distributed.tensor import Shard
+
+        malformed_pickle = (
+            pickle.PROTO
+            + b"\x02"
+            + pickle.GLOBAL
+            + Shard.__module__.encode()
+            + b"\n"
+            + Shard.__name__.encode()
+            + b"\n"
+            + pickle.EMPTY_TUPLE
+            + pickle.NEWOBJ
+            + pickle.STOP
+        )
+
+        checkpoint = io.BytesIO()
+        with zipfile.ZipFile(checkpoint, "w") as archive:
+            archive.writestr("archive/data.pkl", malformed_pickle)
+            archive.writestr("archive/version", "3\n")
+            archive.writestr("archive/byteorder", sys.byteorder)
+        checkpoint.seek(0)
+
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "pickle data is likely corrupt or malicious"
+        ):
+            torch.load(checkpoint, weights_only=True)
+
+        buffer = io.BytesIO()
+        torch.save(Shard(2), buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.load(buffer, weights_only=True), Shard(2))
+
     def test_weights_only_safe_globals_build(self):
         counter = 0
 
@@ -4544,10 +4582,32 @@ class TestSerialization(TestCase, SerializationMixin):
             filename = pathlib.Path(filename)
             import_string = "import torch._dynamo;" if should_import else ""
             err_msg = (
-                "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
-                " must be imported to load nested jagged tensors (NJTs)"
-            ) if not should_import else None
+                "Unsupported global: GLOBAL torch.nested._internal.nested_tensor._rebuild_njt"
+                " was not an allowed global by default"
+            )
             self._attempt_load_from_subprocess(filename, import_string, err_msg)
+
+    @serialTest()
+    def test_load_njt_weights_only_safe_globals(self):
+        from torch.nested._internal.nested_tensor import _rebuild_njt, NestedTensor
+        njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
+        with BytesIOContext() as f:
+            torch.save(njt, f)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                pickle.UnpicklingError,
+                "Unsupported global: GLOBAL torch.nested._internal.nested_tensor._rebuild_njt",
+            ):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            with torch.serialization.safe_globals([_rebuild_njt, NestedTensor]):
+                loaded = torch.load(f, weights_only=True)
+            self.assertEqual(type(loaded), NestedTensor)
+            self.assertEqual(loaded.values(), njt.values())
+            self.assertEqual(loaded.offsets(), njt.offsets())
+            # safe_globals is a context manager, so the allowlisted globals are removed on exit
+            self.assertNotIn(_rebuild_njt, torch.serialization.get_safe_globals())
+            self.assertNotIn(NestedTensor, torch.serialization.get_safe_globals())
 
     @parametrize("dtype", all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     @parametrize("weights_only", [True, False])
