@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 8fbc0a1..7a37683 100644
+index f2235d0..37682ec 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -1344 +1344,3 @@ class EpiMod:
