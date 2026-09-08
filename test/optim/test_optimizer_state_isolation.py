@@ -36,6 +36,19 @@ class TestOptimizerStateIsolation(TestCase):
         opt2.step()
         torch.testing.assert_close(state1, before)
 
+    def test_load_state_dict_preserves_non_tensor_state(self):
+        p1 = torch.nn.Parameter(torch.ones(2))
+        p2 = torch.nn.Parameter(torch.ones(2))
+        opt1 = torch.optim.SGD([p1], lr=0.1)
+        opt2 = torch.optim.SGD([p2], lr=0.1)
+        opt1.state[p1]["tag"] = "cpu"
+        opt1.state[p1]["step_count"] = 3
+
+        opt2.load_state_dict(opt1.state_dict())
+
+        self.assertEqual(opt2.state[p2]["tag"], "cpu")
+        self.assertEqual(opt2.state[p2]["step_count"], 3)
+
 
 if __name__ == "__main__":
     torch.testing._internal.common_utils.run_tests()
