@@ -5,7 +5,6 @@ from . import lr_scheduler
 
 _original_constant_lr_init = lr_scheduler.ConstantLR.__init__
 _original_linear_lr_init = lr_scheduler.LinearLR.__init__
-_original_reduce_lr = lr_scheduler.ReduceLROnPlateau._reduce_lr
 
 
 def _constant_lr_init(self, optimizer, factor=1.0 / 3, total_iters=5, last_epoch=-1):
@@ -54,8 +53,9 @@ def _reduce_lr(self, epoch):
             if bool(torch.any(old_lr - new_lr > self.eps)):
                 lr_scheduler._update_param_group_val(param_group, "lr", new_lr)
         else:
-            _original_reduce_lr(self, epoch)
-            break
+            new_lr = max(old_lr * self.factor, self.min_lrs[i])
+            if old_lr - new_lr > self.eps:
+                lr_scheduler._update_param_group_val(param_group, "lr", new_lr)
 
 
 def _composite_initial_step(self):
