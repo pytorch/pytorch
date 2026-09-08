@@ -211,7 +211,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     GuardCheckGetMetadataFn = Callable[[Guard, Any], Any]
     GuardCheckEvalFn = Callable[[Any, Any], bool]
@@ -4694,6 +4694,31 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _prune(self, value: object, reason: str) -> object:
         return value if self._keep(value) else self._missing(reason)
 
+    def _keep_container_verbatim(
+        self, container: object, values: Collection[object]
+    ) -> bool:
+        """Whether a function container (__defaults__/__dict__/...) is carried whole.
+
+        A kept container is carried verbatim in two cases, and pruned per value
+        otherwise. It is verbatim when its type is not the plain builtin: a
+        dict/tuple SUBCLASS assigned to the slot must keep its type and identity
+        for the guard that reads it. It is also verbatim when a whole-container
+        guard reads it (EQUALS_MATCH/length) with no per-element source, since
+        pruning the elements would silently break that guard -- a permanent
+        cache miss, not a load error (see
+        test_nested_function_preserves_a_guarded_defaults_tuple). But when a
+        guard is rooted at a value INSIDE a plain container (func.__dict__
+        ["tag"], func.__defaults__[0] == 2.0), the container is kept only as the
+        path to that value; carrying it whole would drag every unguarded sibling
+        -- e.g. an unpicklable threading.Lock a decorator stashed -- into the
+        pickle and fail the dump, so it is pruned per value.
+        """
+        if not self._keep(container):
+            return False
+        if type(container) in (dict, tuple):
+            return not any(self._keep(v) for v in values)
+        return True
+
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
@@ -4735,29 +4760,29 @@ class GuardsStatePickler(FunctionPicklerBase):
         snapshot = None
         if self._keep(obj.__globals__):
             snapshot = self._globals_snapshot(obj.__globals__)
-        # An unregistered container keeps its shape; see the Note for why a
-        # registered one is carried verbatim.
+        # See _keep_container_verbatim for when a kept container (__defaults__,
+        # __kwdefaults__, __dict__, __annotations__) is carried whole vs pruned
+        # per value. The per-value prune is what stops one unguarded unpicklable
+        # sibling (a threading.Lock a decorator stashed next to a guarded value)
+        # from failing the whole package.
         defaults = obj.__defaults__
-        if defaults is not None and not self._keep(defaults):
+        if defaults is not None and not self._keep_container_verbatim(
+            defaults, defaults
+        ):
             reason = "unguarded function default"
             defaults = tuple(self._prune(v, reason) for v in defaults)
 
         kwdefaults = obj.__kwdefaults__
-        if kwdefaults is not None and not self._keep(kwdefaults):
+        if kwdefaults is not None and not self._keep_container_verbatim(
+            kwdefaults, kwdefaults.values()
+        ):
             reason = "unguarded function kwdefault"
             kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
 
         closure = obj.__closure__
         if closure is not None:
             closure = tuple(self._prune_cell(cell) for cell in closure)
-        # An unregistered __dict__ drops its unguarded keys outright: unlike a
-        # signature, it holds whatever a decorator happened to stash, and no
-        # guard can read a structure nothing registered. A __dict__ a guard IS
-        # rooted at (a TYPE_MATCH on a dict subclass assigned to it) takes the
-        # same _keep(container) escape as __annotations__/__defaults__: carry it
-        # verbatim so its type and identity survive, rather than rebuild a plain
-        # dict the guard would reject.
-        if self._keep(obj.__dict__):
+        if self._keep_container_verbatim(obj.__dict__, obj.__dict__.values()):
             attributes = obj.__dict__
         else:
             attributes = {
@@ -4766,17 +4791,14 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if self._keep(value)
             }
         # An annotation or type param nothing guards can be an unpicklable local
-        # class; prune it rather than let it fail the whole dump. __annotations__
-        # takes the same _keep(container) escape as __defaults__/__kwdefaults__:
-        # a guard rooted at the container itself (a TYPE_MATCH on a dict subclass
-        # assigned to __annotations__) needs it carried verbatim, so keep it when
-        # kept and prune per value otherwise. Below 3.14 the escape reads
-        # obj.__annotations__ directly (id-stable); on 3.14 _read_raw_annotations
-        # hands back a fresh dict per call, so _keep is always False there and the
-        # per-value prune is taken. __type_params__ has no such escape: a TypeVar
-        # is not a literal, so the tuple never takes a value-baking guard.
+        # class; prune it rather than let it fail the whole dump. Below 3.14 the
+        # verbatim escape reads obj.__annotations__ directly (id-stable); on 3.14
+        # _read_raw_annotations hands back a fresh dict per call, so _keep is
+        # always False there and the per-value prune is taken. __type_params__
+        # has no such escape: a TypeVar is not a literal, so the tuple never
+        # takes a value-baking guard.
         raw_annotations = self._read_raw_annotations(obj)
-        if self._keep(raw_annotations):
+        if self._keep_container_verbatim(raw_annotations, raw_annotations.values()):
             annotations = raw_annotations
         else:
             annotations = {
