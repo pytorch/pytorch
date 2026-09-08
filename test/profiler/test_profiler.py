@@ -1713,8 +1713,6 @@ class TestProfiler(TestCase):
                     self.assertTrue("string_list" in args)
                     self.assertTrue("int_param" in args)
                     self.assertTrue("string_param" in args)
-                    # Check that the list of strings is properly serialized
-                    # The list should be formatted as a JSON array by ivalueListToStr
                     self.assertEqual(args["string_list"], ["hello", "world", "test"])
                     self.assertEqual(args["int_param"], 42)
                     self.assertEqual(args["string_param"], "single_string")
