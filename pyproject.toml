@@ -237,7 +237,7 @@ exclude = [
     "**/*.sh",
     "**/*.proto",
     "**/*.pyi.in",   # codegen templates -> .pyi at build time
-    "**/BUCK.oss",   # Bazel build file
+    "**/BUCK.oss",   # Buck build file
     # Docs and editor / dev metadata that scikit-build-core's package walk
     # picks up but legacy setup.py omitted.
     "**/*.md",
