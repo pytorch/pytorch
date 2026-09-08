@@ -1,33 +1,16 @@
-# General CuTeDSL reduction kernel (K0) + the dispatcher for the whole fold-
-# reduction taxonomy. K0 is one @cute.kernel that handles ANY geometry (row,
-# column, n-D, transposed, sliced, reduce-all) via a TensorIterator-derived
-# offset decode -- the correctness floor, and the COMBINE engine for the two-stage
-# drivers that follow (from_partials). `_reduce()` is the dispatcher every reduction
-# enters: it decodes the geometry and routes to the specialized kernels, each of which
-# wires its own branch in as it is introduced:
-#   contiguous last-dim, smem-fits   -> kernel_rowtile   (one-shot)
-#   contiguous last-dim, larger N    -> kernel_xcta      (fused cross-CTA split)
-#   prime / awkward N                -> _two_stage_row   (ragged split, K0 body)
-#   every kept extent 1              -> reduce_all
-#   anything only K0 could serve     -> declined to aten by the cond
+# The general CuteDSL reduction kernel and the dispatcher for the whole taxonomy. One
+# @cute.kernel handles ANY geometry -- row, column, n-D, transposed, sliced, reduce-all --
+# through a TensorIterator-derived offset decode, which makes it the correctness floor and the
+# COMBINE engine for the two-stage drivers that follow. Specialized kernels wire their own
+# branch into `_reduce()` as each is introduced.
 #
-# ADDRESSING. TI coalesces any reduction into an iteration where a dim is REDUCED iff the output
-# stride along it is 0. The host passes compile-time (extent, element_stride) lists -- `red_dims`
-# for the per-thread fold, `kept_dims` for one block per kept coordinate -- and the kernel decodes a
-# linear index to a flat offset against them (_decode_offset). Multi-dim reductions and arbitrary
-# strides fall out of the same decode. Reduce-all is the degenerate zero-kept-dims case.
+# ADDRESSING. TI coalesces any reduction into an iteration where a dim is REDUCED iff the
+# output stride along it is 0. The host passes compile-time (extent, element_stride) lists and
+# the kernel decodes a linear index to a flat offset against them, so multi-dim reductions and
+# arbitrary strides need no special cases. Reduce-all is the zero-kept-dims case.
 #
-# Only STRUCTURE is compiled in (cache_sig); geometry VALUES are runtime args, so kernel count is
-# O(op x dtype x pair-count), not O(distinct shapes).
-#
-# const_expr specialization keys:
-#   npairs_red / npairs_kept  decode depth      nouts  1 or 2 results (var_mean, max.dim)
-#   gidx_from   what an index trait is told the position is: "r" the linear reduction index,
-#               "flat" the global offset (reduce-all), "chunk" chunk_base + r (a ragged split)
-#   final       project and store, or store RAW accumulator fields as stage-1 partials
-#   from_partials  the per-thread step COMBINES accumulator tuples instead of REDUCING inputs
-#   flat_tail / ragged_chunk   clamp the fold bound to `limit`, or to the end of this output's own
-#               reduced run (a non-multiple extent leaves the last chunk of every output short)
+# Only STRUCTURE is compiled in; geometry VALUES are runtime launch args, so the kernel count
+# is O(op x dtype x pair-count) rather than O(distinct shapes).
 
 import math
 
@@ -45,37 +28,18 @@ from .._cutedsl.traits import block_reduce, WARP, warp_reduce
 
 
 def _magic(d):
-    # Magic-number reciprocal for exact n // d over 0 <= n < 2^31 as
-    # (n * m) >> sh -- one 64-bit multiply + shift instead of a runtime 64-bit
-    # divide (which the ~%25-slower runtime-geometry decode would otherwise emit
-    # per element per pair). Same Granlund-Montgomery family as aten's IntDivider
-    # (aten/src/ATen/cuda/detail/IntegerDivider.cuh, hackersdelight.org/magic.htm);
-    # that one uses the add-indicator form for the full unsigned 2^32 domain, but
-    # K0's linear indices are Int32-positive (< 2^31), so the simpler round-up form
-    # is exact and one instruction cheaper. Proof sketch: m = floor(2^(31+l)/d)+1
-    # with l = ceil(log2 d), so m*d = 2^(31+l) + e with 0 < e <= d, and for n < 2^31
-    # the error term n*e/(d*2^(31+l)) < 2^-l * 1 < 1/d ... floor((n*m) >> (31+l))
-    # = n//d exactly. m < 2^32 (d > 2^(l-1)) so n*m < 2^63: no Int64 overflow.
+    # Magic-number reciprocal for exact n // d as (n * m) >> sh: one multiply-shift instead of a
+    # runtime 64-bit divide per element per pair. Granlund-Montgomery, as in aten's IntDivider,
+    # in the round-up form the Int32-positive domain allows -- exact, and an instruction cheaper.
     l = (d - 1).bit_length()
     return (1 << (31 + l)) // d + 1, 31 + l
 
 
 def _decode_offset(linear, vals, npairs):
-    # Mixed-radix decode of a linear index into a flat element offset. vals is a
-    # RUNTIME Int64 list of QUADS, fastest-varying dim first:
-    #     [m0, sh0, ext0, strd0,  m1, sh1, ext1, strd1, ...]
-    # where (m, sh) is _magic(ext). npairs is the compile-time pair COUNT (only the
-    # loop STRUCTURE is baked -- the values are launch args, so one compiled kernel
-    # serves every geometry with the same pair count). Divisions run as magic
-    # multiply+shift; the LAST pair needs neither div nor mod (a linear index in
-    # range has rem < ext_last; out-of-range lanes decode garbage that the callers'
-    # `valid` predication never reads). For a single pair this is linear*stride.
-    #
-    # INT64: the flat offset can exceed int32 (numel >= 2^31, e.g. a (300000, 8192)
-    # reduction). Cast the linear index to Int64 up front so every rem*stride product
-    # and accumulation is 64-bit; an int32 product silently wraps negative and reads
-    # out of bounds. The returned offset indexes a flat gmem tensor, which expects a
-    # 64-bit offset.
+    # Mixed-radix decode of a linear index to a flat element offset. `vals` is a RUNTIME quad list,
+    # fastest dim first, so only the pair COUNT is baked and one kernel serves every geometry
+    # sharing it; the last pair needs neither div nor mod. INT64 throughout, since numel can exceed
+    # 2**31 and an int32 product wraps negative and reads out of bounds.
     rem = cutlass.Int64(linear)
     if npairs == 1:
         return rem * vals[3]
@@ -137,12 +101,8 @@ class ReduceBlock:
 
     @property
     def cache_sig(self):
-        # EVERY value baked into the kernel as a const_expr -- now STRUCTURE only.
-        # count / num_o / the pair VALUES / in_base / limit / project_n are RUNTIME
-        # launch args (grid comes from the output extent), so one compiled kernel
-        # serves every geometry sharing this structure: kernel count is
-        # O(op x dtype x pair-count), not O(distinct shapes/strides). Callers
-        # prepend trait_key and the operand dtypes (not captured here).
+        # STRUCTURE only: the counts, pair values and bounds are RUNTIME launch args, so one compiled
+        # kernel serves every geometry sharing this structure. Callers prepend the trait key and dtypes.
         return (
             self.npairs_red,
             self.npairs_kept,
@@ -158,9 +118,8 @@ class ReduceBlock:
 
     @property
     def geom_sig(self):
-        # The RUNTIME geometry values, for the per-geometry PLAN cache (which holds
-        # the pre-boxed launch args): a repeat geometry skips the Int32/Int64 boxing
-        # (~6us/launch) but still shares the structurally-cached compiled kernel.
+        # The RUNTIME geometry, for the per-geometry PLAN cache: a repeat geometry skips the
+        # Int32/Int64 boxing (~6us/launch) but still shares the structurally-cached kernel.
         return (
             self.count,
             self.red_pairs,
@@ -211,11 +170,8 @@ class ReduceBlock:
         obase = in_base
         if const_expr(self.npairs_kept > 0):
             obase = in_base + _decode_offset(o, kvals, self.npairs_kept)
-        # Per-block fold bound rb: normally count; with flat_tail (reduce-all
-        # stage 1, red stride 1 by construction) clamp to the elements left before
-        # `limit` so the overhanging last chunk folds nothing out of range. Runtime
-        # value -> the full-wave count n_full is a DYNAMIC loop trip count.
-        # nonzero only under ragged_chunk -- see gidx_from == "chunk"
+        # Per-block fold bound: normally the full count, but with flat_tail clamped to the elements
+        # left before `limit`, so the overhanging last chunk folds nothing out of range.
         chunk_base = Int32(0)
         rb = count
         if const_expr(self.flat_tail):
@@ -226,16 +182,11 @@ class ReduceBlock:
             left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
             rb = cutlass.Int32(left)
         elif const_expr(self.ragged_chunk):
-            # RAGGED CHUNK SPLIT (stage 1): the reduced run is cut into chunks of `count`
-            # STEPS each, and its extent need not be a multiple of count -- so the LAST chunk
-            # of every output is short and must fold nothing belonging to the next output.
-            # `limit` carries the reduced EXTENT; the chunk pair is the fastest-varying kept
-            # pair, so its magic quad in kvals yields the chunk index with no runtime divide
-            # (see _magic). One such computation per BLOCK, not per element.
-            #
-            # Counted in STEPS of the reduced axis, not elements, so this is independent of
-            # that axis's stride: a contiguous row split (stride 1, count = chunk columns)
-            # and a column split (stride = row length, count = chunk rows) use it unchanged.
+            # RAGGED CHUNK SPLIT: the reduced run is cut into chunks of `count` STEPS whose extent need not
+            # divide it, so the LAST chunk of every output is short and must not fold the next one's
+            # elements. The chunk pair is the fastest-varying kept pair, so its magic quad yields the chunk
+            # index once per BLOCK with no runtime divide. In STEPS, so a row split and a column split use
+            # it unchanged.
             q = (cutlass.Int64(o) * kvals[0]) >> kvals[1]
             c = cutlass.Int64(o) - q * kvals[2]
             cnt = cutlass.Int64(count)
@@ -250,22 +201,11 @@ class ReduceBlock:
         reduce_fn = trait.reduce  # local bind: attribute access trips a dyn loop
         acc_dtype = trait.acc  # accumulator dtype (a compile-time Python class)
         if const_expr(self.from_partials):
-            # Stage-2: COMBINE pre-reduced accumulator tuples from the per-field
-            # partial buffers. Partials for output o are the contiguous run
-            # [obase, obase+count); obase = o*C decoded from kept_pairs (Int64) -- must
-            # offset by it, else every row reads row 0's partials (multi-row bug).
-            #
-            # count is the partial count (for a huge-N reduce-all split, LARGE -- ~1e5).
-            # A range_constexpr(ceil(count/block)) unroll scaled the compile with count
-            # (count=98125 -> ~384-deep unroll -> ~3s compile; the reduce-all backup's
-            # G-chunk was worse). Same fix as the per-axis fold below: a DYNAMIC
-            # full-wave loop (all-in-range, so the constant valid=True doesn't trip the
-            # IR flattener) + a CONSTEXPR remainder. Compile depth is O(1) in count.
-            # Bind trait attributes to locals -- attribute access on `trait` inside a
-            # dynamic loop trips the IR flattener (like reduce_fn above); nfields is a
-            # small python int so a bare-range comprehension is trace-time unrolled and
-            # leaves no trait access in the loop body (range_constexpr can't appear in a
-            # cutlass.range loop).
+            # Stage 2: COMBINE pre-reduced accumulator tuples from the per-field partial buffers. Each
+            # output's partials are a contiguous run, and the base must be decoded from kept_pairs or every
+            # row reads row 0's. The fold is a DYNAMIC full-wave loop plus a constexpr remainder, because a
+            # static unroll scaled compile time with the partial count (~3s at 1e5). Bind the trait's
+            # attributes to locals -- attribute access inside a dynamic loop trips the IR flattener.
             combine_fn = trait.combine
             fdtypes = trait.fdtypes
             nf = const_expr(nfields)
@@ -283,13 +223,9 @@ class ReduceBlock:
             merged = combine_fn(acc, part)
             acc = tuple((merged[f] if valid else acc[f]) for f in range(nf))
         else:
-            # Per-axis fold (flat_tail included: rb is pre-clamped to the elements
-            # before `limit`, so r < rb already implies off < limit -- the old
-            # per-element off guard collapsed into the rb clamp above). The trip
-            # count n_full is a DYNAMIC value: every full wave is all-in-range, so
-            # the loop guard is the python constant True and a cutlass.range loop
-            # compiles (a dynamic per-element `valid` would trip the IR flattener).
-            # Compile depth is O(1) in count; one predicated remainder pass follows.
+            # Per-axis fold. rb is pre-clamped, so `r < rb` already implies in-range and the per-element
+            # guard collapses into it. The trip count is DYNAMIC and every full wave is all-in-range, so
+            # the loop guard is a python constant and compile depth is O(1) in the extent.
             base_r = tidx
             for _ in cutlass.range(n_full):
                 # Inline the offset (no intermediate name that the DSL would treat
@@ -378,10 +314,8 @@ class ReduceBlock:
                     mOuts[f][o] = trait.fdtypes[f](acc[f])
 
 
-# ---------------------------------------------------------------------------
-# Host plumbing + the geometry chooser. These build ReduceBlock launches; the
-# kernel above is the only @cute.kernel in the whole library.
-# ---------------------------------------------------------------------------
+# Host plumbing + the geometry chooser: these build the plans that drive tile.TileReduce.
+# Nothing here is a kernel.
 _stream = _L.stream
 # _L.compile_kernel: cute.compile against FAKE operands + options="--enable-tvm-ffi", so the
 # compiled callable takes the torch tensors and there is no per-call wrap.
@@ -393,9 +327,8 @@ _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry arg
 
 
 def _fakes(ts):
-    # Compile-time descriptors. All K0 operands are 1D flat views (input storage, partials, reshaped
-    # outs) and the leading (only) extent is DYNAMIC, so one structural kernel serves any length --
-    # required since the grid reads mOuts[0].shape[0] live.
+    # Compile-time descriptors. Every operand is a 1D flat view whose extent is DYNAMIC, so one
+    # structural kernel serves any length -- required, since the grid reads a shape live.
     return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
 
 
@@ -406,10 +339,8 @@ def _operands(ts, read_only=False):
 
 
 def _quads(pairs):
-    # (extent, stride) pairs -> the flat [m, sh, ext, strd, ...] quad list
-    # _decode_offset consumes (see there). Runs once per NEW geometry (the boxed
-    # result is memoized in _PLAN), so the bit_length/divide cost is off the
-    # repeat-launch path.
+    # (extent, stride) pairs -> the flat quad list _decode_offset consumes. Runs once per NEW
+    # geometry (the boxed result is memoized), so the divide cost is off the repeat path.
     out = []
     for ext, strd in pairs:
         m, sh = _magic(ext)
@@ -418,11 +349,10 @@ def _quads(pairs):
 
 
 def _geom_args(op):
-    # The RUNTIME geometry of a ReduceBlock launch: magic-division quad lists for
-    # the reduced/kept decodes plus the scalar bounds. Everything here was a baked
-    # const_expr before; the compiled kernel (keyed on the STRUCTURAL cache_sig
-    # alone) now takes these per call. The magic form requires linear indices
-    # < 2^31; r and o are Int32 by construction, asserted where count/num_o are set.
+    # The RUNTIME geometry of a launch: magic-division quads for the two decodes plus the scalar
+    # bounds, all of which used to be baked const_exprs. The magic form needs indices < 2**31,
+    # which count/num_o assert. Unused row/col args are None, not dummies: an unused Int32 kernel
+    # parameter is not free (see tile.TileReduce.kernel).
     return (
         _quads(op.red_pairs),
         _quads(op.kept_pairs),
@@ -434,11 +364,8 @@ def _geom_args(op):
 
 
 def _launch(op, key, ins, outs):
-    # Two-level cache: _PLAN memoizes (compiled fn, pre-boxed geometry args) per
-    # GEOMETRY (boxing 10 Int32/Int64 costs ~6us -- the dominant repeat-launch
-    # overhead); _COMPILE_CACHE dedupes the compile per STRUCTURE (key already ends
-    # in cache_sig), so new geometries reuse the kernel and only box once. key[1] is
-    # the trait_key (e.g. "sum") -> one tlparse artifact per distinct K0 kernel built.
+    # Two-level cache: _PLAN memoizes the pre-boxed launch args per GEOMETRY, since boxing ten
+    # scalars costs ~6us; _COMPILE_CACHE dedupes the compile per STRUCTURE.
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
         fn = cached_plan(
@@ -454,13 +381,12 @@ def _launch(op, key, ins, outs):
 
 
 def _ti_pairs(x, out):
-    """The kernel's input addressing for ``reduce x into out``, read off TensorIterator: a dim is
-    REDUCED iff the output stride along it is 0. Returns (red_pairs, kept_pairs) of
-    (extent, input_element_stride).
+    """Input addressing for ``reduce x into out``, off TensorIterator: a dim is REDUCED iff the
+    output stride along it is 0. Returns (red_pairs, kept_pairs) of (extent, input stride).
 
     KEPT dims are ordered by OUTPUT stride ascending, because the block index is decoded
-    fastest-first and must land on out.reshape(-1)[o]. REDUCED dims need no order -- the fold visits
-    each element once and combine is commutative."""
+    fastest-first. REDUCED dims need no order -- the fold visits each element once.
+    """
     it = reduce_op(out, x)
     in_str = it.element_strides(it.noutputs)  # input operand follows the outputs
     out_str = it.element_strides(0)
@@ -473,9 +399,8 @@ def _ti_pairs(x, out):
 
 
 def _probe(x, red_axes):
-    # A dummy output tensor with the reduced dims set to size 1, as reduce_op /
-    # _ti_pairs expect (it reads shapes+strides only, no compute). Shared by the
-    # fast-path classifier and the K0 fallback so both see the same TI decode.
+    # A dummy output with the reduced dims set to 1, as reduce_op expects (it reads shapes and
+    # strides only). Shared by the classifier and the fallback so both see one TI decode.
     return torch.empty(
         [1 if i in red_axes else s for i, s in enumerate(x.shape)],
         device=x.device,
@@ -484,36 +409,21 @@ def _probe(x, red_axes):
 
 
 def _flat(x):
-    # A 1D stride-1 view over x's ENTIRE underlying storage. TI's element strides
-    # are storage-relative, so the kernel indexes THIS (not x.reshape(-1), which
-    # for a non-contiguous x would copy + reorder and break the stride math).
+    # A 1D stride-1 view over x's ENTIRE storage: TI's element strides are storage-relative, and
+    # x.reshape(-1) on a non-contiguous x would copy and break the stride math.
     n = max(x.untyped_storage().nbytes() // x.element_size(), 1)
     return torch.as_strided(x, (n,), (1,), storage_offset=0)
 
 
-# --- Fast-path classification: the ONE source of truth, shared by the router below and the override
-# cond gate. Runs on the TI-decomposed pairs, so it sees POST-coalesce geometry (a contiguous 3D
-# last-dim reduction collapses to one reduced + one kept run and reshapes into the row kernel). The
-# general kernel is correct for any geometry but ~5-8x slower than ATen, so coalescible geometries are
-# reshaped into the fast paths and the rest DECLINE to ATen. ---
+# --- Fast-path classification, the ONE source of truth for the router and the cond gate. It
+# runs on the TI-decomposed pairs, so it sees POST-coalesce geometry. ---
 
 
 def fast_kind(red_pairs, kept_pairs, nouts, has_index):
-    """Which fast kernel serves this TI-decomposed reduction, or None (-> the general kernel/ATen).
+    """Which fast kernel serves this TI-decomposed reduction, or None for the general one.
 
-    "row"     : reduced axis is the single contiguous (stride-1) innermost run;
-                kept is a single run. Reshape to (prod(kept), prod(red)), reduce
-                last dim -> the row kernels / xcta. Any nouts / index trait.
-    "col"     : kept axis is the single contiguous (stride-1) innermost run;
-                reduced is a single run. Reshape to (prod(red), prod(kept)),
-                reduce dim 0 -> K2. ONLY nouts==1 non-index (K2 is value-only).
-    "all"     : no kept dims (full reduction) -> xcta / two-stage. Any trait.
-    None      : neither -- only the K0 general kernel could serve it; the cond
-                declines to aten instead (K0 is far slower than aten's kernel).
-
-    BOTH axes must coalesce to a single run, so the reduction is a dense 2D view: a transpose,
-    multi-run or gapped layout gives more than one pair and falls to None. The stride-1 pair is the
-    innermost axis and decides row vs col.
+    BOTH axes must coalesce to a single run, so the reduction is a dense 2D view; the stride-1
+    pair is the innermost axis and decides row against col. "col" is value-only.
     """
     if len(kept_pairs) == 0:
         return "all"
@@ -526,26 +436,19 @@ def fast_kind(red_pairs, kept_pairs, nouts, has_index):
     return None
 
 
-# The one-shot stages a whole row tile, so its tile is ~N*dtype_bytes; it must fit the
-# ~228 KB B200 smem budget. Above that, route to the multi-CTA split (which caps each
-# chunk's tile). Use a conservative 192 KB so the reduction buffer + slack also fit.
+# The one-shot stages a whole row tile (~N*itemsize), so it must fit smem; above that the
+# multi-CTA split caps each chunk's tile. Conservative, to leave the reduction buffer room.
 _SMEM_BUDGET = 192 * 1024
-# ... and the per-thread LOAD count must stay bounded. The fold walks ceil(N/(tpr*vec)) loads
-# per thread; that only gets out of hand when the vector width collapses to 1 (an odd or prime
-# N), where it becomes N/tpr. MEASURED, (8, N) sum vs ATen with the bound absent: N=32771 fp32
-# 34.1us vs 5.8 (0.17x), N=65537 bf16 76.4 vs 6.0 (0.08x), N=98299 bf16 95.4 vs 7.5 (0.08x).
-# Above the bound the cross-CTA split serves those instead, measured 1.93-2.41x of ATen on the
-# same shapes. 64 separates every measured good case (N=4099 at tpr 64 -> 64 loads, N=49152 at
-# vec 4 -> 48) from every bad one (128, 256). tile.MAX_UNROLL bounds the same quantity inside
-# the kernel; this is the gate's copy.
+# ... and the per-thread LOAD count must stay bounded. It only runs away when the vector
+# width collapses to 1 (an odd or prime N): measured 0.08-0.17x of ATen with no bound, and
+# 1.93-2.41x once the cross-CTA split serves those instead. 64 separates every measured good
+# case from every bad one. tile.MAX_UNROLL bounds the same quantity inside the kernel.
 _ONESHOT_MAX_LOADS = 64
 # Chunks per row for the ragged split (_two_stage_row). Caps the stage-2 fold.
 _C_MAX_ROW = 64
 
-# K0 general (correctness-fallback) kernel config, as named DATA. K0 is the any-geometry
-# backstop (scalar/strided offset-decoded loads), NOT a perf path, so its knobs are
-# occupancy baselines, not a tuned surface. reduce-dim uses _K0_BLOCK threads/block;
-# reduce-all uses its own (block, grid_mult) since it routes through the xcta two-stage.
+# The general axis's launch config as named DATA. It is the any-geometry backstop rather than
+# a perf path, so these are occupancy baselines and not a tuned surface.
 _K0_BLOCK = 128
 _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
@@ -566,15 +469,10 @@ def _oneshot_ok(x):
 
 
 def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
-    # Fast path for reduction of the CONTIGUOUS last dim of a 2D problem. Sub-paths;
-    # returns the result tuple, or None if not handled:
-    #   smem-safe, load-bounded N -> one-shot (kernel_rowtile, 1 or 2 outputs)
-    #   larger N                  -> fused cross-CTA two-stage (reduce_xcta, 1 or 2)
-    # The one-shot needs no index remap (the projected index IS the per-row column), so it
-    # serves index traits directly. The cross-CTA split DECLINES them: its reshape makes a
-    # sub-row's chunk index row % C, and rebasing that to a global column is awkward, so an
-    # index trait at larger N falls to the ragged split / K0 instead (see kernel_xcta's
-    # has_index gate). A geometry neither accepts returns None -> K0.
+    # Fast path for the CONTIGUOUS last dim of a 2D problem; None if it is not handled. The
+    # one-shot needs no index remap, so it serves index traits directly, while the cross-CTA
+    # split declines them -- its reshape makes a sub-row's chunk index row % C, which is awkward
+    # to rebase to a global column (see kernel_xcta's has_index gate).
     if x.dim() != 2 or x.stride(-1) != 1:
         return None
     N = x.shape[-1]
@@ -589,9 +487,8 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     from . import kernel_xcta as xc
 
     if nouts == 2:
-        # The same fused split as nouts==1, projecting both fields. Without it a
-        # few-row/huge-N 2-output reduction lands on K0's one-block-per-row (0.63x of
-        # ATen at N=65536, 0.20x at N=131072, for every M).
+        # The same fused split as nouts==1, projecting both fields. Without it a few-row/huge-N
+        # 2-output reduction lands on one-block-per-row: 0.63x of ATen at N=65536, 0.20x at 131072.
         res = xc.reduce_row_xcta_2out(trait, trait_key, x, out_dtypes)
         if res is not None:
             return res
@@ -600,18 +497,14 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     res = xc.reduce_row_xcta(trait, trait_key, x, out_dtypes[0])
     if res is not None:
         return (res,)
-    # xcta declined: no C divides N inside its window (a prime N, say), or the trait
-    # carries an index. Split raggedly instead -- same two stages, but the chunk need not
-    # divide the row, and stage 1 can carry the absolute column.
+    # xcta declined (a prime N, or an index trait): split raggedly instead -- same two stages, but
+    # the chunk need not divide the row and stage 1 can carry the absolute column.
     return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
 def _as_shape(out, out_shape):
-    # Give a reduction's flat output its final n-D shape WITHOUT leaving the result a
-    # view. reduce_all allocates its own 1-element buffer, so a plain
-    # `.reshape(out_shape)` returns a view whose `_base` is that buffer -- and an aten
-    # reduction NEVER aliases, a difference OpInfo's python-ref tests do check.
-    # `_as_shape` reshapes in place when it can so the buffer IS the result.
+    # Give the flat output its n-D shape WITHOUT leaving it a view: the kernels allocate their own
+    # buffer, and an aten reduction never aliases -- OpInfo's python-ref tests check that.
     if tuple(out.shape) == tuple(out_shape):
         return out
     reshaped = out.reshape(out_shape)
@@ -622,16 +515,12 @@ def _as_shape(out, out_shape):
 
 
 def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
-    # RAGGED cross-CTA row split, for an N that kernel_xcta declines because no divisor of N falls
-    # in its window: without it a prime N lands on one block per row, measured 0.28x of ATen at
-    # (8, 131071). Here the chunk length need not divide N -- chunk c covers
-    # [c*s, min((c+1)*s, N)) and stage 1 clamps its fold to the end of the row (ragged_chunk).
-    # Returns None at C == 1, where a second launch buys no parallelism.
+    # RAGGED cross-CTA row split, for an N with no divisor in xcta's window: without it a prime N
+    # lands on one block per row, measured 0.28x of ATen at (8, 131071). The chunk need not divide
+    # N, so stage 1 clamps its fold to the end of the row. None at C == 1, which buys nothing.
     #
-    # Index traits ARE served here, which is what lets xcta decline them: stage 1 runs
-    # gidx_from="chunk", so the trait sees the GLOBAL column and stage 2 needs no remap, with
-    # ATen's first-wins tie-break surviving because a lower column compares lower. Measured
-    # 1.29-3.17x of ATen on the argmax shapes xcta refuses.
+    # Index traits ARE served here, which is what lets xcta decline them: stage 1 sees the GLOBAL
+    # column, so stage 2 needs no remap and ATen's first-wins tie-break survives.
     M, N = x.shape
     sm = torch.cuda.get_device_properties(x.device).multi_processor_count
     # Enough chunks to fill the device, then round s up to a 16B-friendly multiple so the
@@ -651,9 +540,8 @@ def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
 
-    # Stage 1: one output per (row, chunk). Kept pairs are (C, s_chunk) FASTEST-varying then
-    # (M, N), so o = m*C + c decodes to obase = m*N + c*s_chunk -- and the chunk pair being
-    # first is what lets the ragged clamp read its magic quad from kvals[0..3].
+    # Stage 1: one output per (row, chunk). The chunk pair is FASTEST-varying, which is what lets
+    # the ragged clamp read its magic quad from the front of kvals.
     s1 = ReduceBlock(
         trait,
         count=s_chunk,
@@ -687,9 +575,8 @@ def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
 
 
 def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
-    # General reduction of x over `dims` (int / tuple / None=all), driven by TI.
-    # Covers row/column/n-D/transposed/sliced uniformly. Returns nouts tensors.
-    # block = K0 threads-per-block (exposed knob); baked into ReduceBlock + cache_sig.
+    # General reduction of x over `dims` (int / tuple / None), driven by TI: row, column, n-D,
+    # transposed and sliced all take the same path. Returns nouts tensors.
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
     red_axes = (
@@ -698,19 +585,16 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     red_axes = {d % x.dim() for d in red_axes}
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
 
-    # Single output ELEMENT (every kept extent is 1) -> reduce_all's two-stage split rather than the
-    # general fallback, which would put ONE block on the whole row. Reached by a full `dims` set and
-    # by the M=1 row case, where TI collapses the extent-1 kept axes away entirely so the classify
-    # block below cannot serve it. _as_shape restores out_shape, which is pure metadata at numel 1.
+    # A single output ELEMENT takes reduce_all's two-stage split, not the general fallback, which
+    # would put ONE block on the whole row. Reached by a full `dims` set and by the M=1 row case,
+    # where TI collapses the extent-1 kept axes away before the classifier can see them.
     if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
         out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
         return (_as_shape(out, out_shape),)
 
-    # Classify the POST-TI-coalesce geometry and route to a fast kernel through a dense 2D reshape,
-    # which is what puts a contiguous n-D reduction over its innermost axes on the row/col kernels
-    # rather than the ~5-8x-slower general one. The override cond declines anything returning None
-    # here, so `_reduce` only sees {row, col} on a real call; the general kernel below remains the
-    # correctness fallback for direct callers and for a fast kernel that declines.
+    # Classify the POST-TI-coalesce geometry and reshape onto a fast kernel, which is what puts a
+    # contiguous n-D reduction over its innermost axes on the row/col path. The general kernel
+    # stays the correctness fallback for direct callers and for a fast kernel that declines.
     if len(out_shape) > 0 and x.is_contiguous():
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
         has_index = getattr(trait, "has_index", False)
@@ -750,9 +634,8 @@ def reduce_dim2(trait, trait_key, x, dims, out_dtypes, block=_K0_BLOCK):
 
 
 def _grid_size(L, block, sm_count, grid_mult=4):
-    # G = number of stage-1 chunks (CTAs). Fill the device to grid_mult waves, capped
-    # by the work available. grid_mult is the exposed fan-out knob: more chunks = more
-    # parallelism in stage 1 but a larger stage-2 fold. Default 4 (the prior constant).
+    # G = stage-1 chunks. Fill the device to grid_mult waves, capped by the work available: more
+    # chunks means more stage-1 parallelism but a larger stage-2 fold.
     by_work = (L + block - 1) // block
     return max(1, min(by_work, sm_count * grid_mult))
 
@@ -764,32 +647,24 @@ def reduce_all(
 
 
 def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
-    # Full-tensor reduce-all, in preference order: the one-shot row kernel (a single
-    # kernel, when the input fits its tile), then the fused cross-CTA two-stage
-    # (reduce_xcta, the M=1 case -- it mirrors ATen's ctas_per_output split), then the
-    # grid-striding two-stage K0. Index traits (argmax/min) are served throughout: a
-    # single row makes each sub-row's global column the flat index, and stage 1
-    # accumulates exactly that, so the winner's index needs no remap.
+    # Full-tensor reduce-all, in preference order: the one-shot row kernel, then the fused
+    # cross-CTA two-stage, then the grid-striding general one. Index traits are served throughout,
+    # since a single row makes each sub-row's global column the flat index.
     if not (x.is_cuda and x.is_contiguous()):
         raise AssertionError(
             f"reduce-all needs a contiguous CUDA input, got {x.device} {x.stride()}"
         )
     L = x.numel()
     xf = x.reshape(-1)
-    # Fits the one-shot tile -> no cross-CTA split is wanted at all. Left to xcta, such
-    # an input either lands on C == 1 (stage 2 folds a SINGLE partial in a kernel of its
-    # own: ~1.9us of pure launch, 45% of the small-input floor) or, below xcta's
-    # 256-element sub-row floor, is declined to the two-stage K0 -- one kernel too many
-    # either way. _try_fast_row applies this same gate BEFORE reaching for xcta; the
-    # reduce-all path calls xcta directly, so it has to apply it here. Measured 1.3-2.1x
-    # over the two-stage across the whole legal band, 1.2-2.1x over ATen.
+    # Fits the one-shot tile -> no cross-CTA split is wanted. Left to xcta such an input either
+    # folds a SINGLE partial in a kernel of its own (~1.9us of pure launch) or is declined below
+    # its sub-row floor -- one kernel too many either way. Measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
     if _oneshot_ok(x2):
         from . import kernel_rowtile as rt
 
-        # The launch is ONE row, so the ladder's row-packing tpr would leave the whole
-        # device on a fraction of one CTA -- widen it (see rt.single_row_config, which
-        # returns None when the ladder's pick already stands).
+        # The launch is ONE row, so the ladder's row-packing tpr would leave the device on a fraction
+        # of one CTA. rt.single_row_config returns None when the ladder's pick already stands.
         cfg = rt.single_row_config(L, x.element_size() * 8, trait.nfields)
         kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
         outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
@@ -803,9 +678,8 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
         res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
     if res is not None:
         return res
-    # Too big for the one-shot and xcta declined (prime/poorly-factored L) -> two-stage
-    # K0, which grid-strides any L with no reshape (O(1) compile regardless of L) and so
-    # still fills the device for a single huge row.
+    # Too big for the one-shot and xcta declined (a prime L): the two-stage general path
+    # grid-strides any L with no reshape, so compile stays O(1) and the device still fills.
     sm = torch.cuda.get_device_properties(x.device).multi_processor_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
@@ -816,10 +690,9 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
     ]
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
 
-    # Stage 1: 1D input split into G contiguous chunks. Modeled in the general
-    # scheme as kept dim (G, chunk) and reduced dim (chunk, 1): obase = o*chunk,
-    # off = o*chunk + r, with flat_tail guarding off < L on the last chunk.
-    # gidx_from="flat" -> argmax carries the true global flat index.
+    # Stage 1: the 1D input split into G contiguous chunks, modelled as kept (G, chunk) and
+    # reduced (chunk, 1), with flat_tail guarding the last chunk. gidx_from="flat", so an index
+    # trait carries the true global offset.
     s1 = ReduceBlock(
         trait,
         count=chunk,
@@ -835,10 +708,8 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
     )
     _launch(s1, ("all1", trait_key, x.dtype) + s1.cache_sig, [xf], parts)
 
-    # Stage 2: fold the G per-field partials in one block, project once. The
-    # divisor for mean/etc. is the TRUE element count L, not G. (from_partials
-    # ignores red_pairs/kept_pairs; pass trivial ones.) project_n=L is in
-    # cache_sig, so distinct L never reuse a stale baked-in divisor.
+    # Stage 2: fold the G per-field partials in one block and project once, with the divisor the
+    # TRUE element count rather than G. That divisor is in cache_sig, so no stale one is reused.
     s2 = ReduceBlock(
         trait,
         count=G,
