@@ -1116,7 +1116,7 @@ def forward(self, args_0):
                 msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
 
-    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
+    def _assert_blockmask_partial_replays_bound_tensors(self, device, make_mask_mod):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 
@@ -1140,7 +1140,7 @@ def forward(self, args_0):
                 H=1,
                 Q_LEN=8,
                 KV_LEN=8,
-                device="cpu",
+                device=device,
                 BLOCK_SIZE=4,
             )
 
@@ -1168,23 +1168,28 @@ def forward(self, args_0):
         self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
 
     def test_blockmask_partial_extraction_replays_bound_tensors(self):
+        device = "cpu"
         self._assert_blockmask_partial_replays_bound_tensors(
+            device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
                 mask_rule,
                 attn_regions=attn_regions,
                 document_ids=document_ids,
-            )
+            ),
         )
 
     def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
+        device = "cpu"
         self._assert_blockmask_partial_replays_bound_tensors(
+            device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
                 functools.partial(mask_rule, attn_regions=attn_regions),
                 document_ids=document_ids,
-            )
+            ),
         )
 
     def test_blockmask_self_referential_function_closure_extraction(self):
+        device = "cpu"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1201,10 +1206,10 @@ def forward(self, args_0):
             return mask_mod
 
         mask_a = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device=device, BLOCK_SIZE=4
         )
         mask_b = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device=device, BLOCK_SIZE=4
         )
 
         leaves_a, spec_a = pytree.tree_flatten(mask_a)
@@ -1224,7 +1229,7 @@ def forward(self, args_0):
             )
         )
 
-    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
+    def _test_export_blockmask_with_mask_fn(self, device, make_mask_fn):
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1241,7 +1246,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        x = torch.randn(2, 128, device="cuda")
+        x = torch.randn(2, 128, device=device)
         module = Model(make_mask_fn)
 
         out_eager, mask_eager = module(x)
@@ -1257,6 +1262,8 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask(self):
+        device = "cuda"
+
         def make_mask_fn():
             res = 4
 
@@ -1265,10 +1272,12 @@ def forward(self, args_0):
 
             return fn
 
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+        self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_mutated_closure(self):
+        device = "cuda"
+
         def make_mask_fn():
             res = 1
 
@@ -1278,10 +1287,12 @@ def forward(self, args_0):
             res = 4  # mutation after function definition
             return fn
 
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+        self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_with_containers(self):
+        device = "cuda"
+
         def make_mask_fn():
             offsets = [1, 2, 3]
             config = {"base": 4, "nested": {"scale": 2}}
@@ -1291,10 +1302,12 @@ def forward(self, args_0):
 
             return fn
 
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+        self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_triple_nested(self):
+        device = "cuda"
+
         def make_mask_fn():
             a = 1
 
@@ -1313,10 +1326,11 @@ def forward(self, args_0):
 
             return level1()
 
-        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+        self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_self_recursive(self):
+        device = "cuda"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1337,7 +1351,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        x = torch.randn(2, 128, device="cuda")
+        x = torch.randn(2, 128, device=device)
         module = Model()
 
         with self.assertRaisesRegex(
@@ -1348,6 +1362,7 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_tensor(self):
+        device = "cuda"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1369,7 +1384,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        x = torch.randn(2, 128, device="cuda")
+        x = torch.randn(2, 128, device=device)
         module = Model()
 
         with self.assertRaisesRegex(
@@ -1380,6 +1395,7 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_unsupported_class_instance(self):
+        device = "cuda"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1404,7 +1420,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        x = torch.randn(2, 128, device="cuda")
+        x = torch.randn(2, 128, device=device)
         module = Model()
 
         with self.assertRaisesRegex(
@@ -1415,6 +1431,7 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_closure_mutually_recursive(self):
+        device = "cuda"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1440,7 +1457,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        x = torch.randn(2, 128, device="cuda")
+        x = torch.randn(2, 128, device=device)
         module = Model()
 
         with self.assertRaisesRegex(
@@ -1454,6 +1471,7 @@ def forward(self, args_0):
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
     )
     def test_aot_export_flex_attention_callable_mask_mod(self):
+        device = "cuda"
         """Test flex_attention AOT export with callable class as mask_mod.
 
         _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
@@ -1509,8 +1527,8 @@ def forward(self, args_0):
                 return (out.transpose(1, 2).contiguous().view(B, L, D),)
 
         embed_dim, num_heads, seq_len = 64, 2, 128
-        model = FlexAttentionModel(embed_dim, num_heads).cuda()
-        x = torch.randn(1, seq_len, embed_dim, device="cuda")
+        model = FlexAttentionModel(embed_dim, num_heads).to(device)
+        x = torch.randn(1, seq_len, embed_dim, device=device)
 
         gm, signature = aot_export_module(model, [x], trace_joint=False)
 
@@ -1526,6 +1544,7 @@ def forward(self, args_0):
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
     )
     def test_aot_export_flex_attention_with_blockmask_placeholders(self):
+        device = "cuda"
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
@@ -1541,7 +1560,7 @@ def forward(self, args_0):
                     H=None,
                     Q_LEN=16,
                     KV_LEN=16,
-                    device="cuda",
+                    device=device,
                 )
 
             def forward(self, x):
@@ -1562,11 +1581,11 @@ def forward(self, args_0):
                     mod,
                     parts[-1],
                     torch.nn.Parameter(
-                        torch.empty(param.shape, dtype=param.dtype, device="cuda"),
+                        torch.empty(param.shape, dtype=param.dtype, device=device),
                         requires_grad=param.requires_grad,
                     ),
                 )
-            x = torch.randn(1, 16, 64, device="cuda")
+            x = torch.randn(1, 16, 64, device=device)
 
         gm = dynamo_graph_capture_for_export(model)(x)
         block_mask_placeholders = [
@@ -1583,6 +1602,8 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
+        device = "cuda"
+
         class DummyOp(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, scalar):
@@ -1613,8 +1634,8 @@ def forward(self, args_0):
                 return fw_out, bw_out
 
         def input_fn():
-            inputs = (torch.rand(2, 128, device="cuda", requires_grad=True),)
-            grad_ins = (torch.rand(2, 128, device="cuda"),)
+            inputs = (torch.rand(2, 128, device=device, requires_grad=True),)
+            grad_ins = (torch.rand(2, 128, device=device),)
             return (
                 *inputs,
                 *grad_ins,
@@ -1646,6 +1667,7 @@ def forward(self, args_0):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_aot_export_blockmask_with_new_closure(self):
+        device = "cuda"
         import contextlib
 
         from torch._export.utils import _compiling_state_context
@@ -1674,7 +1696,7 @@ def forward(self, args_0):
                 )
                 return x, block_mask
 
-        args = (torch.randn(2, 128, device="cuda"),)
+        args = (torch.randn(2, 128, device=device),)
         gm = dynamo_graph_capture_for_export(Model())(*args)
 
         fake_mode = gm.meta["fake_mode"]
@@ -1692,10 +1714,10 @@ def forward(self, args_0):
             )
             self.assertExpectedInline(
                 str(joint_with_descriptors.graph_module.code).strip(),
-                """\
+                f"""\
 def forward(self, arg0_1):
-    arange_2 = torch.ops.aten.arange.start(0, 64, device = device(type='cuda', index=0), pin_memory = False)
-    arange_3 = torch.ops.aten.arange.start(0, 64, device = device(type='cuda', index=0), pin_memory = False)
+    arange_2 = torch.ops.aten.arange.start(0, 64, device = device(type='{device}', index=0), pin_memory = False)
+    arange_3 = torch.ops.aten.arange.start(0, 64, device = device(type='{device}', index=0), pin_memory = False)
     add = torch.ops.aten.add.Tensor(arange_3, 4);  arange_3 = None
     view = torch.ops.aten.view.default(arange_2, [64, 1]);  arange_2 = None
     ge = torch.ops.aten.ge.Tensor(view, add);  view = add = None
@@ -1726,19 +1748,19 @@ def forward(self, arg0_1):
     _to_copy_6 = torch.ops.aten._to_copy.default(sum_3, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_3 = None
     _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
     new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
-    arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
-    arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
     unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
     lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_3);  arange_5 = unsqueeze_3 = None
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device}', index=0))
     where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
-    arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
     unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
     view_2 = torch.ops.aten.view.default(new_ones, [1, 1, 1, 1]);  new_ones = None
-    arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
     unsqueeze_6 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
     unsqueeze_7 = torch.ops.aten.unsqueeze.default(unsqueeze_6, -1);  unsqueeze_6 = None
     unsqueeze_8 = torch.ops.aten.unsqueeze.default(unsqueeze_7, -1);  unsqueeze_7 = None
@@ -1751,19 +1773,19 @@ def forward(self, arg0_1):
     _to_copy_8 = torch.ops.aten._to_copy.default(sum_4, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_4 = None
     _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
-    arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
     unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
-    arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
     unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
     lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_10);  arange_9 = unsqueeze_10 = None
-    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
+    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device}', index=0))
     where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
-    arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
     unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
     unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
     view_3 = torch.ops.aten.view.default(new_ones_1, [1, 1, 1, 1]);  new_ones_1 = None
-    arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
     unsqueeze_13 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
     unsqueeze_14 = torch.ops.aten.unsqueeze.default(unsqueeze_13, -1);  unsqueeze_13 = None
     unsqueeze_15 = torch.ops.aten.unsqueeze.default(unsqueeze_14, -1);  unsqueeze_14 = None
@@ -1784,6 +1806,7 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_aot_export_blockmask_closure_spec_mismatch(self):
+        device = "cuda"
         """BlockMasks with same closure structure produce equal TreeSpecs.
 
         Closure values are extracted into pytree leaves, so two BlockMasks
@@ -1803,13 +1826,13 @@ def forward(self, arg0_1):
             return fn
 
         mask_a = create_block_mask(
-            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
         )
         mask_b = create_block_mask(
-            make_mask_fn(8), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+            make_mask_fn(8), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
         )
         mask_a_same = create_block_mask(
-            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
         )
 
         _, spec_a = pytree.tree_flatten(mask_a)
@@ -1827,13 +1850,14 @@ def forward(self, arg0_1):
             return q > k
 
         mask_c = create_block_mask(
-            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+            different_mask, B=1, H=1, Q_LEN=64, KV_LEN=64, device=device
         )
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_blockmask_and_masks_closure_extraction(self):
+        device = "cuda"
         """and_masks closure tensors are recursively extracted into pytree leaves.
 
         and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
@@ -1853,14 +1877,14 @@ def forward(self, arg0_1):
         def causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        offset = torch.tensor(3, device="cuda")
+        offset = torch.tensor(3, device=device)
 
         def offset_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx + offset
 
         mask_mod = and_masks(causal, offset_mask)
         block_mask = create_block_mask(
-            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device="cuda"
+            mask_mod, B=1, H=None, Q_LEN=128, KV_LEN=128, device=device
         )
 
         leaves, spec = pytree.tree_flatten(block_mask)
