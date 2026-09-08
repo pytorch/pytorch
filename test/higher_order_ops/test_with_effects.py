@@ -349,54 +349,48 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @skipIfNoDynamoSupport
-    def test_inductor_pins_effectful_op_input_buffers(self):
-        # An ORDERED effectful op may retain its input tensor in hidden state
-        # that inductor cannot see (e.g. a torchbind queue). The with_effects
-        # lowering must therefore add that input buffer to never_reuse_buffers
-        # so its storage is never recycled for a later buffer; otherwise the
-        # retained tensor is silently corrupted. We assert the pin directly
-        # (buffer in never_reuse_buffers) rather than via numerics, since
-        # whether the scheduler would actually recycle a given buffer depends
-        # on fusion/memory-planning heuristics and is not a stable signal.
-        from unittest import mock
-
-        from torch._inductor.graph import GraphLowering
-
-        captured_graphs = []
-        orig_init = GraphLowering.__init__
-
-        def capture_init(self, *args, **kwargs):
-            orig_init(self, *args, **kwargs)
-            captured_graphs.append(self)
+    def test_inductor_effect_order_does_not_extend_lifetimes(self):
+        # The effect edge between two ORDERED ops is an ordering constraint only.
+        # It must not be modelled as a real read of the previous op's output
+        # buffer: that would count as a use, keep the buffer live until the
+        # later op runs, and suppress its deallocation.
+        #
+        # keep() produces a real output buffer, and stash() is ordered after it
+        # while also consuming a value derived from that buffer, so stash cannot
+        # be hoisted above the buffer's last true use. With a weak ordering dep
+        # the buffer is freed right after that use; modelling the effect edge as
+        # a real read holds it live across the stash call instead.
+        from torch._inductor.utils import run_and_get_code
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            # stash has no ScriptObject argument and is registered ORDERED
-            # manually, so it exercises the case where pinning must not be
-            # scoped to torchbind-argument ops: a ScriptObject arg only
-            # triggers the default effect, it is not required for an op to be
-            # effectful and retain its inputs.
+            torch.library.define("mylib::keep", "(Tensor x) -> Tensor", lib=lib)
             torch.library.define("mylib::stash", "(Tensor x) -> ()", lib=lib)
+            lib.impl("keep", lambda x: x.clone(), "CompositeExplicitAutograd")
+            lib.impl("keep", lambda x: torch.empty_like(x), "Meta")
             lib.impl("stash", lambda x: None, "CompositeExplicitAutograd")
             lib.impl("stash", lambda x: None, "Meta")
-            torch.library._register_effectful_op(
-                "mylib::stash", _EffectType.ORDERED, lib=lib
-            )
+            for name in ("keep", "stash"):
+                torch.library._register_effectful_op(
+                    f"mylib::{name}", _EffectType.ORDERED, lib=lib
+                )
 
             def f(x):
-                torch.ops.mylib.stash(x + 1)
-                return x * 3
+                y = torch.ops.mylib.keep(x)
+                z = y * 2
+                torch.ops.mylib.stash(z)
+                return z + 1
 
             x = torch.arange(64, dtype=torch.float32)
             torch._dynamo.reset()
-            with mock.patch.object(GraphLowering, "__init__", capture_init):
-                torch.compile(f, fullgraph=True, backend="inductor")(x)
+            code = run_and_get_code(
+                torch.compile(f, fullgraph=True, backend="inductor"), x
+            )[1][0]
 
-            pinned = set()
-            for graph in captured_graphs:
-                pinned |= set(graph.never_reuse_buffers)
-            # The buffer holding `x + 1` (the effectful op's input) must be
-            # pinned; without the fix this set is empty.
-            self.assertTrue(pinned, "no buffers were pinned for the effectful op")
+            # Both effectful ops still run, in program order.
+            FileCheck().check("keep").check("stash").run(code)
+            # keep's output buffer is freed before the stash it is ordered
+            # before, rather than being held live by the effect edge.
+            FileCheck().check("keep").check("del buf0").check("stash").run(code)
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):

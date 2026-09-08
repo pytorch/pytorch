@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 import operator
+import struct
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -20,6 +22,22 @@ if TYPE_CHECKING:
     from torch.utils._pytree import TreeSpec
 
 aten = torch.ops.aten
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScalarKey:
+    tag: str
+    bits: bytes
+
+
+def _normalize_cse_arg(val: Any) -> Any:
+    # Python float hash/eq is not value-identity: nan != nan (hash(nan) is
+    # id-based) while -0.0 == 0.0 and hashes equal. Key by bit pattern instead.
+    if type(val) is float:
+        return _ScalarKey("float", struct.pack(">d", val))
+    if type(val) is complex:
+        return _ScalarKey("complex", struct.pack(">dd", val.real, val.imag))
+    return val
 
 
 def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
@@ -196,6 +214,7 @@ def fx_graph_cse(
                         arg_list[i] = env[v]
                     if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                         arg_list[i] = v.node
+                    arg_list[i] = _normalize_cse_arg(arg_list[i])
                 return tuple(arg_list), spec
 
             args, args_spec = substitute(n.args)

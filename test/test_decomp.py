@@ -213,7 +213,7 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,

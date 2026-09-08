@@ -689,6 +689,14 @@ _scaled_dot_product_cudnn_attention_batch_rule(
         value_bdim.has_value() || attn_bias_bdim.has_value();
     check_randomness(randomness, any_tensor_batched);
   }
+  // BatchedTensor wrappers hide requires_grad from the composite SDPA wrapper.
+  // Recompute it after unwrapping so training forwards produce LSE for backward.
+  compute_log_sumexp =
+      compute_log_sumexp ||
+      (at::GradMode::is_enabled() &&
+       (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
+        (attn_bias.has_value() && attn_bias->defined() &&
+         attn_bias->requires_grad())));
   auto batch_size = attn_bias.has_value() && attn_bias->defined()
       ? get_bdim_size4(query, query_bdim, key, key_bdim, value, value_bdim, *attn_bias, attn_bias_bdim)
       : get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
@@ -833,6 +841,7 @@ LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex)
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_polar, linalg.polar)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr)
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet)
 LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular)

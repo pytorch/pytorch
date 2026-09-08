@@ -753,7 +753,20 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 }
 
 const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order": _new_process_group_helper() only fills the vector in for
+  // subgroups, and a directly-constructed (stateless) ProcessGroupGloo leaves
+  // it at its default. Deriving the identity mapping is therefore the right
+  // answer whenever it is empty.
+  //
+  // This must NOT be gated on local_id_ == 0. local_id_ is a process-global
+  // counter over every ProcessGroupGloo ever constructed in this process, so
+  // the default group only gets 0 when it happens to be the first gloo backend
+  // built. If any gloo pg was created earlier -- a stateless pg, or one
+  // inherited across fork() -- the default group fell through to the empty
+  // global_ranks_in_group below and split() then indexed an empty vector,
+  // segfaulting on a null data pointer.
+  if (options_->global_ranks_in_group.empty()) {
     if (defaultRanks_.size() != static_cast<size_t>(size_)) {
       defaultRanks_.resize(size_);
       std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);

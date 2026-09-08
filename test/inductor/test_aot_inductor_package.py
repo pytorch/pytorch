@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import dataclasses
 import functools
 import gc
 import io
@@ -35,6 +36,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils import _pytree as pytree
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -238,6 +240,70 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_custom_output_type_missing_pytree_registration_error(self):
+        if self.device != "cpu" or self.package_cpp_only:
+            raise unittest.SkipTest("Only needs one CPU Python package variant")
+
+        @dataclasses.dataclass
+        class CustomOutput:
+            value: torch.Tensor
+
+        torch.export.register_dataclass(
+            CustomOutput,
+            serialized_type_name="test_aot_inductor_package.CustomOutput",
+        )
+        self.addCleanup(pytree._deregister_pytree_node, CustomOutput)
+        self.addCleanup(pytree.treespec_loads.cache_clear)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return CustomOutput(x + 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = Path(tmpdir) / "model.pt2"
+            example_inputs = (torch.ones(2),)
+            ep = torch.export.export(Model(), example_inputs, strict=True)
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                package_path=str(package_path),
+            )
+
+            loaded = torch._inductor.aoti_load_package(str(package_path))
+            self.assertEqual(loaded(*example_inputs).value, torch.full((2,), 2.0))
+
+            script = f"""
+import torch
+
+model = torch._inductor.aoti_load_package({str(package_path)!r})
+model(torch.ones(2))
+"""
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(
+            "import that package before loading this artifact",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+        self.assertIn(
+            "torch.export.register_dataclass",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+        self.assertIn(
+            "test_aot_inductor_package.CustomOutput",
+            proc.stderr,
+            msg=proc.stderr,
+        )
+
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
         # With the package artifact, that cubin path should be overridden at the run time,
@@ -312,7 +378,15 @@ class TestAOTInductorPackage(TestCase):
                     # The loader should be able to load from temp_dir which contains 'data/...'
                     # or 'some_prefix/data/...'
 
-                    loaded = torch._inductor.aoti_load_package(temp_dir)
+                    with (
+                        self.assertNoLogs(
+                            "torch._inductor.package.package", level="WARNING"
+                        ),
+                        self.assertNoLogs(
+                            "torch.export.pt2_archive._package", level="WARNING"
+                        ),
+                    ):
+                        loaded = torch._inductor.aoti_load_package(temp_dir)
                     actual = loaded(*example_inputs)
                     self.assertEqual(actual, expected)
 
@@ -904,6 +978,66 @@ class TestAOTInductorPackage(TestCase):
             self.assertTrue(
                 torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
             )
+
+    @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "CPU non-cpp package regression test",
+    )
+    def test_buffer_mutations_persist_across_package_calls(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("assign_one", torch.ones(1, device=device))
+                self.register_buffer("add_one", torch.ones(1, device=device))
+                self.register_buffer("slice_one", torch.ones(1, device=device))
+                self.register_buffer("add_two", torch.ones(2, device=device))
+                self.register_buffer("index_two", torch.ones(2, device=device))
+
+            def forward(self):
+                self.assign_one = self.assign_one + 1.0
+                self.add_one.add_(1.0)
+                self.slice_one[:] = self.slice_one[:] + 1.0
+                self.add_two.add_(1.0)
+                self.index_two[0] = self.index_two[0] + 1.0
+                return (
+                    self.assign_one,
+                    self.add_one,
+                    self.slice_one,
+                    self.add_two,
+                    self.index_two,
+                )
+
+        for always_keep_tensor_constants in (True, False):
+            model = Model(self.device)
+            ep = torch.export.export(model, tuple())
+            inductor_configs = {
+                "always_keep_tensor_constants": always_keep_tensor_constants,
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            }
+            with WritableTempFile(suffix=".pt2") as f:
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                    inductor_configs=inductor_configs,
+                )
+                loaded = load_package(package_path)
+
+            actual = [tuple(out.clone() for out in loaded()) for _ in range(3)]
+            expected = []
+            for call_idx in range(3):
+                expected_one = torch.full((1,), call_idx + 2.0, device=self.device)
+                expected_two = torch.full((2,), call_idx + 2.0, device=self.device)
+                expected_index = torch.tensor([call_idx + 2.0, 1.0], device=self.device)
+                expected.append(
+                    (
+                        expected_one,
+                        expected_one,
+                        expected_one,
+                        expected_two,
+                        expected_index,
+                    )
+                )
+            self.assertEqual(actual, expected)
 
     @skipif(
         lambda device, package_cpp_only: package_cpp_only,

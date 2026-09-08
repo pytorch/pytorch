@@ -6,26 +6,18 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/LegacyBatchedTensorImpl.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/GridSamplerUtils.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
-#include <c10/util/SmallBuffer.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -849,7 +841,7 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value) {
   return areAnyTensorSubclassLike({tensor, mask})
@@ -4581,6 +4573,71 @@ Tensor linalg_matrix_sqrth_differential(
   return 0.5 * (out + out.mH());
 }
 
+// Solves H X + X H = R for Hermitian positive-definite H = Q diag(s) Q^H.
+// Eigendecomposing H directly (rather than A^H A, whose eigenvalues are the
+// squared singular values) keeps small singular values at full precision.
+static Tensor polar_sylvester_solve(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& R) {
+  auto denom = s.unsqueeze(-1) + s.unsqueeze(-2);
+  auto inner = at::matmul(at::matmul(Q.mH(), R), Q).div(denom);
+  return at::matmul(at::matmul(Q, inner), Q.mH());
+}
+
+// X H^{-1} reusing the eigendecomposition of H.
+static Tensor polar_apply_hinv(
+    const Tensor& Q,
+    const Tensor& s,
+    const Tensor& X) {
+  return at::matmul(at::matmul(X, Q).div(s.unsqueeze(-2)), Q.mH());
+}
+
+Tensor linalg_polar_backward(
+    const Tensor& grad_U,
+    const Tensor& grad_H,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  if (!grad_U.defined() && !grad_H.defined()) {
+    return {};
+  }
+  at::NoTF32Guard disable_tf32;
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
+  Tensor grad_A;
+  if (grad_U.defined()) {
+    auto C = at::matmul(U.mH(), grad_U);
+    // Project out the component parallel to U before applying H^{-1}; the
+    // tangential component goes through the Sylvester solve.
+    auto normal = polar_apply_hinv(Q, s, grad_U - at::matmul(U, C));
+    auto X = polar_sylvester_solve(Q, s, C - C.mH());
+    grad_A = normal + at::matmul(U, X);
+  }
+  if (grad_H.defined()) {
+    auto Z = polar_sylvester_solve(Q, s, grad_H + grad_H.mH());
+    auto from_H = at::matmul(A, Z);
+    grad_A = grad_A.defined() ? grad_A + from_H : std::move(from_H);
+  }
+  return grad_A;
+}
+
+std::tuple<Tensor, Tensor> linalg_polar_jvp(
+    const Tensor& dA,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  at::NoTF32Guard disable_tf32;
+  // d(H^2) = d(A^H A) gives H dH + dH H = dA^H A + A^H dA, and
+  // U = A H^{-1} gives dU = (dA - U dH) H^{-1}.
+  auto [s, Q] = at::linalg_eigh(H);
+  s = s.clamp_min(0);
+  auto dM = at::matmul(dA.mH(), A) + at::matmul(A.mH(), dA);
+  auto dH = polar_sylvester_solve(Q, s, dM);
+  auto dU = polar_apply_hinv(Q, s, dA - at::matmul(U, dH));
+  return std::make_tuple(std::move(dU), std::move(dH));
+}
+
 template <typename F1, typename F2, typename... Ts>
 static Tensor masked_fmap(
     const Tensor& mask,
@@ -4620,18 +4677,33 @@ static Tensor masked_fmap(
 Tensor linalg_det_jvp(
     const Tensor& dA,
     const Tensor& det,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool use_A_T) {
   // (d det)_A(E) = tr(A^{-1}E)*det
   // We use that the determinant is C^1 to approximate the gradient of singular
-  // inputs Since we never differentiate over forward AD, we don't need to deal
-  // with further gradients, as we do in grad_backward
-  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
-  auto LU_ =
-      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
-  auto AinvE =
-      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  // inputs.
+  // Recompute A^{-1}dA via linalg_solve when the result may be differentiated
+  // again, so autograd sees the dependence of A^{-1} on A (cf. the analogous
+  // branch in linalg_det_backward). The subclass check makes every functorch
+  // transform, even a single jvp, take this branch: the primal here still
+  // carries a functorch wrapper, which is indistinguishable from a pending
+  // higher-order differentiation. Only plain forward-mode AD (make_dual
+  // without functorch) reaches the fast saved-LU path below.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor AinvE;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
+    AinvE = at::linalg_solve(A, dA);
+  } else {
+    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    auto LU_ =
+        LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+    AinvE = at::linalg_lu_solve(
+        LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  }
   return AinvE.diagonal(0, -2, -1).sum(-1) * det;
 }
 
@@ -4705,7 +4777,22 @@ Tensor linalg_det_backward(
     // in the result.
 
     if (areAnyTensorSubclassLike({A, d, grad})) {
-      return singular(A, d, grad);
+      // We can't call masked_fmap here as it calls index({mask}) which needs
+      // item(). Instead we select between the singular (SVD adjugate) and
+      // non-singular (solve) formulas with where. To keep each branch's
+      // derivative finite where it is not selected, we feed the SVD a matrix
+      // with distinct singular values off the singular set (so svd_backward's
+      // 1/(S_i^2 - S_j^2) terms stay finite) and the solve the identity on it.
+      // Always using the SVD formula instead poisons non-singular inputs with
+      // clustered singular values.
+      auto singular_mask = (det.abs() < 100. * eps).unsqueeze(-1).unsqueeze(-1);
+      auto ones = at::ones_like(A.diagonal(0, -2, -1));
+      auto identity = at::diag_embed(ones);
+      auto distinct = at::diag_embed(ones.cumsum(-1));
+      auto sing = singular(at::where(singular_mask, A, distinct), d, grad);
+      auto non_sing =
+          non_singular(at::where(singular_mask, identity, A), d, grad);
+      return at::where(singular_mask, sing, non_sing);
     } else {
       return masked_fmap(
           det.abs() < 100. * eps, singular, non_singular, A, d, grad);
@@ -4717,13 +4804,28 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     const Tensor& LU,
     const Tensor& pivots,
     const Tensor& dA,
+    const Tensor& A,
     const Tensor& sign,
     const bool use_A_T) {
   // No need to handle the singular case separately as we do in det since
   // this function is not differentiable on singular matrices
-  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
-                     .diagonal(0, -2, -1)
-                     .sum(-1);
+  // Recompute A^{-1}dA via linalg_solve when the result may be differentiated
+  // again (cf. linalg_det_jvp): the subclass check makes every functorch
+  // transform, even a single jvp, take this branch, since the primal still
+  // carries a functorch wrapper indistinguishable from a pending higher-order
+  // differentiation. Plain forward-mode AD (make_dual without functorch)
+  // keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor trAinvE;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA})) {
+    trAinvE = at::linalg_solve(A, dA).diagonal(0, -2, -1).sum(-1);
+  } else {
+    trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
+                  .diagonal(0, -2, -1)
+                  .sum(-1);
+  }
   if (LU.is_complex()) {
     auto i = c10::complex<double>{0.0, 1.0};
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
@@ -6214,50 +6316,103 @@ Tensor i1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1_backward", [&]() {
-    // For x = 0, the correct gradient is 0.5,
-    // however due to floating point computation we get NaN.
-    // So we manually update gradient for x=0
-    auto eps = std::numeric_limits<scalar_t>::epsilon();
-    auto self_is_not_tiny = self.abs() > eps;
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "i1_backward",
+      [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
 
-    // Following `where` is needed as `where` computes gradients,
-    // even for the part which didn't affect the output.
-    // Look at https://github.com/pytorch/pytorch/issues/52248
-    // Update if and when this is fixed.
-    auto safe_self = at::where(
-        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
-    auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
-    return grad *
-        at::where(
-               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
-  });
+        // Following `where` is needed as `where` computes gradients,
+        // even for the part which didn't affect the output.
+        // Look at https://github.com/pytorch/pytorch/issues/52248
+        // Update if and when this is fixed.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
+}
+
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "bessel_j1_backward",
+      [&]() {
+        // J1'(x) = J0(x) - J1(x) / x. At x = 0 this is 0/0, but the analytic
+        // limit is 0.5. Replace the singular points with a safe input so the
+        // reciprocal stays finite, then select the 0.5 limit there.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
+
+        // Following `where` is needed as `where` computes gradients.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx =
+            (at::special_bessel_j0(safe_self) -
+             (result * safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
+}
+
+Tensor bessel_y1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  // Y1'(x) = Y0(x) - Y1(x) / x. At x = 0 both terms are -inf, so the
+  // expression evaluates to (-inf) - (-inf) = NaN while the one-sided limit
+  // is +inf. Select the limit there, matching how the y0/k0/k1 derivatives
+  // already report an infinite gradient at the origin.
+  auto gradx = at::special_bessel_y0(self) - result * self.reciprocal();
+  auto inf = at::scalar_tensor(
+      std::numeric_limits<double>::infinity(), self.options());
+  return grad * at::where(self == 0, inf, gradx);
 }
 
 Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1e_backward", [&]() {
-    // For x = 0, the correct gradient is 0.5,
-    // however due to floating point computation we get NaN.
-    // So we manually update gradient for x=0
-    auto eps = std::numeric_limits<scalar_t>::epsilon();
-    auto self_is_not_tiny = self.abs() > eps;
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "i1e_backward",
+      [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0.
+        // The mask tests `<= eps` rather than `> eps` so that a NaN input takes
+        // the general branch and keeps propagating NaN instead of being given
+        // the 0.5 limit.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
 
-    // Following `where` is needed as `where` computes gradients,
-    // even for the part which didn't affect the output.
-    // Look at https://github.com/pytorch/pytorch/issues/52248
-    // Update if and when this is fixed.
-    auto safe_self = at::where(
-        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
-    auto gradx =
-        (at::special_i0e(safe_self) -
-         result * (safe_self.sgn() + safe_self.reciprocal()));
-    return grad *
-        at::where(
-               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
-  });
+        // Following `where` is needed as `where` computes gradients,
+        // even for the part which didn't affect the output.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx =
+            (at::special_i0e(safe_self) -
+             result * (safe_self.sgn() + safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
 }
 
 // lu_solve is a map (LU, P, B) -> (PLU)^{-1} B,
@@ -6447,6 +6602,7 @@ Tensor linalg_solve_jvp(
     const Tensor& dA,
     const Tensor& dB,
     const Tensor& X,
+    const Tensor& A,
     const Tensor& LU,
     const Tensor& pivots,
     const bool left) {
@@ -6471,7 +6627,21 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  // Recompute A^{-1}(dB - dAX) via linalg_solve when the result may be
+  // differentiated again (cf. linalg_solve_backward). The subclass check over
+  // A, dA, and dB makes every functorch transform, even a single jvp, take
+  // this branch: the primal still carries a functorch wrapper that is
+  // indistinguishable from a pending higher-order differentiation. Plain
+  // forward-mode AD (make_dual without functorch) keeps the fast LU path.
+  // Under no_grad() or inference mode, the tangent cannot be reverse-
+  // differentiated, so the saved-LU path is safe regardless of requires_grad.
+  Tensor dX_;
+  if ((at::GradMode::is_enabled() && A.requires_grad()) ||
+      areAnyTensorSubclassLike({A, dA, dB})) {
+    dX_ = at::linalg_solve(A, dB_ - R_, left);
+  } else {
+    dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
+  }
   return matrix_to_vector(dX_);
 }
 

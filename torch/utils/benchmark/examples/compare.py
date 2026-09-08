@@ -27,7 +27,7 @@ class FauxTorch:
     def extra_overhead(self, result):
         # time.sleep has a ~65 us overhead, so only fake a
         # per-element overhead if numel is large enough.
-        numel = int(result.numel())
+        numel = result.numel()
         if numel > 5000:
             time.sleep(numel * self._extra_ns_per_element * 1e-9)
         return result

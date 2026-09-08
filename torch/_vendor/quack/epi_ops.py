@@ -1190,6 +1190,7 @@ class _GroupedLocalReduceParams(NamedTuple):
     combine_fn: object
     finalize_fn: object
     feeds_main: bool
+    logical_n: object
 
 
 class _GroupedLocalReduceFeedState(NamedTuple):
@@ -1236,7 +1237,7 @@ def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finaliz
 
 
 class GroupedLocalReduce(VecReduce):
-    """Store or broadcast generated grouped local-reduce values."""
+    """Store or broadcast grouped reductions using the main output's M/N bounds."""
 
     dim = 1
     epi_m_major_preference = -1
@@ -1250,12 +1251,20 @@ class GroupedLocalReduce(VecReduce):
         return EpiSmemBytes()
 
     def to_params(self, gemm, args):
+        tensor = getattr(args, self.name)
+        reference_output = (
+            args.mAuxOut[0] if args.tensor_epilogue_returns_aux else args.mAuxOut
+        )
+        if tensor is not None and args.local_reduce_output_layout is not None:
+            tensor = args.local_reduce_output_layout(tensor)
         return {
             self.name: _GroupedLocalReduceParams(
-                getattr(args, self.name),
+                tensor,
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
                 args.local_reduce_feeds_main,
+                cute.size(reference_output, mode=[1])
+                * gemm.grouped_n_contract_group,
             )
         }
 
@@ -1362,11 +1371,16 @@ class GroupedLocalReduce(VecReduce):
             tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
             tDcD_flt = cute.filter_zeros(tDcD_cur)
             batch_idx = tile_coord_mnkl[3]
-            limit_m = min(
-                varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M,
-                tile_M,
+            logical_m = varlen_manager.len_m(batch_idx)
+            limit_m = min(logical_m - tile_coord_mnkl[0] * tile_M, tile_M)
+            limit_n = min(
+                param.logical_n - tile_coord_mnkl[1] * tile_N,
+                tile_N,
             )
-            limit_n = min(cute.size(param_tensor, mode=[2]) - tile_coord_mnkl[1] * tile_N, tile_N)
+            if const_expr(axis == 1):
+                limit_groups = param.logical_n // group
+            else:
+                limit_groups = logical_m // group
             if const_expr(axis == 1):
                 local_fragment_n = const_expr(cute.size(tDrReduce_cur.shape, mode=[0]))
             if const_expr(axis == 1 and group > local_fragment_n):
@@ -1376,11 +1390,6 @@ class GroupedLocalReduce(VecReduce):
                 fragments_per_group = const_expr(group // local_fragment_n)
                 if const_expr((epi_coord[1] + 1) % fragments_per_group == 0):
                     group_start_epi_n = const_expr(epi_coord[1] + 1 - fragments_per_group)
-                    limit_groups = (
-                        param_tensor.shape[2]
-                        if not varlen_manager.varlen_m
-                        else param_tensor.shape[1]
-                    )
                     if const_expr(not varlen_manager.varlen_m):
                         mReduce = param_tensor[batch_idx, None, None]
                     else:
@@ -1463,11 +1472,6 @@ class GroupedLocalReduce(VecReduce):
                     assert groups_per_cta * group_warps <= warps_in_M
                     warp_idx = cute.arch.make_warp_uniform(tidx // cute.arch.WARP_SIZE)
                     warp_m_idx = warp_layout_MN.get_hier_coord(warp_idx)[0]
-                    limit_groups = (
-                        param_tensor.shape[1]
-                        if not varlen_manager.varlen_m
-                        else param_tensor.shape[0]
-                    )
                     if const_expr(not varlen_manager.varlen_m):
                         mReduce = param_tensor[batch_idx, None, None]
                     else:
@@ -1515,11 +1519,9 @@ class GroupedLocalReduce(VecReduce):
                     gemm.epilogue_barrier.arrive_and_wait()
                     return
             if const_expr(axis == 1):
-                limit_groups = param_tensor.shape[2] if not varlen_manager.varlen_m else param_tensor.shape[1]
                 tile_shape = (tile_M, groups_per_cta)
                 tile_coord = (tile_coord_mnkl[0], tile_coord_mnkl[1])
             else:
-                limit_groups = param_tensor.shape[1] if not varlen_manager.varlen_m else param_tensor.shape[0]
                 tile_shape = (groups_per_cta, tile_N)
                 tile_coord = (tile_coord_mnkl[0], tile_coord_mnkl[1])
             if const_expr(not varlen_manager.varlen_m):
@@ -1534,6 +1536,7 @@ class GroupedLocalReduce(VecReduce):
                 axis == 0
                 and param_tensor.element_type == Float32
                 and param_tensor.iterator.alignment >= 16
+                and param_tensor.stride[2] == 1
                 and cute.size(tDrReduce_flt) % 4 == 0
                 and tile_N % 4 == 0
             ):
