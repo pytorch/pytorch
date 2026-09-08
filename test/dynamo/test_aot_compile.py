@@ -818,6 +818,33 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
 
+    def test_save_guidance_when_a_closure_cell_cannot_pickle(self):
+        # A closure cell the artifact carries unpruned -- here a threading.Lock
+        # reached through a nested function -- cannot pickle. save preserves the
+        # original error (callers/tests match on "cannot pickle") and appends
+        # guidance pointing at external_data, rather than reconstructing the
+        # exception (a TypeError subclass may take a non-message constructor).
+        def outer():
+            lock = threading.Lock()
+
+            def fn(x):
+                def unused():
+                    return lock
+
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("cannot pickle", msg)
+        self.assertIn("not picklable", msg)
+        self.assertIn("external_data", msg)
+
     def test_aot_compile_prunes_functools_wraps_wrapped(self):
         # functools.wraps writes __wrapped__ into the wrapper's __dict__, so a
         # helper that merely decorates another function drags the wrapped one
