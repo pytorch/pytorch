@@ -120,7 +120,7 @@ void MPSEvent::waitForCpuSync() {
 }
 
 bool MPSEvent::synchronize() {
-  bool scheduledNotify = notifyLocked(^(id<MTLSharedEvent>, uint64_t) {
+  bool scheduledNotify = notify(/*needsLock*/ true, ^(id<MTLSharedEvent>, uint64_t) {
     m_completion_time = getTime();
     notifyCpuSync();
   });
