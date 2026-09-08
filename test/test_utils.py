@@ -998,6 +998,29 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
+    def test_symbolize_mode(self):
+        script = "import torch; print(torch._C._get_symbolize_mode())"
+        for disable_addr2line, expected in [
+            (None, "dladdr"),
+            ("0", "addr2line"),
+            ("1", "dladdr"),
+        ]:
+            with self.subTest(disable_addr2line=disable_addr2line):
+                env = os.environ.copy()
+                env.pop("TORCH_SYMBOLIZE_MODE", None)
+                if disable_addr2line is None:
+                    env.pop("TORCH_DISABLE_ADDR2LINE", None)
+                else:
+                    env["TORCH_DISABLE_ADDR2LINE"] = disable_addr2line
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
     @staticmethod
     @torch._dynamo.disable
     def _context_decorator_traceback_frame_names():

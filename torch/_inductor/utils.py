@@ -2284,18 +2284,20 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
     return V.graph.sizevars.statically_known_multiple_of(expr_bytes, alignment)
 
 
-def _single_unit_stride_dim(strides_i: Sequence[_IntLike]) -> int | None:
-    """Index of the sole unit-stride dim, or None when there is not exactly one."""
+def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
+    """Index of the single stride-1 ("inner") dim, or None if there is not
+    exactly one. TMA requires exactly one contiguous dim, so None means the
+    tensor is not TMA-compatible. `strides` must already be resolved to ints or
+    hinted symbols by the caller.
+    """
     from .virtualized import V
 
     inner = [
         i
-        for i, stride in enumerate(strides_i)
-        if V.graph.sizevars.statically_known_equals(stride, 1)
+        for i, st in enumerate(strides)
+        if V.graph.sizevars.statically_known_equals(st, 1)
     ]
-    if len(inner) != 1:
-        return None
-    return inner[0]
+    return inner[0] if len(inner) == 1 else None
 
 
 def can_use_tma(
@@ -2373,8 +2375,7 @@ def can_use_tma(
                 V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
             ]
 
-        # Find the single contiguous ("inner") dim
-        inner_idx = _single_unit_stride_dim(strides_i)
+        inner_idx = tma_inner_dim(strides_i)
         if inner_idx is None:
             return False
 
@@ -2533,7 +2534,7 @@ def _tdm_row_major_from_strides(strides_i: Sequence[sympy.Expr | int]) -> bool |
     Split out of ``tdm_descriptor_row_major`` so callers that already resolved
     the strides do not resolve (or re-specialize) them twice.
     """
-    inner_idx = _single_unit_stride_dim(strides_i)
+    inner_idx = tma_inner_dim(strides_i)
     if inner_idx is None:
         return None
     return inner_idx == 1
@@ -3138,11 +3139,23 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
+
+    Prefer this over get_device_capability() for target-specific behaviour. On
+    ROCm that call reports the gfx major/minor, which does not order by
+    capability and spans two product lines: gfx1250 (MI450) reports (12, 5) and
+    gfx1100 (RDNA3) reports (11, 0), both greater than gfx950's (9, 5). Target
+    features are stripped, so "gfx950:sramecc+:xnack-" becomes "gfx950".
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return ""
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+
+
 def using_rocm_rdna3() -> bool:
     """Returns true if the device is based on RDNA3, otherwise returns false."""
-    return torch.cuda.is_available() and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx11")
+    return rocm_gfx_arch().startswith("gfx11")
 
 
 @functools.cache
