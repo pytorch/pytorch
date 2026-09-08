@@ -235,26 +235,26 @@ void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
 }
 
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
-  if (!op.has_value()) {
-    bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
-    bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
-    TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
-        "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
-        "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
-        "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
-        "We suggest only using the new API to set the TF32 flag(s). See also: ",
-        "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  } else {
+  if (op.has_value()) {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
-  return allow_tf32_cudnn;
+  // The legacy allow_tf32 flag is derived from the conv/rnn precisions rather
+  // than cached, so the new-style setters cannot desync it.
+  bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
+  bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
+  TORCH_CHECK(
+      allow_tf32_rnn == allow_tf32_conv,
+      "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
+      "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
+      "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
+      "We suggest only using the new API to set the TF32 flag(s). See also: ",
+      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+  return allow_tf32_conv;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
   setFloat32Precision(Float32Backend::CUDA, Float32Op::RNN, b ? Float32Precision::TF32 : Float32Precision::NONE);
   setFloat32Precision(Float32Backend::CUDA, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
-  allow_tf32_cudnn = b;
 }
 
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
