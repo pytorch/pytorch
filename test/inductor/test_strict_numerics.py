@@ -485,9 +485,7 @@ instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 #
 # Two input sources. Reference inputs supply the non-contiguous and arbitrarily strided
 # layouts that drive codegen; a raw bit-pattern call supplies the subnormals, NaN
-# encodings and exact special values that reference inputs never contain. Bit patterns
-# are skipped for BITPATTERN_SLOW ops and for signatures that cannot take substituted
-# data (bool masks, per-channel weights), which fall back to reference inputs alone.
+# encodings and exact special values that reference inputs never contain.
 # ---------------------------------------------------------------------------
 
 
@@ -553,6 +551,30 @@ def _dtype_label(dtype):
 # fp32.
 NUM_BITPATTERN_SAMPLES = 65536
 
+_FINFO32 = torch.finfo(torch.float32)
+# Exact values random sampling never lands on. Appended to every value sweep, and crossed
+# with themselves so every special-vs-special operand pair is reachable.
+_SPECIALS = torch.tensor(
+    [
+        0.0,
+        -0.0,
+        1.0,
+        -1.0,
+        0.5,
+        2.0,
+        float("inf"),
+        -float("inf"),
+        float("nan"),
+        _FINFO32.smallest_normal,
+        -_FINFO32.smallest_normal,
+        _FINFO32.max,
+        _FINFO32.min,
+        _FINFO32.eps,
+        1.0 + _FINFO32.eps,
+        1.0 - _FINFO32.eps / 2,
+    ]
+)
+
 
 def _exhaustive_16bit(dtype, device):
     # All 65536 patterns; the narrowing int32->int16 cast wraps so 32768..65535 land on
@@ -562,43 +584,6 @@ def _exhaustive_16bit(dtype, device):
         .to(torch.int16)
         .view(dtype)
     )
-
-
-# Operand pairs the value sweeps cannot produce. Left/right are matched positionally.
-_SPECIAL_PAIRS = (
-    torch.tensor(
-        [
-            0.0,
-            -0.0,
-            0.0,
-            -0.0,
-            1.0,
-            -1.0,
-            float("inf"),
-            -float("inf"),
-            float("nan"),
-            1.0,
-            0.0,
-            float("inf"),
-        ]
-    ),
-    torch.tensor(
-        [
-            -0.0,
-            0.0,
-            0.0,
-            -0.0,
-            -1.0,
-            1.0,
-            -float("inf"),
-            float("inf"),
-            1.0,
-            float("nan"),
-            float("inf"),
-            0.0,
-        ]
-    ),
-)
 
 
 def _substitute(t, y, n):
@@ -628,29 +613,7 @@ def _sampled_fp32(n, device, seed=0):
         0, 2**31, (n,), dtype=torch.int32, device=device, generator=gen
     )
     signs = torch.randint(0, 2, (n,), dtype=torch.int32, device=device, generator=gen)
-    fi = torch.finfo(torch.float32)
-    specials = torch.tensor(
-        [
-            0.0,
-            -0.0,
-            1.0,
-            -1.0,
-            0.5,
-            2.0,
-            float("inf"),
-            -float("inf"),
-            float("nan"),
-            fi.smallest_normal,
-            -fi.smallest_normal,
-            fi.max,
-            fi.min,
-            fi.eps,
-            1.0 + fi.eps,
-            1.0 - fi.eps / 2,
-        ],
-        device=device,
-    )
-    return torch.cat([(bits | (signs << 31)).view(torch.float32), specials])
+    return torch.cat([(bits | (signs << 31)).view(torch.float32), _SPECIALS.to(device)])
 
 
 _BIT_VIEW = {
@@ -822,6 +785,8 @@ POINTWISE_XFAIL = frozenset(
         ("i0", "float32"),
         ("ldexp", "bfloat16"),
         ("ldexp", "float16"),
+        ("logaddexp2", "bfloat16"),
+        ("logaddexp2", "float16"),
         ("logaddexp2", "float32"),
         ("max_binary", "bfloat16"),
         ("max_binary", "float16"),
@@ -906,36 +871,45 @@ POINTWISE_XFAIL = frozenset(
     }
 )
 
-# The one ledger entry that is not portable across GPUs. __rdiv__ backward at bf16 is
-# reached by the neg signed-zero divergence (fixed later in this stack) only on sm_100;
-# on sm_89 the compiled result already matches eager, so listing it there would XPASS.
-# The other two __rdiv__ dtypes diverge on both and are listed unconditionally.
-_SM100_ONLY_BACKWARD_XFAIL = frozenset({("__rdiv__", "bfloat16")} if IS_SM100 else ())
-
-BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
+# Ledger entries that are not portable across GPUs: on sm_89 the compiled result
+# already matches eager, so listing them there would XPASS. All but remainder and
+# float_power route through the neg signed-zero divergence (atan2, cos, __rdiv__,
+# special_entr, special_modified_bessel_k0/k1) and go away once that is fixed later
+# in this stack. Measured on sm_89 (CUDA 13.0 and 13.2) and on sm_100.
+_SM100_ONLY_BACKWARD_XFAIL = frozenset(
     {
+        ("__rdiv__", "bfloat16"),
         ("__rdiv__", "float16"),
         ("__rdiv__", "float32"),
-        ("__rmod__", "bfloat16"),
-        ("__rmod__", "float16"),
-        ("__rmod__", "float32"),
-        ("__rpow__", "bfloat16"),
-        ("__rpow__", "float16"),
-        ("__rpow__", "float32"),
-        ("addcdiv", "bfloat16"),
-        ("addcdiv", "float16"),
-        ("addcdiv", "float32"),
         ("atan2", "bfloat16"),
         ("atan2", "float16"),
         ("atan2", "float32"),
         ("cos", "bfloat16"),
         ("cos", "float16"),
         ("cos", "float32"),
+        ("float_power", "float32"),
+        ("remainder", "float32"),
+        ("special_entr", "bfloat16"),
+        ("special_entr", "float16"),
+        ("special_modified_bessel_k0", "float32"),
+        ("special_modified_bessel_k1", "float32"),
+    }
+    if IS_SM100
+    else ()
+)
+
+BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
+    {
+        ("__rpow__", "bfloat16"),
+        ("__rpow__", "float16"),
+        ("__rpow__", "float32"),
+        ("addcdiv", "bfloat16"),
+        ("addcdiv", "float16"),
+        ("addcdiv", "float32"),
         ("double", "bfloat16"),
         ("double", "float16"),
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
-        ("float_power", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
@@ -960,6 +934,7 @@ BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
         ("nn_functional_mish", "bfloat16"),
         ("nn_functional_mish", "float16"),
         ("nn_functional_mish", "float32"),
+        ("nn_functional_silu", "bfloat16"),
         ("nn_functional_silu", "float16"),
         ("nn_functional_silu", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
@@ -968,9 +943,6 @@ BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
         ("nn_functional_tanhshrink", "bfloat16"),
         ("nn_functional_tanhshrink", "float16"),
         ("nn_functional_tanhshrink", "float32"),
-        ("remainder", "bfloat16"),
-        ("remainder", "float16"),
-        ("remainder", "float32"),
         ("rsqrt", "bfloat16"),
         ("rsqrt", "float16"),
         ("sigmoid", "bfloat16"),
@@ -980,8 +952,6 @@ BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
         ("special_bessel_y1", "float32"),
-        ("special_entr", "bfloat16"),
-        ("special_entr", "float16"),
         ("special_erfcx", "float32"),
         ("special_i1", "bfloat16"),
         ("special_i1", "float16"),
@@ -989,8 +959,6 @@ BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
-        ("special_modified_bessel_k0", "float32"),
-        ("special_modified_bessel_k1", "float32"),
         ("special_xlog1py", "bfloat16"),
         ("special_xlog1py", "float16"),
         ("tanh", "bfloat16"),
@@ -1055,16 +1023,6 @@ class _RngOpDetector(TorchDispatchMode):
         if torch.Tag.nondeterministic_seeded in getattr(func, "tags", ()):
             self.has_rng = True
         return func(*args, **(kwargs or {}))
-
-
-def _survey_ledger(key, what, listed, mismatches):
-    # Report ledger disagreements instead of failing, so one run sweeps the whole file
-    # rather than aborting at the first. pytest.ini sets --capture=sys, which only swaps
-    # sys.stdout/stderr, so write fd 2 directly to reach the job log.
-    if listed and not mismatches:
-        os.write(2, f"LEDGER-SURVEY XPASS    {what} {key}\n".encode())
-    elif not listed and mismatches:
-        os.write(2, f"LEDGER-SURVEY UNLISTED {what} {key} {mismatches}\n".encode())
 
 
 @unittest.skipUnless(
@@ -1132,18 +1090,15 @@ class PointwiseStrictNumericsTest(TestCase):
             x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=0)
             y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
         else:
-            x = y = None
-        if x is not None:
-            # The value sweeps pair position i of x with position i of y, and neither
-            # pairing ever puts +0.0 opposite -0.0: flip(0) maps 0x0000 to 0xFFFF, and the
-            # two fp32 draws append the same specials block at the same offsets, so only
-            # identical specials meet. Signed-zero ties are exactly what byte comparison
-            # exists to catch (minimum/maximum/copysign/atan2), so append them explicitly.
-            px, py = _SPECIAL_PAIRS
-            x = torch.cat([x, px.to(device=device, dtype=dtype)])
-            y = torch.cat([y, py.to(device=device, dtype=dtype)])
-        else:
             return []
+        # Position i of x pairs with position i of y, and neither sweep ever puts +0.0
+        # opposite -0.0: flip(0) maps 0x0000 to 0xFFFF, and the two fp32 draws append the
+        # same specials at the same offsets, so only identical specials meet. Signed-zero
+        # and infinity ties are exactly what byte comparison exists to catch
+        # (minimum/maximum/copysign/atan2), so cross the specials with themselves.
+        sp = _SPECIALS.to(device=device, dtype=dtype)
+        x = torch.cat([x, sp.repeat_interleave(sp.numel())])
+        y = torch.cat([y, sp.repeat(sp.numel())])
         try:
             samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         except Exception:
@@ -1173,40 +1128,56 @@ class PointwiseStrictNumericsTest(TestCase):
             calls.append((x, args, kwargs))
         return calls
 
-    def _sweep(self, device, op, dtype, cfg):
-        """Run reference inputs and bit patterns through eager and torch.compile.
+    def _collect_calls(self, device, op, dtype):
+        """The (source, input, args, kwargs) list both sweeps run over.
 
-        Returns mismatching (source, index, shape, kwargs, kind) records, where
-        source is "ref" (reference inputs) or "bits" (raw bit patterns); both are
-        held to the same bitwise standard. Skips known-uncompilable / RNG / no-sample
-        ops; other compile failures are left to fail.
+        Reference inputs are the only source of non-contiguous / arbitrarily strided
+        layouts; the bit-pattern call is the only source of subnormals and exhaustive
+        16-bit values. Skips ops this suite cannot judge: uncompilable under fullgraph,
+        RNG-seeded, or yielding no usable call.
         """
         if op.name in COMPILE_UNSUPPORTED:
             self.skipTest("uncompilable op under fullgraph")
-
-        def fn(inp, args, kwargs):
-            return op.op(inp, *args, **kwargs)
-
-        # Reference inputs are the only source of non-contiguous / arbitrarily strided
-        # layouts; the bit-pattern call is the only source of subnormals and exhaustive
-        # 16-bit values. The bit-pattern call yields nothing for BITPATTERN_SLOW ops and
-        # for signatures whose args cannot take substituted data (bool masks).
         try:
             samples = list(op.reference_inputs(device, dtype, requires_grad=False))
         except Exception as e:
             self.skipTest(f"reference_inputs failed: {type(e).__name__}")
         calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
         calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
-        if calls:
-            # Probe every call: RNG use can depend on the scalar signature.
-            detector = _RngOpDetector()
-            with detector:
-                for _, inp, args, kwargs in calls:
-                    fn(inp, args, kwargs)
-                    if detector.has_rng:
-                        break
-            if detector.has_rng:
-                self.skipTest("RNG op excluded (RNG-source equivalence is separate)")
+        if not calls:
+            self.skipTest("no usable sample")
+        # Probe every call: RNG use can depend on the scalar signature.
+        detector = _RngOpDetector()
+        with detector:
+            for _, inp, args, kwargs in calls:
+                op.op(inp, *args, **kwargs)
+                if detector.has_rng:
+                    break
+        if detector.has_rng:
+            self.skipTest("RNG op excluded (RNG-source equivalence is separate)")
+        return calls
+
+    def _require_kernel(self, tested, nothing_tested):
+        # Inductor emitting no kernel means the "compiled" result came from the same ATen
+        # kernel eager dispatched to, so the comparison was eager-vs-eager. Passing would
+        # claim a verification that did not happen.
+        if tested == 0:
+            self.skipTest(nothing_tested)
+        if metrics.generated_kernel_count == 0:
+            self.skipTest("no Triton kernel generated (op falls back to ATen)")
+
+    def _sweep(self, device, op, dtype, cfg):
+        """Run reference inputs and bit patterns through eager and torch.compile.
+
+        Returns mismatching (source, index, shape, kwargs, kind) records, where
+        source is "ref" (reference inputs) or "bits" (raw bit patterns); both are
+        held to the same bitwise standard.
+        """
+        calls = self._collect_calls(device, op, dtype)
+
+        def fn(inp, args, kwargs):
+            return op.op(inp, *args, **kwargs)
+
         tested = 0
         mismatches = []
         with (
@@ -1216,45 +1187,56 @@ class PointwiseStrictNumericsTest(TestCase):
                 accumulated_recompile_limit=sys.maxsize,
             ),
         ):
-            torch._dynamo.reset()
             metrics.reset()
-            compiled = torch.compile(fn, fullgraph=True, dynamic=False)
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 eager = fn(inp, args, kwargs)
                 if not self._is_tensor_output(eager):
                     continue
                 if not self._is_pointwise_output(inp, args, kwargs, eager):
                     continue
-                result = compiled(inp, args, kwargs)
+                torch._dynamo.reset()
+                result = torch.compile(fn, fullgraph=True)(inp, args, kwargs)
                 tested += 1
                 if not _outputs_equal(eager, result):
                     kind = _diff_kind(eager, result)
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
-        if tested == 0:
-            self.skipTest("no usable sample")
-        if metrics.generated_kernel_count == 0:
-            # Inductor emitted no kernel, so the "compiled" result came from the same
-            # ATen kernel eager dispatched to and the comparison above is eager-vs-eager.
-            # Passing would claim a verification that did not happen.
-            self.skipTest("no Triton kernel generated (op falls back to ATen)")
+        self._require_kernel(tested, "no usable sample")
         return mismatches
+
+    def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
+        """Hold the (op, dtype) to its ledger entry: listed means it must still differ."""
+        key = (_op_id(op), _dtype_label(dtype))
+        if key in xfail:
+            self.assertTrue(
+                mismatches,
+                f"{key} {what} now matches eager under strict numerics; "
+                f"remove it from {xfail_name}.",
+            )
+        else:
+            self.assertFalse(
+                mismatches,
+                f"{key} {what} differs from eager under strict numerics "
+                f"on (source, index, shape, kwargs, kind): {mismatches}.",
+            )
 
     @ops(POINTWISE_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_bitwise(self, device, dtype, op):
         # @ops intersects allowed_dtypes with each op's supported dtypes, so unsupported
         # combos are never generated. No-fp32 ops are covered by test_pointwise_nonfloat.
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        key = (_op_id(op), _dtype_label(dtype))
-        _survey_ledger(key, "forward", key in POINTWISE_XFAIL, mismatches)
+        self._assert_ledger(
+            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
+        )
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
         # No-fp32 ops (bitwise/gcd/lcm on ints, imag on complex): no rounding, so eager
         # and compile must agree exactly. Swept over every supported int/complex dtype.
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        key = (_op_id(op), _dtype_label(dtype))
-        _survey_ledger(key, "nonfloat", key in NONFLOAT_XFAIL, mismatches)
+        self._assert_ledger(
+            mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
+        )
 
     def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
         # grad_output is shared across eager and compiled so both see identical upstream.
@@ -1302,30 +1284,10 @@ class PointwiseStrictNumericsTest(TestCase):
         inputs); a fixed grad_output is shared so both paths see identical upstream
         gradients.
         """
-        if op.name in COMPILE_UNSUPPORTED:
-            self.skipTest("uncompilable op under fullgraph")
+        calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
             return op.op(inp, *args, **kwargs)
-
-        try:
-            samples = list(op.reference_inputs(device, dtype, requires_grad=False))
-        except Exception as e:
-            self.skipTest(f"reference_inputs failed: {type(e).__name__}")
-        calls = [("ref", *c) for c in self._build_calls(samples, dtype)]
-        calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
-        if not calls:
-            self.skipTest("no usable sample")
-
-        # Probe every call: RNG use can depend on the scalar signature.
-        detector = _RngOpDetector()
-        with detector:
-            for _, inp, args, kwargs in calls:
-                fn(inp, args, kwargs)
-                if detector.has_rng:
-                    break
-        if detector.has_rng:
-            self.skipTest("RNG op excluded (RNG-source equivalence is separate)")
 
         tested = 0
         mismatches = []
@@ -1336,9 +1298,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 accumulated_recompile_limit=sys.maxsize,
             ),
         ):
-            torch._dynamo.reset()
             metrics.reset()
-            compiled = torch.compile(fn, fullgraph=True, dynamic=False)
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 with torch.no_grad():
                     probe = fn(inp, args, kwargs)
@@ -1367,6 +1327,8 @@ class PointwiseStrictNumericsTest(TestCase):
                     continue
                 if eager_grads is None:
                     continue
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, fullgraph=True)
                 _, comp_grads = self._input_grads(
                     compiled, inp, args, kwargs, grad_output
                 )
@@ -1379,17 +1341,15 @@ class PointwiseStrictNumericsTest(TestCase):
                     kind = _diff_kind(eager_grads, comp_grads)
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
-        if tested == 0:
-            self.skipTest("no differentiable sample")
-        if metrics.generated_kernel_count == 0:
-            self.skipTest("no Triton kernel generated (op falls back to ATen)")
+        self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
     @ops(BACKWARD_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
-        key = (_op_id(op), _dtype_label(dtype))
-        _survey_ledger(key, "backward", key in BACKWARD_XFAIL, mismatches)
+        self._assert_ledger(
+            mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
+        )
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
