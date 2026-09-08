@@ -3694,140 +3694,145 @@ class SIMDScheduling(BaseScheduling):
             "features": kernel_features,
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
-            "disable_multi_kernel": True,
         }
-        kernel = cast(
-            "TritonKernel",
+        kernels = cast(
+            "list[TritonKernel]",
             self.create_kernel_choices(
                 kernel_features,
                 [tiling],
                 kernel_kwargs,
-            )[0],
+            ),
         )
 
-        if local_reduction_in_r:
-            kernel.min_rblock = local_reduction_size_hint
-        else:
-            kernel.min_xblock = local_reduction_size_hint
+        for kernel in kernels:
+            if local_reduction_in_r:
+                kernel.min_rblock = local_reduction_size_hint
+            else:
+                kernel.min_xblock = local_reduction_size_hint
 
-        with kernel:
-            layout: _GroupedReductionLayout = _GroupedReductionLayout.from_kernel(
-                kernel,
-                local_reduction_size,
-                local_reduction_in_r,
-            )
-            sub_parent_family: _DerivedIterationFamily | None = None
-            value_resolver: _SubParentValueResolver | None = None
-            if sub_parent_stage is not None:
-                sub_parent_family = layout.make_sub_parent_family(
-                    sub_parent_stage.factor
-                )
-                value_resolver = _SubParentValueResolver(
-                    V.get_ops_handler(),
+            with kernel:
+                layout: _GroupedReductionLayout = _GroupedReductionLayout.from_kernel(
                     kernel,
-                    layout,
-                    sub_parent_family,
-                    access_relations=sub_parent_stage.access_relations,
-                    sub_parent_factor=sub_parent_stage.factor,
+                    local_reduction_size,
+                    local_reduction_in_r,
                 )
-            with V.set_ops_handler(value_resolver or V.get_ops_handler()):
-                self._codegen_node_schedule_body(combined_schedule, kernel)
-            # Flush the outer reduction code:
-            # - Persistent: one pass, no loops
-            # - Looped: disable_reduction already flushed loop 1
-            #   and post-loop code, but pending buffers may still have the next
-            #   pass. Flush it now so later nested stages can consume it.
-            kernel.codegen_body()
+                sub_parent_family: _DerivedIterationFamily | None = None
+                value_resolver: _SubParentValueResolver | None = None
+                if sub_parent_stage is not None:
+                    sub_parent_family = layout.make_sub_parent_family(
+                        sub_parent_stage.factor
+                    )
+                    value_resolver = _SubParentValueResolver(
+                        V.get_ops_handler(),
+                        kernel,
+                        layout,
+                        sub_parent_family,
+                        access_relations=sub_parent_stage.access_relations,
+                        sub_parent_factor=sub_parent_stage.factor,
+                    )
+                with V.set_ops_handler(value_resolver or V.get_ops_handler()):
+                    self._codegen_node_schedule_body(combined_schedule, kernel)
+                # Flush the outer reduction code:
+                # - Persistent: one pass, no loops
+                # - Looped: disable_reduction already flushed loop 1
+                #   and post-loop code, but pending buffers may still have the next
+                #   pass. Flush it now so later nested stages can consume it.
+                kernel.codegen_body()
 
-            group_reduction_vars = layout.construct_group_reduction_vars(
-                grouped_reduction_body
-            )
-            reduced_output_family = layout.make_reduced_output_family(
-                group_reduction_vars
-            )
-            parent_full_family = layout.make_parent_full_family()
-            local_reduction_source: _IterationSpace = (
-                self._local_reduction_iteration_values(
-                    grouped_reduction_body,
-                    group_reduction_vars.iter_remapped,
-                    group_reduction_vars.reduce_remapped,
+                group_reduction_vars = layout.construct_group_reduction_vars(
+                    grouped_reduction_body
                 )
-            )
-            parent_full_source: _IterationSpace = layout.parent_full_iteration_values(
-                group_reduction_vars
-            )
-            with V.set_ops_handler(value_resolver or V.get_ops_handler()):
-                self._codegen_remapped_pointwise(
-                    kernel,
-                    outer_local_reduction_pointwise,
-                    parent_full_family,
-                    local_reduction_source,
-                    load_transform=_ParentFullLoadTransform(kernel, layout),
+                reduced_output_family = layout.make_reduced_output_family(
+                    group_reduction_vars
                 )
-                self._codegen_nested_grouped_schedule(
-                    kernel,
-                    grouped_schedule,
-                    grouped_reduction,
-                    layout,
-                    group_reduction_vars,
-                    local_reduction_source,
-                    parent_full_source,
-                    pointwise_domain_by_node,
-                    reduced_output_family,
-                    parent_full_family,
+                parent_full_family = layout.make_parent_full_family()
+                local_reduction_source: _IterationSpace = (
+                    self._local_reduction_iteration_values(
+                        grouped_reduction_body,
+                        group_reduction_vars.iter_remapped,
+                        group_reduction_vars.reduce_remapped,
+                    )
                 )
-            if sub_parent_stage is not None:
-                if sub_parent_family is None or value_resolver is None:
-                    raise AssertionError("sub-parent stage requires its codegen state")
-                value_resolver.materialize_sources(
-                    relation
-                    for relation in sub_parent_stage.access_relations
-                    if relation.parent_lane is not None
+                parent_full_source: _IterationSpace = (
+                    layout.parent_full_iteration_values(group_reduction_vars)
                 )
-                self._codegen_sub_parent_output_groups(
-                    kernel,
-                    sub_parent_stage,
-                    layout,
-                    sub_parent_family,
-                    value_resolver,
-                )
+                with V.set_ops_handler(value_resolver or V.get_ops_handler()):
+                    self._codegen_remapped_pointwise(
+                        kernel,
+                        outer_local_reduction_pointwise,
+                        parent_full_family,
+                        local_reduction_source,
+                        load_transform=_ParentFullLoadTransform(kernel, layout),
+                    )
+                    self._codegen_nested_grouped_schedule(
+                        kernel,
+                        grouped_schedule,
+                        grouped_reduction,
+                        layout,
+                        group_reduction_vars,
+                        local_reduction_source,
+                        parent_full_source,
+                        pointwise_domain_by_node,
+                        reduced_output_family,
+                        parent_full_family,
+                    )
+                if sub_parent_stage is not None:
+                    if sub_parent_family is None or value_resolver is None:
+                        raise AssertionError("sub-parent stage requires codegen state")
+                    value_resolver.materialize_sources(
+                        relation
+                        for relation in sub_parent_stage.access_relations
+                        if relation.parent_lane is not None
+                    )
+                    self._codegen_sub_parent_output_groups(
+                        kernel,
+                        sub_parent_stage,
+                        layout,
+                        sub_parent_family,
+                        value_resolver,
+                    )
 
-            kernel.codegen_body()
+                kernel.codegen_body()
 
-        self._finalize_nested_reduction_kernel(
-            kernel,
+        self._finalize_nested_reduction_kernels(
+            kernels,
             combined_schedule,
             node.get_nodes(),
             indexing_schedule,
         )
 
-    def _finalize_nested_reduction_kernel(
+    def _finalize_nested_reduction_kernels(
         self,
-        kernel,
+        kernels,
         combined_schedule,
         nodes_to_mark,
         config_patch_schedule=None,
     ) -> None:
+        MultiKernel.merge_workspaces_inplace(kernels)
         config_patches = self._collect_config_patches(
             config_patch_schedule or combined_schedule
         )
-        with V.set_kernel_handler(kernel), config.patch(**config_patches):
-            src_code = kernel.codegen_kernel()
-        kernel.kernel_name = self.define_kernel(
-            src_code,
-            combined_schedule,
-            kernel,
-        )
-        kernel.code_hash = code_hash(src_code)
+        for kernel in kernels:
+            with V.set_kernel_handler(kernel), config.patch(**config_patches):
+                src_code = kernel.codegen_kernel()
+            kernel.kernel_name = self.define_kernel(
+                src_code,
+                combined_schedule,
+                kernel,
+            )
+            kernel.code_hash = code_hash(src_code)
 
-        with V.set_kernel_handler(kernel):
+        final_kernel: SIMDKernel | MultiKernel = (
+            MultiKernel(kernels) if len(kernels) > 1 else kernels[0]
+        )
+        with V.set_kernel_handler(final_kernel):
             for sn in nodes_to_mark:
                 sn.mark_run()
 
         base_scheduler_nodes = [
             node for node in combined_schedule if isinstance(node, BaseSchedulerNode)
         ]
-        self._launch_kernel_and_cleanup(kernel, base_scheduler_nodes)
+        self._launch_kernel_and_cleanup(final_kernel, base_scheduler_nodes)
 
     def _codegen_nested_grouped_schedule(
         self,
@@ -4145,49 +4150,49 @@ class SIMDScheduling(BaseScheduling):
             "features": kernel_features,
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
-            "disable_multi_kernel": True,
         }
-        kernel = cast(
-            "TritonKernel",
-            self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)[0],
+        kernels = cast(
+            "list[TritonKernel]",
+            self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
         )
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = stage.factor
         parent_rnumel = plan.parent_rnumel
-        kernel.min_rblock = sub_parent_factor
-        if len(kernel.range_trees) != 2:
-            raise AssertionError("sub-parent codegen requires a 2D kernel")
-        layout = _GroupedReductionLayout.from_kernel(
-            kernel,
-            parent_rnumel,
-            local_reduction_in_r=True,
-        )
-        sub_parent_family = layout.make_sub_parent_family(sub_parent_factor)
-        with kernel:
-            value_resolver = _SubParentValueResolver(
-                V.get_ops_handler(),
+        for kernel in kernels:
+            kernel.min_rblock = sub_parent_factor
+            if len(kernel.range_trees) != 2:
+                raise AssertionError("sub-parent codegen requires a 2D kernel")
+            layout = _GroupedReductionLayout.from_kernel(
                 kernel,
-                layout,
-                sub_parent_family,
-                access_relations=stage.access_relations,
-                sub_parent_factor=sub_parent_factor,
+                parent_rnumel,
+                local_reduction_in_r=True,
             )
-            with V.set_ops_handler(value_resolver):
-                self._codegen_node_schedule_body(parent_schedule, kernel)
-            if not required_lane_relations:
+            sub_parent_family = layout.make_sub_parent_family(sub_parent_factor)
+            with kernel:
+                value_resolver = _SubParentValueResolver(
+                    V.get_ops_handler(),
+                    kernel,
+                    layout,
+                    sub_parent_family,
+                    access_relations=stage.access_relations,
+                    sub_parent_factor=sub_parent_factor,
+                )
+                with V.set_ops_handler(value_resolver):
+                    self._codegen_node_schedule_body(parent_schedule, kernel)
+                if not required_lane_relations:
+                    kernel.codegen_body()
+                else:
+                    value_resolver.materialize_sources(required_lane_relations)
+                self._codegen_sub_parent_output_groups(
+                    kernel,
+                    stage,
+                    layout,
+                    sub_parent_family,
+                    value_resolver,
+                )
                 kernel.codegen_body()
-            else:
-                value_resolver.materialize_sources(required_lane_relations)
-            self._codegen_sub_parent_output_groups(
-                kernel,
-                stage,
-                layout,
-                sub_parent_family,
-                value_resolver,
-            )
-            kernel.codegen_body()
 
-        self._finalize_nested_reduction_kernel(kernel, combined_schedule, nodes)
+        self._finalize_nested_reduction_kernels(kernels, combined_schedule, nodes)
 
     def codegen_node(
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
