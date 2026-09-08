@@ -236,9 +236,13 @@ void ExtraState::apply_pending_evictions(
       case PendingEviction::CACHE_REGION: {
         auto it = this->cache_entry_map.find(eviction.region_id);
         if (it != this->cache_entry_map.end()) {
-          TORCH_CHECK(
-              this->total_cache_entry_count >= it->second.size(),
-              "cache entry count underflow while applying a parked eviction");
+          // CHECK, not TORCH_CHECK: this runs under lookup() on the frame
+          // evaluator's path (eval_frame.c, a C frame with no catch), so a
+          // c10::Error would unwind through C. Abort cleanly like the other
+          // invariant checks on this path (move_to_front/move_to_back). The
+          // twin in _clear_cache_entries_for_region stays TORCH_CHECK -- it is
+          // only pybind-reached, where it converts to a Python exception.
+          CHECK(this->total_cache_entry_count >= it->second.size());
           this->total_cache_entry_count -= it->second.size();
           auto& dst = dead_cache[eviction.region_id];
           dst.splice(dst.end(), it->second);
