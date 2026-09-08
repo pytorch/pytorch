@@ -24,7 +24,12 @@ def _optimized_module_bool(self):
     return bool(self._orig_mod)
 
 
-bytecode_debugger._DebugContext.__init__ = _init
-eval_frame.OptimizedModule.__bool__ = _optimized_module_bool
+if not getattr(bytecode_debugger._DebugContext, "_native_neo_debugger_fix_installed", False):
+    bytecode_debugger._DebugContext.__init__ = _init
+    bytecode_debugger._DebugContext._native_neo_debugger_fix_installed = True
+
+if not getattr(eval_frame.OptimizedModule, "_native_neo_bool_fix_installed", False):
+    eval_frame.OptimizedModule.__bool__ = _optimized_module_bool
+    eval_frame.OptimizedModule._native_neo_bool_fix_installed = True
 
 __all__ = []
