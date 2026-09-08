@@ -53,6 +53,8 @@ def _is_valid_hgemm_config(hgemm_config: dict[str, int | bool]) -> bool:
     block_threads = m_waves * n_waves * 64
     ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
     ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
+    if ldg_a_iters <= 0 or ldg_b_iters <= 0:
+        return False
     if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
         return False
 
@@ -72,10 +74,10 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     Returns the exhaustive configuration set for the gfx950 FlyDSL HGEMM kernel.
     """
     selections = {
-        "TILE_M": [16, 32, 48, 64, 96, 128, 192, 256],
-        "TILE_N": [64, 96, 128, 192, 256],
+        "TILE_M": [16, 32, 48, 64, 96, 128, 256],
+        "TILE_N": [64, 96, 128, 256],
         "TILE_K": [64, 128, 256],
-        "STAGES": [i for i in range(2, 11)],
+        "STAGES": [i for i in range(2, 7)],
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
         "SPLIT_K": [1],
@@ -106,24 +108,17 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     Returns the default configuration set for the gfx950 FlyDSL HGEMM kernel.
     """
     config_tuples = [
+        (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
         (128, 128, 64, 4, 1, 4, 4, 1, 0, True),
         (256, 256, 64, 2, 1, 4, 4, 1, 0, True),
         (128, 256, 64, 2, 1, 4, 4, 1, 0, True),
         (256, 128, 64, 2, 1, 4, 4, 1, 0, True),
-        (128, 128, 64, 2, 1, 4, 4, 1, 0, True),
         (64, 256, 64, 2, 1, 2, 4, 1, 0, True),
         (256, 64, 64, 2, 1, 4, 2, 1, 0, True),
         (64, 128, 64, 2, 1, 2, 4, 1, 0, True),
         (128, 64, 64, 2, 1, 4, 2, 1, 0, True),
         (96, 128, 64, 2, 1, 2, 4, 1, 0, True),
         (128, 96, 64, 2, 1, 4, 2, 1, 0, True),
-        (192, 128, 64, 2, 1, 4, 4, 1, 0, True),
-        (128, 192, 64, 2, 1, 4, 4, 1, 0, True),
-        (192, 192, 64, 2, 1, 4, 4, 1, 0, True),
-        (192, 256, 64, 2, 1, 4, 4, 1, 0, True),
-        (256, 192, 64, 2, 1, 4, 4, 1, 0, True),
-        (96, 192, 64, 2, 1, 2, 4, 1, 0, True),
-        (192, 96, 64, 2, 1, 4, 2, 1, 0, True),
         (64, 64, 64, 2, 1, 2, 2, 1, 0, True),
         (128, 128, 128, 2, 1, 4, 4, 1, 0, True),
         (64, 128, 128, 2, 1, 2, 4, 1, 0, True),
