@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <mach/vm_page_size.h>
 #include <cstdio>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <unordered_set>
@@ -102,7 +103,7 @@ struct BufferComparison {
       return a->size < b->size;
     }
     if (a->heap != b->heap) {
-      return reinterpret_cast<uintptr_t>(a->heap) < reinterpret_cast<uintptr_t>(b->heap);
+      return std::less<>{}(a->heap, b->heap);
     }
     return a->offset < b->offset;
   }
