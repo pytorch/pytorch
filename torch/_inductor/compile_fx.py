@@ -1053,10 +1053,12 @@ def compile_fx_inner(
             config.triton.use_tensor_descriptor and config.assume_aligned_inputs
         ):
             warnings.warn(
-                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.enable_host_side_tma requires both "
                 "config.triton.use_tensor_descriptor and "
-                "config.assume_aligned_inputs are also enabled; host-side TMA "
-                "will be skipped.",
+                "config.assume_aligned_inputs for pointwise/reduction kernels; "
+                "host-side TMA will be skipped for those. GEMM templates are "
+                "unaffected: their operands are validated by can_use_tma() "
+                "before the template is offered as a choice.",
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
