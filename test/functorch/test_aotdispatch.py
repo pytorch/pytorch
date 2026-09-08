@@ -7153,20 +7153,6 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_autocast(self):
-        mod = torchvision.models.resnet18().cuda()
-        mod.train()
-
-        x = torch.randn(16, 3, 32, 32, device="cuda")
-        aot_mod = memory_efficient_fusion(mod)
-
-        # Ensure that AOT Autograd works with AMP
-        with torch.cuda.amp.autocast(True):
-            res = aot_mod(x)
-        res.sum().backward()
-
     def test_quantize_activation_duplicate_nodes(self):
         """Test both quantize_activation_fw and quantize_activation_bw handle duplicate nodes correctly"""
         import torch.fx as fx
@@ -7662,185 +7648,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(compiled_out, eager_out)
         self.assertEqual(compiled_grad, eager_grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops(self):
-        """Test that effectful op outputs are saved, not recomputed.
-
-        This test traces a function with a with_effects node and verifies
-        that the getitem outputs are marked MUST_SAVE.
-        """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
-        )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
-
-        @torch.library.custom_op("test::effectful_op", mutates_args=())
-        def effectful_op(x: torch.Tensor) -> torch.Tensor:
-            return x * 2
-
-        @effectful_op.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            return torch.empty_like(x)
-
-        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
-
-        try:
-            gm = None
-
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x, weight):
-                a = torch.ops.test.effectful_op(x)
-                return a.sum() * weight
-
-            x = torch.randn(4, 4)
-            weight = torch.randn(4, 4)
-            fn(x, weight)
-
-            force_save_effectful_ops(gm)
-
-            with_effects_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function" and n.target == with_effects
-            ]
-            self.assertEqual(
-                len(with_effects_nodes), 1, "should have one with_effects node"
-            )
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_nodes[0]
-            ]
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
-            self.assertEqual(
-                must_save_count,
-                2,
-                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
-            )
-            self.assertEqual(
-                len(getitem_nodes),
-                must_save_count,
-                "all getitem nodes should be MUST_SAVE",
-            )
-        finally:
-            handle.destroy()
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops_nested_tuple(self):
-        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
-
-        This test creates a custom op that returns a tuple, registers it as effectful,
-        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
-        """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
-        )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
-
-        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
-        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return x * 2, x + 1
-
-        @effectful_tuple_op.register_fake
-        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return torch.empty_like(x), torch.empty_like(x)
-
-        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
-
-        try:
-            gm = None
-
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x):
-                a, b = torch.ops.test.effectful_tuple_op(x)
-                return a.sum() + b.sum()
-
-            x = torch.randn(4, 4)
-            fn(x)
-
-            with_effects_node = None
-            for node in gm.graph.nodes:
-                if node.op == "call_function" and node.target == with_effects:
-                    with_effects_node = node
-                    break
-            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_node
-            ]
-
-            force_save_effectful_ops(gm)
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            tensor_getitem_count = 0
-            must_save_count = 0
-            for node in getitem_nodes:
-                val = node.meta.get("val")
-                if isinstance(val, torch.Tensor):
-                    tensor_getitem_count += 1
-                    if is_must_save(node):
-                        must_save_count += 1
-
-            self.assertEqual(
-                tensor_getitem_count,
-                3,
-                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
-            )
-            self.assertEqual(
-                must_save_count,
-                tensor_getitem_count,
-                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
-            )
-        finally:
-            handle.destroy()
-
     def test_static_input_indices_with_effect_tokens(self):
         """Test that static_input_indices are correctly offset when effect tokens are prepended."""
         from torch._functorch._aot_autograd.descriptors import PlainAOTInput
@@ -8102,27 +7909,6 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_emitted(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("functionalized_rng_wrapper") as captured:
-
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x) + x
-
-                x = torch.randn(4, device="cuda")
-                f(x)
-
-        self.assertEqual(
-            len(captured),
-            1,
-            "Expected functionalized_rng_wrapper codegen artifact",
-        )
-        source = captured[0]
-        self.assertIn("_get_rng_state_", source)
-        self.assertIn("_set_offset_", source)
-
     def test_functionalized_rng_no_codegen(self):
         with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -8152,70 +7938,6 @@ def forward(self, primals_1, tangents_1):
             sentinel, SimpleNamespace(), runtime_metadata=mock_meta
         )
         self.assertIs(result, sentinel)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_correctness(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                return torch.rand_like(x)
-
-            x = torch.randn(8, device="cuda")
-            out = f(x)
-
-        self.assertEqual(out.shape, x.shape)
-        self.assertEqual(out.device, x.device)
-        self.assertTrue((out >= 0).all() and (out <= 1).all())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_multi_output(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                noise = torch.rand_like(x)
-                return x + noise, x * 2
-
-            x = torch.randn(4, device="cuda")
-            out1, out2 = f(x)
-
-        self.assertEqual(out2, x * 2)
-        self.assertEqual(out1.shape, x.shape)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_advances_state(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-
-            @torch.compile(backend="aot_eager")
-            def f(x):
-                return torch.rand_like(x)
-
-            x = torch.randn(100, device="cuda")
-            out1 = f(x)
-            out2 = f(x)
-
-        self.assertFalse(
-            torch.allclose(out1, out2),
-            "Successive calls should produce different random outputs",
-        )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functionalized_rng_codegen_source_structure(self):
-        with torch._functorch.config.patch(functionalize_rng_ops=True):
-            with capture_codegen_source("functionalized_rng_wrapper") as captured:
-
-                @torch.compile(backend="aot_eager")
-                def f(x):
-                    return torch.rand_like(x)
-
-                f(torch.randn(4, device="cuda"))
-
-        self.assertEqual(len(captured), 1)
-        source = captured[0]
-        self.assertIn("def _functionalized_rng_wrapper", source)
-        self.assertIn("extend", source)
-        self.assertIn("outs[", source)
 
     def test_functionalized_rng_codegen_unit_return_new_outs(self):
         set_offset_log = []
@@ -10584,6 +10306,290 @@ def forward(self, primals_1, tangents_1):
         out.sum().backward()
 
 
+class TestPartitioningDevice(AOTTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self):
+        mod = torchvision.models.resnet18().cuda()
+        mod.train()
+
+        x = torch.randn(16, 3, 32, 32, device="cuda")
+        aot_mod = memory_efficient_fusion(mod)
+
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_force_save_effectful_ops(self):
+        """Test that effectful op outputs are saved, not recomputed.
+
+        This test traces a function with a with_effects node and verifies
+        that the getitem outputs are marked MUST_SAVE.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_op", mutates_args=())
+        def effectful_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x, weight):
+                a = torch.ops.test.effectful_op(x)
+                return a.sum() * weight
+
+            x = torch.randn(4, 4)
+            weight = torch.randn(4, 4)
+            fn(x, weight)
+
+            force_save_effectful_ops(gm)
+
+            with_effects_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function" and n.target == with_effects
+            ]
+            self.assertEqual(
+                len(with_effects_nodes), 1, "should have one with_effects node"
+            )
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_nodes[0]
+            ]
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
+            self.assertEqual(
+                must_save_count,
+                2,
+                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
+            )
+            self.assertEqual(
+                len(getitem_nodes),
+                must_save_count,
+                "all getitem nodes should be MUST_SAVE",
+            )
+        finally:
+            handle.destroy()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_force_save_effectful_ops_nested_tuple(self):
+        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
+
+        This test creates a custom op that returns a tuple, registers it as effectful,
+        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
+        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return x * 2, x + 1
+
+        @effectful_tuple_op.register_fake
+        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x):
+                a, b = torch.ops.test.effectful_tuple_op(x)
+                return a.sum() + b.sum()
+
+            x = torch.randn(4, 4)
+            fn(x)
+
+            with_effects_node = None
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target == with_effects:
+                    with_effects_node = node
+                    break
+            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_node
+            ]
+
+            force_save_effectful_ops(gm)
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            tensor_getitem_count = 0
+            must_save_count = 0
+            for node in getitem_nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.Tensor):
+                    tensor_getitem_count += 1
+                    if is_must_save(node):
+                        must_save_count += 1
+
+            self.assertEqual(
+                tensor_getitem_count,
+                3,
+                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
+            )
+            self.assertEqual(
+                must_save_count,
+                tensor_getitem_count,
+                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
+        finally:
+            handle.destroy()
+
+    # --- FunctionalizedRngRuntimeWrapper codegen tests ---
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_emitted(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x) + x
+
+                x = torch.randn(4, device="cuda")
+                f(x)
+
+        self.assertEqual(
+            len(captured),
+            1,
+            "Expected functionalized_rng_wrapper codegen artifact",
+        )
+        source = captured[0]
+        self.assertIn("_get_rng_state_", source)
+        self.assertIn("_set_offset_", source)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_correctness(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(8, device="cuda")
+            out = f(x)
+
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(out.device, x.device)
+        self.assertTrue((out >= 0).all() and (out <= 1).all())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_multi_output(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                noise = torch.rand_like(x)
+                return x + noise, x * 2
+
+            x = torch.randn(4, device="cuda")
+            out1, out2 = f(x)
+
+        self.assertEqual(out2, x * 2)
+        self.assertEqual(out1.shape, x.shape)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_advances_state(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.rand_like(x)
+
+            x = torch.randn(100, device="cuda")
+            out1 = f(x)
+            out2 = f(x)
+
+        self.assertFalse(
+            torch.allclose(out1, out2),
+            "Successive calls should produce different random outputs",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_functionalized_rng_codegen_source_structure(self):
+        with torch._functorch.config.patch(functionalize_rng_ops=True):
+            with capture_codegen_source("functionalized_rng_wrapper") as captured:
+
+                @torch.compile(backend="aot_eager")
+                def f(x):
+                    return torch.rand_like(x)
+
+                f(torch.randn(4, device="cuda"))
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("def _functionalized_rng_wrapper", source)
+        self.assertIn("extend", source)
+        self.assertIn("outs[", source)
+
+
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
     # - subclass / mode introduced in the middle of the compiled fn
@@ -12808,6 +12814,8 @@ instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
+
+instantiate_device_type_tests(TestPartitioningDevice, globals(), only_for=("cuda",))
 
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
