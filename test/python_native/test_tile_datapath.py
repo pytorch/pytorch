@@ -1,8 +1,8 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Host-only tests for the static-fragment datapath's THREAD MAP. TileMap is plain arithmetic --
-# no kernel, no GPU -- and it is where a fold order describes itself, so the properties an order
-# depends on are checkable here rather than only through a compiled kernel two commits later.
+# Host-only tests for the static-fragment datapath's THREAD MAP. TileMap is plain arithmetic
+# and it is where a fold order describes itself, so the properties an order depends on are
+# checkable here rather than only through a compiled kernel.
 
 import math
 
@@ -23,9 +23,8 @@ class TestTileDatapath(TestCase):
             self._tm(N=512, itemsize=4, tpr=48, loads=1)
 
     def test_exact_is_derived_and_overridable(self):
-        # `exact` means the tile covers the row with nothing left over, which is what lets the load
-        # emit no predication at all. It is derived from N by default; a BATCHED tile covers only
-        # its batch, so that caller passes exact=False and must keep its bound checks.
+        # `exact` means the tile covers the row with nothing over, which is what lets the load emit no
+        # predication. A BATCHED tile covers only its batch, so that caller keeps its bound checks.
         covering = self._tm(N=256, itemsize=4, tpr=32, loads=2)  # 4 * 2 * 32 == 256
         self.assertTrue(covering.exact)
         ragged = self._tm(N=252, itemsize=4, tpr=32, loads=2)
@@ -36,19 +35,17 @@ class TestTileDatapath(TestCase):
         )
 
     def test_vec_override_is_what_an_order_needs(self):
-        # By default vec is gcd-derived from N, which changes with N and so would change an
-        # order's add DAG. An order defines itself as 16 // itemsize regardless of N and pads the
-        # ragged tail with identities, so the override has to be honoured verbatim.
+        # By default vec is gcd-derived from N, which would change an order's add DAG with N. An order
+        # defines its own from the itemsize and pads the tail, so the override must be honoured.
         derived = self._tm(N=252, itemsize=4, tpr=32, loads=2)
         self.assertEqual(derived.vec, math.gcd(252, 4))
         fixed = self._tm(N=252, itemsize=4, tpr=32, loads=2, vec=4, exact=False)
         self.assertEqual(fixed.vec, 4)
 
     def test_strides_are_the_only_difference_between_the_two_orders(self):
-        # The regular and inner-tree orders read the SAME elements into the SAME registers and
-        # differ only in which chunk goes to which warp -- i.e. in the l/w strides swapping. Both
-        # must keep stride 1 innermost (that is what makes the load coalesce) and both must be a
-        # permutation of the same column set.
+        # The two orders read the SAME elements into the SAME registers and differ only in which chunk
+        # goes to which warp. Both must keep stride 1 innermost -- that is what coalesces the load --
+        # and both must be a permutation of the same column set.
         kw = dict(N=1024, itemsize=4, tpr=128, loads=2)
         row_major = self._tm(**kw)
         warp_major = self._tm(**kw, warp_major=True)
@@ -67,11 +64,9 @@ class TestTileDatapath(TestCase):
             self.assertEqual(max(cols), kw["N"] - tm.vec)
 
     def test_align_bytes_tracks_the_load_width(self):
-        # The declared alignment is what makes the DSL emit the wide instruction, and declaring
-        # more than the layout proves faults at launch. With a DERIVED vec it always divides N, so
-        # the wide load is legal and the alignment is vec * itemsize. The one case where it is not
-        # is an ORDER's explicit vec, which is 16 // itemsize regardless of N: there the load falls
-        # back to per-element reads and the declaration has to fall back with it.
+        # The declared alignment is what makes the DSL emit the wide instruction, and declaring more
+        # than the layout proves faults at launch. With a DERIVED vec it always divides N; an ORDER's
+        # explicit vec may not, and there the declaration has to fall back with the load.
         wide = self._tm(N=1024, itemsize=4, tpr=32, loads=1)
         self.assertTrue(wide.wide_ok)
         self.assertEqual(wide.align_bytes(4), wide.vec * 4)

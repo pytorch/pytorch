@@ -1,9 +1,8 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Minimal smoke test for the column reduction on the shared tile datapath. Covers the two
-# shapes that exercise different machinery: one that fits a single stage (no reduced-axis
-# split) and a tall one that must split the reduced axis and combine partials. Real numeric
-# coverage comes from the reduction overrides' OpInfo suites in a later commit.
+# Smoke test for the column reduction on the shared tile datapath: one shape that fits a
+# single stage and a tall one that must split the reduced axis and combine partials. Numeric
+# coverage comes from the overrides' OpInfo suites.
 
 import unittest
 
@@ -42,10 +41,9 @@ class TestKernelColTile(TestCase):
         self.assertEqual(out, x.mean(dim=0), atol=1e-3, rtol=1e-3)
 
     def test_stage2_combine_body(self):
-        # Stage 2 has TWO shapes: a ReduceBlock fold, and the shared body in `combine` mode, which
-        # is selected only when C >= _C_THREAD_STAGE2 AND the reduced axis is split. The existing
-        # tests use C=512/256, so both took the ReduceBlock branch and the combine body -- the
-        # only construction of TileReduce(combine=True) in the tree -- ran nowhere.
+        # Stage 2 has TWO shapes, and the shared body in `combine` mode is selected only above a C
+        # threshold with the reduced axis split -- the only construction of TileReduce(combine=True)
+        # in the tree, and it ran nowhere.
         from unittest import mock
 
         import cutlass
@@ -70,9 +68,8 @@ class TestKernelColTile(TestCase):
         self.assertEqual(out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4)
 
     def test_dim0_argmax_is_exact_including_ties(self):
-        # The commit's headline claim is that this path carries the ABSOLUTE reduced index, so
-        # argmax/argmin over dim 0 are exact with ATen's first-wins tie-break. randn has no ties,
-        # so build them: two rows hold the same maximum and the LOWER row must win.
+        # The headline claim is that this path carries the ABSOLUTE reduced index, so argmax over dim
+        # 0 matches ATen's first-wins tie-break. randn has no ties, so build them.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -112,12 +109,9 @@ class TestKernelColTile(TestCase):
         self.assertEqual(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
 
     def test_dispatcher_routes_a_column_reduction(self):
-        # The other tests call reduce_col_tile directly, so the line this commit actually changes
-        # for users -- fast_kind's col arm plus the reshape/_as_shape round-trip in _reduce -- was
-        # untested. Numbers alone cannot check it: with the col arm gone, K0 serves the same shape
-        # correctly, so a result-only assertion passes either way. Assert what identifies the arm --
-        # that the col driver is the thing that served it -- for a 2D input and for an n-D one that
-        # has to coalesce to a single reduced + single kept run first.
+        # The other tests call the driver directly, so the line this changes for users -- the col arm
+        # plus the reshape round-trip -- was untested. Numbers cannot check it: with the arm gone the
+        # general path serves the same shape correctly. Assert what identifies the arm.
         from unittest import mock
 
         import cutlass
@@ -145,9 +139,8 @@ class TestKernelColTile(TestCase):
 @skipIfNoCuteDSL
 class TestColTileHost(TestCase):
     def test_col_axis_carries_no_tile(self):
-        # Host-only, so it runs wherever the DSL imports. The col axis takes `vec` from the
-        # driver (accumulators per thread) rather than from a load width, so it has no tile --
-        # and asking for one must fail loudly, not dereference None inside a kernel build.
+        # Host-only. The col axis takes `vec` from the driver rather than from a load width, so it has
+        # no tile -- and asking for one must fail loudly, not dereference None inside a kernel build.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -163,10 +156,9 @@ class TestColTileHost(TestCase):
             col.tilemap
 
     def test_over_reported_split_stays_correct(self):
-        # _split_p caps npar at _P_MAX, so q * (npar - 1) can exceed R and the last blocks get a
-        # NEGATIVE row count. They still write a partial that stage 2 folds, so this pins both
-        # halves: the fold issues no load, and the identity survives the combine. Asserted on the
-        # result rather than on the lowering, which is what the clamp stops depending on.
+        # _split_p caps npar, so the last blocks can get a NEGATIVE row count and still write a
+        # partial that stage 2 folds. Pins both halves: the fold issues no load, and the identity
+        # survives the combine. Asserted on the result, not the lowering.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -186,9 +178,8 @@ class TestColTileHost(TestCase):
         self.assertEqual(idx, x.argmax(dim=0).to(torch.int32))
 
     def test_explicit_vec_must_divide_the_column_count(self):
-        # nchunks = C // vec, so a vec that does not divide C never stores the trailing columns
-        # and `out` keeps whatever torch.empty gave it -- a silently wrong answer, not an error.
-        # The derived vec always divides C, so only an explicit one reaches this.
+        # A vec that does not divide C never stores the trailing columns, so `out` keeps whatever
+        # torch.empty gave it -- silently wrong, not an error. Only an explicit vec reaches this.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
