@@ -3043,7 +3043,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return values, indices, values.float().sum(-1)
 
         x = torch.randn(128, width, dtype=dtype, device=device_type)
-        self._check_topk(f, x, x, k)
+        # A single smallest value is not a min: min.dim propagates NaN.
+        self._check_topk(f, x, x, k, expect_triton=largest or k > 1)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     @config.patch({"emulate_precision_casts": True})
@@ -3111,7 +3112,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @parametrize(
         "name, shape, k, dim",
         [
-            ("k_too_large", (128, 256), 129, -1),
+            ("k_over_budget", (128, 1024), 65, -1),
             ("too_much_work", (256, 4096), 32, -1),
             ("wide_input", (128, 16385), 4, -1),
             ("non_last_dim", (33, 128), 4, 0),

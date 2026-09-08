@@ -8592,7 +8592,6 @@ def mode_default(self, dim=-1, keepdim=False):
 # costs about k * block lanes of work per row; past 2**16 the ATen radix
 # select is faster, except that k <= 8 stays ahead out to the widest block.
 _TRITON_TOPK_MAX_WIDTH = 16384
-_TRITON_TOPK_MAX_K = 128
 _TRITON_TOPK_MAX_WORK = 2**16
 _TRITON_TOPK_CHEAP_K = 8
 
@@ -8614,14 +8613,12 @@ def _use_triton_topk(x, k, dim) -> bool:
         return False
     k, width = int(k), int(shape[dim])
     return (
-        1 <= k <= _TRITON_TOPK_MAX_K
-        and k <= width <= _TRITON_TOPK_MAX_WIDTH
+        1 <= k <= width <= _TRITON_TOPK_MAX_WIDTH
         and (
             k <= _TRITON_TOPK_CHEAP_K
             or k * next_power_of_2(width) <= _TRITON_TOPK_MAX_WORK
         )
         and torch.cuda.get_device_capability(device) >= (9, 0)
-        and V.graph.sizevars.optimization_hint(sympy_product(shape[:dim])) > 0
     )
 
 
@@ -8633,17 +8630,17 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
         return clone(self), _full(0, self.get_device(), torch.int64, shape)
     dim = canonicalize_dim(ndim, dim)
     if _use_triton_topk(self, k, dim):
-        if int(k) == 1:
-            # A single rank is a max or min with its index; the reduction
-            # lowering fuses either way and stores one value per row, which
-            # the compact sort store cannot (its row index would let a
-            # pointwise epilogue read the in-loop tile).
-            return (reduce_max if largest else reduce_min)(self, dim, keepdim=True)
-        result = _triton_sort(
-            self, dim=dim, stable=False, descending=largest, top_k=int(k)
-        )
-        if result is not None:
-            return result
+        if int(k) > 1:
+            result = _triton_sort(
+                self, dim=dim, stable=False, descending=largest, top_k=int(k)
+            )
+            if result is not None:
+                return result
+        elif largest:
+            # Like topk, max.dim ranks NaN above everything (min.dim would
+            # return NaN where topk(largest=False) skips it), and it stores
+            # one value per row, which the compact sort store cannot.
+            return reduce_max(self, dim, keepdim=True)
     if not config.triton.decompose_sort_ops:
         return topk_fallback(self, k, dim, largest, sorted)
     sorted_vals, sorted_idxs = sort_stable(
