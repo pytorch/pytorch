@@ -1008,7 +1008,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # (__defaults__/__kwdefaults__/__annotations__). Dropping the key
         # instead shrinks the dict, so a guard reading its shape rebakes against
         # the smaller dict at load and never matches again. See the attributes
-        # branch in _reduce_fqn_mismatched_function.
+        # branch in _reduce_function_by_value.
         def base(x):
             return x
 
@@ -1021,6 +1021,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(set(out.__dict__), {"tag", "cache"})
         self.assertEqual(out.__dict__["tag"], 2.0)
         self.assertIsInstance(out.__dict__["cache"], _Missing)
+
+    def test_a_whole_tuple_guard_keeps_defaults_verbatim(self):
+        # A __defaults__ tuple that carries BOTH a whole-tuple guard (the tuple
+        # is in guard_tree_values) and a per-element guard reached via
+        # DefaultsSource (the element is in guard_tree_values but is rooted at
+        # the FUNCTION, not the tuple, so it is not a child of the tuple) must
+        # stay verbatim: pruning the unguarded sibling to _Missing would rebake
+        # the whole-tuple guard against a value it can never match at load.
+        def base(x, a="alpha", b="beta"):
+            return x
+
+        d = base.__defaults__
+        gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
+        buf = io.BytesIO()
+        # No container->element edge: DefaultsSource does not record the tuple.
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(out.__defaults__, ("alpha", "beta"))
+
+    def test_an_element_guarded_through_its_container_still_prunes_siblings(self):
+        # When a guard IS rooted at an element through the container (a
+        # GetItemSource records the container->element edge), the container is
+        # pruned per value so an unguarded sibling is dropped.
+        def base(x, a="alpha", b="beta"):
+            return x
+
+        d = base.__defaults__
+        gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
+        children = {id(d): {id(d[1])}}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf, guard_tree_children=children).dump(
+            {"fn": base}
+        )
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__defaults__[0], _Missing)
+        self.assertEqual(out.__defaults__[1], "beta")
 
     def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
@@ -1375,7 +1411,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         )
         # What a guard on fn.__defaults__[0] leaves in the guard tree.
         builder = types.SimpleNamespace(
-            guard_tree_values={id(fn): fn, id(fn.__defaults__): fn.__defaults__}
+            guard_tree_values={id(fn): fn, id(fn.__defaults__): fn.__defaults__},
+            guard_tree_children={},
         )
         with self.assertRaisesRegex(
             PackageError, r"reached via: local_scope\['fn'\]\.__defaults__\[0\]"
