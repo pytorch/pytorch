@@ -7,7 +7,7 @@ future.
 """
 
 from torch.optim import lr_scheduler as lr_scheduler, swa_utils as swa_utils
-from torch.optim._adafactor import Adafactor as Adafactor
+from torch.optim._adafactor_mixed import Adafactor as Adafactor
 from torch.optim._muon import Muon as Muon
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
@@ -54,6 +54,7 @@ del lbfgs  # type: ignore[name-defined] # noqa: F821
 __all__ = [
     "Adafactor",
     "Adadelta",
+    "Adagrad",
     "Adagrad",
     "Adam",
     "Adamax",
