@@ -35,8 +35,6 @@
 #include <nvshmemx.h>
 
 // NVSHMEM_VENDOR_VERSION selects the tile reduce API in the tile_reduce_kernel.
-// If this variable is not defined, the default value is 0 which would make the shim
-// fall back to the 3.4.5 way of calling tile reduce.
 #if !defined(NVSHMEM_VENDOR_VERSION)
 #error "NVSHMEM_VENDOR_VERSION is not defined! Cannot select the tile reduce API!"
 #endif
