@@ -271,7 +271,6 @@ __global__ void atomicadaptivemaxgradinput(
       const int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      // numel is the slice the base pointer addresses, not the whole tensor.
       fastAtomicAdd(gradInput_d, argmax, isize_dhw, grad_delta, true);
     }
   }

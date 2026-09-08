@@ -193,7 +193,6 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      // numel is the plane the base pointer addresses, not the whole tensor.
       fastAtomicAdd(gradInput, argmax, isizeH * isizeW, z, true);
     }
   }
