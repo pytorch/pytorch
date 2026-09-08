@@ -3065,6 +3065,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.pop_codegened_graph()
 
+    def codegen_subgraph_with_flattened_outputs(
+        self, subgraph, outer_inputs, outer_outputs
+    ):
+        for outer_output in outer_outputs:
+            self.writeline(f"RAIIAtenTensorHandle {outer_output};")
+
+        self.writeline("{")
+        with self._preserve_device_guard_state():
+            self.writeline(EnterSubgraphLine(self, subgraph.graph))
+            self.codegen_subgraph(subgraph, outer_inputs, outer_outputs)
+            self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
+
     def codegen_while_loop(self, while_loop, stack_output=False):
         """Emit ABI-compatible C++ for a higher-order while_loop.
 
