@@ -522,6 +522,11 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
         self.training = self._orig_mod.training
 
+    def __bool__(self) -> bool:
+        # Proxy the bool call to the original module
+        # pyrefly: ignore [unsafe-overlap]
+        return bool(self._orig_mod)
+
     def __len__(self) -> int:
         # Proxy the len call to the original module
         # pyrefly: ignore [unsafe-overlap]
