@@ -319,10 +319,26 @@ class FunctionPicklerBase(pickle.Pickler):
         # wrong when that does not resolve back to the same function; those
         # carry the function and self explicitly.
         func = method.__func__
-        inner = getattr(method.__self__, func.__name__, None)
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
             inner = inner.__func__
-        if func is inner:
+        # `func is inner` proves resolution NOW, but a name satisfied only by a
+        # per-instance __dict__ will NOT resolve at load: self.__dict__ is
+        # restored AFTER the method is rebuilt, so an instance monkeypatch
+        # (m.forward = MethodType(f, m)) would round-trip to the class default.
+        # A class namespace (when __self__ is itself a type, e.g. a classmethod)
+        # is restored with the class, so it is exempt.
+        self_dict = getattr(method.__self__, "__dict__", None)
+        in_instance_dict = (
+            not isinstance(method.__self__, type)
+            and isinstance(self_dict, dict)
+            and name in self_dict
+        )
+        if func is inner and not in_instance_dict:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
 
@@ -1118,7 +1134,9 @@ class CompilePackage:
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
     2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
     3. `package.install(backends) which will handle all the side-effectful global scope
-        updates with compiled functions and resume functions.
+        updates with compiled functions and resume functions. The install is tied
+        to the package's lifetime by a finalizer, so a caller that installs must
+        retain the package; dropping it undoes these updates.
     """
 
     def __init__(
@@ -1897,6 +1915,11 @@ class DiskDynamoCache(DiskDynamoStore):
     ) -> CompilePackage | None:
         """
         Load directly into a package and install backends.
+
+        The returned package OWNS the install: install effects are tied to its
+        lifetime via a weakref finalizer, so the caller must retain it. Dropping
+        the result uninstalls immediately on refcounted CPython, before the
+        install can even be observed.
 
         ``isolate_recompiles_id`` must be the region the caller will look up in:
         precompile entries match their own region only, so installing into the
