@@ -384,10 +384,14 @@ def handle_noncontiguous_outputs(input_tlist, output):
             device = maybe_get_fake_device(t)
             break
 
-    if not is_noncontiguous_supported(device):
-        output = output.contiguous()
+    if isinstance(output, Tensor):
+        return output if is_noncontiguous_supported(device) else output.contiguous()
 
-    return output
+    # Multi-output
+    return type(output)(
+        out if is_noncontiguous_supported(device) else out.contiguous()
+        for out in output
+    )
 
 
 def _broadcast_shapes(*_shapes):
@@ -1340,10 +1344,10 @@ def div(
         raise ValueError(msg)
 
 
-@register_decomposition(aten.divmod)
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a", "b"),
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    has_out=False,
+    supports_two_python_scalars=True,
 )
 def divmod(
     a: TensorLikeType | NumberType,
@@ -1359,11 +1363,9 @@ def divmod(
         # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b, device=a.device, dtype=a.dtype)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        if a.device.type == "cpu":
-            raise RuntimeError(
-                f"Expected all tensors to be on the same device, but found at least two devices, cpu and {b.device}!"
-            )
-        b = prims.device_put(b, device=a.device)
+        raise RuntimeError(
+            f"Expected all tensors to be on the same device, but found at least two devices, {a.device} and {b.device}!"
+        )
 
     q = aten.floor_divide(a, b)
     r = aten.remainder(a, b)
