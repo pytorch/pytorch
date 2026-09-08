@@ -1,14 +1,11 @@
-# TWO-STAGE cross-CTA row reduction for few-row / huge-N (and the M=1 reduce-all case), mirroring
-# ATen's Reduce.cuh. Stage 1 reshapes (M, N) -> (M*C, N/C) and has kernel_rowtile reduce each sub-row
-# to a RAW accumulator (final=False), with no cross-block sync, so it runs at full bandwidth; stage 2
-# COMBINES each row's C partials one block per row and projects once with the true N, which is what
-# keeps mean/var correct and gives the 2-output split for free. 5.4 TB/s on (1,16M) fp32 = 1.13x
-# ATen, fp16 up to 1.66x.
+# TWO-STAGE cross-CTA row reduction for few-row / huge-N (and the M=1 reduce-all case),
+# mirroring ATen's Reduce.cuh. Stage 1 reshapes (M, N) -> (M*C, N/C) and reduces each sub-row
+# to a RAW accumulator with no cross-block sync; stage 2 combines each row's C partials and
+# projects once with the true N, which keeps mean/var correct. 1.13-1.66x of ATen.
 #
-# C comes from N alone (nearest divisor to a measured sub-row target that still fits the tile, see
-# _split_C), deliberately not from M or the SM count, because C is baked into the plan. INDEX traits
-# are DECLINED: the reshape makes a sub-row's chunk index row % C; they go to
-# kernel_general._two_stage_row, whose gidx_from="chunk" carries the absolute index.
+# C comes from N alone, not from M or the SM count, because it is baked into the plan. INDEX
+# traits are DECLINED: the reshape makes a sub-row's chunk index row % C, so they go to
+# kernel_general's ragged split, whose gidx_from="chunk" carries the absolute index.
 
 import math
 from typing import NamedTuple
@@ -35,12 +32,10 @@ _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int3
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
-# Target stage-1 sub-row length (elements). The reshape (M*C, N/C) puts the WHOLE
-# sub-row of s = N/C elements into ONE row-kernel block's tile, so s trades off directly
-# against occupancy: s at the smem ceiling (~44k fp32 = 175KB) -> ~1 block/SM -> ~3.5
-# TB/s; s ~8-20k -> several blocks/SM -> ~7.3 TB/s on B200 (measured, >aten's 5.8).
-# Below ~4k the stage-2 combine (one block folding C = N/s partials) starts to cost.
-# 8192 sits in the flat top of that curve for both throughput and the ~0.6s compile.
+# Target stage-1 sub-row length. The reshape puts a whole sub-row in ONE block's tile, so it
+# trades directly against occupancy: at the smem ceiling ~1 block/SM and ~3.5 TB/s, at 8-20k
+# several blocks/SM and ~7.3. Below ~4k the stage-2 combine starts to cost. 8192 is the flat
+# top of that curve for throughput and for compile time.
 _SUBROW_TARGET = 8192
 # Stage-2 threads-per-block: the combine is bandwidth-light (folds C partials), so a
 # mid block is plenty; parameterized so the autotuner / a retune can override.
@@ -55,34 +50,24 @@ class _XctaConfig(NamedTuple):
 
 
 def _choose_config(hw=None, nfields: int = 1) -> "_XctaConfig":
-    # xcta config. subrow_target is a stage-1 smem-tile-length sweet spot (elements), so
-    # it scales with per-SM smem capacity: multiply the B200 anchor (8192) by
-    # hw.smem_scale so a device with more/less smem targets a proportionally longer/
-    # shorter sub-row (1.0 on B200 -> 8192 exactly). _split_C then snaps it to N's
-    # nearest legal divisor. nfields is accepted for signature parity + autotuner key but
-    # not acted on: the sweep showed wide-accumulator traits prefer shorter sub-rows, but
-    # the shift is shape-dependent and no closed-form rule captures it without regressing
-    # the nf=1 sweet spot -> left to the autotuner (which measures per key).
+    # xcta config. subrow_target is a smem-tile-length sweet spot, so it scales with per-SM smem
+    # capacity and _split_C then snaps it to N's nearest legal divisor. nfields is accepted for
+    # signature parity but not acted on: wide-accumulator traits prefer shorter sub-rows, but the
+    # shift is shape-dependent and no closed form captures it without regressing nfields=1.
     smem = 1.0 if hw is None else hw.smem_scale
     return _XctaConfig(subrow_target=int(round(_SUBROW_TARGET * smem)))
 
 
 def _split_C(N, vec, smem_budget_elems, subrow_target=None):
-    # Choose C = chunks per output row for the two-stage split. The reshape
-    # (M*C, N/C) requires C | N exactly, i.e. the sub-row length s = N/C must be a
-    # DIVISOR of N that (1) is a multiple of vec (the row kernel vectorizes the load) and
-    # (2) fits its tile (s <= smem_budget_elems). We do NOT maximize s -- that pins ~1
-    # block/SM and halves bandwidth. Instead aim for subrow_target (the measured
-    # occupancy sweet spot, default _SUBROW_TARGET) and take the nearest divisor,
-    # searching outward. The search is bounded by the smem budget (~12k candidates)
-    # regardless of N or its factorization, which matters when the divisors near the target lie
-    # tens of thousands apart (N=4.396e9: divisors bracket the smem ceiling at 87920
-    # and 98125). subrow_target is the exposed knob (autotuner overrides it).
+    # C = chunks per output row. The reshape needs C | N exactly, with the sub-row length a
+    # multiple of vec that fits its tile. We do NOT maximize it -- that pins ~1 block/SM and halves
+    # bandwidth -- but aim for subrow_target and take the nearest divisor, searching outward. The
+    # search is bounded by the smem budget rather than by N, which matters when the divisors near
+    # the target lie tens of thousands apart.
     target = _SUBROW_TARGET if subrow_target is None else subrow_target
     step = max(vec, 1)
-    # Floor on sub-row length: below this, stage 1 barely reduces (a subrow of 1 for a
-    # prime N degenerates to C=N partials + a no-op stage 1). Keeps genuinely awkward N
-    # (prime / only tiny divisors) on the backup K0 grid-stride path instead.
+    # Floor on sub-row length: below it stage 1 barely reduces (a prime N degenerates to N
+    # partials and a no-op stage 1). Those stay on the grid-striding fallback instead.
     lo = max(step, 256)
     hi = min(smem_budget_elems, N)
     hi -= hi % step
@@ -92,11 +77,9 @@ def _split_C(N, vec, smem_budget_elems, subrow_target=None):
     # Expand symmetrically from tgt; first divisor of N (that keeps C <= _C_MAX) wins.
     for d in range(0, hi - lo + step, step):
         for s in (tgt + d, tgt - d):
-            # C == 1 is rejected: a "split" into one chunk IS the one-shot, and every caller
-            # reaches here only after the one-shot was declined -- so returning it rebuilds the
-            # very kernel that was rejected. It arises for a PRIME N, whose only in-window
-            # divisor is N itself: (8, 65537) bf16 then folded a 65537-element sub-row at
-            # vec=1 and took 74us against ATen's 6.0. Declining sends it to the ragged split.
+            # C == 1 is rejected: a split into one chunk IS the one-shot, which every caller has already
+            # declined. It arises for a PRIME N, whose only in-window divisor is N itself -- (8, 65537)
+            # bf16 then folded the whole sub-row at vec=1, 74us against ATen's 6.0.
             if lo <= s <= hi and N % s == 0 and 1 < N // s <= _C_MAX:
                 return N // s
     return None
@@ -104,9 +87,8 @@ def _split_C(N, vec, smem_budget_elems, subrow_target=None):
 
 class FusedTwoStage:
     # BOTH stage launches in ONE @cute.jit region: one compile artifact and one host-side call, so
-    # the Python dispatch and arg marshalling are paid once. The two cuLaunchKernel still issue
-    # separately, serialized on the stream. s1 is a row-axis tile.TileReduce (final=False), s2 a
-    # ReduceBlock (from_partials); this replicates their __call__ launch bodies back-to-back.
+    # the Python dispatch and arg marshalling are paid once. The two launches still serialize on
+    # the stream. This replicates the two objects' own launch bodies back to back.
     def __init__(self, s1, s2):
         self.s1 = s1
         self.s2 = s2
@@ -126,26 +108,18 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # --- stage 1 launch (mirrors tile.TileReduce.__call__) ---
-        # The tile row kernel with final=False: it writes the RAW per-field accumulator of
-        # each sub-row. Its fold is ROLLED, so the sub-row length arrives as runtime args
-        # (nchunks/nwaves) and distinct N in a vec class share ONE compiled kernel. tma_atom
-        # is None: a sub-row here is wide enough that the direct load is already coalesced.
-        # q/npar are the col axis's split args: None here, since an unused Int32 param is
-        # not free (see tile.TileReduce.kernel).
+        # --- stage 1: the row kernel with final=False, writing each sub-row's RAW accumulator. Its
+        # fold is ROLLED, so the sub-row length arrives as runtime args and a vec class shares one
+        # kernel. No TMA atom: a sub-row here is wide enough that the direct load already coalesces.
+        # The other axes' args are None, since an unused Int32 param is not free. ---
         s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
         )
-        # --- stage 2 launch (mirrors ReduceBlock.__call__); reads `parts` ---
-        # Stage-2 grid = one block per output row = mOuts[0].shape[0] (read live, so this
-        # fused kernel serves any M with no recompile). s2 has a single kept dim, so
-        # _decode_offset ignores the extent -- correct for any M. The geometry
-        # (count=C, project divisor N, decode quads) arrives as RUNTIME args, so one
-        # compiled fused kernel serves every N in the vec class, each with its own C.
-        # limit is unused (flat_tail=False) but the kernel signature requires it;
-        # in_base is always 0 here.
+        # --- stage 2: one block per output row, with the grid read live so the fused kernel serves any
+        # M. A single kept dim means the decode ignores the extent, and the geometry arrives as RUNTIME
+        # args, so one kernel serves every N in the vec class with its own C. ---
         s2 = self.s2
         s2.kernel(
             parts,
@@ -159,9 +133,8 @@ class FusedTwoStage:
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
-# Two-level cache, as in kernel_general: _PLAN holds compiled kernels keyed on the sub-row's vec
-# class and stage-1 config; _GEOM memoizes per-(N, knobs) derivations including the pre-boxed runtime
-# args (~6us of Int boxing) and None declines.
+# Two-level cache: compiled kernels keyed on the sub-row's vec class and stage-1 config, and
+# per-(N, knobs) derivations including the pre-boxed args (~6us of boxing) and None declines.
 _PLAN = {}
 _GEOM = {}
 
@@ -178,9 +151,8 @@ def reduce_row_xcta(
 def reduce_row_xcta_2out(
     trait, trait_key, x, out_dtypes, block=None, flatten=False, subrow_target=None
 ):
-    # Two-output form (max.dim/min.dim/aminmax/var_mean): stage 2 projects BOTH fields
-    # of the same combined accumulator, so the split costs nothing extra over nouts==1.
-    # Returns a tuple of nouts results, or None if the split is declined.
+    # Two-output form: stage 2 projects BOTH fields of the same combined accumulator, so the split
+    # costs nothing over nouts==1. None if the split is declined.
     return _reduce_row_xcta(
         trait, trait_key, x, list(out_dtypes), 2, block, flatten, subrow_target
     )
@@ -189,12 +161,9 @@ def reduce_row_xcta_2out(
 def _reduce_row_xcta(
     trait, trait_key, x, out_dtypes, nouts, block, flatten, subrow_target
 ):
-    # FUSED two-stage row reduction. x: (M, N) contiguous, or (N,) for reduce-all; returns a tuple of
-    # (M,) results. flatten=True collapses the M==1 result to a 0-d scalar, which is what a 1-D
-    # reduce-ALL wants and a (1, N) reduce-DIM does not.
-    #
-    # The single @cute.jit region (FusedTwoStage) is what turns the few-row/huge-N regime from ~0.6x
-    # ATen with two separate launches into ~1.15-1.44x in plain eager, and it captures cleanly.
+    # FUSED two-stage row reduction; flatten collapses an M==1 result to 0-d, which a 1-D
+    # reduce-ALL wants and a (1, N) reduce-DIM does not. The single @cute.jit region is what turns
+    # this regime from ~0.6x of ATen with two launches into ~1.15-1.44x, and it captures cleanly.
     if not (x.is_cuda and x.is_contiguous()):
         raise AssertionError(
             f"need a contiguous CUDA input, got {x.device} {x.stride()}"
@@ -202,24 +171,18 @@ def _reduce_row_xcta(
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
-    # Fill block/subrow_target from the config when the caller passed None (the override
-    # path); explicit values (autotuner) pass straight through. The hw-scaled
-    # subrow_target is resolved here so _split_C snaps THAT (not its own raw anchor) to a
-    # legal divisor; on B200 smem_scale=1.0 -> the 8192 anchor, unchanged.
+    # Fill the knobs from the config when the caller passed None; explicit values pass through.
+    # The hw-scaled target is resolved here so _split_C snaps THAT, not its own raw anchor.
     from .._cutedsl import hw_caps as _hw
 
     cfg = _choose_config(_hw.caps(x.device))
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
-    # DYNAMIC M: the plan depends on N, dtype and trait but NOT M, so one compiled kernel serves any
-    # batch size; M only sizes the grid and scratch. Stage 1 casts its tile coordinate to Int64, so a
-    # >2^31 element offset does not overflow.
-    #
-    # TWO cache levels: a given N's GEOMETRY (its C split, pre-boxed args, wrap params) per gkey,
-    # and the COMPILED kernel on the sub-row's vec class plus the stage-1 config -- both stages take
-    # their extents as runtime args, so distinct N in a vec class share one kernel. subrow_target is
-    # in gkey because it changes C.
+    # DYNAMIC M: the plan depends on N, dtype and trait but NOT M, so one kernel serves any batch
+    # size and M only sizes the grid and scratch. Stage 1 casts its tile coordinate to Int64, so a
+    # past-2**31 offset does not overflow. Two cache levels, as above, with subrow_target in the
+    # geometry key because it changes C.
     out_dtypes = tuple(out_dtypes)
     gkey = (trait_key, x.dtype, out_dtypes, N, block, subrow_target, str(x.device))
     geom = _GEOM.get(gkey)
@@ -231,9 +194,8 @@ def _reduce_row_xcta(
         return None
     C, s, fn, rvals, kvals, cnt, pn, s1nc, s1nw = geom
 
-    # One fused launch. Scratch partials sized to THIS M*C (allocated per call since M
-    # varies); input + partials + output all dynamic-M so the cached kernel serves any
-    # M. Stage 1 folds sub-rows -> raw partials; stage 2 combines per row.
+    # One fused launch. Scratch is sized per call since M varies, and every operand is dynamic-M
+    # so the cached kernel serves any M.
     sub = x.reshape(M * C, s)
     parts = [
         torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
@@ -260,9 +222,8 @@ def _reduce_row_xcta(
 
 
 def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target):
-    # Derive the C split for this exact N, then compile (or reuse) the fused kernel
-    # for its bucket. Returns None to decline (no legal divisor split), memoized by
-    # the caller so the K0 fallback is also remembered.
+    # Derive the C split for this N, then compile or reuse the fused kernel for its bucket. None
+    # declines; the caller memoizes that, so the fallback is remembered too.
     device = x.device
     elsize = x.element_size()
     vec = math.gcd(N, 128 // (elsize * 8))
@@ -274,10 +235,9 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         # None -> the K0 general kernel serves it (any N, no reshape, O(1) compile).
         return None
     s = N // C
-    # INDEX traits are declined here: stage 1 would have to rebase its within-sub-row column
-    # to the global one, which the reshape makes awkward (the chunk index is row % C). They
-    # are served by _two_stage_row's ragged split instead, whose gidx_from="chunk" already
-    # carries the absolute reduced index -- measured 1.29-3.17x of ATen. See kernel_general.
+    # INDEX traits are declined: stage 1 would have to rebase its within-sub-row column to the
+    # global one, which the reshape makes awkward. The ragged split serves them at 1.29-3.17x of
+    # ATen, since its gidx_from="chunk" already carries the absolute index.
     if getattr(trait, "has_index", False):
         return None
     svec = math.gcd(s, 128 // (elsize * 8))  # the sub-row's OWN vec class
@@ -330,10 +290,8 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
     def _build():
         s1 = _make_s1()
-        # s2's geometry values (count/project_n/quads) are runtime launch args; the
-        # object only contributes the STRUCTURAL cache_sig fields (block, nfields,
-        # single red/kept pair). The seed geometry below is per-build but the
-        # compiled kernel is geometry-agnostic.
+        # Stage 2's geometry values are runtime launch args; the object contributes only the
+        # STRUCTURAL cache_sig fields, so the compiled kernel is geometry-agnostic.
         s2 = _RB.ReduceBlock(
             trait,
             count=C,
@@ -364,9 +322,8 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
 
 def _s2_args(C, M, N):
-    # Pre-boxed stage-2 runtime args (memoized in _GEOM: boxing is ~us-scale).
-    # The kept-pair quad carries the seed M, but a single-pair decode ignores the
-    # extent (rem * stride), so the baked M is dead -- M stays fully dynamic.
+    # Pre-boxed stage-2 runtime args, memoized because boxing is us-scale. The kept-pair quad
+    # carries a seed M, but a single-pair decode ignores the extent, so M stays fully dynamic.
     return (
         _RB._quads([(C, 1)]),
         _RB._quads([(M, C)]),

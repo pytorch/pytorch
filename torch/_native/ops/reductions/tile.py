@@ -1,22 +1,7 @@
-# The shared reduction KERNEL and the datapath it is built from: where a tile's load width,
-# alignment and thread mapping are derived, the folds that walk them, and the ONE @cute.kernel
-# (TileReduce, at the bottom) that every fast reduction path launches -- row or column,
-# one-shot or split stage. The kernel_* modules above it are drivers: they pick the launch
-# shape and own the plan cache, but the body lives here.
-#
-# Why this module exists. The load stage is where the bugs were, twice, in two hand-rolled
-# copies: one kernel lost 3.7x to per-element (un-widened) reads, and another then lost 3x to
-# a missing `assumed_align` -- both invisible in the source. One load stage means one place to
-# get width and alignment right, and one place to record WHY (see vec_size / align_bytes).
-#
-# A tile is described by TileMap: `vec` elements per load, `tpr` threads per row. `tpr == 1`
-# is the degenerate multirow shape -- one thread owns a whole row and there is no lane merge
-# at all -- and any tpr > 1 shape finishes by folding across its lanes (merge_lanes).
-#
-# The folds here are ROLLED: the trip count is a RUNTIME value, so ONE compiled kernel serves
-# every row length in a vec class. That is a requirement, not a preference -- a static
-# per-thread loop makes compile time scale with the shape (see MAX_UNROLL) and the kernel
-# count scale with the number of distinct shapes seen.
+# The shared reduction KERNEL and its datapath: where a tile's load width, alignment and thread
+# mapping are derived, the folds that walk them, and the ONE @cute.kernel every fast reduction
+# path launches. The kernel_* modules are drivers -- they pick the launch shape and own the plan
+# cache -- but the body lives here.
 
 import math
 
@@ -27,31 +12,28 @@ from cutlass import const_expr, Int32, Int64
 
 WARP = 32
 
-# SAFETY bound on the per-thread unroll (vec * loads), enforced in TileMap: a static trip count is
-# emitted at trace time, so compile time scales with it, superlinearly past ~1300 ops.
-#   unrolled ops   12    80   320   640  1280  2560
-#   compile (s)  0.14  0.17  0.35  0.60  1.17  4.54
+# SAFETY bound on the per-thread unroll, enforced in TileMap: a static trip count is emitted
+# at trace time, so compile time scales with it and turns superlinear past ~1300 ops.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged tail
-    in a chunk, and every chunk base and row start carries the base pointer's alignment.
+    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged
+    tail in a chunk, and every chunk base carries the base pointer's alignment.
     """
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap. Not optional: `from_dlpack` otherwise assumes the
+    """Alignment to DECLARE on the input wrap. Not optional: from_dlpack otherwise assumes the
     element width and silently emits narrow loads, measured 3x on the multirow shape.
     """
     return vec_size(N, itemsize) * itemsize
 
 
 class TileMap:
-    """How one row is spread over threads and loads.
-
-    tpr == 1 -> one thread owns a whole row, and there is no lane merge.
+    """How one row is spread over threads and loads. tpr == 1 means one thread owns a whole row,
+    with no lane merge.
     """
 
     def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
@@ -68,9 +50,8 @@ class TileMap:
         self.vec = vec_size(N, itemsize)
         self.tpr = tpr
         self.loads = loads
-        # A wide load needs vec to divide N, which is what makes every row start (row stride
-        # N*itemsize) and every chunk base carry the base pointer's alignment. When it does
-        # not, the load falls back to per-element reads.
+        # A wide load needs vec to divide N, which is what makes every row start and chunk base carry
+        # the base pointer's alignment. Otherwise the load falls back to per-element reads.
         self.wide_ok = N % self.vec == 0
 
     @property
@@ -84,10 +65,10 @@ class TileMap:
 
 @cute.jit
 def merge_lanes(trait, acc, tm: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Reduce across the `tpr` lanes covering one row. A no-op at tpr == 1.
+    """Reduce across the `tpr` lanes covering one row; a no-op at tpr == 1.
 
-    `asc` selects the ASCENDING butterfly over the descending one. The folds below hand
-    columns out in that direction, and an index trait's ties depend on which it is.
+    `asc` selects the ASCENDING butterfly, which the folds' column order depends on and an
+    index trait's ties depend on.
     """
     if const_expr(tm.tpr == 1):
         return acc
@@ -112,9 +93,8 @@ def fold_row_rolled(
 ):
     """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
 
-    Each wave covers tpr*vec contiguous elements and this thread takes chunk (c*tpr + lane). A wave
-    past the row's last chunk CLAMPS the index and passes valid=False rather than branching, which
-    the DSL rejects for a dynamic bind.
+    A wave past the row's last chunk CLAMPS its index and passes valid=False rather than
+    branching, which the DSL rejects for a dynamic bind.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -144,9 +124,8 @@ def fold_cols_rolled(
 ):
     """Accumulate DOWN the rows, keeping `vec` independent accumulators. For columns.
 
-    The transpose of every other fold here: vectorized along the CONTIGUOUS (kept) axis, so a thread
-    owns `vec` adjacent columns and one accumulator each, and never merges across lanes. State is a
-    loop-carried TUPLE of acc tuples, one per column.
+    The transpose of every other fold here: vectorized along the KEPT axis, so a thread owns
+    adjacent columns with one accumulator each and never merges across lanes.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
@@ -158,9 +137,8 @@ def fold_cols_rolled(
         cute.autovec_copy(
             cute.flat_divide(mX[Int64(rr), None], (vec,))[None, col], frag
         )
-        # plain `range`: a comprehension is not visited by the DSL AST preprocessor, so
-        # range_constexpr raises there -- and vec is compile-time anyway, so this unrolls
-        # at trace time exactly like a range_constexpr `for` statement would.
+        # Plain `range`: a comprehension is not visited by the DSL AST preprocessor, so
+        # range_constexpr raises there -- and vec is compile-time, so this unrolls the same way.
         accs = tuple(reduce_fn(accs[i], acc_dt(frag[i]), rr, True) for i in range(vec))
     return accs
 
@@ -168,20 +146,13 @@ def fold_cols_rolled(
 class TileReduce:
     """The tile reduction KERNEL: one body, parameterized by which axis is reduced.
 
-    axis "row" -- the reduced axis is CONTIGUOUS. `tpr` threads share a row, each folding its
-        own chunks of it, and then the lanes merge (and the warps too, when a row spans more
-        than one).
-    axis "col" -- the reduced axis is STRIDED (dim 0). Each thread owns `vec` ADJACENT columns
-        and folds DOWN the rows, so there is one accumulator per output and nothing merges
-        across lanes at all. The y-grid splits the reduced axis, and `combine` folds the
-        partials that split leaves, in a second pass of this same body.
+    Row: the reduced axis is CONTIGUOUS, `tpr` threads share a row and then merge (tpr == 1
+    merges nothing). Col: the reduced axis is STRIDED, each thread owns `vec` adjacent columns
+    and folds down the rows, so nothing merges across lanes and the y-grid splits the reduced
+    axis instead.
 
-    Why one body and not two: only the FOLD is axis-specific, and every fold is a primitive
-    above. The clamp of dead threads, the projection (which has to happen OUTSIDE the store
-    branch either way, or the DSL rejects the binding) and the store are shared -- both axes
-    write nslots x nouts results and differ only in the index they write to. The col axis pins
-    `lane = 0`, since its mapping already gives every output group a thread of its own; that
-    is what lets one store serve both.
+    One body and not two because only the FOLD is axis-specific: the dead-thread clamp, the
+    projection and the store are shared, and both axes write nslots x nouts results.
     """
 
     def __init__(
@@ -256,10 +227,9 @@ class TileReduce:
 
     @cute.jit
     def _fold_partials(self, mIns, unit, nchunks, npar):
-        # COMBINE pass (col axis stage 2): fold the npar partials of this thread's column,
-        # which the split left as one (npar, nchunks) matrix per trait field. Bind the trait's
-        # methods to locals -- attribute access on it inside a dynamic loop trips the IR
-        # flattener.
+        # COMBINE pass (col axis stage 2): fold this thread's column's partials, which the split left
+        # as one matrix per field. Bind the trait's methods to locals -- attribute access on it inside
+        # a dynamic loop trips the IR flattener.
         trait = self.trait
         combine_fn = trait.combine
         fdtypes = trait.fdtypes
@@ -287,17 +257,9 @@ class TileReduce:
 
     @cute.kernel
     def kernel(self, mIns: list, mOuts: list, nchunks, nwaves, project_n, q, npar):
-        # RUNTIME args, so one compiled kernel serves every extent sharing a structure:
-        #   nchunks   vec-chunks along the axis a thread walks (row: of its row; col: of the
-        #             column count, i.e. how many threads have work)
-        #   nwaves    row only: waves of tpr chunks the rolled fold takes
-        #   project_n the TRUE reduced extent -- mean/var's divisor, and on the col axis the
-        #             row count its per-block chunk bound is measured against
-        #   q, npar   col only: the reduced-axis split (rows per chunk, chunk count)
-        #
-        # An arg a variant does not use is passed as None, NOT as a dummy value: a dummy Int32
-        # is a real kernel param, and the extra one measured 1.27x on the column fold
-        # (8.2 -> 10.4us at (65536, 256) fp32 sum).
+        # RUNTIME args, so one compiled kernel serves every extent sharing a structure. An arg a
+        # variant does not use is passed as None, not a dummy: one unused Int32 param measured 1.27x
+        # on the column fold (8.2 -> 10.4us at (65536, 256)).
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
         trait = self.trait
@@ -311,24 +273,21 @@ class TileReduce:
             raw = Int32(bx) * const_expr(self.nt) + Int32(tx)
             lane = Int32(0)  # the col mapping gives every output group its own thread
             alive = raw < nchunks
-        # Dead threads clamp onto unit 0 so every load stays in range; their accumulator is
-        # computed and discarded at the guarded store. Cheaper than predicating every load,
-        # and a fold has no side effects.
+        # Dead threads clamp onto unit 0 so every load stays in range; their accumulator is discarded
+        # at the guarded store. Cheaper than predicating every load, and a fold has no side effects.
         unit = raw if alive else Int32(0)
 
         # THE FOLD: the one axis-specific step. Everything after it is shared.
         if const_expr(self.combine):
             accs = (self._fold_partials(mIns, unit, nchunks, npar),)
         elif const_expr(self.axis == "col"):
-            # This block's chunk of the REDUCED axis. The last chunk is short whenever q does
-            # not divide the extent -- the same ragged tail the row split has, clamped the
-            # same way.
+            # This block's chunk of the REDUCED axis. The last chunk is short whenever q does not divide
+            # the extent -- the same ragged tail the row split has, clamped the same way.
             row0 = Int32(by) * q
             left = project_n - row0
             cnt = left if left < q else q  # noqa: FURB136 -- no DSL builtin min
-            # _split_p caps npar, so q * (npar - 1) can exceed the extent and leave the
-            # last blocks with nothing. A negative trip count happens to lower to a
-            # zero-trip loop, which is not a guarantee worth resting a global load on.
+            # _split_p caps npar, so the last blocks can be left with nothing. A negative trip count
+            # happens to lower to a zero-trip loop, which is not a guarantee to rest a global load on.
             zero = Int32(0)
             cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
             accs = fold_cols_rolled(
