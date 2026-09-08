@@ -696,8 +696,13 @@ class DTensorTestMixin:
 
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
+    def _selected_device_type(cls) -> str:
+        device_type = cls.device_type
+        return device_type if isinstance(device_type, str) else DEVICE_TYPE
+
+    @classmethod
     def backend_str(cls) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(cls._selected_device_type())
         return backend
 
     @classmethod
@@ -705,7 +710,7 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         # Set device before initializing process group to ensure
         # each rank is bound to the correct GPU. However, if world_size > device_count,
         # we skip the test.
-        if torch.accelerator.is_available():
+        if cls._selected_device_type() != "cpu":
             if world_size > torch.accelerator.device_count():
                 sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
@@ -1223,7 +1228,7 @@ class LocalDTensorTestBase(DTensorTestBase):
 
 def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
-    def wrapped(self):
+    def wrapped(self, *args, **kwargs):
         torch._dynamo.reset()
         stack = contextlib.ExitStack()
         for ctx in ctxs:
@@ -1232,12 +1237,20 @@ def make_wrapped(fn, ctxs):
             else:
                 stack.enter_context(ctx)
         try:
-            out = fn(self)
+            out = fn(self, *args, **kwargs)
         finally:
             stack.close()
         return out
 
     return wrapped
+
+
+def make_skipped(fn):
+    @functools.wraps(fn)
+    def skipped(self, *args, **kwargs):
+        self.skipTest("Skipped test")
+
+    return skipped
 
 
 def create_local_tensor_test_class(
@@ -1252,7 +1265,7 @@ def create_local_tensor_test_class(
         if not callable(fn):
             continue
         elif name in skipped_tests:
-            dct[name] = lambda self: self.skipTest("Skipped test")
+            dct[name] = make_skipped(fn)
         elif name.startswith("test_"):
             ctxs = [
                 lambda test: test._get_local_tensor_mode(),

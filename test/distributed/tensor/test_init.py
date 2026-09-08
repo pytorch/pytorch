@@ -129,7 +129,7 @@ class DTensorConstructorTest(DTensorTestBase):
         eq_op(expected_tensor, local_tensor)
 
     @with_comms
-    def test_ones(self):
+    def test_ones(self, device):
         self._run_init_op(
             torch.ones,
             torch.distributed.tensor.ones,
@@ -138,7 +138,7 @@ class DTensorConstructorTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_empty(self):
+    def test_empty(self, device):
         self._run_init_op(
             torch.empty,
             torch.distributed.tensor.empty,
@@ -149,7 +149,7 @@ class DTensorConstructorTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_full(self):
+    def test_full(self, device):
         self._run_init_op(
             torch.full,
             torch.distributed.tensor.full,
@@ -159,7 +159,8 @@ class DTensorConstructorTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_linspace(self):
+    def test_linspace(self, device):
+        device_type = torch.device(device).type
         mesh = self.build_device_mesh()
         steps = 8
 
@@ -196,10 +197,10 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(dist_tensor.full_tensor(), torch.linspace(2.0, -2.0, 5))
 
             start = DTensor.from_local(
-                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+                torch.tensor(1.0, device=device_type), mesh, [Replicate()]
             )
             end = DTensor.from_local(
-                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+                torch.tensor(2.0, device=device_type), mesh, [Replicate()]
             )
             dist_tensor = linspace(
                 start, end, steps, device_mesh=mesh, placements=placements
@@ -211,7 +212,7 @@ class DTensorConstructorTest(DTensorTestBase):
                 "linspace only supports 0-dimensional start and end tensors",
             ):
                 linspace(
-                    torch.tensor([1.0, 2.0], device=self.device_type),
+                    torch.tensor([1.0, 2.0], device=device_type),
                     2.0,
                     steps,
                     device_mesh=mesh,
@@ -219,7 +220,8 @@ class DTensorConstructorTest(DTensorTestBase):
                 )
 
     @with_comms
-    def test_logspace(self):
+    def test_logspace(self, device):
+        device_type = torch.device(device).type
         mesh = self.build_device_mesh()
         steps = 8
 
@@ -258,10 +260,10 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(dist_tensor.full_tensor(), torch.logspace(2.0, -2.0, 5))
 
             start = DTensor.from_local(
-                torch.tensor(1.0, device=self.device_type), mesh, [Replicate()]
+                torch.tensor(1.0, device=device_type), mesh, [Replicate()]
             )
             end = DTensor.from_local(
-                torch.tensor(2.0, device=self.device_type), mesh, [Replicate()]
+                torch.tensor(2.0, device=device_type), mesh, [Replicate()]
             )
             dist_tensor = logspace(
                 start, end, steps, device_mesh=mesh, placements=placements
@@ -273,7 +275,7 @@ class DTensorConstructorTest(DTensorTestBase):
                 "logspace only supports 0-dimensional start and end tensors",
             ):
                 logspace(
-                    torch.tensor([1.0, 2.0], device=self.device_type),
+                    torch.tensor([1.0, 2.0], device=device_type),
                     2.0,
                     steps,
                     device_mesh=mesh,
@@ -281,7 +283,7 @@ class DTensorConstructorTest(DTensorTestBase):
                 )
 
     @with_comms
-    def test_zeros(self):
+    def test_zeros(self, device):
         self._run_init_op(
             torch.zeros,
             torch.distributed.tensor.zeros,
@@ -290,8 +292,9 @@ class DTensorConstructorTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_zeros_full_mesh(self):
+    def test_zeros_full_mesh(self, device):
         # construct a gpu device 1d mesh
+        device_type = torch.device(device).type
         mesh = self.build_device_mesh()
         placements = [Shard(0)]
         size = [32, 3]
@@ -303,7 +306,7 @@ class DTensorConstructorTest(DTensorTestBase):
         local_tensor = torch.zeros(8, 3)
         self.assertEqual(dist_tensor.to_local(), local_tensor)
 
-        self.assertEqual(dist_tensor.device.type, self.device_type)
+        self.assertEqual(dist_tensor.device.type, device_type)
 
         # 1d sharded unevenly
         size = [31, 3]
@@ -323,7 +326,7 @@ class DTensorConstructorTest(DTensorTestBase):
         check_per_rank_tensors(self.rank, local_tensor)
 
         # construct a gpu device mesh with 2d: shard, replicate
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size).reshape(2, 2))
         placements = [Shard(0), Replicate()]
         size = [32, 4]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -360,11 +363,12 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor, torch.zeros([15, 1]))
 
     @with_comms
-    def test_zeros_submesh(self):
+    def test_zeros_submesh(self, device):
         # default world_size is 4
         # construct a gpu device 1d mesh, with no sub pg initialized
+        device_type = torch.device(device).type
         sub_mesh_list = [0, 3]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(device_type, sub_mesh_list)
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -380,7 +384,7 @@ class DTensorConstructorTest(DTensorTestBase):
 
         # construct a gpu device 1d mesh: unevenly, with subpg initialized
         sub_mesh_list = [0, 1, 3]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(device_type, sub_mesh_list)
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -400,7 +404,7 @@ class DTensorConstructorTest(DTensorTestBase):
 
         # construct a gpu device 2d mesh, with no subpg initialized
         sub_mesh_list = [[0], [3]]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(device_type, sub_mesh_list)
         placements = [Shard(0), Shard(1)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -422,10 +426,17 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
         "test_zeros_submesh",
     ],
 )
-
-
 instantiate_device_type_tests(
     DTensorInitOpsTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DTensorConstructorTest, globals(), except_for=["cpu"], allow_xpu=True
+)
+instantiate_device_type_tests(
+    DTensorConstructorTestWithLocalTensor,
     globals(),
     except_for=["cpu"],
     allow_xpu=True,
