@@ -1,7 +1,6 @@
-# Per-tensor capability gating shared by every CuteDSL native-op override family. These run on EVERY
-# eager dispatch, so they must be cheap and must NEVER raise -- a throwing cond crashes the dispatcher
-# instead of falling back to aten. Op-agnostic: only "can our kernels run on this tensor at all",
-# with each family layering its own dtype and geometry checks on top.
+# Per-tensor capability gating for every override family. These run on EVERY eager dispatch, so
+# they must be cheap and must NEVER raise -- a throwing cond crashes the dispatcher instead of
+# falling back. Op-agnostic: each family layers its own dtype and geometry checks on top.
 
 from __future__ import annotations
 
@@ -13,9 +12,8 @@ import torch._subclasses.fake_tensor
 
 def is_traced(t: torch.Tensor) -> bool:
     # A fake or meta tensor has no storage to launch on, so decline and let the compile router use
-    # aten's reference. The exact-type fast path avoids is_fake()'s subclass walk (0.52us against
-    # 1.01us), but exact-type alone does NOT mean "not traced": the two C++-level wrappers --
-    # functionalization and a C++ fake -- ARE exactly torch.Tensor, so both bits must be read too.
+    # aten's reference. The exact-type fast path avoids is_fake()'s subclass walk (0.52 against
+    # 1.01us), but is not sufficient alone: both C++-level wrappers ARE exactly torch.Tensor.
     if type(t) is torch.Tensor:
         return (
             t.device.type == "meta"
@@ -27,9 +25,8 @@ def is_traced(t: torch.Tensor) -> bool:
 
 @functools.cache
 def _arch_ok(idx: int, majors: tuple[int, ...]) -> bool:
-    # get_device_capability queries device properties and the answer is IMMUTABLE per device,
-    # while a cond runs on every eager call -- so memoize. The accepted set is part of the key:
-    # two families with different sets must not be served each other's answer.
+    # get_device_capability queries device properties and the answer is IMMUTABLE per device, while
+    # a cond runs on every eager call -- so memoize, with the accepted set part of the key.
     try:
         major, _ = torch.cuda.get_device_capability(idx)
     except RuntimeError:
@@ -43,18 +40,10 @@ def _arch_ok(idx: int, majors: tuple[int, ...]) -> bool:
 def device_ok(x: torch.Tensor, majors: tuple[int, ...]) -> bool:
     """CUDA (not HIP), on a compute-capability major the CALLER's kernels support.
 
-    An explicit allow-list, not a minimum. `>=` would silently admit hardware nobody tested:
-    SM 11.0 is Thor, which this tree already knows about (``common_cuda.IS_THOR``,
-    ``cpp_extension``'s ``'11.0'``/``'11.0a'`` arches, ``sm_110a`` in ``cmake/Codegen.cmake``),
-    and admitting it -- or any future major -- is exactly what a family enumerating
-    ``(9, 10, 12)`` is refusing to do. The set belongs to the caller because the families
-    genuinely differ; passing one here is a claim about which arches that family's kernels have
-    been run on.
-
-    Granularity is the MAJOR only, so an accepted major admits every minor within it, including
-    ones that do not exist yet -- ``(9, 10, 12)`` accepts Rubin at 10.7
-    (``cpp_extension.py``'s ``('Rubin', '10.7+PTX')``). A family that needs to distinguish
-    minors has to check ``get_device_capability`` itself; this predicate cannot express it.
+    An explicit allow-list, not a minimum: `>=` would silently admit hardware nobody tested,
+    such as SM 11.0 (Thor). The set belongs to the caller because the families genuinely
+    differ, and passing one is a claim about which arches that family has been run on.
+    Granularity is the MAJOR only.
     """
     if x.device.type != "cuda" or torch.version.hip is not None:
         return False

@@ -1,11 +1,8 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Unit tests for the pure-arithmetic surface of _cutedsl.hw_caps.HWCaps -- the
-# derived occupancy quantities the launch heuristics reason in. These are integer
-# formulas over device properties (no kernel launch), so they are checked here for
-# internal consistency and against hand-computed values; the rest of the _cutedsl
-# machinery (traits / launch) only does work once compiled into a kernel and is
-# exercised by the reduction-override suites that build on it.
+# Unit tests for the pure-arithmetic surface of hw_caps: integer formulas over device
+# properties, checked for internal consistency and against hand-computed values. The rest of
+# the machinery only does work once compiled into a kernel.
 
 import sys
 import unittest
@@ -14,9 +11,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
-# hw_caps reaches cutlass transitively, so the guard has to precede the import rather than decorate
-# the class -- on an image without the runtime, a module-level import fails collection for the whole
-# file instead of skipping it. sys.exit keeps a direct `python test_hw_caps.py` a success.
+# hw_caps reaches cutlass transitively, so the guard must precede the import rather than
+# decorate the class, or an image without the runtime fails collection for the whole file.
 if not TEST_CUTEDSL:
     sys.stderr.write("CuTeDSL not available\n")
     if __name__ == "__main__":
