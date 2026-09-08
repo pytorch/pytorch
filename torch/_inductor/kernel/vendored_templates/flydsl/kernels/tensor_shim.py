@@ -3,6 +3,7 @@
 
 from abc import ABC, abstractmethod
 from itertools import product
+import os
 
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ from flydsl._mlir.dialects import fly, llvm
 from flydsl.compiler.protocol import extract_to_ir_values
 from flydsl.expr import arith, buffer_ops, range_constexpr, vector
 from flydsl.expr.typing import T
+from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 
 
 def _run_compiled(exe, *args):
@@ -21,8 +23,10 @@ def _run_compiled(exe, *args):
     """
     cf = getattr(exe, "_cf", None)
     if cf is None:
+        ensure_flydsl_cache_dir()
         cf = flyc.compile(exe, *args)
-        exe._cf = cf
+        if not os.environ.get("COMPILE_ONLY"):
+            exe._cf = cf
     else:
         cf(*args)
 

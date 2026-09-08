@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import hashlib
 import logging
+import os
 from collections.abc import Sequence
 from typing import cast
 
@@ -51,7 +52,9 @@ class FlyDSLScheduling(BaseScheduling):
     ) -> bool:
         return False
 
-    def define_kernel(self, src_code_str: str, node_schedule) -> str:
+    def define_kernel(
+        self, src_code_str: str, node_schedule, precompile_metadata=None
+    ) -> str:
         wrapper = V.graph.wrapper_code
 
         if src_code_str in wrapper.src_to_kernel:
@@ -78,7 +81,12 @@ class FlyDSLScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.flydsl({kernel_name!r}, r'''")
             compile_wrapper.splice(src_code_str, strip=True)
-            compile_wrapper.writeline("''')")
+            if precompile_metadata is not None:
+                compile_wrapper.writeline(
+                    f"''', precompile_metadata={precompile_metadata!r})"
+                )
+            else:
+                compile_wrapper.writeline("''')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -115,10 +123,98 @@ class FlyDSLScheduling(BaseScheduling):
         else:
             src_code_str = src_code
 
+        precompile_metadata = self._build_precompile_metadata(kernel, ftb)
+
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
-            kernel_name = self.define_kernel(src_code_str, node_schedule)
+            kernel_name = self.define_kernel(
+                src_code_str, node_schedule, precompile_metadata
+            )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ftb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
+
+    def _build_precompile_metadata(self, kernel, ftb):
+        """Extract concrete tensor metadata for FlyDSL subprocess precompilation."""
+        if not hasattr(kernel, "_template_input_args"):
+            return None
+
+        precompile_shapes = {}
+        precompile_strides = {}
+        precompile_dtypes = {}
+
+        try:
+            for arg_name, input_node in kernel._template_input_args:
+                template_name = arg_name.removeprefix("arg_")
+                size = input_node.get_size()
+                precompile_shapes[template_name] = [int(s) for s in size]
+                stride = input_node.get_stride()
+                precompile_strides[template_name] = [int(s) for s in stride]
+                precompile_dtypes[template_name] = str(
+                    input_node.get_dtype()
+                ).removeprefix("torch.")
+
+            output_size = ftb.layout.size
+            precompile_shapes["output"] = [int(s) for s in output_size]
+            output_stride = ftb.layout.stride
+            precompile_strides["output"] = [int(s) for s in output_stride]
+            precompile_dtypes["output"] = str(ftb.layout.dtype).removeprefix("torch.")
+        except (TypeError, RuntimeError, ValueError):
+            log.debug(
+                "Skipping FlyDSL precompile metadata: symbolic sizes cannot be "
+                "resolved to concrete values"
+            )
+            return None
+
+        device = ftb.layout.device
+        device_index = device.index if device.index is not None else 0
+
+        import torch
+
+        device_capability = None
+        if torch.cuda.is_available():
+            device_capability = torch.cuda.get_device_capability(device_index)
+
+        metadata: dict[str, object] = {
+            "precompile_shapes": precompile_shapes,
+            "precompile_strides": precompile_strides,
+            "precompile_dtypes": precompile_dtypes,
+            "device_index": device_index,
+            "device_capability": device_capability,
+        }
+
+        flydsl_gpu_arch = self._build_flydsl_gpu_arch(device_index)
+        if flydsl_gpu_arch is not None:
+            metadata["flydsl_gpu_arch"] = flydsl_gpu_arch
+
+        return metadata
+
+    @staticmethod
+    def _build_flydsl_gpu_arch(device_index) -> str | None:
+        """Best-effort ROCm arch string for FlyDSL worker precompilation."""
+        for env_var in ("FLYDSL_GPU_ARCH", "ARCH"):
+            arch = os.environ.get(env_var)
+            if arch:
+                return arch.split(":", 1)[0]
+
+        hsa_arch = os.environ.get("HSA_OVERRIDE_GFX_VERSION")
+        if hsa_arch:
+            if hsa_arch.startswith("gfx"):
+                return hsa_arch
+            if hsa_arch.count(".") == 2:
+                major, minor, stepping = hsa_arch.split(".")
+                return f"gfx{major}{minor}{stepping}"
+
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                props = torch.cuda.get_device_properties(device_index)
+                arch = getattr(props, "gcnArchName", None)
+                if arch:
+                    return str(arch).split(":", 1)[0]
+        except Exception:
+            log.debug("Could not determine FlyDSL GPU arch", exc_info=True)
+
+        return None
