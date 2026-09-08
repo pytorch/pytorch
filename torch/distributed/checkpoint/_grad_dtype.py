@@ -87,6 +87,53 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
             param.requires_grad_(value)
 
 
+def _patch_consolidate_hf_safetensors() -> None:
+    from . import _consolidate_hf_safetensors as consolidate
+    from ._hf_utils import (
+        DEFAULT_EXTRA_METADATA_KEY,
+        SAVED_OFFSETS_KEY,
+        SHAPE_KEY,
+        DTYPE_KEY,
+    )
+    from safetensors.torch import _getdtype
+
+    def parse_input_metadata(input_files_data, output_files_data):
+        fqn_to_size_mapping = {}
+        for file_data in input_files_data.values():
+            metadata = file_data.metadata
+            dcp_sharding_info = _state_dict._get_dcp_custom_metadata(metadata)
+            if not dcp_sharding_info:
+                raise ValueError(
+                    "No DCP custom metadata found in safetensors file. The file must be saved with DCP to be consolidated."
+                )
+            for key, val in metadata.items():
+                if key == DEFAULT_EXTRA_METADATA_KEY:
+                    continue
+                sizes = val[SHAPE_KEY]
+                offsets = dcp_sharding_info[key][SAVED_OFFSETS_KEY]
+                if key not in fqn_to_size_mapping:
+                    fqn_to_size_mapping[key] = (
+                        [size + offset for size, offset in zip(sizes, offsets)],
+                        val[DTYPE_KEY],
+                    )
+                else:
+                    cur_size = fqn_to_size_mapping[key][0]
+                    for i in range(len(sizes)):
+                        cur_size[i] = max(cur_size[i], sizes[i] + offsets[i])
+        for fqn, (tensor_size, dtype_str) in fqn_to_size_mapping.items():
+            dtype = _getdtype(dtype_str)
+            dtype_size = torch.empty((), dtype=dtype).element_size()
+            for output_data in output_files_data.values():
+                if fqn in output_data.fqn_data:
+                    output_data.fqn_data[fqn] = consolidate._FqnData(
+                        shape_in_file=tensor_size,
+                        dtype_size=dtype_size,
+                        dtype_str=dtype_str,
+                    )
+
+    consolidate._parse_input_metadata = parse_input_metadata
+
+
 _state_dict._unflatten_optim_state_dict = _unflatten_optim_state_dict
 
-__all__ = ["_init_optim_state"]
+__all__ = ["_init_optim_state", "_patch_consolidate_hf_safetensors"]
