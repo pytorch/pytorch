@@ -44,7 +44,7 @@ def solve_for_zero(expr: sympy.Expr) -> sympy.Expr | None:
     """
     if isinstance(expr, FloorDiv):
         return None
-    if expr.is_constant():
+    if not expr.free_symbols:
         return None
 
     if len(expr.free_symbols) != 1:
