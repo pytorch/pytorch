@@ -886,14 +886,15 @@ def _cpu_codegen_target_problem(
     vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds
     cpp.simdlen and ATEN_CPU_CAPABILITY into the ISA it returns: a simdlen that
     caps the width picks a narrower ISA, so the width and macro already reflect
-    it. march does not gate for a different reason: the arch flags pick_vec_isa()
-    emits are what select the instruction set, and they are emitted after
-    cpp.march on the compile line -- the x86 ISAs enable it with explicit -m
-    flags (-mavx2, -mavx512f) that hold regardless of cpp.march, while VecSVE's
-    own -march, coming later, wins over it. Either way kernels built for a given
-    resolved ISA rebuild identically here whatever cpp.march is set to.
-    Comparing the resolved triple is therefore complete, and comparing the raw
-    simdlen/march knobs on top of it is not just
+    it. march does not gate for a different reason: it does not change the
+    tiling the kernel source was generated for -- which is what the
+    masked-load/zero-fill hazard across ISAs is about -- it only changes how
+    that same source is compiled, the same class of variation as the compiler
+    version, which is likewise unchecked. (pick_vec_isa() folds in simdlen and
+    ATEN_CPU_CAPABILITY but never reads cpp.march, and the default -march=native
+    is host-specific by definition, so gating on the recorded value would catch
+    nothing anyway.) Comparing the resolved triple is therefore complete, and
+    comparing the raw simdlen/march knobs on top of it is not just
     redundant, it is wrong -- it rejects an artifact whose kernels this host can
     reproduce merely because the knob that got there differs (an artifact built
     under cpp.simdlen=256 is loadable on any host that resolves to the same
