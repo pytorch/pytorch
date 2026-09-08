@@ -276,7 +276,6 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             self.assertIs(fp32, build(torch.float32))
             self.assertIsNot(fp32, build(torch.bfloat16))
 
-    @skipIfNoCuteDSL
     @staticmethod
     def searchSpaceKey(
         tile_m,
@@ -1744,7 +1743,7 @@ class TestFlexGemmAnalysis(TestCase):
             column.replace_all_uses_with(column.args[0])
             body.graph.erase_node(column)
             body.recompile()
-            raise lowering.QuackGroupedMmUnsupported("forced fallback")
+            raise lowering.QuackFallbackUnsupported("forced fallback")
 
         def process(lowered_graph, args):
             self.assertIs(lowered_graph, graph_module)
@@ -1765,6 +1764,40 @@ class TestFlexGemmAnalysis(TestCase):
                 {"backend": "QUACK"},
             )
         self.assertIs(actual, expected)
+
+    def test_quack_pinned_config_rejects_fallback(self):
+        import inspect
+
+        from torch._inductor import ir
+        from torch._inductor.kernel.flex_gemm import lowering
+
+        graph = torch.fx.Graph()
+        mat1 = graph.placeholder("mat1")
+        mat2 = graph.placeholder("mat2")
+        graph.output(graph.call_function(torch.ops.aten.mm.default, (mat1, mat2)))
+        subgraph = ir.Subgraph(
+            name="flex_gemm_body_0", graph_module=torch.fx.GraphModule({}, graph)
+        )
+        error = lowering.QuackFallbackUnsupported("unsupported recipe")
+
+        with (
+            mock.patch.object(lowering, "lower_quack_flex_gemm", side_effect=error),
+            mock.patch.object(lowering, "process_subgraph_nodes") as process,
+        ):
+            lower = inspect.unwrap(lowering.flex_gemm_lowering)
+            lower(torch.ops.aten.mm.default, subgraph, (), {}, {"backend": "QUACK"})
+            process.assert_called_once()
+            with self.assertRaisesRegex(
+                lowering.QuackFallbackUnsupported, "unsupported recipe"
+            ):
+                lower(
+                    torch.ops.aten.mm.default,
+                    subgraph,
+                    (),
+                    {},
+                    {"backend": "QUACK", "config": {"swap_ab": False}},
+                )
+            process.assert_called_once()
 
     def test_local_reduce_plan_rejects_invalid_group_axis(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -7903,53 +7936,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("tile", lambda m, n: (m, n)),
-            ("row", lambda m, n: (1, n)),
-            ("col", lambda m, n: (m, 1)),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
-        kind, shape_fn = case
-
-        def epilogue_fn(acc, scale):
-            return (acc.float() * scale).relu()
-
-        def fn(a, b, scale):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                lambda acc: epilogue_fn(acc, scale),
-                kernel_options={"backend": "QUACK"},
-            )
-
-        m, k, n = 128, 64, 128
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.float32)
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
-        )
-
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b, scale),
-            epilogue_fn(a.double() @ b.double(), scale.double()),
-            a.shape[1],
-        )
-        self.assertFlexGemmGeneratedCode(
-            code,
-            "epilogue_args=",
-            f"epilogue_arg_kinds=('{kind}',)",
-        )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        (
+            ("tile", (128, 128), lambda acc, w: (acc.float() * w).relu(), "tile"),
+            ("row", (1, 128), lambda acc, w: (acc.float() * w).relu(), "row"),
+            ("col", (128, 1), lambda acc, w: (acc.float() * w).relu(), "col"),
             ("row_broadcast", (128,), lambda acc, w: acc.float() + w, "row"),
             ("row_unsqueeze", (128,), lambda acc, w: acc.float() * w[None, :], "row"),
             ("col_unsqueeze", (128,), lambda acc, w: acc.float() + w[:, None], "col"),
@@ -7958,7 +7947,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_generated_code_reads_1d_captured_tensor_epilogue_arg(self, case):
+    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
         """M == N so plain broadcasting reads [N] as a row while w[:, None] reads it as a column."""
         _, shape, epilogue_fn, kind = case
 
@@ -9064,34 +9053,9 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertIn("config=", code)
         self.assertGroupedMmMatches(actual, x, w_t, offs, torch.relu)
 
-    def test_grouped_mm_tile_capture_falls_back(self, device):
-        import torch.nn.functional as F
-
-        x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
-        residual = self.makeTensor(x.shape[0], self.N, device=device)
-
-        def epilogue_fn(acc):
-            return (acc + residual).relu()
-
-        def fn(x, w_t, offs):
-            return flex_gemm(
-                F.grouped_mm,
-                (x, w_t),
-                epilogue_fn,
-                gemm_kwargs={"offs": offs},
-                kernel_options={"backend": "QUACK"},
-            )
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), x, w_t, offs
-        )
-
-        self.assertIn("extern_kernels._grouped_mm(", code)
-        self.assertNotIn("flex_gemm_runtime", code)
-        self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
-
-    def test_grouped_mm_column_capture_falls_back_with_tile_capture(self, device):
-        """The 1-D capture rewrite must not leak into the fallback lowering."""
+    @parametrize("with_column_gain", (False, True))
+    def test_grouped_mm_tile_capture_falls_back(self, device, with_column_gain):
+        """Full-shape captures leave QUACK; a column capture beside them must not leak the 1-D rewrite."""
         import torch.nn.functional as F
 
         x, w_t, offs = self.makeGroupedMm((200, 0, 130, 182), device)
@@ -9099,7 +9063,8 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         gain = torch.rand(x.shape[0], device=device, dtype=torch.float32) + 0.5
 
         def epilogue_fn(acc):
-            return (acc * gain[:, None] + residual).relu()
+            scaled = acc * gain[:, None] if with_column_gain else acc
+            return (scaled + residual).relu()
 
         def fn(x, w_t, offs):
             return flex_gemm(
