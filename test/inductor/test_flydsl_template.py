@@ -169,7 +169,7 @@ class TestFlyDSLTemplate(TestCase):
         finally:
             FlyDSLTemplate.all_templates.pop(template_name, None)
 
-    def test_scheduling_disables_fusion(self):
+    def test_scheduling_rejects_non_flydsl_nodes(self):
         scheduling = FlyDSLScheduling(scheduler=None)
         node1 = mock.Mock()
         node2 = mock.Mock()
@@ -1165,6 +1165,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         epilogue_fusion=True,
+        benchmark_epilogue_fusion=False,
     )
     def test_flydsl_gemm_accumulator_epilogue_fusion(
         self, dtype, use_half_tile_interleaved, m, n
@@ -1215,6 +1216,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         epilogue_fusion=True,
+        benchmark_epilogue_fusion=False,
     )
     def test_flydsl_gemm_epilogue_fusion_rejections(self):
         from torch._inductor.utils import run_and_get_code
@@ -1284,6 +1286,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm_backends="FLYDSL",
         epilogue_fusion=True,
         epilogue_fusion_first=True,
+        benchmark_epilogue_fusion=False,
     )
     def test_flydsl_gemm_epilogue_fusion_multi_user_safety(self):
         from torch._inductor.utils import run_and_get_code
@@ -1301,12 +1304,17 @@ class TestFlyDSLTemplate(TestCase):
             result = torch.mm(a, b.t()) + 1.0
             return result, result * 2.0
 
+        def independent_epilogues(a, b):
+            result = torch.mm(a, b.t())
+            return result + 1.0, result * 2.0
+
         dtype = torch.bfloat16
         a = torch.randn(32, 128, device="cuda", dtype=dtype)
         b = torch.randn(128, 128, device="cuda", dtype=dtype)
         cases = (
             ("template_output", template_output_has_other_user, False),
             ("fused_output", fused_output_has_other_user, True),
+            ("independent_epilogues", independent_epilogues, False),
         )
         for name, fn, expect_fused in cases:
             with self.subTest(name=name):
