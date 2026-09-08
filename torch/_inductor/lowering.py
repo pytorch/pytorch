@@ -82,6 +82,7 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    TOPK_MAX_SORT_BLOCK,
     validate_ir,
     View,
 )
@@ -8462,10 +8463,9 @@ def mode_default(self, dim=-1, keepdim=False):
     return mode_vals, mode_idxs
 
 
-# Matches the top-k persistent block cap in ir.Sort.create. The selection
-# costs about k * block lanes of work per row; past 2**16 the ATen radix
-# select is faster, except that k <= 8 stays ahead out to the widest block.
-_TRITON_TOPK_MAX_WIDTH = 16384
+# The selection costs about k * block lanes of work per row; past 2**16 the
+# ATen radix select is faster, except that k <= 8 stays ahead out to the
+# widest block.
 _TRITON_TOPK_MAX_WORK = 2**16
 _TRITON_TOPK_CHEAP_K = 8
 
@@ -8487,7 +8487,7 @@ def _use_triton_topk(x, k, dim) -> bool:
         return False
     k, width = int(k), int(shape[dim])
     return (
-        1 <= k <= width <= _TRITON_TOPK_MAX_WIDTH
+        1 <= k <= width <= TOPK_MAX_SORT_BLOCK
         and (
             k <= _TRITON_TOPK_CHEAP_K
             or k * next_power_of_2(width) <= _TRITON_TOPK_MAX_WORK
