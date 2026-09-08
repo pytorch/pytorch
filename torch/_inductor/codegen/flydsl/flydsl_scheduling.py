@@ -66,6 +66,38 @@ class FlyDSLScheduling(BaseScheduling):
     def is_flydsl_template_or_fused(self, node: BaseSchedulerNode) -> bool:
         return self.is_flydsl_template(node) or self.is_flydsl_fused_template(node)
 
+    @staticmethod
+    def _is_fusable_epilogue(
+        template: FlyDSLTemplateBuffer, epilogue_node: SchedulerNode
+    ) -> bool:
+        node = epilogue_node.node
+        if not isinstance(node, ComputedBuffer) or not isinstance(node.data, Pointwise):
+            return False
+        if (
+            not V.graph.sizevars.statically_known_list_equals(
+                node.get_size(), template.get_size()
+            )
+            or node.get_dtype() != template.get_dtype()
+        ):
+            return False
+
+        reads = list(epilogue_node.read_writes.reads)
+        writes = list(epilogue_node.read_writes.writes)
+        if (
+            len(reads) != 1
+            or len(writes) != 1
+            or not isinstance(reads[0], MemoryDep)
+            or not isinstance(writes[0], MemoryDep)
+        ):
+            return False
+        read, write = reads[0], writes[0]
+        return (
+            read.name == template.get_name()
+            and read.index == write.index
+            and read.var_names == write.var_names
+            and read.size == write.size
+        )
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -84,39 +116,9 @@ class FlyDSLScheduling(BaseScheduling):
         if len(epilogue_nodes) != 1:
             return False
         epilogue_node = epilogue_nodes[0]
-        node = epilogue_node.node
-        if not isinstance(node, ComputedBuffer) or not isinstance(node.data, Pointwise):
-            return False
-        if not V.graph.sizevars.statically_known_list_equals(
-            node.get_size(), template.get_size()
-        ):
-            return False
-        if node.get_dtype() != template.get_dtype():
-            return False
-
-        reads = list(epilogue_node.read_writes.reads)
-        writes = list(epilogue_node.read_writes.writes)
-        if (
-            len(reads) != 1
-            or len(writes) != 1
-            or not isinstance(reads[0], MemoryDep)
-            or not isinstance(writes[0], MemoryDep)
-            or reads[0].name != template.get_name()
-            or (
-                reads[0].index,
-                reads[0].var_names,
-                reads[0].size,
-            )
-            != (
-                writes[0].index,
-                writes[0].var_names,
-                writes[0].size,
-            )
-        ):
+        if not self._is_fusable_epilogue(template, epilogue_node):
             log.debug(
-                "Rejecting FlyDSL GEMM epilogue fusion: expected one identity "
-                "read from %s",
-                template.get_name(),
+                "Rejecting FlyDSL GEMM epilogue fusion: unsupported pointwise access"
             )
             return False
 

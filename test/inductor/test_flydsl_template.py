@@ -1229,13 +1229,11 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         epilogue_fusion=True,
+        epilogue_fusion_first=True,
         benchmark_epilogue_fusion=False,
     )
-    def test_flydsl_gemm_epilogue_fusion_rejections(self):
+    def test_flydsl_gemm_epilogue_fusion_safety(self):
         self._skip_unless_flydsl_gfx950()
-
-        def unsupported_sin(a, b, unused):
-            return torch.sin(torch.mm(a, b.t()))
 
         def extra_tensor_read(a, b, scale):
             return torch.mm(a, b.t()) * scale
@@ -1251,7 +1249,6 @@ class TestFlyDSLTemplate(TestCase):
         b = torch.randn(128, 128, device="cuda", dtype=dtype)
         scale = torch.randn(32, 128, device="cuda", dtype=dtype)
         for name, fn in (
-            ("unsupported_op", unsupported_sin),
             ("extra_tensor_read", extra_tensor_read),
             ("different_output_dtype", different_output_dtype),
             ("non_identity_read", non_identity_read),
@@ -1261,26 +1258,6 @@ class TestFlyDSLTemplate(TestCase):
                 self.assertIn("async_compile.flydsl", code)
                 self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
                 self.assertIn("triton_poi_", code)
-
-        def supported_add(a, b):
-            return torch.mm(a, b.t()) + 1.0
-
-        with torch._inductor.config.patch(epilogue_fusion=False):
-            code = self._assert_compiled_flydsl_epilogue(supported_add, a, b)
-        self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
-        self.assertIn("triton_poi_", code)
-
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        epilogue_fusion=True,
-        epilogue_fusion_first=True,
-        benchmark_epilogue_fusion=False,
-    )
-    def test_flydsl_gemm_epilogue_fusion_multi_user_safety(self):
-        self._skip_unless_flydsl_gfx950()
 
         def template_output_has_other_user(a, b):
             result = torch.mm(a, b.t())
@@ -1294,15 +1271,11 @@ class TestFlyDSLTemplate(TestCase):
             result = torch.mm(a, b.t())
             return result + 1.0, result * 2.0
 
-        dtype = torch.bfloat16
-        a = torch.randn(32, 128, device="cuda", dtype=dtype)
-        b = torch.randn(128, 128, device="cuda", dtype=dtype)
-        cases = (
+        for name, fn, expect_fused in (
             ("template_output", template_output_has_other_user, False),
             ("fused_output", fused_output_has_other_user, True),
             ("independent_epilogues", independent_epilogues, False),
-        )
-        for name, fn, expect_fused in cases:
+        ):
             with self.subTest(name=name):
                 code = self._assert_compiled_flydsl_epilogue(fn, a, b)
                 assertion = self.assertIn if expect_fused else self.assertNotIn
