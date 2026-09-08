@@ -2666,6 +2666,33 @@ class _NestedReductionBase:
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
 
+    def test_standalone_flat_reshape_pack_fuses(self):
+        """A torchao-style FP4 quantizer fuses into one kernel.
+
+        The codes are built from the flat (M, K) view, so their block-scale
+        read carries a FloorDiv and only the loop-reordering fusion round joins
+        them to the reduction. The nibble pack can join only if that round is
+        repeated until nothing changes.
+        """
+        M, K, G = 2048, 3072, 32
+
+        def f(x):
+            blocks = x.view(M, K // G, G)
+            amax = blocks.abs().amax(dim=-1).unsqueeze(-1).float()
+            exponent = ((amax.view(torch.int32) >> 23) & 0xFF) - 127 - 2
+            biased = (exponent.clamp(-127, 128) + 127).to(torch.uint8)
+            biased = torch.where(torch.isnan(amax), 255, biased)
+            scale = ((biased.to(torch.int32) << 23).view(torch.float32)).clamp_min(
+                2.0**-126
+            )
+            codes = (blocks.float() / scale).reshape(M, K).clamp(0, 15).to(torch.uint8)
+            flat = codes.contiguous().view(-1)
+            return (flat[::2] | (flat[1::2] << 4)).view(M, K // 2), biased.squeeze(-1)
+
+        x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
