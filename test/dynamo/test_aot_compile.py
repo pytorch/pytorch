@@ -679,7 +679,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         inputs = (torch.randn(3),)
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
-        with self.assertRaisesRegex(TypeError, "cannot pickle '_thread.lock' object"):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"cannot pickle '_thread.lock' object[\s\S]*Mark it\n?\s*as external data",
+        ):
             compiled_fn.save_compiled_function(self.path())
 
     def test_aot_compile_autocast_guard_reload(self):
