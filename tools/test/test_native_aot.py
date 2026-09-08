@@ -345,7 +345,9 @@ class TestRegistrationTranslationUnit(unittest.TestCase):
             )
             shards = sorted(glob.glob(os.path.join(d, "RegisterCUDA_*.cpp")))
             if not shards:
-                raise AssertionError(f"no RegisterCUDA shards in {sorted(os.listdir(d))}")
+                raise AssertionError(
+                    f"no RegisterCUDA shards in {sorted(os.listdir(d))}"
+                )
             return "\n".join(open(s).read() for s in shards)
 
     def test_stubs_header_included_only_where_a_declaration_exists(self) -> None:
