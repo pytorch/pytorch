@@ -95,20 +95,24 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned -- except its annotations and
-            # type params. The runtime assigns those back verbatim and never
-            # evaluates them, so a value this pickler cannot serialize (a
-            # <locals> annotation class, a PEP 695 function-scoped TypeVar) is
-            # dropped rather than left to fail the whole dump. Known limitation:
-            # the top-level function's own annotations ride on
-            # CompileArtifacts.signature, which serialize() dumps unpruned, so
-            # this only protects the nested functions reached here.
+            # pickler nothing it holds is pruned -- except annotations, type
+            # params, and __dict__ entries that will not pickle. The runtime
+            # assigns those back and never forces the pruned ones, so a value
+            # this pickler cannot serialize (a <locals> annotation class, a PEP
+            # 695 function-scoped TypeVar, or a __dict__ entry like the
+            # __wrapped__ functools.wraps stashes, which can drag an unrelated
+            # lock/Module in) is dropped rather than left to fail the whole
+            # dump. Known limitation: the top-level function's own annotations
+            # ride on CompileArtifacts.signature, which serialize() dumps
+            # unpruned, so this only protects the nested functions reached here.
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
-                attributes=obj.__dict__,
+                attributes={
+                    k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
+                },
                 annotations=self._pickleable_annotations(obj),
                 doc=obj.__doc__,
                 type_params=self._pickleable_type_params(obj),
