@@ -1,12 +1,23 @@
 # Owner(s): ["module: inductor"]
+import math
+import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
+from torch._inductor import config
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
-from torch._inductor.lowering import register_lowering
+from torch._inductor.kernel.decompose_k import (
+    BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    decomposeK as blackwell_decomposeK,
+    get_blackwell_decompose_k_splits,
+    lower_blackwell_decompose_k_partial,
+)
+from torch._inductor.lowering import lowerings, register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -22,6 +33,40 @@ def decomposeK(a, b, kPartitions):
     result_fp32 = result.to(torch.float32)
     reduced_buf = torch.sum(result_fp32, 0)
     return reduced_buf.to(a.dtype)
+
+
+BLACKWELL_K_SPLIT = 8
+
+
+@torch.library.custom_op(
+    "inductor_test::blackwell_decompose_k_partial", mutates_args={}
+)
+def blackwell_decompose_k_partial(
+    a: torch.Tensor, b: torch.Tensor, two_ctas: bool
+) -> torch.Tensor:
+    m, k = a.shape
+    n = b.shape[1]
+    m_pad = math.ceil(m / 128) * 128
+    block_k = 64 if two_ctas else 128
+    k_part = math.ceil(math.ceil(k / BLACKWELL_K_SPLIT) / block_k) * block_k
+    out = torch.zeros(
+        (BLACKWELL_K_SPLIT, m_pad, n), device=a.device, dtype=torch.float32
+    )
+    for split in range(BLACKWELL_K_SPLIT):
+        begin = split * k_part
+        end = min(begin + k_part, k)
+        if begin < end:
+            out[split, :m] = torch.mm(
+                a[:, begin:end], b[begin:end], out_dtype=torch.float32
+            )
+    return out.view(BLACKWELL_K_SPLIT * m_pad, n)
+
+
+@blackwell_decompose_k_partial.register_fake
+def _(a: torch.Tensor, b: torch.Tensor, two_ctas: bool) -> torch.Tensor:
+    del two_ctas
+    m_pad = math.ceil(a.shape[0] / 128) * 128
+    return a.new_empty((BLACKWELL_K_SPLIT * m_pad, b.shape[1]), dtype=torch.float32)
 
 
 class TestSubgraphChoice(TestCase):
@@ -166,6 +211,151 @@ class TestSubgraphChoice(TestCase):
             compiled_func = torch.compile(func, mode="max-autotune", dynamic=False)
 
             compiled_func(a_in, b_in)
+
+
+@unittest.skipUnless(
+    HAS_GPU and SM100OrLater,
+    "requires NVIDIA SM100+",
+)
+class TestBlackwellDecomposeKSubgraphChoice(TestCase):
+    def test_backend_specific_split_candidates(self):
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def splits(m, n, k, partial_config):
+            return get_blackwell_decompose_k_splits(m, n, k, 148, partial_config)
+
+        production_ks = (
+            10_879_109,
+            10_954_007,
+            11_091_857,
+            11_047_127,
+            11_029_264,
+        )
+        for k in production_ks:
+            self.assertEqual(splits(256, 128, k, one_cta), [74, 148])
+
+        self.assertEqual(splits(128, 128, 11_047_127, one_cta), [148, 296])
+        self.assertEqual(splits(128, 256, 969_147, one_cta), [74, 149])
+        self.assertEqual(splits(256, 424, 973_138, two_cta_wide), [37, 74])
+        self.assertEqual(splits(512, 424, 11_047_127, two_cta_wide), [19, 37])
+
+        # Exact and uneven K use the same bounded geometry-based candidates,
+        # while shallow K and a lone M tile reject the 2CTA schedule.
+        self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
+        self.assertEqual(splits(256, 128, 8_193, one_cta), [])
+        self.assertEqual(splits(128, 424, 11_047_127, two_cta_wide), [])
+
+    def _run_forced_triton_plan(self, two_ctas: bool) -> None:
+        config_index = 1 if two_ctas else 0
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+
+        def lowering(a, b, two_ctas_arg):
+            if bool(two_ctas_arg) != two_ctas:
+                raise AssertionError("unexpected 2CTA specialization")
+            m, k = map(int, a.get_size())
+            m_tiles = math.ceil(m / partial_config.block_m)
+            if partial_config.two_ctas:
+                m_tiles = math.ceil(m_tiles / 2) * 2
+            m_pad = m_tiles * partial_config.block_m
+            k_part = (
+                math.ceil(math.ceil(k / BLACKWELL_K_SPLIT) / partial_config.block_k)
+                * partial_config.block_k
+            )
+            return lower_blackwell_decompose_k_partial(
+                a,
+                b,
+                BLACKWELL_K_SPLIT,
+                config_index,
+                m_pad,
+                k_part,
+            )
+
+        m, k, n = 256, 8193, 128
+        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        def fn(x, y):
+            partial = blackwell_decompose_k_partial(x, y, two_ctas)
+            return partial.view(BLACKWELL_K_SPLIT, m, n).sum(0).to(torch.bfloat16)
+
+        with (
+            mock.patch.dict(
+                lowerings,
+                {
+                    torch.ops.inductor_test.blackwell_decompose_k_partial.default: lowering
+                },
+            ),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertIn("make_tensor_descriptor", source)
+        self.assertIn(f"BATCH_SIZE : tl.constexpr = {BLACKWELL_K_SPLIT}", source)
+        self.assertEqual("TWO_CTAS : tl.constexpr = True" in source, two_ctas)
+
+    def test_forced_triton_1cta(self):
+        self._run_forced_triton_plan(False)
+
+    def test_forced_triton_2cta(self):
+        self._run_forced_triton_plan(True)
+
+    def test_mixed_backend_plan_enumeration(self):
+        m, k, n = 256, 131072, 128
+        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k": True,
+                "triton.num_decompose_k_splits": 4,
+                "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(lambda x, y: x @ y, fullgraph=True), a, b
+            )
+
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertIn("_split_aten", source)
+        self.assertIn("_split_triton_config_", source)
+
+    def test_complete_plan_forced_triton_codegen(self):
+        m, k, n = 256, 8193, 128
+        a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        decompose_k = torch._dynamo.dont_skip_tracing(blackwell_decomposeK)
+        with config.patch(
+            compile_threads=1,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(
+                    lambda x, y: decompose_k(x, y, 33, "triton", 0),
+                    fullgraph=True,
+                ),
+                a,
+                b,
+            )
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+        source = "\n".join(codes)
+        self.assertIn("blackwell_decompose_k_partial", source)
+        self.assertIn("BATCH_SIZE : tl.constexpr = 33", source)
+        self.assertNotIn("extern_kernels.bmm_dtype", source)
 
 
 if __name__ == "__main__":

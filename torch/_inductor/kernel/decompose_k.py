@@ -108,7 +108,7 @@ def get_blackwell_decompose_k_splits(
     config: BlackwellBMMConfig,
     max_workspace_bytes: int = 128 * 1024**2,
 ) -> list[int]:
-    """Return one- and two-wave splits for one Triton partial-BMM schedule."""
+    """Return at most one- and two-wave splits for one Triton schedule."""
     if min(m, n, k, num_sms) <= 0:
         return []
 
@@ -140,7 +140,7 @@ def get_blackwell_decompose_k_splits(
         search_end = min(max_split, target + search_span)
         for k_split in range(target, search_end + 1):
             k_part = _aligned_k_part(k, k_split, config.block_k)
-            if k_part < 2 * config.block_k:
+            if k_part < 8 * config.block_k:
                 break
             if (k_split - 1) * k_part < k:
                 if k_split not in candidates:
@@ -158,6 +158,7 @@ def _blackwell_decompose_k_partial_kwargs(
     k_part: int,
     config: BlackwellBMMConfig,
 ) -> dict[str, Any]:
+    """Build launch kwargs for the partial-BMM template, not the outer graph."""
     m, k = map(int, mat1.get_size())
     k_b, n = map(int, mat2.get_size())
     if k != k_b:

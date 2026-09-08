@@ -110,21 +110,22 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         m_hint, n_hint, k_hint = map(int, (m, n, k))
         device_properties = DeviceProperties.create(kernel_inputs.device())
-        config_indices = [0, 3]
-        if m_hint > 128:
-            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
-
-        for config_index in config_indices:
-            partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
-            for k_split in get_blackwell_decompose_k_splits(
-                m_hint,
-                n_hint,
-                k_hint,
-                device_properties.multi_processor_count,
-                partial_config,
-            ):
-                yield {
-                    "k_split": k_split,
-                    "bmm_backend": "triton",
-                    "bmm_config_index": config_index,
-                }
+        # Keep the Triton search to one M/N-specific schedule family and its
+        # one- and two-wave splits. Narrow-N and one-M-tile cases use the 1CTA
+        # BK128 schedule; wider outputs with at least two M tiles use 2CTA
+        # BN256. The whole-plan autotuner retains direct and exact ATen
+        # fallbacks.
+        config_index = 2 if m_hint > 128 and n_hint > 128 else 0
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        for k_split in get_blackwell_decompose_k_splits(
+            m_hint,
+            n_hint,
+            k_hint,
+            device_properties.multi_processor_count,
+            partial_config,
+        ):
+            yield {
+                "k_split": k_split,
+                "bmm_backend": "triton",
+                "bmm_config_index": config_index,
+            }
