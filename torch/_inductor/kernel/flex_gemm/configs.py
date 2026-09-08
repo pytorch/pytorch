@@ -50,10 +50,10 @@ _PRIORITY_RANK = _sm100_priority_rank(
 
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
 # expert shapes (E in 8..256, balanced and skewed offs); the first entry is
-# the untuned varlen default. The last two entries are the only ones a
-# grouped-main store accepts (cluster_n == 1, tile_m 128 -> cluster_m 1), so
-# grouped SwiGLU defaults to 128x128 c1x1 (measured at E=64) and autotunes
-# 256x128 c2x1 (E=8).
+# the untuned default for ordinary varlen calls. Of the measured entries here,
+# grouped-main stores accept the last two: both have cluster_n == 1, and the
+# tile_m=128 choice also has cluster_m == 1. Grouped SwiGLU therefore defaults
+# to 128x128 c1x1 (measured at E=64) and autotunes 256x128 c2x1 (E=8).
 _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
     (
         (128, 128, 2, 1, True),
@@ -125,5 +125,6 @@ def flex_gemm_default_config(
     Dense calls keep QuACK's untuned default (``legal_configs[0]``); varlen-M
     calls take the best-ranked legal grouped_mm config instead.
     """
-    prioritized = _prioritized(legal_configs, varlen=True) if varlen else []
-    return prioritized[0] if prioritized else legal_configs[0]
+    if varlen and (prioritized := _prioritized(legal_configs, varlen=True)):
+        return prioritized[0]
+    return legal_configs[0]
