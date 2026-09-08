@@ -27,13 +27,16 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
     TemporaryFileName,
 )
-from torch.testing._internal.common_cuda import has_device_side_assert
+from torch.testing._internal.common_cuda import (
+    has_device_side_assert,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal import opinfo
+from torch.testing._internal import common_device_type, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
@@ -551,6 +554,84 @@ if __name__ == '__main__':
 
 
 instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestFusedAttentionCapability(TestCase):
+    def test_identifier(self):
+        self.assertEqual(
+            common_device_type.Capability.attention.fused_attention,
+            "attention.fused_attention",
+        )
+
+    def test_builtin_device_registrations(self):
+        capability = common_device_type.Capability.attention.fused_attention
+        flash_attention = common_device_type.Capability.attention.flash_attention
+        mem_efficient_attention = (
+            common_device_type.Capability.attention.mem_efficient_attention
+        )
+
+        for test_base in (
+            common_device_type.CPUTestBase,
+            common_device_type.MPSTestBase,
+            common_device_type.XPUTestBase,
+        ):
+            with self.subTest(device_type=test_base.device_type):
+                capabilities = test_base._capabilities()
+                self.assertEqual(
+                    bool(capabilities[capability]()),
+                    bool(capabilities[flash_attention]())
+                    or bool(capabilities[mem_efficient_attention]()),
+                )
+
+        cuda_capabilities = common_device_type.CUDATestBase._capabilities()
+        self.assertEqual(
+            bool(cuda_capabilities[capability]()),
+            bool(PLATFORM_SUPPORTS_FUSED_ATTENTION),
+        )
+
+        hpu_capabilities = common_device_type.HPUTestBase._capabilities()
+        self.assertFalse(hpu_capabilities[capability]())
+
+        privateuse1_capabilities = (
+            common_device_type.PrivateUse1TestBase._capabilities()
+        )
+        self.assertNotIn(capability, privateuse1_capabilities)
+
+    def test_gate_supported_unsupported_and_missing(self):
+        capability = common_device_type.Capability.attention.fused_attention
+
+        class Supported(common_device_type.DeviceTypeTestBase):
+            device_type = "supported"
+
+            @classmethod
+            def _capabilities(cls):
+                return {capability: lambda: True}
+
+        class Unsupported(common_device_type.DeviceTypeTestBase):
+            device_type = "unsupported"
+
+            @classmethod
+            def _capabilities(cls):
+                return {capability: lambda: False}
+
+        class Missing(common_device_type.DeviceTypeTestBase):
+            device_type = "missing"
+
+        @common_device_type.requires_capabilities(capability)
+        def gated_test(_):
+            return "executed"
+
+        self.assertEqual(gated_test(Supported()), "executed")
+        with self.assertRaisesRegex(
+            unittest.SkipTest,
+            r"unsupported capabilities: attention\.fused_attention",
+        ):
+            gated_test(Unsupported())
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"has not declared capabilities: attention\.fused_attention",
+        ):
+            gated_test(Missing())
 
 
 class TestFrameworkUtils(TestCase):
