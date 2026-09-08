@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     run_tests,
     skipIfRocmArch,
-	skipIfRocmVersionLessThan,
+    skipIfRocmVersionLessThan,
     TEST_HPU,
 )
 
@@ -720,8 +720,12 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         loss.backward()
 
 
-instantiate_device_type_tests(TestReplicateMixedPrecisionTraining, globals(), except_for="cpu", allow_xpu=True)
-instantiate_device_type_tests(TestReplicateMixedPrecisionCasts, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestReplicateMixedPrecisionTraining, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestReplicateMixedPrecisionCasts, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
