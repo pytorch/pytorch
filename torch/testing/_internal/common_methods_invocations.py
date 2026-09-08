@@ -5763,6 +5763,16 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
+    # index_select, index_copy, and index_add accept a scalar index as a
+    # length-1 vector.
+    if not fill:
+        t = make_arg((S, S))
+        idx = make_idx(1).squeeze(0)
+        args = [-1, idx]
+        if copy or add:
+            args.append(make_arg((S, 1)))
+        yield SampleInput(t, args=tuple(args))
+
 def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
