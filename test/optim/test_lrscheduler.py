@@ -885,8 +885,8 @@ class TestLRScheduler(TestCase):
             return SequentialLR(
                 optimizer,
                 [
-                    ConstantLR(optimizer, factor=0.5, total_iters=2),
-                    ConstantLR(optimizer, factor=0.2, total_iters=10),
+                    ConstantLR(optimizer, factor=0.2),
+                    ConstantLR(optimizer, factor=0.5),
                 ],
                 milestones=[2],
             )
@@ -910,7 +910,7 @@ class TestLRScheduler(TestCase):
             """Construct the ChainedScheduler used at both nesting depths."""
             return ChainedScheduler(
                 [
-                    ConstantLR(optimizer, factor=0.5, total_iters=2),
+                    ConstantLR(optimizer, factor=0.5),
                     ExponentialLR(optimizer, gamma=0.9),
                 ],
                 optimizer=optimizer,
