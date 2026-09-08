@@ -2,7 +2,6 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <csignal>
 #include <optional>
 
@@ -34,11 +33,9 @@
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <iostream>
@@ -96,18 +93,17 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
@@ -119,7 +115,6 @@
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -895,6 +890,22 @@ static PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THModule_getSymbolizeMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  switch (torch::get_symbolize_mode()) {
+    case torch::unwind::Mode::addr2line:
+      return THPUtils_packString("addr2line");
+    case torch::unwind::Mode::fast:
+      return THPUtils_packString("fast");
+    case torch::unwind::Mode::dladdr:
+      return THPUtils_packString("dladdr");
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unknown symbolize mode");
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THModule_rename_privateuse1_backend(
     PyObject* _unused,
     PyObject* arg) {
@@ -1133,8 +1144,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -2304,6 +2314,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_get_symbolize_mode", THModule_getSymbolizeMode, METH_NOARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
@@ -2722,6 +2733,13 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+  py_module.def("_is_pybind11_type", [](py::handle cls) {
+    if (!PyType_Check(cls.ptr())) {
+      return false;
+    }
+    auto* type = reinterpret_cast<PyTypeObject*>(cls.ptr());
+    return !py::detail::all_type_info(type).empty();
+  });
 
   // Serialized access to the process environment. Prefer these over Python's
   // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so

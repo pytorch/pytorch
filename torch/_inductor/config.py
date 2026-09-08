@@ -236,6 +236,14 @@ runtime_triton_nan_asserts = (
 )
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Skips codegen for range bounds, a subset of scalar_asserts. These are
+# inequalities between a symbol and a constant (e.g. u0 >= 4). This is unsafe
+# because the skipped assertions check expected shape invariants, including
+# hand-written torch._check().
+unsafe_skip_scalar_range_asserts = (
+    os.environ.get("TORCHINDUCTOR_UNSAFE_SKIP_SCALAR_RANGE_ASSERTS") == "1"
+)
+
 # Disable by default in fbcode
 alignment_asserts = (
     os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
@@ -364,12 +372,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {
-    "batch_linear_lhs": {
-        "devices": ("xpu",),
-        "min_fuse_set_size": 2,
-    },
-}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -398,8 +401,9 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-# DEPRECATED. This setting is ignored.
-use_mixed_mm = True
+use_mixed_mm: bool = Config(
+    default=True, deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -413,8 +417,9 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# DEPRECATED. This setting is ignored.
-mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
+mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = Config(
+    default="heuristic", deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -640,11 +645,12 @@ multi_kernel_hints: list[int] = []
 
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
@@ -767,6 +773,8 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
@@ -824,7 +832,7 @@ def _parse_autoheuristic_collect_env():
 
 
 def _parse_autoheuristic_use_env():
-    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "").split(",")
     return use_env
 
 
@@ -834,7 +842,6 @@ class autoheuristic_collect:
     """
 
     pad_mm = "pad_mm" in _parse_autoheuristic_collect_env()
-    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
 
 
 class autoheuristic_use:
@@ -843,7 +850,6 @@ class autoheuristic_use:
     """
 
     pad_mm = True if "pad_mm" in _parse_autoheuristic_use_env() else None
-    mixed_mm = True if "mixed_mm" in _parse_autoheuristic_use_env() else None
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
@@ -2254,8 +2260,8 @@ class triton:
     )
     # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
     # args instead of creating them device-side inside the kernel. Selects the
-    # descriptor flavor only; requires use_tensor_descriptor and
-    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    # descriptor flavor only. Pointwise/reduction kernels additionally require
+    # use_tensor_descriptor and assume_aligned_inputs; GEMM templates do not.
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
@@ -2315,9 +2321,13 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
+    nested_reduction: bool = Config(
+        justknob="pytorch/inductor:nested_reduction",
+        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
+        default=True,
+    )
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2716,6 +2726,12 @@ class cuda(cutlass):
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
 
+    # When True, inductor autotune pushes a per-op dynamic-dims mask for
+    # symbolic GEMM dims so TunableOp persists wildcard kernel-map entries that
+    # runtime concrete-miss lookups can reuse. False stops producing new
+    # wildcard entries; existing rows in a loaded file still satisfy lookups.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
+
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):
@@ -2818,6 +2834,7 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
+    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
