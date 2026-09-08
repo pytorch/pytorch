@@ -4,6 +4,7 @@ r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 from typing import Any, TypeVar
 from typing_extensions import deprecated
 
+import torch
 from torch import _weight_norm, norm_except_dim
 from torch.nn.modules import Module
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -22,8 +23,7 @@ class WeightNorm:
         self.name = name
         self.dim = dim
 
-    # TODO Make return type more specific
-    def compute_weight(self, module: Module) -> Any:
+    def compute_weight(self, module: Module) -> torch.Tensor:
         g = getattr(module, self.name + "_g")
         v = getattr(module, self.name + "_v")
         return _weight_norm(v, g, self.dim)
