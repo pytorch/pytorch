@@ -493,7 +493,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int64_t iheight = gradInput.size(-2);
   const int64_t iwidth = gradInput.size(-1);
 
-  max_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput,
     indices,
