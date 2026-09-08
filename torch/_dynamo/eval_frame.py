@@ -1017,6 +1017,10 @@ class _TorchDynamoContext:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
                         )
+                        # initialize() above already set _initialized before
+                        # install() raised, so clear it or the fresh re-init
+                        # below trips its already-initialized assertion.
+                        self._package._initialized = False
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
