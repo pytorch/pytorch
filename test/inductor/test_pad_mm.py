@@ -3,21 +3,38 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.device_interface import (
+    device_interfaces,
+    DeviceInterface,
+    register_interface_for_device,
+)
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters
+from torch._inductor import utils as inductor_utils
 from torch._inductor.fx_passes.pad_mm import (
+    _bf16_large_k_needs_pad,
+    _pad_mm_trace_device,
     can_pad,
+    check_device,
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
+    is_mm_compute_bound,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.utils._triton import has_triton_for_device
 
 
+@unittest.skipIf(
+    not HAS_GPU_AND_TRITON,
+    "PadMMTest benches padded mm end to end and needs an accelerator with Triton",
+)
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -517,9 +534,8 @@ class PadMMTest(TestCase):
         )
 
     @unittest.skipIf(
-        (not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0))
-        and (not torch.xpu.is_available()),
-        "No perf regression on H100+ with BF16",
+        not HAS_GPU_AND_TRITON or not _bf16_large_k_needs_pad(GPU_TYPE),
+        "No bf16 large-K pad regression on this device",
     )
     @fresh_cache()
     @inductor_config.patch(
@@ -537,7 +553,7 @@ class PadMMTest(TestCase):
             raise AssertionError("Alignment for bfloat16 should be 8")
         if not can_pad(mat1, mat2, torch.ops.aten.mm):
             raise AssertionError("This should pass the common padding criteria")
-        if not should_pad_mm_bf16(mat1.dtype, m, n, k):
+        if not should_pad_mm_bf16(mat1.dtype, m, n, k, mat1.device.type):
             raise AssertionError(
                 "This should pass the should_pad_mm_bf16 padding criteria"
             )
@@ -718,6 +734,242 @@ class PadMMTest(TestCase):
         self.assertEqual(compiled.stride(), expected.stride())
 
 
+class PadMMDeviceAgnosticTest(TestCase):
+    """
+    The pad decisions in pad_mm must key off the device of the tensors being
+    compiled, not off which accelerators happen to be visible to the process.
+    These cases run anywhere, including on CPU-only machines.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    # Mirrors test_pad_mm_bf16: bf16, K > M, K > N, N odd and K above the pad
+    # threshold, so the only thing left to decide is the device.
+    M, K, N = 2, 15691904, 13
+    PAD_OPTIONS = {"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
+
+    def test_check_device_accepts_any_accelerator(self):
+        # Fake tensors carry their target device without hardware (the repo
+        # convention from test_caching). npu/privateuseone fake tensors are not
+        # constructible in an in-tree build, so their reachability is pinned
+        # at the gate layer by test_has_triton_for_device_registry_contract.
+        with torch._subclasses.FakeTensorMode():
+            cuda = torch.empty(4, 4, device="cuda")
+            xpu = torch.empty(4, 4, device="xpu")
+
+        for t in (cuda, xpu):
+            self.assertTrue(check_device(t, t), f"{t.device.type} should be paddable")
+        self.assertFalse(check_device(cuda, xpu))
+
+        # Real tensors: cpu never pads, and neither does the meta device that
+        # pattern-matcher inputs carry.
+        self.assertFalse(check_device(torch.empty(4, 4), torch.empty(4, 4)))
+        meta = torch.empty(4, 4, device="meta")
+        self.assertFalse(check_device(meta, meta))
+        self.assertFalse(check_device(cuda, torch.empty(4, 4)))
+
+    @inductor_config.patch(post_grad_fusion_options=PAD_OPTIONS)
+    def test_should_pad_mm_bf16_asks_only_the_compiled_device(self):
+        args = (torch.bfloat16, self.M, self.N, self.K)
+        with (
+            unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(8, 0)
+            ) as cuda_cap,
+            unittest.mock.patch("torch.xpu.is_available", return_value=True) as xpu_ok,
+        ):
+            self.assertTrue(should_pad_mm_bf16(*args, device_type="cuda"))
+            self.assertGreaterEqual(cuda_cap.call_count, 1)
+            self.assertEqual(xpu_ok.call_count, 0)
+            # xpu answers from the device table; every other accelerator takes
+            # the default of "this regression was never seen here". Deciding
+            # for one device must not increase another's probe counts; exact
+            # counts on the positive path are not part of the contract.
+            self.assertTrue(should_pad_mm_bf16(*args, device_type="xpu"))
+            cuda_before = cuda_cap.call_count
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="npu"))
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="privateuseone"))
+            self.assertEqual(cuda_cap.call_count, cuda_before)
+            self.assertEqual(xpu_ok.call_count, 0)
+
+    @inductor_config.patch(post_grad_fusion_options=PAD_OPTIONS)
+    def test_should_pad_mm_bf16_skips_pad_on_hopper(self):
+        args = (torch.bfloat16, self.M, self.N, self.K)
+        with unittest.mock.patch(
+            "torch.cuda.get_device_capability", return_value=(9, 0)
+        ):
+            self.assertFalse(should_pad_mm_bf16(*args, device_type="cuda"))
+
+    def test_is_mm_compute_bound_bf16_large_k_is_device_specific(self):
+        # These rates make the shape bandwidth bound, so a True can only come
+        # from the device-specific bf16 large-K override.
+        args = (self.M, self.K, self.N, torch.bfloat16)
+        tflops = unittest.mock.patch.object(
+            inductor_utils, "get_device_tflops", return_value=100.0
+        )
+        gbps = unittest.mock.patch.object(
+            inductor_utils, "get_device_dram_gbps", return_value=2000.0
+        )
+        with tflops, gbps:
+            with unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(8, 0)
+            ) as cuda_cap:
+                self.assertTrue(is_mm_compute_bound(*args, device_type="cuda"))
+                # Deciding for npu must not probe cuda's hardware APIs.
+                cuda_before = cuda_cap.call_count
+                self.assertFalse(is_mm_compute_bound(*args, device_type="npu"))
+                self.assertEqual(cuda_cap.call_count, cuda_before)
+            with unittest.mock.patch(
+                "torch.cuda.get_device_capability", return_value=(9, 0)
+            ):
+                self.assertFalse(is_mm_compute_bound(*args, device_type="cuda"))
+            with unittest.mock.patch(
+                "torch.xpu.is_available", return_value=True
+            ) as xpu_ok:
+                self.assertTrue(is_mm_compute_bound(*args, device_type="xpu"))
+                self.assertFalse(is_mm_compute_bound(*args, device_type="npu"))
+                self.assertEqual(xpu_ok.call_count, 0)
+
+    def test_is_mm_compute_bound_without_roofline_info_defers_to_benchmark(self):
+        # A device without roofline info reports tflops 0.0 or DRAM None; the
+        # comparison is meaningless there, so the decision defers to the
+        # measured benchmark (True) despite the bandwidth-bound mock rates.
+        args = (self.M, self.K, self.N, torch.bfloat16)
+        for tflops_ret, dram_ret in ((0.0, 2000.0), (100.0, None)):
+            with (
+                unittest.mock.patch.object(
+                    inductor_utils, "get_device_tflops", return_value=tflops_ret
+                ),
+                unittest.mock.patch.object(
+                    inductor_utils,
+                    "get_device_dram_gbps",
+                    return_value=dram_ret,
+                ),
+            ):
+                with self.subTest(tflops=tflops_ret, dram=dram_ret):
+                    self.assertTrue(is_mm_compute_bound(*args, device_type="npu"))
+
+    def test_pad_mm_trace_device_probe_order(self):
+        # The historical cuda -> xpu -> cpu order. The trace device must not
+        # consult the process-wide default accelerator: a backend can register
+        # a C++ accelerator hook without shipping a matching torch.<name>
+        # module, and current_accelerator(check_available=True) raises there.
+        with (
+            unittest.mock.patch("torch.cuda.is_available", return_value=True),
+            unittest.mock.patch("torch.xpu.is_available", return_value=True),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "cuda")
+        with (
+            unittest.mock.patch("torch.cuda.is_available", return_value=False),
+            unittest.mock.patch("torch.xpu.is_available", return_value=True),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "xpu")
+        with (
+            unittest.mock.patch(
+                "torch.accelerator.current_accelerator",
+                side_effect=AssertionError("pad_mm must not probe the accelerator"),
+            ),
+            unittest.mock.patch("torch.cuda.is_available", return_value=False),
+            unittest.mock.patch("torch.xpu.is_available", return_value=False),
+        ):
+            self.assertEqual(_pad_mm_trace_device(), "cpu")
+
+    # The per-device Triton gate, wired end-to-end into can_pad and defined
+    # by the device-interface registry.
+    def test_can_pad_asks_the_operand_device(self):
+        asked = []
+        allowed = {"testpadmm"}
+
+        def fake_gate(device_type):
+            asked.append(device_type)
+            return device_type in allowed
+
+        gate = "torch._inductor.fx_passes.pad_mm.has_triton_for_device"
+        with (
+            inductor_config.patch(shape_padding=True),
+            unittest.mock.patch(gate, side_effect=fake_gate),
+        ):
+            with torch._subclasses.FakeTensorMode():
+                mat1 = torch.empty(4, 13, device="cuda")
+                mat2 = torch.empty(13, 8, device="cuda")
+            # K = 13 is unaligned, so can_pad reaches the Triton gate and asks
+            # about the operands' device, not the process default.
+            self.assertFalse(can_pad(mat1, mat2, torch.ops.aten.mm))
+            self.assertEqual(asked, ["cuda"])
+
+            # cpu and meta operands are rejected before the gate is consulted.
+            asked.clear()
+            cpu1, cpu2 = torch.empty(4, 13), torch.empty(13, 8)
+            self.assertFalse(can_pad(cpu1, cpu2, torch.ops.aten.mm))
+            meta1 = torch.empty(4, 13, device="meta")
+            meta2 = torch.empty(13, 8, device="meta")
+            self.assertFalse(can_pad(meta1, meta2, torch.ops.aten.mm))
+            self.assertEqual(asked, [])
+
+            # The gate's answer for the operand device is what can_pad obeys.
+            allowed.add("cuda")
+            asked.clear()
+            self.assertTrue(can_pad(mat1, mat2, torch.ops.aten.mm))
+            self.assertEqual(asked, ["cuda"])
+
+    def test_has_triton_for_device_registry_contract(self):
+        # Out-of-tree backends opt in through the device-interface registry
+        # (#190326): device available + is_triton_capable() + Triton backend
+        # actually built. In-tree devices that never claim capability (e.g.
+        # MpsInterface inheriting the base False) stay unreachable.
+        class _NotCapable(DeviceInterface):
+            @staticmethod
+            def is_available():
+                return True
+
+        class _MissingBackend(DeviceInterface):
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def is_triton_capable():
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable():
+                raise TritonUnavailableError("triton backend not built")
+
+        class _Ready(DeviceInterface):
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def is_triton_capable():
+                return True
+
+            @staticmethod
+            def raise_if_triton_unavailable():
+                return None
+
+        device = "testpadmm"
+        pkg = "torch.utils._triton.has_triton_package"
+        try:
+            with unittest.mock.patch(pkg, return_value=False):
+                register_interface_for_device(device, _Ready)
+                has_triton_for_device.cache_clear()
+                self.assertFalse(has_triton_for_device(device))
+            with unittest.mock.patch(pkg, return_value=True):
+                for iface, expected in (
+                    (_NotCapable, False),
+                    (_MissingBackend, False),
+                    (_Ready, True),
+                ):
+                    with self.subTest(interface=iface.__name__):
+                        register_interface_for_device(device, iface)
+                        has_triton_for_device.cache_clear()
+                        self.assertEqual(has_triton_for_device(device), expected)
+                has_triton_for_device.cache_clear()
+                self.assertFalse(has_triton_for_device("nosuchdevice"))
+        finally:
+            device_interfaces.pop(device, None)
+            has_triton_for_device.cache_clear()
+
+
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON:
-        run_tests()
+    run_tests()
