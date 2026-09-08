@@ -43,6 +43,32 @@ class Adafactor(_Adafactor):
             for i, param in enumerate(params_with_grad):
                 by_dtype[param.dtype].append(i)
 
+            if len(by_dtype) == 1:
+                dtype = next(iter(by_dtype))
+                dtype_eps1 = eps1
+                if dtype_eps1 is None:
+                    dtype_eps1 = torch.finfo(dtype).eps
+                adafactor(
+                    params_with_grad,
+                    grads,
+                    row_vars,
+                    col_vars,
+                    variances,
+                    state_steps,
+                    d=group["d"],
+                    lr=group["lr"],
+                    beta2_decay=group["beta2_decay"],
+                    weight_decay=group["weight_decay"],
+                    eps1=dtype_eps1,
+                    eps2=eps2,
+                    foreach=group["foreach"],
+                    maximize=group["maximize"],
+                    grad_scale=getattr(self, "grad_scale", None),
+                    found_inf=getattr(self, "found_inf", None),
+                    has_complex=has_complex,
+                )
+                continue
+
             for dtype, indices in by_dtype.items():
                 dtype_eps1 = eps1
                 if dtype_eps1 is None:
