@@ -410,6 +410,22 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         unranked = (quack_default, key(128, 32, 1, 1, True))
         self.assertEqual(flex_gemm_default_config(unranked, varlen=True), quack_default)
         self.assertEqual(flex_gemm_search_space(unranked, varlen=True), unranked)
+        # Grouped-main stores only accept cluster_n == 1 configs (tile_m 128 needs
+        # cluster_m 1); the varlen table ranks two of them after the others.
+        grouped_main_legal = (
+            quack_default,
+            key(128, 128, 1, 1, False),
+            key(256, 128, 2, 1, True),
+            key(128, 128, 1, 1, True),
+        )
+        self.assertEqual(
+            flex_gemm_default_config(grouped_main_legal, varlen=True),
+            key(128, 128, 1, 1, True),
+        )
+        self.assertEqual(
+            flex_gemm_search_space(grouped_main_legal, varlen=True),
+            (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True)),
+        )
 
     @parametrize(
         "reduction_type",
@@ -2345,7 +2361,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         for fn, error in (
             (tile_capture, "captured tensors of the full"),
-            (grouped_reduce, "grouped reductions or grouped-main"),
+            (grouped_reduce, "grouped reductions"),
         ):
             with self.subTest(fn=fn.__name__):
                 with self.assertRaisesRegex(
@@ -9227,6 +9243,119 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertGroupedMmQuackCode(code)
         self.assertIn("config=", code)
         self.assertGroupedMmMatches(actual, x, w_t, offs, torch.relu)
+
+    def assertGroupedSwigluMatches(self, actual, x, w1, w3, offs, hidden):
+        """Compare against eager two-GEMM SwiGLU and a per-group fp64 reference."""
+        import torch.nn.functional as F
+
+        valid = offs[-1].item()
+        starts = [0, *offs.tolist()]
+        expected = torch.cat(
+            [
+                F.silu(x[s:e].double() @ w1[g].double().mT)
+                * (x[s:e].double() @ w3[g].double().mT)
+                for g, (s, e) in enumerate(itertools.pairwise(starts))
+            ]
+        )
+        eager = F.silu(F.grouped_mm(x, w1.mT, offs=offs)) * F.grouped_mm(
+            x, w3.mT, offs=offs
+        )
+        self.assertEqual(actual.shape, (x.shape[0], hidden))
+        self.assertEqual(actual.dtype, torch.bfloat16)
+        self.assertTrue(actual[:valid].isfinite().all())
+        self.assertMatchesLowPrecisionEager(
+            actual[:valid], eager[:valid], expected, self.K
+        )
+
+    @parametrize("spelling", ("interleaved", "chunked"))
+    @parametrize("experts", (8, 64))
+    def test_grouped_mm_swiglu_matches_reference(self, device, spelling, experts):
+        """MoE expert FFN SwiGLU as one grouped GEMM with the dense SwiGLU epilogues."""
+        import torch.nn.functional as F
+
+        hidden = 96
+        # Ragged groups with two empty ones and non-tile-multiple sizes.
+        seqlens = [(37 * (g + 1)) % 200 for g in range(experts)]
+        seqlens[1] = seqlens[experts // 2] = 0
+        offs = torch.tensor(seqlens, device=device).cumsum(0).to(torch.int32)
+        total_m = sum(seqlens)
+        x = self.makeTensor(total_m, self.K, device=device)
+        w1 = self.makeTensor(experts, hidden, self.K, device=device)
+        w3 = self.makeTensor(experts, hidden, self.K, device=device)
+        if spelling == "interleaved":
+            # torchtitan's [E, out, in] weights: rows gate0, up0, gate1, up1, ...
+            w13 = torch.stack([w1, w3], dim=2).reshape(experts, 2 * hidden, self.K)
+
+            def epilogue_fn(acc):
+                lanes = acc.float().view(total_m, -1, 2)
+                return (F.silu(lanes[..., 0]) * lanes[..., 1]).to(acc.dtype)
+
+        else:
+            # Rows [w1; w3]; the transpose below gives the column-major B the
+            # chunked layout requires.
+            w13 = torch.cat([w1, w3], dim=1)
+
+            def epilogue_fn(acc):
+                gate, up = acc.float().chunk(2, dim=-1)
+                return (F.silu(gate) * up).to(acc.dtype)
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            x,
+            w13.transpose(-2, -1),
+            offs,
+        )
+
+        self.assertGroupedMmQuackCode(code)
+        self.assertIn(
+            f"FlexGemmGroupedMainOutputTransform(group=2, chunked={spelling == 'chunked'})",
+            code,
+        )
+        self.assertGroupedSwigluMatches(actual, x, w1, w3, offs, hidden)
+
+    def test_grouped_mm_swiglu_tuned_matches_reference(self, device):
+        import torch.nn.functional as F
+
+        experts, hidden = 8, 96
+        seqlens = (200, 0, 130, 182, 64, 0, 33, 95)
+        offs = torch.tensor(seqlens, device=device).cumsum(0).to(torch.int32)
+        total_m = sum(seqlens)
+        x = self.makeTensor(total_m, self.K, device=device)
+        w1 = self.makeTensor(experts, hidden, self.K, device=device)
+        w3 = self.makeTensor(experts, hidden, self.K, device=device)
+        w13_t = torch.stack([w1, w3], dim=2).reshape(experts, -1, self.K).mT
+
+        def epilogue_fn(acc):
+            lanes = acc.float().view(total_m, -1, 2)
+            return (F.silu(lanes[..., 0]) * lanes[..., 1]).to(acc.dtype)
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        with self.limitEpiModAutotune():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, w13_t, offs
+            )
+
+        self.assertGroupedMmQuackCode(code)
+        self.assertIn("config=", code)
+        self.assertIn("FlexGemmGroupedMainOutputTransform(group=2", code)
+        self.assertGroupedSwigluMatches(actual, x, w1, w3, offs, hidden)
 
     def test_grouped_mm_tile_capture_falls_back(self, device):
         import torch.nn.functional as F

@@ -50,13 +50,18 @@ _PRIORITY_RANK = _sm100_priority_rank(
 
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
 # expert shapes (E in 8..256, balanced and skewed offs); the first entry is
-# the untuned varlen default.
+# the untuned varlen default. The last two entries are the only ones a
+# grouped-main store accepts (cluster_n == 1, tile_m 128 -> cluster_m 1), so
+# grouped SwiGLU defaults to 128x128 c1x1 (measured at E=64) and autotunes
+# 256x128 c2x1 (E=8).
 _VARLEN_PRIORITY_RANK = _sm100_priority_rank(
     (
         (128, 128, 2, 1, True),
         (128, 256, 2, 2, False),
         (256, 256, 2, 2, False),
         (128, 128, 2, 1, False),
+        (128, 128, 1, 1, True),
+        (256, 128, 2, 1, True),
     )
 )
 
