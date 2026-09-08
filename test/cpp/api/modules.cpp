@@ -1113,6 +1113,56 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, RMSNorm) {
+  RMSNorm model(RMSNormOptions({3}).eps(2e-5));
+  model->weight.set_data(torch::tensor({0.5, 1.5, -2.0}));
+  auto x = torch::randn({2, 3}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 2);
+  ASSERT_EQ(y.size(1), 3);
+  ASSERT_EQ(model->weight.grad().numel(), 3);
+
+  // Expanded here instead of calling at::rms_norm, which is what the module
+  // itself calls: with a non-unit weight and a non-square normalized_shape
+  // this fails if the weight is dropped or applied along the wrong axis.
+  const auto xd = x.detach();
+  const auto expected = xd / torch::sqrt(xd.pow(2).mean({-1}, true) + 2e-5) *
+      model->weight.detach();
+  ASSERT_TRUE(torch::allclose(y, expected));
+}
+
+TEST_F(ModulesTest, RMSNormDefaultEps) {
+  // eps is unset by default, which defers to at::rms_norm: the machine epsilon
+  // of the opmath type, not of the input dtype.
+  RMSNorm model(RMSNormOptions({2, 2}));
+  auto x = torch::randn({2, 2});
+  auto y = model(x);
+  auto y_exp = torch::rms_norm(x, {2, 2}, model->weight, std::nullopt);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, RMSNormNoAffine) {
+  RMSNorm model(RMSNormOptions({3}).elementwise_affine(false).eps(2e-5));
+  ASSERT_FALSE(model->weight.defined());
+  auto x = torch::randn({2, 3});
+  auto y = model(x);
+  const auto expected = x / torch::sqrt(x.pow(2).mean({-1}, true) + 2e-5);
+  ASSERT_TRUE(torch::allclose(y, expected));
+}
+
+TEST_F(ModulesTest, RMSNormInvalidWeightShape) {
+  RMSNorm model(RMSNormOptions({3}));
+  model->weight.set_data(torch::ones({4}));
+  ASSERT_THROWS_WITH(
+      model(torch::randn({2, 3})),
+      "Expected weight to be of same shape as normalized_shape");
+}
+
 TEST_F(ModulesTest, GroupNorm) {
   GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -4984,6 +5034,16 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
       c10::str(LayerNorm(
           LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
       "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintRMSNorm) {
+  ASSERT_EQ(
+      c10::str(RMSNorm(RMSNormOptions({2, 2}))),
+      "torch::nn::RMSNorm([2, 2], eps=None, elementwise_affine=true)");
+  ASSERT_EQ(
+      c10::str(
+          RMSNorm(RMSNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
+      "torch::nn::RMSNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintGroupNorm) {
