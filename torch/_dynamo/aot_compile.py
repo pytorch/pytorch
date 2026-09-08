@@ -581,23 +581,28 @@ def aot_compile_fullgraph(
             system_info = SystemInfo.current(
                 cpu_codegen=(emits_native_code(backend_name) and "cpu" in device_types)
             )
-        artifacts = CompileArtifacts(
-            signature=convert_frame._get_signature(fn),
-            guard_manager=check_fn.guard_manager,
-            guards_state=check_fn.guards_state,
-            backend_id=backend_input.backend_id,
-            compiled_fn=compiled_fn,
-            original_code=fn.__code__,
-            runtime_env=graph_capture_output.get_runtime_env(),
-            source_info=source_info,
-            device_type=device_type,
-            backend_name=backend_name,
-            system_info=system_info,
-            device_types=device_types,
-        )
-        aot_compiled_fn = AOTCompiledFunction(
-            _artifacts=artifacts, _extra_globals=fn.__globals__
-        )
+            # Build the artifact under the same config the fingerprint was
+            # sampled under: AOTCompiledFunction.__post_init__ runs
+            # check_compatibility(), whose SystemInfo.current() must see the same
+            # inductor config (e.g. cpp.simdlen) or the artifact rejects its own
+            # build.
+            artifacts = CompileArtifacts(
+                signature=convert_frame._get_signature(fn),
+                guard_manager=check_fn.guard_manager,
+                guards_state=check_fn.guards_state,
+                backend_id=backend_input.backend_id,
+                compiled_fn=compiled_fn,
+                original_code=fn.__code__,
+                runtime_env=graph_capture_output.get_runtime_env(),
+                source_info=source_info,
+                device_type=device_type,
+                backend_name=backend_name,
+                system_info=system_info,
+                device_types=device_types,
+            )
+            aot_compiled_fn = AOTCompiledFunction(
+                _artifacts=artifacts, _extra_globals=fn.__globals__
+            )
 
     return aot_compiled_fn
 
