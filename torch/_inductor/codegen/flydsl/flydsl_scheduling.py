@@ -66,6 +66,7 @@ class FlyDSLScheduling(BaseScheduling):
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        """Allow one removable, identity-indexed pointwise GEMM consumer."""
         if not config.epilogue_fusion or not self.is_flydsl_template(node1):
             return False
         if node2.has_aliasing_or_mutation() or node2.is_reduction():
