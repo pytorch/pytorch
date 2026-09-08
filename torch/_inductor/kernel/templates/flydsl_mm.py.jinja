@@ -3,18 +3,18 @@ import os
 
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
-    launch_hgemm_gfx950,
-    make_hgemm_param_and_validate,
+    launch_gemm_gfx950,
+    make_gemm_param_and_validate,
 )
 from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 
 {{gen_defines()}}
 
 
-_hgemm_fn_cache = {}
+_gemm_fn_cache = {}
 
 
-def _hgemm_param_cache_key(param):
+def _gemm_param_cache_key(param):
     return (
         param.block_m,
         param.block_n,
@@ -38,16 +38,16 @@ def _hgemm_param_cache_key(param):
     )
 
 
-def _run_hgemm_gfx950(param, *runtime_args):
+def _run_gemm_gfx950(param, *runtime_args):
     """First call compiles and executes; subsequent calls dispatch the cached executor."""
-    cache_key = _hgemm_param_cache_key(param)
+    cache_key = _gemm_param_cache_key(param)
     args = runtime_args[:-1] + (param, runtime_args[-1])
-    executor = _hgemm_fn_cache.get(cache_key)
+    executor = _gemm_fn_cache.get(cache_key)
     if executor is None:
         ensure_flydsl_cache_dir()
-        executor = flyc.compile(launch_hgemm_gfx950, *args)
+        executor = flyc.compile(launch_gemm_gfx950, *args)
         if not os.environ.get("COMPILE_ONLY"):
-            _hgemm_fn_cache[cache_key] = executor
+            _gemm_fn_cache[cache_key] = executor
     else:
         executor(*args)
 
@@ -80,7 +80,7 @@ def _flydsl_mm(output, mat1, mat2, stream):
 
     has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
 
-    param = make_hgemm_param_and_validate(
+    param = make_gemm_param_and_validate(
         m,
         n,
         k,
@@ -96,7 +96,7 @@ def _flydsl_mm(output, mat1, mat2, stream):
             "has_k_tail": has_k_tail,
         },
     )
-    _run_hgemm_gfx950(
+    _run_gemm_gfx950(
         param,
         output_mn,
         mat1_mk,
@@ -138,7 +138,7 @@ def {{kernel_name}}_precompile(
 
     env_updates = {"COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
-        # FlyDSL's hgemm factory and backend read different arch env names.
+        # FlyDSL's GEMM factory and backend read different arch env names.
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
         env_updates["ARCH"] = flydsl_gpu_arch
 
@@ -157,4 +157,4 @@ def {{kernel_name}}_precompile(
             try:
                 _flydsl_mm(output, mat1, mat2, stream=0)
             finally:
-                _hgemm_fn_cache.clear()
+                _gemm_fn_cache.clear()

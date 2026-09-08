@@ -18,14 +18,14 @@ class FlyDSLGemmConfig:
     B_TO_LDS: bool = True
 
 
-def _is_valid_hgemm_config(hgemm_config: dict[str, int | bool]) -> bool:
-    block_m = int(hgemm_config["TILE_M"])
-    block_n = int(hgemm_config["TILE_N"])
-    block_k = int(hgemm_config["TILE_K"])
-    stages = int(hgemm_config["STAGES"])
-    m_waves = int(hgemm_config["BLOCK_M_WARPS"])
-    n_waves = int(hgemm_config["BLOCK_N_WARPS"])
-    group_m = int(hgemm_config["GROUP_M"])
+def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
+    block_m = int(gemm_config["TILE_M"])
+    block_n = int(gemm_config["TILE_N"])
+    block_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    m_waves = int(gemm_config["BLOCK_M_WARPS"])
+    n_waves = int(gemm_config["BLOCK_N_WARPS"])
+    group_m = int(gemm_config["GROUP_M"])
     mma_m = 16
     mma_n = 16
     mma_k = 32
@@ -51,8 +51,13 @@ def _is_valid_hgemm_config(hgemm_config: dict[str, int | bool]) -> bool:
         return False
 
     block_threads = m_waves * n_waves * 64
-    ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
-    ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
+    load_elems_per_iter = block_threads * async_load_vec_size
+    if (block_m * block_k) % load_elems_per_iter != 0:
+        return False
+    if (block_n * block_k) % load_elems_per_iter != 0:
+        return False
+    ldg_a_iters = (block_m * block_k) // load_elems_per_iter
+    ldg_b_iters = (block_n * block_k) // load_elems_per_iter
     if ldg_a_iters <= 0 or ldg_b_iters <= 0:
         return False
     if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
@@ -89,15 +94,15 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     values = selections.values()
     configs = [dict(zip(keys, combo)) for combo in product(*values)]
     valid_configs: list[FlyDSLGemmConfig] = []
-    for hgemm_config in configs:
-        mma_m_iters = hgemm_config["TILE_M"] // hgemm_config["BLOCK_M_WARPS"] // 16
-        mma_n_iters = hgemm_config["TILE_N"] // hgemm_config["BLOCK_N_WARPS"] // 16
+    for gemm_config in configs:
+        mma_m_iters = gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
+        mma_n_iters = gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
         if mma_m_iters > 4 or mma_n_iters > 4:
             continue
-        if not _is_valid_hgemm_config(hgemm_config):
+        if not _is_valid_gemm_config(gemm_config):
             continue
         try:
-            valid_configs.append(FlyDSLGemmConfig(**hgemm_config))
+            valid_configs.append(FlyDSLGemmConfig(**gemm_config))
         except Exception:
             pass
     return valid_configs
@@ -130,9 +135,9 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     ]
     configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
     return [
-        hgemm_config
-        for hgemm_config in configs
-        if _is_valid_hgemm_config(asdict(hgemm_config))
+        gemm_config
+        for gemm_config in configs
+        if _is_valid_gemm_config(asdict(gemm_config))
     ]
 
 
@@ -152,4 +157,4 @@ def get_gemm_configs() -> list[dict[str, object]]:
         configs = get_default_gemm_configs()
     else:
         configs = [get_default_gemm_configs()[0]]
-    return [asdict(hgemm_config) for hgemm_config in configs]
+    return [asdict(gemm_config) for gemm_config in configs]

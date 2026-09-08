@@ -255,7 +255,7 @@ def get_flydsl_mm_template_kwargs(
     if dtype != torch.bfloat16:
         return []
 
-    # FlyDSL hgemm consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
+    # FlyDSL GEMM consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
     # the RHS as a [K, N] transpose view with stride[0] == 1.
     if not sizevars.statically_known_equals(mat2_stride[0], 1):
         return []
