@@ -13,7 +13,7 @@ GFX950_WAVE_SIZE = 64
 
 
 @fx.struct
-class HGemmGfx950Param:
+class GemmGfx950Param:
     block_m: fx.Constexpr[int]
     block_n: fx.Constexpr[int]
     block_k: fx.Constexpr[int]
@@ -35,7 +35,7 @@ class HGemmGfx950Param:
     mma_k: fx.Constexpr[int]
 
 
-def make_hgemm_gfx950_param(
+def make_gemm_gfx950_param(
     block_m: int = 256,
     block_n: int = 256,
     block_k: int = 64,
@@ -48,7 +48,7 @@ def make_hgemm_gfx950_param(
     mma_m: int = 16,
     mma_n: int = 16,
     mma_k: int = 32,
-) -> HGemmGfx950Param:
+) -> GemmGfx950Param:
     if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
         raise ValueError("block_m, block_n, block_k, and stages must be positive")
     if (mma_m, mma_n, mma_k) != (16, 16, 32):
@@ -82,8 +82,21 @@ def make_hgemm_gfx950_param(
         )
 
     block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
-    ldg_a_iters = (block_m * block_k) // (block_threads * async_load_vec_size)
-    ldg_b_iters = (block_n * block_k) // (block_threads * async_load_vec_size)
+    load_elems_per_iter = block_threads * async_load_vec_size
+    if (block_m * block_k) % load_elems_per_iter != 0:
+        raise ValueError(
+            "A tile load schedule must exactly cover the LDS tile: "
+            f"block_m={block_m}, block_k={block_k}, "
+            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}"
+        )
+    if (block_n * block_k) % load_elems_per_iter != 0:
+        raise ValueError(
+            "B tile load schedule must exactly cover the LDS tile: "
+            f"block_n={block_n}, block_k={block_k}, "
+            f"block_threads={block_threads}, async_load_vec_size={async_load_vec_size}"
+        )
+    ldg_a_iters = (block_m * block_k) // load_elems_per_iter
+    ldg_b_iters = (block_n * block_k) // load_elems_per_iter
     if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
         raise ValueError("staged pipeline wait count exceeds supported range")
 
@@ -100,7 +113,7 @@ def make_hgemm_gfx950_param(
             f"block_n={block_n}, n_waves={n_waves}, mma_n={mma_n}"
         )
 
-    return HGemmGfx950Param(
+    return GemmGfx950Param(
         block_m=block_m,
         block_n=block_n,
         block_k=block_k,
@@ -123,8 +136,8 @@ def make_hgemm_gfx950_param(
     )
 
 
-def make_hgemm_gfx950_kernel_name(param: HGemmGfx950Param) -> str:
-    name = f"hgemm_t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
+def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
+    name = f"gemm_t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
     name += f"_w{param.m_waves}x{param.n_waves}"
     name += f"_gm{param.group_m}"
     name += f"_bias{int(param.has_bias)}"
@@ -201,7 +214,7 @@ def buffer_load_lds_inline(rsrc, lds_ptr, global_offset, dma_bytes):
 
 
 @flyc.kernel
-def hgemm_gfx950_kernel(
+def gemm_gfx950_kernel(
     out: fx.Tensor,
     a: fx.Tensor,
     b: fx.Tensor,
@@ -210,7 +223,7 @@ def hgemm_gfx950_kernel(
     n: fx.Int32,
     k: fx.Int32,
     tiled_mma: fx.TiledMma,
-    param: HGemmGfx950Param,
+    param: GemmGfx950Param,
 ):
     block_m = param.block_m
     block_n = param.block_n
@@ -444,7 +457,7 @@ def hgemm_gfx950_kernel(
 
 
 @flyc.jit
-def launch_hgemm_gfx950(
+def launch_gemm_gfx950(
     out: fx.Tensor,
     a: fx.Tensor,
     b: fx.Tensor,
@@ -452,7 +465,7 @@ def launch_hgemm_gfx950(
     m: fx.Int32,
     n: fx.Int32,
     k: fx.Int32,
-    param: HGemmGfx950Param,
+    param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):
     mma_atom = fx.make_mma_atom(
@@ -476,9 +489,9 @@ def launch_hgemm_gfx950(
     )
     num_pid_m = (m + param.block_m - 1) // param.block_m
     num_pid_n = (n + param.block_n - 1) // param.block_n
-    hgemm_gfx950_kernel._known_block_size = [param.block_threads, 1, 1]
-    hgemm_gfx950_kernel._func.__name__ = make_hgemm_gfx950_kernel_name(param)
-    hgemm_gfx950_kernel(out, a, b, bias, m, n, k, tiled_mma, param).launch(
+    gemm_gfx950_kernel._known_block_size = [param.block_threads, 1, 1]
+    gemm_gfx950_kernel._func.__name__ = make_gemm_gfx950_kernel_name(param)
+    gemm_gfx950_kernel(out, a, b, bias, m, n, k, tiled_mma, param).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,
@@ -490,10 +503,10 @@ def infer_has_k_tail(k: int, block_k: int, stages: int):
     return (k % block_k != 0) or (k_tiles < stages - 1)
 
 
-def make_hgemm_param_and_validate(m, n, k, kwargs):
+def make_gemm_param_and_validate(m, n, k, kwargs):
     result = None
     try:
-        result = make_hgemm_gfx950_param(**kwargs)
+        result = make_gemm_gfx950_param(**kwargs)
     except Exception:
         return None
     if not ((n % 32 == 0) and (k % result.mma_k == 0)):

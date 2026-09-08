@@ -42,7 +42,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
     )
-    def test_flydsl_hgemm_transposed_rhs_e2e(self):
+    def test_flydsl_gemm_transposed_rhs_e2e(self):
         from torch._inductor.utils import run_and_get_code
 
         if not flydsl_utils.runtime_available():
