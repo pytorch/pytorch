@@ -289,12 +289,7 @@ def _nativert_aoti_case(device, case):
     raise AssertionError(f"unknown aoti case: {case}")
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-@unittest.skipIf(not is_fbcode(), "FBcode only for now")
-class TestNativeRT(TestCase):
-    hw_classification = HardwareClassification.CPU
-
+class _NativeRTAOTI:
     def _test_aoti(self, device, case):
         m, sample_inputs = _nativert_aoti_case(device, case)
         MODEL_NAME = "model"
@@ -378,16 +373,28 @@ class TestNativeRT(TestCase):
                 else:
                     raise e
 
-    @parametrize("case", NATIVERT_AOTI_CASES)
-    def test_aoti(self, device, case):
-        self._test_aoti(device, case)
+
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
+class TestNativeRT(_NativeRTAOTI, TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_aoti_basic(self):
+        self._test_aoti("cpu", "basic")
+
+    def test_aoti_multi_output(self):
+        self._test_aoti("cpu", "multi_output")
+
+    def test_aoti_pytree(self):
+        self._test_aoti("cpu", "pytree")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 @unittest.skipIf(not is_fbcode(), "FBcode only for now")
 @unittest.skipUnless(HAS_TRITON, "requires triton")
-class TestNativeRTAccelerator(TestNativeRT):
+class TestNativeRTAccelerator(_NativeRTAOTI, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("case", NATIVERT_AOTI_CASES)
@@ -395,7 +402,6 @@ class TestNativeRTAccelerator(TestNativeRT):
         self._test_aoti(device, case)
 
 
-instantiate_device_type_tests(TestNativeRT, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNativeRTAccelerator, globals(), except_for="cpu")
 
 
