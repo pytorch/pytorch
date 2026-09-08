@@ -17,9 +17,7 @@ class TestOptimizedModuleBool(TestCase):
 
         debug_init = bytecode_debugger._DebugContext.__init__
         optimized_bool = eval_frame.OptimizedModule.__bool__
-        _bytecode_debugger_fix.install = _bytecode_debugger_fix.__dict__.get(
-            "install", lambda: None
-        )
+        _bytecode_debugger_fix.install()
         self.assertIs(bytecode_debugger._DebugContext.__init__, debug_init)
         self.assertIs(eval_frame.OptimizedModule.__bool__, optimized_bool)
 
