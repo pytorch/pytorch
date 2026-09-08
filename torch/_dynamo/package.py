@@ -710,20 +710,24 @@ def _cpu_codegen_target_problem(
 
     The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
     codegen, and the loading host compiles that source with the flags of its
-    own pick_vec_isa(). The two must agree, so every component is compared
-    exactly (march is the unresolved config knob, so two hosts recording None
-    compare equal though -march=native expands differently -- benign, since the
-    loading host supplies the actual flags); a wider host ISA is not a superset
-    here, its masked loads zero-fill the lanes the narrower tiling never wrote.
-    simdlen is compared as its own component, not only through the resolved ISA,
-    so a host that would pick the same ISA under a different simdlen knob is
-    still rejected (fail-closed). The ISA name and its
-    bit width must both agree: VecSVE(128) and VecSVE(256) share the name
-    "asimd", so the name alone would accept a kernel tiled for the wrong width.
-    The build macros disambiguate further: VecNEON and VecSVE(128) share both
-    the name "asimd" and a 128-bit width but compile with different capability
-    macros, so name and width alone would accept a kernel tiled for the wrong
-    one.
+    own pick_vec_isa(). The gate is the *resolved* target -- (machine, vec_isa,
+    vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds the
+    raw config knobs (simdlen, march, ATEN_CPU_CAPABILITY) into the ISA it
+    returns: a simdlen that caps the width picks a narrower ISA, so the width
+    and macro already reflect it. Comparing the resolved triple is therefore
+    complete, and comparing the raw simdlen/march knobs on top of it is not just
+    redundant, it is wrong -- it rejects an artifact whose kernels this host can
+    reproduce merely because the knob that got there differs (an artifact built
+    under cpp.simdlen=256 is loadable on any host that resolves to the same
+    256-bit ISA, whether via its default or via ATEN_CPU_CAPABILITY), and it
+    makes the escape hatch ineffective, since setting cpp.simdlen to fix an ISA
+    mismatch would only trade it for a simdlen mismatch. The name and width must
+    both agree (VecSVE(128)/VecSVE(256) share the name "asimd"), and the build
+    macros disambiguate further (VecNEON and VecSVE(128) share name and width
+    but compile with different capability macros). A wider host ISA is not a
+    superset: its masked loads zero-fill the lanes the narrower tiling never
+    wrote. simdlen and march stay in the recorded tuple for diagnostics but do
+    not gate.
     """
     if current is None:
         # No current tuple to compare against, so no component-level reason is
@@ -733,20 +737,17 @@ def _cpu_codegen_target_problem(
             "supported vector ISA), so it cannot reproduce the target the "
             "artifact's CPU kernels were built for."
         )
-    machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march = cached
+    machine, vec_isa, vec_isa_width, vec_isa_macro, _simdlen, _march = cached
     if machine != current[0]:
         return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
     if (vec_isa, vec_isa_width, vec_isa_macro) != (current[1], current[2], current[3]):
         return (
             f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r} "
-            f"({vec_isa_width}-bit); this host would compile them for {current[1]!r} "
-            f"({current[2]}-bit). Set ATEN_CPU_CAPABILITY or "
+            f"({vec_isa_width}-bit, macros {list(vec_isa_macro)}); this host would "
+            f"compile them for {current[1]!r} ({current[2]}-bit, macros "
+            f"{list(current[3])}). Set ATEN_CPU_CAPABILITY or "
             "torch._inductor.config.cpp.simdlen so the host picks the same ISA."
         )
-    if simdlen != current[4]:
-        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[4]!r}."
-    if march != current[5]:
-        return f"The artifact was built with march={march!r}, this host uses {current[5]!r}."
     return None
 
 
