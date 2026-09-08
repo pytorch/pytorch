@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <atomic>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,7 +33,9 @@ using TeamPool = std::vector<nvshmem_team_t>;
 class TeamManager {
  public:
   // Constructor
-  explicit TeamManager(const c10::Device device) : device_(device) {}
+  explicit TeamManager(const c10::Device device) : device_(device) {
+    instance_.store(this, std::memory_order_release);
+  }
 
   // Get single, global manager.
   static TeamManager& get(const c10::Device device) {
@@ -41,6 +44,15 @@ class TeamManager {
         manager.device_ == device,
         "Detected use of TeamManager on multiple devices. This is not supported.");
     return manager;
+  }
+
+  // Release a group's teams without constructing the singleton if NVSHMEM
+  // collectives have not been used in this process.
+  static void release_group_if_initialized(const std::string& group_name) {
+    auto* manager = instance_.load(std::memory_order_acquire);
+    if (manager != nullptr) {
+      manager->release_group(group_name);
+    }
   }
 
   // Get a team for a group.
@@ -90,6 +102,31 @@ class TeamManager {
           stream));
     }
     return std::make_pair(std::cref(team_pool), team_pool_dev);
+  }
+
+  // Destroy all teams associated with a process group. This must be called
+  // collectively by the members of the group after all work has completed.
+  void release_group(const std::string& group_name) {
+    auto team_it = group_name_to_team_pool_.find(group_name);
+    if (team_it == group_name_to_team_pool_.end()) {
+      return;
+    }
+
+    c10::cuda::CUDAGuard guard(device_);
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+
+    for (auto team : team_it->second) {
+      if (team != NVSHMEM_TEAM_INVALID) {
+        nvshmem_team_destroy(team);
+      }
+    }
+    group_name_to_team_pool_.erase(team_it);
+
+    auto dev_it = team_pool_devptrs_.find(group_name);
+    if (dev_it != team_pool_devptrs_.end()) {
+      c10::cuda::CUDACachingAllocator::raw_delete(dev_it->second);
+      team_pool_devptrs_.erase(dev_it);
+    }
   }
 
   ~TeamManager() noexcept {
@@ -165,6 +202,7 @@ class TeamManager {
  private:
   // Device where the team manager is created
   const c10::Device device_;
+  inline static std::atomic<TeamManager*> instance_{nullptr};
   // A map from group name to team pool for that group.
   std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
   // A map from group name to team pool array in device memory.
