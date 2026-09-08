@@ -3680,12 +3680,12 @@ class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
         expected_type: type | None,
-        expected_meta: Any,
+        expected_meta: object,
         runtime_type: type,
-        runtime_meta: Any,
+        runtime_meta: object,
         orig_x: torch.Tensor,
         tangent_idx: int | None,
-        tangent_desc: Any | None,
+        tangent_desc: AOTInput | None,
         compile_id_str: str | None,
         tangent_stack_trace: str | None,
     ) -> RuntimeError:
@@ -3757,7 +3757,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         x: Any,
         meta: PlainTensorMeta | SubclassCreationMeta,
         tangent_idx: int | None = None,
-        tangent_desc: Any | None = None,
+        tangent_desc: AOTInput | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:

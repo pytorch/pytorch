@@ -18,6 +18,7 @@ import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
+from torchgen import native_aot
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -75,6 +76,11 @@ from torchgen.model import (
     Type,
     Variant,
     ViewSchemaKind,
+)
+from torchgen.native_aot import (
+    NativeAotManifest,
+    parse_native_aot_manifests,
+    validate_native_aot_manifests,
 )
 from torchgen.native_function_generation import (
     add_generated_native_functions,
@@ -1675,6 +1681,7 @@ def get_native_function_definitions(
     symint: bool,
     skip_dispatcher_op_registration: bool,
     gen_dispatch_helpers: bool,
+    native_aot_manifests: dict[str, NativeAotManifest] | None = None,
 ) -> list[str]:
     definitions: list[str] = []
     ns_definitions: dict[str, list[str]] = defaultdict(list)
@@ -1698,6 +1705,7 @@ def get_native_function_definitions(
         symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+        native_aot_manifests=native_aot_manifests or {},
     )
     reg_gen = dest.RegisterDispatchKey(
         backend_idx,
@@ -2181,7 +2189,20 @@ def gen_headers(
     functions_keys: set[DispatchKey],
     rocm: bool,
     per_operator_headers: bool,
+    native_aot_manifests: dict[tuple[DispatchKey, str], NativeAotManifest]
+    | None = None,
 ) -> None:
+    native_aot_manifests = native_aot_manifests or {}
+    # NB: base names repeat across groups (bmm and bmm.dtype, sum and sum.dim_IntList),
+    # so the stub signature must come from the structured group the manifest targets.
+    # Validation guarantees exactly one match per manifest.
+    native_aot_groups_by_op = {
+        op: g
+        for g in structured_native_functions
+        if g.structured
+        for (_, op), m in native_aot_manifests.items()
+        if m.matches_group(g)
+    }
     if per_operator_headers:
         gen_per_operator_headers(
             native_functions=native_functions,
@@ -2258,6 +2279,16 @@ def gen_headers(
         "VmapGeneratedPlumbing.h", lambda: gen_all_vmap_plumbing(native_functions)
     )
 
+    cpu_fm.write(
+        "NativeAotStubs.h",
+        lambda: {
+            "native_aot_stub_declarations": [
+                native_aot.gen_stub_declaration(m, native_aot_groups_by_op[op])
+                for (_, op), m in sorted(native_aot_manifests.items())
+            ],
+        },
+    )
+
     def gen_aten_interned_strings() -> dict[str, str]:
         attrs: set[str] = set()  # All function argument names
         names = set()  # All ATen function names
@@ -2325,7 +2356,10 @@ def gen_source_files(
     update_aoti_c_shim: bool,
     aoti_backends: set[DispatchKey | None],
     extend_aoti_c_shim: bool,
+    native_aot_manifests: dict[tuple[DispatchKey, str], NativeAotManifest]
+    | None = None,
 ) -> None:
+    native_aot_manifests = native_aot_manifests or {}
     extra_cuda_headers = """\
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
@@ -2427,6 +2461,12 @@ def gen_source_files(
             ),
         }
 
+        native_aot_manifests_for_key = {
+            op: m
+            for (key, op), m in native_aot_manifests.items()
+            if key == dispatch_key
+        }
+
         def register_dispatch_key_env_callable(
             gnf: NativeFunction | NativeFunctionsGroup,
         ) -> dict[str, list[str]]:
@@ -2441,6 +2481,7 @@ def gen_source_files(
                     symint=True,
                     skip_dispatcher_op_registration=skip_dispatcher_op_registration,
                     gen_dispatch_helpers=gen_dispatch_helpers,
+                    native_aot_manifests=native_aot_manifests_for_key,
                 )
             }
 
@@ -2536,6 +2577,16 @@ def gen_source_files(
         }
 
     cpu_fm.write("RegisterBackendSelect.cpp", gen_backend_select)
+
+    cpu_fm.write(
+        "NativeAotStubs.cpp",
+        lambda: {
+            "native_aot_stub_definitions": [
+                native_aot.gen_stub_definition(m)
+                for _, m in sorted(native_aot_manifests.items())
+            ],
+        },
+    )
 
     schema_selector = selector
     if force_schema_registration:
@@ -2863,6 +2914,14 @@ def main() -> None:
         default=None,
     )
     parser.add_argument(
+        "--native-aot-ops-dir",
+        "--native_aot_ops_dir",
+        help="directory scanned for <op>/aot.py native-aot declaration "
+        "modules (default: torch/_native/ops relative to the repo root); "
+        "pass an empty string to disable native-aot codegen",
+        default=None,
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -3046,6 +3105,18 @@ def main() -> None:
         if isinstance(g, NativeFunctionsViewGroup)
     ]
 
+    if options.native_aot_ops_dir is None:
+        # aten/src/ATen -> repo root -> torch/_native/ops
+        native_aot_ops_dir = os.path.join(
+            options.source_path, "..", "..", "..", "torch", "_native", "ops"
+        )
+    else:
+        native_aot_ops_dir = options.native_aot_ops_dir
+    native_aot_manifests = (
+        parse_native_aot_manifests(native_aot_ops_dir) if native_aot_ops_dir else {}
+    )
+    validate_native_aot_manifests(native_aot_manifests, grouped_native_functions)
+
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
     # will eventually be ingested by cmake, which does not respect Windows style
     # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -3119,6 +3190,7 @@ def main() -> None:
             update_aoti_c_shim=options.update_aoti_c_shim,
             aoti_backends=aoti_backends,
             extend_aoti_c_shim=options.extend_aoti_c_shim,
+            native_aot_manifests=native_aot_manifests,
         )
 
     if "headers" in options.generate:
@@ -3139,6 +3211,7 @@ def main() -> None:
             functions_keys=functions_keys,
             rocm=options.rocm,
             per_operator_headers=options.per_operator_headers,
+            native_aot_manifests=native_aot_manifests,
         )
 
     if "declarations_yaml" in options.generate:
