@@ -1444,6 +1444,8 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
+        # Container id -> ids of elements a guard source is rooted at THROUGH it.
+        self.guard_tree_children: dict[int, set[int]] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1791,6 +1793,13 @@ class GuardBuilder(GuardBuilderBase):
             base_guard_manager_enum = self.get_guard_manager_type(
                 source.base, base_example_value
             )
+            # Record the container->element edge so _keep_container_verbatim can
+            # tell an element guarded THROUGH this container from one that merely
+            # shares an id() with an unrelated guarded value elsewhere.
+            if example_value is not None:
+                self.guard_tree_children.setdefault(id(base_example_value), set()).add(
+                    id(example_value)
+                )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -4471,12 +4480,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
+        guard_tree_children: dict[int, set[int]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
+        # Container id -> ids of the elements a guard is rooted at THROUGH it.
+        # Absent for the pickler-level unit tests, which never root a guard at a
+        # kept container, so an empty map keeps their containers verbatim.
+        self.guard_tree_children = guard_tree_children or {}
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4709,7 +4723,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         if not self._keep(container):
             return False
         if type(container) in (dict, tuple):
-            return not any(self._keep(v) for v in values)
+            # Prune per value only when a guard is rooted at an element THROUGH
+            # this container; an element that is _keep for an unrelated reason
+            # (interned, shared, reachable elsewhere) must not force a prune that
+            # would then break a whole-container guard reading this same slot.
+            children = self.guard_tree_children.get(id(container), ())
+            return not any(id(v) in children for v in values)
         return True
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
@@ -4790,7 +4809,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in raw_annotations.items()
             }
         type_params = getattr(obj, "__type_params__", None)
-        if type_params is not None:
+        if type_params is not None and not self._keep_container_verbatim(
+            type_params, type_params
+        ):
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
@@ -4979,7 +5000,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             and hasattr(obj, "_torch_handler_name")
         ):
             if not hasattr(obj, "_torch_unpickler"):
-                raise AssertionError(
+                # A reducer invariant, not a third-party value we cannot carry:
+                # raise PackageError so the broad catch below stays honest.
+                raise torch._dynamo.exc.PackageError(
                     f"sympy Function subclass {obj} must have _torch_unpickler attribute"
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
@@ -4993,7 +5016,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, torch.SymInt):
-            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot serialize SymInt {obj} (node: {obj.node})"
+            )
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
@@ -5122,14 +5147,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             if obj is not torch.distributed.fsdp._fully_shard.FSDPModule:
                 original_type = obj.__mro__[2]
                 if not issubclass(original_type, torch.nn.Module):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"Expected nn.Module subclass, got {original_type}"
                     )
                 if (
                     original_type
                     not in torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()
                 ):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"{original_type} not found in FSDP cls-to-fsdp-cls mapping"
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
@@ -5383,7 +5408,13 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+    pickler = GuardsStatePickler(
+        guard_tree_values,
+        empty_values,
+        missing_values,
+        buf,
+        guard_tree_children=builder.guard_tree_children,
+    )
 
     # Snapshot the search roots before the pruning below empties global_scope.
     # The diagnostic that names the unpicklable value walks these, so pruning
