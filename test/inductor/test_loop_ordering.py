@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 
 
 # set so that metrics appear
@@ -1992,6 +1992,18 @@ class MemoryCoalescingTest(MockSchedulerTest):
         for expr, expected in test_cases:
             result = tiling_utils.solve_for_zero(expr)
             self.assertEqual(result, expected)
+
+    def test_solve_for_zero_floordiv_does_not_query_constant(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        expr = FloorDiv(Mod(x, 4), 2)
+        with mock.patch.object(
+            FloorDiv,
+            "is_constant",
+            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
+        ):
+            self.assertIsNone(tiling_utils.solve_for_zero(expr))
 
     def test_solve_for_tiling(self):
         from torch._inductor import tiling_utils

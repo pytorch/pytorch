@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName,
+    TemporaryFileName, getRocmVersion,
 )
-from torch.testing._internal.common_cuda import has_device_side_assert
+from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -554,6 +554,28 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
+
+    def test_rocm_version_uses_sdk_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
+            self.assertEqual(getRocmVersion(), (10, 1, 0))
+
+    def test_rocm_version_falls_back_to_hip_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", None),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
+            self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -2811,6 +2833,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.flydsl.intrinsics",  # depends on flydsl
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
@@ -2831,7 +2854,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
-                           "torch.profiler._cupti",  # depends on cupti-python
+                           "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

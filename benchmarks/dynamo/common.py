@@ -2945,11 +2945,13 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
-        niters = 5
+        measure_iters = 5
+        stabilization_iters = 0
         if getattr(self, "hf_llm", False):
             # If we're benchmarking an llm, we want to use the generate function
             self.model_iter_fn = self.generate
-            niters = 1
+            measure_iters = 1
+            stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2957,7 +2959,9 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
-        def warmup(fn, model, example_inputs, mode, niters=5):
+        def warmup(
+            fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
+        ):
             gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
@@ -2968,10 +2972,12 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for _ in range(measure_iters):
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
+                for _ in range(stabilization_iters):
+                    fn(model, example_inputs)
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -2994,14 +3000,6 @@ class BenchmarkRunner:
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
-        # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(model)
-
-        if not hasattr(model, name):
-            model.name = name
-
-        self.init_optimizer(name, current_device, model.parameters())
-
         # The self.autocast context is needed for the model we export with aot_compile,
         # similar to what we do in the check_accuracy function
         ctx = (
@@ -3021,21 +3019,38 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
                 with torch.compiler.set_stance("force_eager"):
-                    eager_latency, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn,
-                        copy.deepcopy(model),
-                        example_inputs,
-                        "eager",
-                        niters=niters,
-                    )
-                    if self.args.use_warm_peak_memory:
-                        _, eager_peak_mem, _ = warmup(
+                    eager_model = self.deepcopy_and_maybe_parallelize(model)
+                    if not hasattr(eager_model, name):
+                        eager_model.name = name
+                    self.init_optimizer(name, current_device, eager_model.parameters())
+                    try:
+                        eager_latency, eager_peak_mem, _ = warmup(
                             self.model_iter_fn,
-                            copy.deepcopy(model),
+                            eager_model,
                             example_inputs,
                             "eager",
-                            niters=1,
+                            measure_iters=measure_iters,
                         )
+                        if self.args.use_warm_peak_memory:
+                            _, eager_peak_mem, _ = warmup(
+                                self.model_iter_fn,
+                                eager_model,
+                                example_inputs,
+                                "eager",
+                                measure_iters=1,
+                            )
+                    finally:
+                        self.optimizer = None
+                        del eager_model
+                        if current_device in ("cuda", "xpu", "mps"):
+                            empty_gpu_cache(current_device)
+
+            # Use a fresh model for the compiled pass. In particular, generate()
+            # can mutate model and cache state during the eager warmup.
+            model = self.deepcopy_and_maybe_parallelize(model)
+            if not hasattr(model, name):
+                model.name = name
+            self.init_optimizer(name, current_device, model.parameters())
 
             if (
                 self.args.export_aot_inductor
@@ -3057,7 +3072,12 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                    optimized_model_iter_fn,
+                    model,
+                    example_inputs,
+                    "dynamo",
+                    measure_iters=measure_iters,
+                    stabilization_iters=stabilization_iters,
                 )
                 if self.args.use_warm_peak_memory:
                     _, dynamo_peak_mem, _ = warmup(
@@ -3065,7 +3085,7 @@ class BenchmarkRunner:
                         model,
                         example_inputs,
                         "dynamo",
-                        niters=1,
+                        measure_iters=1,
                     )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
