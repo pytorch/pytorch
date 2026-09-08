@@ -45,6 +45,19 @@ if TYPE_CHECKING:
     from torchgen.selective_build.selector import SelectiveBuilder
 
 
+# Backends whose structured-kernel class uses a generic OptionalDeviceGuard
+# field (CUDA uses its own OptionalCUDAGuard, handled separately).
+_OPTIONAL_DEVICE_GUARD_KEYS = frozenset(
+    {
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.MPS,  # TODO: Move to OptionalMPSGuard.
+        DispatchKey.XPU,
+        DispatchKey.MTIA,
+        DispatchKey.PrivateUse1,
+    }
+)
+
+
 def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
@@ -104,6 +117,10 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
+    ) or (
+        # Only the structured set_output path uses create_out; don't emit it unused.
+        backend_index.dispatch_key == DispatchKey.PrivateUse1
+        and any(m.structured for m in backend_index.index.values())
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
@@ -366,6 +383,93 @@ class RegisterDispatchKey:
 }}
 """
 
+    def gen_func_inplace_wrapper(
+        self, f: NativeFunction, g: NativeFunctionsGroup | None
+    ) -> str | None:
+        if g is None or g.out is None:
+            return None
+        k = f.func.kind()
+        sig = self.wrapper_kernel_sig(f)
+        # Translate to the .out KERNEL's signature: the raw dispatcher schema is always
+        # symint-typed, but a kernel not declared `symint:` takes int64_t/IntArrayRef.
+        out_sig = kernel_signature(g.out, self.backend_index)
+        out_args_bindings = out_sig.arguments()
+
+        # Separate the bindings into 'non-out' and 'out' for translation
+        # In PyTorch 'out' variants, the out arguments are usually at the end
+        num_out_args = len(g.out.func.arguments.out)
+        out_goal_bindings = (
+            out_args_bindings[:-num_out_args] if num_out_args > 0 else out_args_bindings
+        )
+
+        call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
+        decls: list[str] = []
+        checks: list[str] = []
+        if k is SchemaKind.functional:
+            # No in-tree functional exists for this op, so the kernel is the only authority
+            # on the output dtype: pass undefined outs for it to allocate, and check that it did.
+            outs = [a.name for a in g.out.func.arguments.out]
+            decls = [f"at::Tensor {o};" for o in outs]
+            call_args.extend(outs)
+            checks = [
+                f'TORCH_CHECK({o}.defined(), "{f.func.name}: out-as-primary kernel must '
+                f'allocate an undefined out");'
+                for o in outs
+            ]
+            return_statement = (
+                f"return {outs[0]};"
+                if len(outs) == 1
+                else f"return std::make_tuple({', '.join(outs)});"
+            )
+        else:
+            # Inplace passes 'self' into the 'out' argument slot.
+            self_name = f.func.arguments.self_arg.argument.name
+            call_args.append(self_name)
+            return_statement = f"return {self_name};"
+
+        # Determine the kernel name for the 'out' variant
+        out_meta = self.backend_index.get_kernel(g.out)
+        if out_meta is None:
+            return None
+
+        if self.class_method_name is None:
+            impl_name = f"{out_meta.cpp_namespace}::{out_meta.kernel}"
+        else:
+            impl_name = (
+                f"{out_meta.cpp_namespace}::{self.class_method_name}::{out_meta.kernel}"
+            )
+
+        # Guard like gen_unstructured: the device of the first tensor-like arg,
+        # self -> out -> flat_positional.
+        device_guard = "// DeviceGuard omitted"
+        if f.device_guard and self.backend_index.device_guard and out_meta.device_guard:
+            self_arg = f.func.arguments.self_arg
+            candidate_args = itertools.chain(
+                [self_arg.argument] if self_arg is not None else [],
+                f.func.arguments.out,
+                f.func.arguments.flat_positional,
+            )
+            device_of = next(
+                (a.name for a in candidate_args if a.type.is_tensor_like()), None
+            )
+            if device_of is not None:
+                device_guard = (
+                    f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                )
+
+        body = [
+            device_guard,
+            *decls,
+            f"{impl_name}({', '.join(call_args)});",
+            *checks,
+            return_statement,
+        ]
+        return f"""\
+{sig.defn()} {{
+  {chr(10).join("  " + line if i else line for i, line in enumerate(body))}
+}}
+"""
+
     def gen_structured(self, g: NativeFunctionsGroup) -> list[str]:
         metadata = self.backend_index.get_kernel(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
@@ -403,6 +507,7 @@ class RegisterDispatchKey:
         with native_function_manager(f):
             inplace_meta = False
             gets_out_inplace_wrapper = False
+            gets_func_inplace_wrapper = False
             if not self.backend_index.has_kernel(f):
                 if (
                     self.backend_index.dispatch_key == DispatchKey.Meta
@@ -416,11 +521,53 @@ class RegisterDispatchKey:
                 ):
                     inplace_meta = True
                 elif (
-                    not self.backend_index.use_out_as_primary
+                    self.backend_index.dispatch_key == DispatchKey.PrivateUse1
+                    and self.backend_index.use_out_as_primary
+                    and self.backend_index.external
+                    and g is not None
+                    # A mutable variant writes some arguments and returns the rest; it is
+                    # not derivable from the .out and would register an undefined symbol.
+                    and f.func.kind() in (SchemaKind.functional, SchemaKind.inplace)
+                    and self.backend_index.has_kernel(g.out)
+                    # TensorList out has a runtime count: can't pre-allocate to derive the
+                    # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
+                    and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
+                ):
+                    # A functional that aten already provides -- the structured composite
+                    # (op.meta() + redispatch to this .out) or any other composite kernel --
+                    # is left to it: it computes the output metadata and reaches this .out
+                    # with a defined out, and registering a PrivateUse1 functional would
+                    # shadow it (and, for CompositeImplicitAutograd, bypass autograd).
+                    # Everything else is delegated to the kernel by gen_func_inplace_wrapper.
+                    if f.func.kind() is SchemaKind.functional:
+                        if g.structured or f.has_composite_kernel:
+                            return None
+                        reason = None
+                        if f.func.arguments.tensor_options is not None:
+                            reason = (
+                                "a factory op resolves dtype/layout/device in its functional "
+                                "body and its .out schema has no options argument to carry them"
+                            )
+                        elif len(f.func.returns) != len(g.out.func.arguments.out):
+                            reason = (
+                                "its returns do not map one-to-one onto out arguments"
+                            )
+                        if reason is not None:
+                            raise AssertionError(
+                                f"'{g.out.func.name}' is registered out-as-primary via its "
+                                f"'.out' only, but its functional cannot be derived: {reason}. "
+                                f"Register '{g.functional.func.name}' instead; its '.out' and "
+                                "inplace are then derived from it."
+                            )
+                    gets_func_inplace_wrapper = True
+                elif (
+                    # Out-of-tree only; in-tree keys register their out/inplace explicitly.
+                    self.backend_index.external
                     and g is not None
                     and gets_generated_out_inplace_wrapper(f, g, self.backend_index)
                 ):
                     # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
+                    # Also under use_out_as_primary: primacy follows the variant the backend registered.
                     gets_out_inplace_wrapper = True
                 else:
                     return None
@@ -486,6 +633,8 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 # short circuit for generated inplace/out wrappers
                 if gets_out_inplace_wrapper:
                     return self.gen_out_inplace_wrapper(f, g)
+                elif gets_func_inplace_wrapper:
+                    return self.gen_func_inplace_wrapper(f, g)
 
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
@@ -506,7 +655,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 device_check = "  // No device check\n"
                 # Backends that require device guards presumably also require device checks.
-                if self.backend_index.device_guard:
+                if self.backend_index.device_guard and metadata.device_guard:
                     device_check_args = itertools.chain(
                         f.func.arguments.out, f.func.arguments.flat_positional
                     )
@@ -515,7 +664,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                     )
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and self.backend_index.device_guard:
+                if (
+                    f.device_guard
+                    and self.backend_index.device_guard
+                    and metadata.device_guard
+                ):
                     has_tensor_options = any(
                         isinstance(a, TensorOptionsArguments)
                         for a in f.func.arguments.non_out
@@ -622,6 +775,7 @@ void set_output_{name}(
             DispatchKey.MPS,
             DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
+            DispatchKey.PrivateUse1,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -655,6 +809,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.XPU,
                 DispatchKey.MTIA,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
+                DispatchKey.PrivateUse1,
             ):
                 raise AssertionError(
                     f"Unexpected dispatch key {self.backend_index.dispatch_key} "
@@ -720,17 +875,7 @@ resize_out(out, sizes, strides, options);
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif (
-            self.backend_index.dispatch_key
-            == DispatchKey.CompositeExplicitAutogradNonFunctional
-        ):
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            # TODO: Move to OptionalMPSGuard.
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.XPU:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
+        elif self.backend_index.dispatch_key in _OPTIONAL_DEVICE_GUARD_KEYS:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -834,7 +979,10 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
             context: list[Binding | Expr] = list(sig.arguments())
 
             # Initialize the class corresponding to this structured
-            # operator; feeding it the output argument(s) if it is known
+            # operator; feeding it the output argument(s) if it is known.
+            # Fetched once up front; stays None for the Meta and
+            # CompositeExplicitAutogradNonFunctional dispatch keys.
+            metadata = self.backend_index.get_kernel(self.g)
             if self.backend_index.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
@@ -845,8 +993,14 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
+            elif self.backend_index.external and self.class_method_name is not None:
+                if metadata is None:
+                    raise AssertionError(
+                        f"No kernel metadata found for {self.g.functional.func.name}"
+                    )
+                class_name = f"structured_{metadata.kernel}_{k.name}"
+                parent_class = f"{metadata.cpp_namespace}::{self.class_method_name}::structured_{metadata.kernel}"
             else:
-                metadata = self.backend_index.get_kernel(self.g)
                 if metadata is None:
                     raise AssertionError(
                         f"No kernel metadata found for {self.g.functional.func.name}"
@@ -854,7 +1008,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
-            if self.backend_index.device_guard:
+            if (
+                self.backend_index.device_guard
+                and metadata is not None
+                and metadata.device_guard
+            ):
                 device_check_args = itertools.chain(
                     f.func.arguments.out, f.func.arguments.flat_positional
                 )
