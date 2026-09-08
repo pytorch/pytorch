@@ -1381,6 +1381,8 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
+        # Container id -> ids of elements a guard source is rooted at THROUGH it.
+        self.guard_tree_children: dict[int, set[int]] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1728,6 +1730,13 @@ class GuardBuilder(GuardBuilderBase):
             base_guard_manager_enum = self.get_guard_manager_type(
                 source.base, base_example_value
             )
+            # Record the container->element edge so _keep_container_verbatim can
+            # tell an element guarded THROUGH this container from one that merely
+            # shares an id() with an unrelated guarded value elsewhere.
+            if example_value is not None:
+                self.guard_tree_children.setdefault(id(base_example_value), set()).add(
+                    id(example_value)
+                )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -4159,12 +4168,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
+        guard_tree_children: dict[int, set[int]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
+        # Container id -> ids of the elements a guard is rooted at THROUGH it.
+        # Absent for the pickler-level unit tests, which never root a guard at a
+        # kept container, so an empty map keeps their containers verbatim.
+        self.guard_tree_children = guard_tree_children or {}
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4334,7 +4348,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         if not self._keep(container):
             return False
         if type(container) in (dict, tuple):
-            return not any(self._keep(v) for v in values)
+            # Prune per value only when a guard is rooted at an element THROUGH
+            # this container; an element that is _keep for an unrelated reason
+            # (interned, shared, reachable elsewhere) must not force a prune that
+            # would then break a whole-container guard reading this same slot.
+            children = self.guard_tree_children.get(id(container), ())
+            return not any(id(v) in children for v in values)
         return True
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
@@ -4415,7 +4434,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in raw_annotations.items()
             }
         type_params = getattr(obj, "__type_params__", None)
-        if type_params is not None:
+        if type_params is not None and not self._keep_container_verbatim(
+            type_params, type_params
+        ):
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
@@ -4710,7 +4731,13 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+    pickler = GuardsStatePickler(
+        guard_tree_values,
+        empty_values,
+        missing_values,
+        buf,
+        guard_tree_children=builder.guard_tree_children,
+    )
 
     if all(
         torch.compiler.keep_portable_guards_unsafe(
