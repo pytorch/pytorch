@@ -1341,10 +1341,10 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
         output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
       }
       output_memory_size /= iter.element_size(0); //iter.strides is in bytes
-      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(out_scalar_t), //TODO
+      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
                                                  sizeof(out_scalar_t),
                                                  (char*) iter.data_ptr(0),
-                                                 output_memory_size * sizeof(out_scalar_t))); //TODO
+                                                 output_memory_size * sizeof(arg_t)));
     } else {
       owned_buf_ptr.reset(new AccumulationBuffer());
     }
