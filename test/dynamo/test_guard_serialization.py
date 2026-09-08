@@ -1595,7 +1595,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # without strict_precompile), never a raw RecursionError that hard-fails
         # a program that compiled fine before.
         mod = DecoratedRecursingGuardedDefaultForwardModule()
-        with self.assertRaises(torch._dynamo.exc.PackageError):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.PackageError, "exceeded the recursion limit"
+        ):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
