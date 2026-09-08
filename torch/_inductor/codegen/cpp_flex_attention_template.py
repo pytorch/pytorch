@@ -192,50 +192,35 @@ inline void {{kernel_name}}_online_softmax_row(
 """
 
 BRGEMM_PACK_FUNCTIONS = r"""
-// Copy [rows, cols] -> [prows, pcols], zero-filling the row/column padding.
-// With do_scale, `scale` is folded into the copy. The AMX path uses that to pre-scale Q.
-// Non AMX paths pass do_scale = false and only pad.
-template <bool do_scale, typename scalar_t, typename accum_t>
+template <typename scalar_t>
 inline void {{kernel_name}}_copy_value_with_pad(
     const scalar_t* value_ptr,
     scalar_t* dst_ptr,
-    accum_t scale,
     int64_t rows,
     int64_t cols,
     int64_t prows,
     int64_t pcols,
     int64_t ldi) {
-  using Vec = at::vec::Vectorized<scalar_t>;
-  auto vec_size = Vec::size();
-  // accum_t == scalar_t off the reduced-dtype path, so this serves both branches.
-  auto vec_scale = at::vec::Vectorized<accum_t>(scale);
-  auto maybe_scale = [vec_scale](Vec v) {
-    if constexpr (!do_scale) {
-      return v;
-    } else if constexpr (c10::is_reduced_floating_point_v<scalar_t>) {
-      auto [v0, v1] = at::vec::convert_to_float<scalar_t>(v);
-      return at::vec::convert_from_float<scalar_t>(v0 * vec_scale, v1 * vec_scale);
-    } else {
-      return v * vec_scale;
-    }
-  };
+  auto vec_size = at::vec::Vectorized<scalar_t>::size();
   int64_t i = 0;
   for (; i < rows; i++) {
     int64_t j = 0;
     for (; j < cols - (cols % vec_size); j += vec_size) {
-      auto vec_v = Vec::loadu(value_ptr + i * ldi + j);
-      maybe_scale(vec_v).store(dst_ptr + i * pcols + j);
+      auto vec_v =
+          at::vec::Vectorized<scalar_t>::loadu(value_ptr + i * ldi + j);
+      vec_v.store(dst_ptr + i * pcols + j);
     }
 
     if (j < cols) {
-      auto vec_v = Vec::loadu(value_ptr + i * ldi + j, cols - j);
-      maybe_scale(vec_v).store(dst_ptr + i * pcols + j, cols - j);
+      auto vec_v = at::vec::Vectorized<scalar_t>::loadu(
+          value_ptr + i * ldi + j, cols - j);
+      vec_v.store(dst_ptr + i * pcols + j, cols - j);
     }
 
     // col padding
     auto psize = pcols - cols;
     if (psize > 0) {
-      auto zero_vec = Vec(0);
+      auto zero_vec = at::vec::Vectorized<scalar_t>(0);
       int64_t pj = 0;
       for (; pj < psize - (psize % vec_size); pj += vec_size) {
         zero_vec.store(dst_ptr + i * pcols + cols + pj);
@@ -247,7 +232,7 @@ inline void {{kernel_name}}_copy_value_with_pad(
   }
   // row padding
   for (; i < prows; i++) {
-    auto zero_vec = Vec(0);
+    auto zero_vec = at::vec::Vectorized<scalar_t>(0);
     int64_t j = 0;
     for (; j < pcols - (pcols % vec_size); j += vec_size) {
       zero_vec.store(dst_ptr + i * pcols + j);
@@ -512,7 +497,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
     accum_t* amx_score_buf[2] = {
         qk_data_buf,
         use_amx_overlap ? qk_data2_data + ompIdx * eqSplitSize * kvSplitSize : nullptr};
-    scalar_t* scaled_q_ptr = use_amx_overlap
+    scalar_t* amx_q_ptr = use_amx_overlap
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
 {%- endif %}
@@ -554,12 +539,11 @@ FLEX_ATTENTION_TEMPLATE = r"""
         auto q_block_ptr = q_data + i * qStrideB + j * qStrideH + m * qStrideM;
         if (use_amx_overlap) {
 {%- if amx_supported %}
-          // Pre-scale Q and round the rows up to a multiple of 16 so the AMX
-          // Q@K^T reads whole A tiles.
-          {{kernel.kernel_name}}_copy_value_with_pad<true>(
+          // Round the rows up to a multiple of 16 so the AMX Q@K^T reads whole
+          // A tiles.
+          {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
             q_block_ptr,
-            scaled_q_ptr,
-            scaling_factor,
+            amx_q_ptr,
             cur_qSplitSize,
             headSize,
             (cur_qSplitSize + 15) / 16 * 16,
@@ -568,10 +552,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
 {%- endif %}
         } else if (!headSize_even && need_pack) {
           // Pad query if headSize is not even
-          {{kernel.kernel_name}}_copy_value_with_pad<false>(
+          {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
             q_block_ptr,
             query_t_padding_ptr,
-            static_cast<accum_t>(1),
             cur_qSplitSize,
             headSize,
             cur_qSplitSize,
@@ -676,7 +659,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
           // Execute the GEMM and Softmax
           {{kernel.kernel_name}}_amx_gemm_cb<false>(
               amx_state,
-              reinterpret_cast<const uint16_t*>(scaled_q_ptr),
+              reinterpret_cast<const uint16_t*>(amx_q_ptr),
               reinterpret_cast<const uint16_t*>(
                   key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
                   j_kv * eheadSize * kvSize + n * eheadSize),
@@ -728,11 +711,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
               need_pack);
         }
 
-        // scale already folded into Q for the AMX path; only the brgemm/micro-gemm
-        // paths still need the explicit score scaling here.
-        if (!amx_this_block) {
-          {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
-        }
+        {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
 {%- if score_mod and mask_mod %}
         // TODO: reduce the number of calls of q_idx and kv_idx initialization

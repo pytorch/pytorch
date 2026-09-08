@@ -64,7 +64,7 @@ inline void {{kernel_name}}_amx_block32(
 }
 
 // 16-row variant: C[NROWS<=16,32] (+)= A[NROWS,K] @ Bp[K,32]. Covers the final
-// 1..32 rows of a panel (a <16 remainder was zero-padded up to 16 by scale_q).
+// 1..32 rows of a panel (a <16 remainder was zero-padded up to 16 in the A copy).
 // Uses a single A tile (16 rows) x 2 B tiles (32 columns).
 template <bool accum, typename CB>
 inline void {{kernel_name}}_amx_block16(
