@@ -419,11 +419,13 @@ def collect_memory_snapshot(
         print(f"Memory snapshot is not supported on {acc.type}, skipping")
         return
 
-    mem_mod._record_memory_history(max_entries=100000)
-    benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
     snapshot_path = f"{tempfile.gettempdir()}/memory_snapshot.pickle"
-    mem_mod._dump_snapshot(snapshot_path)
-    mem_mod._record_memory_history(enabled=None)
+    mem_mod._record_memory_history(max_entries=100000)
+    try:
+        benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
+        mem_mod._dump_snapshot(snapshot_path)
+    finally:
+        mem_mod._record_memory_history(enabled=None)
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
@@ -459,13 +461,18 @@ def compiled_module_main(
     )
     parser.add_argument(
         "--memory-snapshot",
-        "--cuda-memory-snapshot",
         action="store_true",
         help="""
             Whether to collect accelerator memory snapshot. Refer to
             "https://pytorch.org/blog/understanding-gpu-memory-1/
             for details about how to visualize the collected snapshot
         """,
+    )
+    parser.add_argument(
+        "--cuda-memory-snapshot",
+        dest="memory_snapshot",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--ncu",
