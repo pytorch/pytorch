@@ -20,7 +20,7 @@ import types
 import unittest
 import warnings
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
@@ -2000,6 +2000,68 @@ class TestProfiler(TestCase):
             ) as prof:
                 payload()
             validate_json(prof, gc_flag)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("device_type", [DeviceType.CUDA, DeviceType.XPU])
+    @parametrize("backend_type", ["runtime", "driver", "overhead"])
+    @parametrize("owner_type", ["cpu_op", "user_annotation"])
+    def test_parse_kineto_results_correlation_id_collision(
+        self, device_type, backend_type, owner_type
+    ):
+        with _profile(use_kineto=True) as p:
+            with record_function("frontend"):
+                pass
+
+        # Preserve real Kineto defaults, but force a collision independent of the
+        # backend's ID allocation and of any earlier profiling sessions.
+        template = next(e for e in p.kineto_results.events() if e.name() == "frontend")
+        owner = Mock(wraps=template)
+        owner.correlation_id.return_value = 7
+        owner.linked_correlation_id.return_value = 0
+        owner.external_id.return_value = 7
+        owner.activity_type.return_value = owner_type
+        owner.is_user_annotation.return_value = owner_type == "user_annotation"
+
+        backend = Mock(wraps=template)
+        backend.name.return_value = "backend"
+        backend.correlation_id.return_value = 7
+        backend.linked_correlation_id.return_value = 0
+        backend.external_id.return_value = 0
+        prefix = "cuda" if device_type == DeviceType.CUDA else "xpu"
+        activity = (
+            "overhead" if backend_type == "overhead" else f"{prefix}_{backend_type}"
+        )
+        backend.activity_type.return_value = activity
+        backend.is_user_annotation.return_value = False
+
+        device = Mock(wraps=template)
+        device.name.return_value = "device_activity"
+        device.correlation_id.return_value = 99
+        device.linked_correlation_id.return_value = 7
+        device.external_id.return_value = 7
+        device.device_type.return_value = device_type
+        device.device_index.return_value = 0
+        device.activity_type.return_value = (
+            "gpu_user_annotation" if owner_type == "user_annotation" else "kernel"
+        )
+        device.end_ns.return_value = template.start_ns() + 100_000
+
+        result = Mock(wraps=p.kineto_results)
+        result.events.return_value = [backend, device, owner]
+        events = p._parse_kineto_results(result)
+        self.assertEqual(len(events), 3)
+        by_name = {e.name: e for e in events}
+        self.assertEqual(by_name["backend"].kernels, [])
+        self.assertEqual(by_name["device_activity"].kernels, [])
+        self.assertEqual(len(by_name["frontend"].kernels), 1)
+        kernel = by_name["frontend"].kernels[0]
+        self.assertEqual(
+            (kernel.name, kernel.device, kernel.duration), ("device_activity", 0, 100)
+        )
+        self.assertEqual(
+            by_name["backend"].cpu_time_total,
+            (template.end_ns() - template.start_ns()) / 1000,
+        )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_parse_kineto_results_timeout_none(self):
