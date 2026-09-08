@@ -83,10 +83,19 @@ def _wrap(fn, i, args, error_file):
     # terminate if their parent terminates before they do.
     _prctl_pr_set_pdeathsig(signal.SIGINT)
 
+    parent_pid = os.getppid()
+
     try:
         fn(i, *args)
     except KeyboardInterrupt:
-        pass  # SIGINT; Killed by parent, do nothing
+        # Parent died (pdeathsig SIGINT): exit quietly. Otherwise report
+        # it like any other failure instead of faking success.
+        if os.getppid() == parent_pid:
+            import traceback
+
+            with open(error_file, "wb") as fh:
+                pickle.dump(traceback.format_exc(), fh)
+            sys.exit(128 + signal.SIGINT)
     except Exception:
         # Propagate exception to parent process, keeping original traceback
         import traceback

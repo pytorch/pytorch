@@ -102,8 +102,9 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.contains(deviceType)) {
-    return deviceTypeToBackend_.at(deviceType);
+  if (auto it = deviceTypeToBackend_.find(deviceType);
+      it != deviceTypeToBackend_.end()) {
+    return it->second;
   }
 
   // Get the backend type associated with the device
@@ -116,8 +117,9 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.contains(backendType)) {
-    auto backend = backendTypeToBackend_.at(backendType);
+  if (auto it = backendTypeToBackend_.find(backendType);
+      it != backendTypeToBackend_.end()) {
+    auto backend = it->second;
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   }
@@ -222,6 +224,19 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
         defaultBackendIt != deviceTypeToBackendType_.end() &&
             deviceTypeFilter.contains(defaultBackendIt->first),
         "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
+  std::unordered_set<BackendType> validatedBackendTypes;
+  for (const auto& [deviceType, backendType] : deviceTypeToBackendType_) {
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
+    if (!validatedBackendTypes.insert(backendType).second) {
+      continue;
+    }
+    TORCH_CHECK(
+        getBackend(deviceType)->isInitialized(),
+        "Parent process group backend is not initialized; pass device_id "
+        "when creating it or run a collective before split_group");
   }
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
