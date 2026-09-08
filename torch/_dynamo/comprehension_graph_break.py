@@ -6,13 +6,12 @@ import dis
 import functools
 import logging
 import sys
+from collections import Counter
 from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     import types
-
-    from collections.abc import Callable
 
     from .symbolic_convert import InstructionTranslatorBase
 
@@ -26,6 +25,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
+from .graph_break_hints import DYNAMO_BUG
 from .output_graph import GraphCompileReason, StackLocalsMetadata
 from .variables.misc import NullVariable, UnknownVariable
 
@@ -51,75 +51,6 @@ def _get_comprehension_bytecode_prefix() -> list[str]:
     end_idx = insts.index("BUILD_LIST")
 
     return insts[start_idx:end_idx]
-
-
-@functools.cache
-def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
-    """Discover bytecode patterns for comprehension result handling.
-
-    Analyzes sample functions to extract the opcode sequences that appear
-    after END_FOR for each result disposition (stored, discarded, returned, consumed).
-
-    Returns patterns with:
-        - pre_store_ops: opcodes between END_FOR and first STORE_FAST
-        - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
-    """
-    if sys.version_info < (3, 12):
-        raise AssertionError(
-            f"comprehension result patterns require Python 3.12+, got {sys.version_info}"
-        )
-
-    def fn_stored() -> list[int]:
-        result = [i for i in range(1)]  # noqa: C416
-        return result
-
-    def fn_discarded() -> int:
-        [i for i in range(1)]  # noqa: C416
-        return 1
-
-    def fn_returned() -> list[int]:
-        return [i for i in range(1)]  # noqa: C416
-
-    def fn_consumed() -> int:
-        return sum([i for i in range(1)])  # noqa: C416
-
-    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], str | None]:
-        """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
-        target_line = list(dis.findlinestarts(fn.__code__))[1][1]
-        insts: list[str] = []
-        started = False
-        for instr in dis.get_instructions(fn):
-            if started and instr.starts_line:
-                break
-            pos = instr.positions
-            if pos and pos.lineno == target_line:
-                started = started or bool(instr.starts_line)
-                insts.append(instr.opname)
-
-        ops = insts[insts.index("END_FOR") + 1 :]
-        idx = 0
-
-        pre_store_ops = []
-        while idx < len(ops) and ops[idx] != "STORE_FAST":
-            pre_store_ops.append(ops[idx])
-            idx += 1
-
-        while idx < len(ops) and ops[idx] == "STORE_FAST":
-            idx += 1
-
-        return pre_store_ops, ops[idx] if idx < len(ops) else None
-
-    stored = extract_pattern(fn_stored)
-    discarded = extract_pattern(fn_discarded)
-    returned = extract_pattern(fn_returned)
-    consumed = extract_pattern(fn_consumed)
-
-    return {
-        "stored": {"pre_store_ops": stored[0], "post_store_op": stored[1]},
-        "discarded": {"pre_store_ops": discarded[0], "post_store_op": discarded[1]},
-        "returned": {"pre_store_ops": returned[0], "post_store_op": returned[1]},
-        "consumed": {"pre_store_ops": consumed[0], "post_store_op": []},
-    }
 
 
 @dataclasses.dataclass
@@ -194,7 +125,6 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
     if tx.instruction_pointer is None:
         raise AssertionError("instruction_pointer must not be None")
 
-    patterns = _get_comprehension_result_patterns()
     start_ip = tx.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
 
     iterator_vars: list[str] = []
@@ -260,6 +190,11 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
     # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
     pre_store_ops: list[str] = []
     scan_ip = end_for_ip + 1
+    # In 3.13 END_FOR is followed by POP_TOP to pop the iter.  In 3.12, END_FOR is responsible for doing the pop, and in
+    # 3.14+ POP_ITER is used instead.  We skip over the mandatory POP_TOP in 3.13 to avoid confusing the analysis below
+    # (which looks for an additional POP_TOP if the result is discarded).
+    if sys.version_info[:2] == (3, 13):
+        scan_ip += 1
     while (
         scan_ip < len(tx.instructions)
         and tx.instructions[scan_ip].opname != "STORE_FAST"
@@ -269,40 +204,54 @@ def _analyze_comprehension(tx: InstructionTranslatorBase) -> ComprehensionAnalys
 
     store_fast_ip = scan_ip
 
-    # Skip all STORE_FASTs to find post_store_op
+    # Skip all STORE_FASTs (iteration-variable restores plus an optional result
+    # assignment) to find the end of the comprehension epilogue.
     while (
         scan_ip < len(tx.instructions)
         and tx.instructions[scan_ip].opname == "STORE_FAST"
     ):
         scan_ip += 1
 
-    post_store_op = (
-        tx.instructions[scan_ip].opname if scan_ip < len(tx.instructions) else None
+    # The comprehension epilogue always restores the iteration variables that
+    # were saved by LOAD_FAST_AND_CLEAR (one STORE_FAST each). The disposition
+    # of the result is determined relative to those restores:
+    #   - a POP_TOP right after the loop teardown discards the result
+    #     (bare statement)
+    #   - one extra STORE_FAST beyond the iteration vars is a result
+    #     assignment (the extra store may reuse an iteration var's name)
+    #   - no extra store leaves the result on the stack (returned/consumed)
+    # We use this to classify the handling of the result as discarded, stored,
+    # or returned/consumed
+    n_iter = len(iterator_vars)
+    store_targets = Counter(
+        tx.instructions[i].argval for i in range(store_fast_ip, scan_ip)
     )
 
-    def matches(name: str) -> bool:
-        pat = patterns[name]
-        return pre_store_ops == pat["pre_store_ops"] and (
-            post_store_op == pat["post_store_op"] or not pat["post_store_op"]
-        )
-
     result_var: str | None = None
-    if matches("stored"):
-        result_var = tx.instructions[store_fast_ip].argval
-        result_on_stack = False
-    elif matches("discarded"):
+    if pre_store_ops[-1:] == ["POP_TOP"]:  # discarded
         result_var = None
         result_on_stack = False
-        scan_ip = scan_ip + 1 if patterns["discarded"]["post_store_op"] else scan_ip
-    elif matches("returned") or pre_store_ops == patterns["consumed"]["pre_store_ops"]:
+    elif store_targets.total() > n_iter:  # stored
+        store_targets.subtract(iterator_vars)
+        if store_targets.total() != 1:
+            unimplemented(
+                gb_type="Comprehension analysis failed: ambiguous result store",
+                context=f"store_targets={store_targets}, iterator_vars={iterator_vars}",
+                explanation="Expected exactly one comprehension result assignment.",
+                hints=DYNAMO_BUG,
+            )
+        result_var = next(iter(store_targets))
+        result_on_stack = False
+    elif store_targets.total() == n_iter:  # returned/consumed
         result_var = None
         result_on_stack = True
     else:
         unimplemented(
             gb_type="Comprehension analysis failed: No matches",
-            context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+            context=f"pre_store_ops={pre_store_ops}, store_targets={store_targets}, "
+            f"iterator_vars={iterator_vars}",
             explanation="Comprehension does not match any known bytecode pattern.",
-            hints=[],
+            hints=DYNAMO_BUG,
         )
 
     return ComprehensionAnalysis(
@@ -452,6 +401,12 @@ def _handle_comprehension_graph_break(
         if var_name in meta.locals_names:
             existing_vars[var_name] = meta.locals_names[var_name]
         else:
+            # The var was cleared to NULL at the break (e.g. a comprehension
+            # iteration variable reused as the result target). We are binding
+            # it to a real value, so drop the NULL restoration; otherwise the
+            # resume function would reset it to NULL and clobber the result.
+            if var_name in meta.locals_null_keys:
+                meta.locals_null_keys.remove(var_name)
             meta.locals_names[var_name] = len(meta.locals_names)
 
     fv_depth = live_stack_depth + 2  # comp_result + frame_values

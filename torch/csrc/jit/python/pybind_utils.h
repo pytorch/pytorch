@@ -181,7 +181,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }
@@ -207,7 +207,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }

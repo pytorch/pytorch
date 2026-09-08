@@ -152,7 +152,7 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: frozenset[str] | None = None
+    dynamism: frozenset[tuple[str, tuple[bool, ...]]] | None = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
@@ -389,9 +389,9 @@ class TypeDictSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
-        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
-        # registers that its working on a dict object.
+        # registers that it's working on a dict object.
         return "dict({0}.__dict__)"
 
 
@@ -1183,6 +1183,27 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+# Guard-only source that yields the inner tensor of an AsyncCollectiveTensor
+# (ACT) and the base value unchanged for a plain Tensor. Used to guard on the
+# unwrapped tensor so a graph traced on an ACT can be reused when the resolved
+# plain Tensor is passed at runtime. See
+# torch._dynamo.variables.builder.VariableBuilder.wrap_tensor.
+@dataclass_with_cached_hash(frozen=True)
+class UnwrapCollectiveTensorSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.guards", "unwrap_async_collective_tensor"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "___unwrap_async_collective_tensor({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)
@@ -1332,6 +1353,15 @@ def is_from_source(source: Source, target: Source) -> bool:
         return True
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
+    return False
+
+
+@functools.lru_cache
+def is_from_attr_proxy_source(source: Source) -> bool:
+    if isinstance(source, AttrProxySource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_attr_proxy_source(source.base)
     return False
 
 

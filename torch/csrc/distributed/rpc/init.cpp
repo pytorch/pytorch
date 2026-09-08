@@ -33,14 +33,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
-  if (!rpc_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(rpc_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -249,7 +245,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               R"(
                   Returns whether this ``RRef`` has been confirmed by the owner.
                   ``OwnerRRef`` always returns true, while ``UserRRef`` only
-                  returns true when the owner knowns about this ``UserRRef``.
+                  returns true when the owner knows about this ``UserRRef``.
               )")
           .def(
               // not releasing GIL here to avoid context switch on getters
@@ -829,7 +825,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
             result must be sent over RPC and get unpickled on the receiving side
             to restore the module. Otherwise, there will be RRef leaks, which
             can potentially lead to program hang. When using this API, it is
-            applications responsibility to make sure that the above assumption
+            the application's responsibility to make sure that the above assumption
             always holds.
       )");
   module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);

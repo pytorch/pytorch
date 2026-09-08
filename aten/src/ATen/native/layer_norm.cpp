@@ -3,7 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
@@ -53,6 +52,7 @@ static void layer_norm_with_mean_rstd_out(
   const size_t axis = input.dim() - normalized_shape.size();
 
   DimVector stat_shape;
+  stat_shape.reserve(input.dim());
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }

@@ -684,7 +684,7 @@ def is_caffe2_gpu_file(rel_filepath):
 
 
 class TrieNode:
-    """A Trie node whose children are represented as a directory of char: TrieNode.
+    """A Trie node whose children are represented as a dictionary of char: TrieNode.
        A special char '' represents end of word
     """
 

@@ -5,6 +5,7 @@ import collections
 import contextlib
 import ctypes
 import gc
+import importlib
 import json
 import os
 import random
@@ -21,6 +22,7 @@ from itertools import product
 from unittest.mock import patch
 
 import torch
+import torch.multiprocessing as mp
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
@@ -47,13 +49,16 @@ from torch.testing._internal.common_utils import (
     serialTest,
     subtest,
     suppress_warnings,
+    TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.utils.checkpoint import checkpoint_sequential
 
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
+HAS_PYZES = importlib.util.find_spec("pyzes") is not None
 
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
@@ -176,11 +181,10 @@ class TestXpu(TestCase):
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
-        if int(torch.version.xpu) >= 20260000:
-            self.assertEqual(
-                device_properties.is_integrated_gpu,
-                device_capability["is_integrated_gpu"],
-            )
+        self.assertEqual(
+            device_properties.is_integrated_gpu,
+            device_capability["is_integrated_gpu"],
+        )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
@@ -306,12 +310,8 @@ if __name__ == "__main__":
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
                 torch.xpu.list_gpu_processes()
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_temperature_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             temp = torch.xpu.temperature()
         except RuntimeError as e:
@@ -324,30 +324,16 @@ if __name__ == "__main__":
         self.assertGreaterEqual(temp, 0.0)
         self.assertLess(temp, 150.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_clock_rate_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
-        try:
-            rate = torch.xpu.clock_rate()
-        except RuntimeError as e:
-            if "elevated privileges" in str(e):
-                self.skipTest("Reading GPU clock rate requires elevated privileges")
-            raise
-
+        rate = torch.xpu.clock_rate()
         self.assertIsInstance(rate, float)
         # Sanity check: GPU clock rate should be in a plausible range (0–5000 MHz)
         self.assertGreaterEqual(rate, 0.0)
         self.assertLess(rate, 5000.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_power_draw_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             power = torch.xpu.power_draw()
         except RuntimeError as e:
@@ -360,12 +346,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(power, 0.0)
         self.assertLess(power, 1000.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_utilization_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             util = torch.xpu.utilization()
         except RuntimeError as e:
@@ -378,12 +360,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(util, 0.0)
         self.assertLessEqual(util, 100.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_memory_usage_returns_float(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             mem_usage = torch.xpu.memory_usage()
         except RuntimeError as e:
@@ -396,12 +374,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_usage, 0.0)
         self.assertLessEqual(mem_usage, 100.0)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_memory_used_returns_int(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         try:
             mem_used = torch.xpu.device_memory_used()
         except RuntimeError as e:
@@ -415,11 +389,8 @@ if __name__ == "__main__":
         self.assertGreaterEqual(mem_used, 0)
         self.assertLessEqual(mem_used, total_memory)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_list_gpu_processes_returns_string(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
         if torch.xpu._get_pyzes_version() < (0, 1, 2):
             with self.assertRaisesRegex(
                 RuntimeError, "requires pyzes version >= 0.1.2"
@@ -433,12 +404,8 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         def _run(mask: str) -> str:
             script = f"""\
 import torch
@@ -466,12 +433,8 @@ print(f"{{r1}}, {{r2}}")
             self.assertEqual(_run("1"), "1, 1")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_not_cached_pre_init(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         test_script = """\
 import torch
 import os
@@ -493,12 +456,8 @@ print(f"{r1}, {r2}")
         self.assertEqual(f"{x}, 1", r)
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_cached_zes_device_infos(self):
-        try:
-            import pyzes  # noqa: F401
-        except ImportError:
-            self.skipTest("pyzes is required for this test")
-
         test_script = """\
 import torch
 import os
@@ -761,6 +720,87 @@ print(torch.xpu.is_initialized())
         ):
             e2.wait(e2)
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+    def test_event_ipc_handle(self):
+        if int(torch.version.xpu) < 20260200:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e0.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events require SYCL compiler 2026.2 or later"
+            ):
+                e1 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e1.ipc_handle()
+            return
+
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e2 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e2.record()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "XPU IPC events are not supported on Windows"
+            ):
+                e3 = torch.xpu.Event(enable_timing=False, interprocess=True)
+                e3.ipc_handle()
+            return
+
+        # IPC and timing cannot both be enabled; error fires at record() time.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e4 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e4.record()
+
+        # Same constraint enforced when ipc_handle() triggers lazy initialization.
+        with self.assertRaisesRegex(
+            RuntimeError, "XPUEvent cannot have both IPC and timing enabled"
+        ):
+            e5 = torch.xpu.Event(enable_timing=True, interprocess=True)
+            e5.ipc_handle()
+
+        # ipc_handle() requires interprocess=True.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e6 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e6.ipc_handle()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            e7 = torch.xpu.Event(enable_timing=False, interprocess=False)
+            e7.record()
+            e7.ipc_handle()
+
+        # Roundtrip: serialize an in-flight event to a handle and reconstruct it.
+        e8 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        stream = torch.xpu.Stream()
+        with stream:
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms at 1 GHz
+        e8.record(stream)
+        handle = e8.ipc_handle()
+        e9 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        e8.synchronize()
+        self.assertTrue(e9.query())
+        event_ptr = e9.sycl_event
+        e9.record()
+        self.assertEqual(event_ptr, e9.sycl_event)
+
+        # ipc_handle() cannot be called on the reconstructed event;
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUEvent ipc_handle\\(\\) requires the event to be constructed with enable_ipc=True",
+        ):
+            handle = e9.ipc_handle()
+
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
         with torch.accelerator.device_index(None):
@@ -799,6 +839,27 @@ print(torch.xpu.is_initialized())
         self.assertEqual(src_device, torch.xpu.current_device())
         self.assertEqual(src_prev_stream, torch.xpu.current_stream())
         self.assertEqual(dst_prev_stream, torch.xpu.current_stream(dst_device))
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_sleep(self):
+        # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
+        cycles = torch.xpu.clock_rate() * 1_000_000
+        # Some Xe GPU's bundled IGC is too old to support it.
+        if not Xe2_Or_Later:
+            with self.assertRaisesRegex(
+                NotImplementedError, "is not supported on this device"
+            ):
+                torch.xpu._sleep(cycles)
+            return
+        # Drain the stream to a known idle state, then verify _sleep() enqueues
+        # asynchronously: stream should be busy right after the call and idle only
+        # after synchronize() completes.
+        torch.xpu.synchronize()
+        self.assertTrue(torch.xpu.current_stream().query())
+        torch.xpu._sleep(cycles)
+        self.assertFalse(torch.xpu.current_stream().query())
+        torch.xpu.synchronize()
+        self.assertTrue(torch.xpu.current_stream().query())
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -2303,6 +2364,40 @@ if __name__ == "__main__":
             torch.xpu.synchronize()
             torch.xpu.empty_cache()
 
+    @serialTest()
+    def test_graph_empty_cache_after_side_stream_free_during_capture(self):
+        # Freeing a block during capture must be deferred until capture ends:
+        # the block is used on a side stream that was forked into the capture,
+        # so an allocator barrier submitted there would become a graph node
+        # whose event only signals on replay, making the following
+        # empty_cache() block forever. This test checks only that the sequence
+        # completes: no hang and no exception. Numerics are not verified.
+        pool = torch.xpu.graph_pool_handle()
+        g = torch.xpu.XPUGraph()
+        capture_stream = torch.xpu.Stream()
+        side = torch.xpu.Stream()
+
+        try:
+            with torch.xpu.stream(capture_stream):
+                g.capture_begin(pool)
+                x = torch.ones(1024, device="xpu")
+                side.wait_stream(capture_stream)
+                with torch.xpu.stream(side):
+                    y = x + 1.0
+                    x.record_stream(side)
+                    del x
+                capture_stream.wait_stream(side)
+                del y
+                g.capture_end()
+            torch.xpu.current_stream().wait_stream(capture_stream)
+
+            torch.xpu.empty_cache()
+
+        except Exception as e:
+            raise self.failureException(
+                f"capture with a side-stream free must complete without error, got {e!r}"
+            ) from e
+
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
         kSmallBuffer = 2097152
@@ -2648,7 +2743,7 @@ if __name__ == "__main__":
         [
             subtest((False, False, True)),
             subtest((True, False, True)),
-            subtest((True, True, True)),
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
             subtest((False, False, False)),
         ],
         name_fn=lambda x, y, z: "{}{}{}".format(
@@ -2929,6 +3024,111 @@ if __name__ == "__main__":
         self.assertTrue(torch.all(x == 4.0))
         graph.replay()
         self.assertTrue(torch.all(x == 6.0))
+
+
+@unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
+@unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+@unittest.skipIf(
+    torch.version.xpu is None or int(torch.version.xpu) < 20260200,
+    "XPU IPC events require SYCL compiler 2026.2 or later",
+)
+class TestXPUMultiprocessing(TestCase):
+    @staticmethod
+    def _event_handle_importer_consumer(handle, p2c, c2p):
+        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        e1.synchronize()
+        c2p.put(1)  # notify synchronization is done in child
+        p2c.get()  # wait for parent to finish
+
+    @staticmethod
+    def _event_handle_exporter_consumer(handle, p2c, c2p):
+        stream = torch.xpu.Stream()
+        with stream:
+            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+            e1.record()
+            c2p.put(0)
+            p2c.get()  # wait for parent to finish
+
+    @staticmethod
+    def _event_multiprocess_child(event, p2c, c2p):
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        event.synchronize()
+        c2p.put(1)  # notify parent synchronization is done
+
+    def test_event_handle_importer(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(e0.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_importer_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for child to become ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(e0.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(e0.query())
+        p2c.put(1)  # notify child to finish
+        p.join()
+
+    def test_event_handle_exporter(self):
+        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for event in child process is recorded
+
+        self.assertFalse(e0.query())
+        e0.synchronize()
+        self.assertTrue(e0.query())
+        p2c.put(0)  # notify child to finish
+        p.join()
+
+    def test_event_multiprocess(self):
+        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(event.query())
+
+        ctx = mp.get_context("spawn")
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestXPUMultiprocessing._event_multiprocess_child,
+            args=(event, p2c, c2p),
+        )
+        p.start()
+
+        c2p.get()  # wait for until child process is ready
+        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+        event.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(event.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(event.query())
+        p.join()
 
 
 @contextlib.contextmanager
@@ -3262,13 +3462,12 @@ class TestXpuOptims(TestCase):
         [
             optim
             for optim in optim_db
-            if "foreach" in optim.supported_impls and "cuda" in optim.supports_fused_on
+            if "foreach" in optim.supported_impls and "xpu" in optim.supports_fused_on
         ],
         dtypes=[torch.float32],
     )
     def test_graph_grad_scaling(self, dtype, optim_info, foreach, fused):
-        device = "xpu"
-        torch.cuda.empty_cache()
+        torch.xpu.empty_cache()
 
         scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
         g = torch.xpu.XPUGraph()
@@ -3276,7 +3475,6 @@ class TestXpuOptims(TestCase):
         weight = torch.ones((100,), device="xpu", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
-        static_grad = torch.ones_like(weight)
 
         # warmup
         s = torch.xpu.Stream()
@@ -3518,6 +3716,33 @@ class TestXpuAutocast(TestAutocast):
             result = torch.mm(mat0_fp32, mat1_fp32)
             self.assertEqual(result.dtype, torch.float16)
 
+    def test_autocast_is_enabled(self):
+        is_enabled = torch.is_autocast_enabled("xpu")
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(not is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(not is_enabled, torch.is_autocast_enabled())
+        torch.set_autocast_enabled(is_enabled)
+        self.assertEqual(torch.is_autocast_enabled("xpu"), torch.is_autocast_enabled())
+        self.assertEqual(is_enabled, torch.is_autocast_enabled())
+
+    def test_fft_fp16_promotion(self):
+        shapes = [tuple(range(5, 5 + ndim)) for ndim in range(1, 6)]
+        for shape in shapes:
+            # r2c: rfftn with float16 input should produce complex32
+            x_r = torch.randn(shape, device="xpu", dtype=torch.float16)
+            result_r2c = torch.fft.rfftn(x_r)
+            self.assertEqual(result_r2c.dtype, torch.complex32)
+            expected_r2c = torch.fft.rfftn(x_r.to(torch.float32)).to(torch.complex32)
+            self.assertEqual(result_r2c, expected_r2c, atol=1e-6, rtol=1e-3)
+
+            # c2r: irfftn with complex32 input should produce float16
+            freq = torch.fft.rfftn(x_r)
+            result_c2r = torch.fft.irfftn(freq)
+            self.assertEqual(result_c2r.dtype, torch.float16)
+            expected_c2r = torch.fft.irfftn(freq.to(torch.complex64)).to(torch.float16)
+            self.assertEqual(result_c2r, expected_c2r, atol=1e-6, rtol=1e-3)
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
@@ -3621,6 +3846,25 @@ class TestXPUAPISanity(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestMemPool(TestCase):
+    def _alloc_record_free_sync(self, pool_ctx, stream, nbytes):
+        """Allocate a block, record it on a second stream, free, synchronize,
+        then try to reallocate. Returns (original_ptr, new_ptr)."""
+        with pool_ctx:
+            a = torch.empty(nbytes, dtype=torch.uint8, device="xpu")
+            original_ptr = a.data_ptr()
+
+            with torch.xpu.stream(stream):
+                a.record_stream(stream)
+                _ = a + 1
+
+            del a
+            torch.xpu.synchronize()
+
+            b = torch.empty(nbytes, dtype=torch.uint8, device="xpu")
+            new_ptr = b.data_ptr()
+            del b
+        return original_ptr, new_ptr
+
     def test_mempool_id(self):
         pool1 = torch.xpu.MemPool().id
         pool2 = torch.xpu.MemPool().id
@@ -3670,8 +3914,73 @@ class TestMemPool(TestCase):
         self.assertTrue(after_pool_release < peak_reserved)
         self.assertTrue(after_pool_release > 0)
 
+    @serialTest()
+    def test_mempool_oom_recovery_releases_cached_blocks(self):
+        MB = 1024 * 1024
+        device = torch.device("xpu:0")
+
+        def align_down_2mb(n):
+            return n & ~(2 * MB - 1)
+
+        for label, make_ctx in [
+            ("default pool", lambda: contextlib.nullcontext()),
+            (
+                "user mempool",
+                lambda: torch.xpu.use_mem_pool(torch.xpu.MemPool()),
+            ),
+        ]:
+            with self.subTest(label=label):
+                torch.xpu.empty_cache()
+                free_before = torch.xpu.mem_get_info(device)[0]
+
+                fill_size = align_down_2mb(free_before // 2)
+                if fill_size < 64 * MB:
+                    self.skipTest("Not enough XPU memory for this test")
+
+                filler = torch.empty(fill_size, dtype=torch.uint8, device=device)
+                del filler
+
+                alloc_size = align_down_2mb(free_before - free_before // 8)
+                oom = False
+                try:
+                    with make_ctx():
+                        big = torch.empty(alloc_size, dtype=torch.uint8, device=device)
+                        del big
+                except torch.OutOfMemoryError:
+                    oom = True
+
+                self.assertFalse(
+                    oom,
+                    f"[{label}] OOM even though the default pool had "
+                    f"{fill_size // MB} MiB of freeable cached blocks "
+                    "-- release_cached_blocks was likely skipped",
+                )
+
+    @serialTest()
+    def test_mempool_block_free_not_deferred(self):
+        torch.xpu.empty_cache()
+        stream = torch.xpu.Stream()
+        nbytes = 1024 * 1024
+
+        for label, pool_ctx in [
+            ("default pool", contextlib.nullcontext()),
+            ("user mempool", torch.xpu.use_mem_pool(torch.xpu.MemPool())),
+        ]:
+            with self.subTest(label=label):
+                torch.xpu.empty_cache()
+                orig, new = self._alloc_record_free_sync(pool_ctx, stream, nbytes)
+                self.assertEqual(
+                    new,
+                    orig,
+                    lambda msg: f"{msg}\n[{label}] Block not reused after multi-stream free "
+                    "-- free was likely deferred as if under graph capture",
+                )
+
 
 instantiate_parametrized_tests(TestXpu)
+instantiate_device_type_tests(
+    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
+)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 

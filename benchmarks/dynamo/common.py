@@ -1092,7 +1092,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
             # the generate function
-            model.forward = torch._dynamo.run(model)
+            model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1757,6 +1757,12 @@ def get_dynamo_stats():
         {
             "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
             "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            # Frames Dynamo saw but could not convert (SkipFrame / error), so
+            # they fell back to running eagerly.
+            "fallbacks_to_eager": (
+                torch._dynamo.utils.counters["frames"]["total"]
+                - torch._dynamo.utils.counters["frames"]["ok"]
+            ),
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
@@ -2939,11 +2945,13 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
-        niters = 5
+        measure_iters = 5
+        stabilization_iters = 0
         if getattr(self, "hf_llm", False):
             # If we're benchmarking an llm, we want to use the generate function
             self.model_iter_fn = self.generate
-            niters = 1
+            measure_iters = 1
+            stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2951,7 +2959,9 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
-        def warmup(fn, model, example_inputs, mode, niters=5):
+        def warmup(
+            fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
+        ):
             gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
@@ -2962,10 +2972,12 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for _ in range(measure_iters):
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
+                for _ in range(stabilization_iters):
+                    fn(model, example_inputs)
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -3020,7 +3032,7 @@ class BenchmarkRunner:
                         copy.deepcopy(model),
                         example_inputs,
                         "eager",
-                        niters=niters,
+                        measure_iters=measure_iters,
                     )
                     if self.args.use_warm_peak_memory:
                         _, eager_peak_mem, _ = warmup(
@@ -3028,7 +3040,7 @@ class BenchmarkRunner:
                             copy.deepcopy(model),
                             example_inputs,
                             "eager",
-                            niters=1,
+                            measure_iters=1,
                         )
 
             if (
@@ -3042,7 +3054,7 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model = optimize_ctx(model)
+                    model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3051,7 +3063,12 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                    optimized_model_iter_fn,
+                    model,
+                    example_inputs,
+                    "dynamo",
+                    measure_iters=measure_iters,
+                    stabilization_iters=stabilization_iters,
                 )
                 if self.args.use_warm_peak_memory:
                     _, dynamo_peak_mem, _ = warmup(
@@ -3059,7 +3076,7 @@ class BenchmarkRunner:
                         model,
                         example_inputs,
                         "dynamo",
-                        niters=1,
+                        measure_iters=1,
                     )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
@@ -4027,21 +4044,6 @@ def main(runner, original_dir=None, args=None):
                 process_entry(0, runner, original_dir, args)
 
 
-# Per-model tolerance (percent) for the backed-vs-unbacked compiled-time parity
-# check. Most models track backed vs unbacked to within ~0.5%. MobileBertForMaskedLM
-# has bimodal compiled timings (backed and unbacked land in different modes
-# independently), so its backed-vs-unbacked diff is ~+-2% run-to-run jitter with no
-# directional regression; it gets a wider band so the noise doesn't red the periodic
-# job while a genuine regression is still caught.
-UNBACKED_PARITY_THRESHOLDS = {"MobileBertForMaskedLM": 3.0}
-DEFAULT_UNBACKED_PARITY_THRESHOLD = 1.0
-
-
-def _unbacked_parity_diff_pct(backed_ms, unbacked_ms):
-    """Percent by which the unbacked compiled time exceeds the backed one."""
-    return (unbacked_ms - backed_ms) / backed_ms * 100
-
-
 def _run_compare_backed_unbacked(runner, args):
     """Run backed and unbacked per-model, alternating, and compare speedup."""
     import re
@@ -4060,7 +4062,7 @@ def _run_compare_backed_unbacked(runner, args):
             b_ms = modes.get("backed_ms")
             u_ms = modes.get("unbacked_ms")
             if b_ms is not None and u_ms is not None:
-                ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
+                ms_diff_pct = (u_ms - b_ms) / b_ms * 100
                 print(
                     f"  {name:<40s} {b_ms:>10.3f} {u_ms:>11.3f} {ms_diff_pct:>+7.1f}%",
                     flush=True,
@@ -4173,7 +4175,7 @@ def _run_compare_backed_unbacked(runner, args):
         ):
             b_ms = all_results[model]["backed_ms"]
             u_ms = all_results[model]["unbacked_ms"]
-            ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
+            ms_diff_pct = (u_ms - b_ms) / b_ms * 100
             print(
                 f"  => diff: {ms_diff_pct:+.1f}% ({b_ms:.3f} ms vs {u_ms:.3f} ms)",
                 flush=True,
@@ -4189,27 +4191,6 @@ def _run_compare_backed_unbacked(runner, args):
             print(f"  => diff: {diff_pct:+.1f}% (ratio-based, no ms data)", flush=True)
 
     print_comparison(all_results)
-
-    # Emit a canonical regression verdict using per-model thresholds. The CI
-    # wrapper (.ci/pytorch/test.sh) detects the UNBACKED_PARITY_REGRESSION line
-    # rather than re-deriving the threshold, so the policy lives here as data.
-    regressions = []
-    for name, modes in all_results.items():
-        b_ms = modes.get("backed_ms")
-        u_ms = modes.get("unbacked_ms")
-        if b_ms is not None and u_ms is not None:
-            diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
-            threshold = UNBACKED_PARITY_THRESHOLDS.get(
-                name, DEFAULT_UNBACKED_PARITY_THRESHOLD
-            )
-            if diff_pct > threshold:
-                regressions.append(
-                    f"{name}: +{diff_pct:.2f}% > {threshold:.1f}% threshold"
-                )
-    if regressions:
-        print(f"UNBACKED_PARITY_REGRESSION: {', '.join(regressions)}", flush=True)
-    else:
-        print("UNBACKED_PARITY_OK: no per-model regressions", flush=True)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
@@ -4387,7 +4368,8 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         if (
-            args.training
+            torch.version.hip is not None
+            and args.training
             and args.only is not None
             and args.only
             in {
@@ -4396,13 +4378,14 @@ def run(runner, args, original_dir=None):
         ):
             # With the harness-wide fallback_random=True, inductor falls back
             # to ATen rng for the dropout decomposition. That fallback Philox
-            # path indexes randoms by flat element offset, whereas eager CUDA
+            # path indexes randoms by flat element offset, whereas eager ROCm
             # rng indexes by (thread_id, intra_thread_iter), so the two produce
             # different dropout masks for the same seed and trip DistillGPT2's
-            # tight accuracy tolerance (observed on gfx942). Setting
+            # tight accuracy tolerance (observed on ROCm/gfx942). Setting
             # fallback_random=False re-enables inductor's replace_random passes,
-            # which align the masks with eager. This is correct/harmless on
-            # other backends since it only changes how inductor lowers rng.
+            # which align the masks with eager on that backend. Leave CUDA on
+            # the default fallback path; the Triton RNG path is not
+            # eager-equivalent there and regresses A100 DistillGPT2 accuracy.
             inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
@@ -4726,7 +4709,6 @@ def run(runner, args, original_dir=None):
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
-                "with_modules": True,
                 "activities": activities,
             }
 

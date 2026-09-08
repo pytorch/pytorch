@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_iterlen.py b/test/cpython/v3_13/test_iterlen.py
-index 41c9752e557..44605a9b00a 100644
+index 41c9752e557fb36aef318e0a26bd069a4106eb49..44605a9b00aa1e1f535a9aef94e71c7cbe173ad3 100644
 --- a/test/cpython/v3_13/test_iterlen.py
 +++ b/test/cpython/v3_13/test_iterlen.py
 @@ -1,3 +1,21 @@

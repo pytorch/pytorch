@@ -34,6 +34,11 @@ on:
         type: string
         default: ""
         description: Space-separated tests to include (empty string implies default list)
+      tests-to-exclude:
+        required: false
+        type: string
+        default: ""
+        description: Space-separated tests to exclude (empty string implies none)
       use-gha:
         required: false
         type: string
@@ -291,6 +296,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}

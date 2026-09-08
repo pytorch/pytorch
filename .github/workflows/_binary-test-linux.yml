@@ -70,6 +70,15 @@ on:
       DOCKER_IMAGE_TAG_PREFIX:
         required: true
         type: string
+      DOCKER_IMAGE_REGISTRY_HOST:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Registry host prefix (with trailing slash) prepended to the
+          pytorch/<image> path, e.g.
+          "308535385114.dkr.ecr.us-east-1.amazonaws.com/". Empty (default)
+          means Docker Hub, preserving the historical nightly/release behavior.
       DESIRED_PYTHON:
         required: false
         type: string
@@ -92,7 +101,7 @@ jobs:
     runs-on: ${{ inputs.runner_prefix }}${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
-      image: ${{ inputs.use_container_directive && format('pytorch/{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) || '' }}
+      image: ${{ inputs.use_container_directive && format('{0}pytorch/{1}:{2}', inputs.DOCKER_IMAGE_REGISTRY_HOST, inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) || '' }}
       options: ${{ inputs.use_container_directive && inputs.GPU_ARCH_TYPE == 'cuda' && '--gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video' || ' ' }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -100,7 +109,7 @@ jobs:
       DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
-      DOCKER_IMAGE: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE_REGISTRY_HOST }}pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}

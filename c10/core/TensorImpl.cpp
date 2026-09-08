@@ -388,10 +388,18 @@ c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
-          has_symbolic_sizes_strides_)) {
+  // for faketensors with symints, a return type of IntArrayRef is problematic
+  // because in order to return a ref you need to have smth owning it and for
+  // SymInts this is not materialized yet
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
+  }
+  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    // guard_int() the SymInts to materialize an int64_t vector owned by
+    // SymbolicShapeMeta (lifetime tied to the TensorImpl). Explicit Python
+    // customization goes through the CustomSizes branch above; every other
+    // symbolic tensor materializes here.
+    return symbolic_shape_meta().materialized_sizes();
   }
   return sizes_default();
 }
@@ -433,10 +441,15 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
-          has_symbolic_sizes_strides_)) {
+  // for faketensors with symints, a return type of IntArrayRef is problematic
+  // because in order to return a ref you need to have smth owning it and for
+  // SymInts this is not materialized yet
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return (*c10::impl::getGlobalPyInterpreter())->strides(this);
+  }
+  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    // same reasoning as sizes_custom() above
+    return symbolic_shape_meta().materialized_strides();
   }
   return strides_default();
 }
@@ -948,7 +961,9 @@ void TensorImpl::set_sizes_and_strides(
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
-  if (int_sizes.has_value()) {
+  // Match set_sizes_and_strides: skip the concrete fast-path when symbolic
+  // sizes are active, since set_sizes_contiguous rejects "customized tensors".
+  if (int_sizes.has_value() && !has_symbolic_sizes_strides_) {
     set_sizes_contiguous(*int_sizes);
     return;
   }

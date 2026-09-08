@@ -7,9 +7,12 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-{#- actions/setup-python wants a full X.Y.Z version string; map DESIRED_PYTHON to one. -#}
+{#- actions/setup-python wants a version string; map DESIRED_PYTHON to one. 3.15
+    has no stable X.Y.Z yet, so emit just the minor and let setup-python resolve
+    the latest beta (allow-prereleases is set on the _binary-test-macos job). -#}
 {%- macro setup_python_version(py_ver) -%}
-!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}
+{%- set base = py_ver.strip('t') -%}
+{%- if base == '3.15' -%}!{{ base }}{%- else -%}!{{ base + ('.4' if '3.14' not in py_ver else '.0') }}{%- endif -%}
 {%- endmacro %}
 
 on:
@@ -71,7 +74,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # Full fetch on tag pushes so the release tag is visible to
@@ -107,7 +110,7 @@ jobs:
       # Upload phase: each wheel becomes its own artifact (one call per name).
 {%- for config in build_configs %}
       - name: Upload !{{ config["build_name"] }}
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: !{{ config["build_name"] }}
@@ -169,7 +172,7 @@ jobs:
       LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
@@ -179,7 +182,7 @@ jobs:
         with:
           python-version: "3.10.4"
           freethreaded: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v7.0.0
         name: Download Wheel Artifact
         with:
           name: !{{ lt_config["source_wheel_build_name"] }}
@@ -194,7 +197,7 @@ jobs:
             --platform macos \
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v6.0.0
         if: always()
         with:
           name: !{{ lt_config["build_name"] }}

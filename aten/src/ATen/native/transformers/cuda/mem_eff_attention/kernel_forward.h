@@ -131,15 +131,15 @@ struct AttentionKernel {
 
   struct Params {
     // Input tensors
-    const scalar_t* query_ptr = nullptr; // [num_queries, num_heads, head_dim]
-    const scalar_t* key_ptr = nullptr; // [num_keys, num_heads, head_dim]
-    const scalar_t* value_ptr = nullptr; // [num_keys, num_heads, head_dim_value]
+    const scalar_t* query_ptr = nullptr; // [num_queries, num_query_heads, head_dim]
+    const scalar_t* key_ptr = nullptr; // [num_keys, num_kv_heads, head_dim]
+    const scalar_t* value_ptr = nullptr; // [num_keys, num_kv_heads, head_dim_value]
     const scalar_t* attn_bias_ptr = nullptr; // [num_heads, num_queries, num_keys]
     const int32_t* seqstart_q_ptr = nullptr;
     const int32_t* seqstart_k_ptr = nullptr;
 
     const int32_t* seqlen_k_ptr = nullptr;
-    uint32_t causal_diagonal_offset = 0;
+    int32_t causal_diagonal_offset = 0;
 
     // Output tensors
     output_t* output_ptr = nullptr; // [num_queries, num_heads, head_dim_value]
@@ -184,6 +184,7 @@ struct AttentionKernel {
 
     int32_t num_batches = 0;
     int32_t num_heads = 0;
+    int32_t q_heads_per_kv = 1;
 
     // dropout
     bool use_dropout = false;
@@ -198,14 +199,15 @@ struct AttentionKernel {
     CUTLASS_DEVICE bool advance_to_block() {
       auto batch_id = blockIdx.z;
       auto head_id = blockIdx.y;
-      auto query_start = blockIdx.x * kQueriesPerBlock;
+      auto kv_head_id = head_id / q_heads_per_kv;
+      int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
 
       if (kSupportsDropout) {
-        dropout_batch_head_rng_offset =
-            batch_id * num_heads * num_queries * num_keys +
-            head_id * num_queries * num_keys;
+        // See NOTE [Mem-efficient attention dropout RNG offset]
+        dropout_batch_head_rng_offset = gemm_kernel_utils::dropout_rng_offset(
+            batch_id, head_id, num_heads, num_queries, num_keys);
       }
 
       int64_t q_start = 0, k_start = 0;
@@ -237,10 +239,10 @@ struct AttentionKernel {
         query_ptr += batch_id * q_strideB;
         key_ptr += batch_id * k_strideB;
         value_ptr += batch_id * v_strideB;
-        output_ptr += int64_t(batch_id * num_queries) * o_strideM;
+        output_ptr += int64_t(batch_id) * num_queries * o_strideM;
         if (output_accum_ptr != nullptr) {
           output_accum_ptr +=
-              int64_t(batch_id * num_queries) * (head_dim_value * num_heads);
+              int64_t(batch_id) * num_queries * head_dim_value * num_heads;
         }
         q_start = 0;
         k_start = 0;
@@ -248,18 +250,21 @@ struct AttentionKernel {
 
       // Advance to the current batch / head / query_start
       query_ptr += (q_start + query_start) * q_strideM + head_id * q_strideH;
-      key_ptr += k_start * k_strideM + head_id * k_strideH;
+      key_ptr += k_start * k_strideM + kv_head_id * k_strideH;
 
-      value_ptr += k_start * v_strideM + head_id * v_strideH;
+      value_ptr += k_start * v_strideM + kv_head_id * v_strideH;
       output_ptr +=
           int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
 
       if (kSupportsBias && attn_bias_ptr != nullptr) {
-        attn_bias_ptr += (batch_id * bias_strideB) + (head_id * bias_strideH);
+        // Anchor the query row before the single-query tail remaps bias_strideM.
+        attn_bias_ptr += (batch_id * bias_strideB) +
+            (head_id * bias_strideH) +
+            (int64_t(query_start) * bias_strideM);
       }
       if (output_accum_ptr != nullptr) {
         output_accum_ptr +=
-            int64_t(q_start + query_start) * (head_dim_value * num_heads) +
+            int64_t(q_start + query_start) * head_dim_value * num_heads +
             head_id * head_dim_value;
       } else {
         // Accumulate directly in the destination buffer (eg for f32)
@@ -268,8 +273,8 @@ struct AttentionKernel {
 
       if (logsumexp_ptr != nullptr) {
         // lse[batch_id, head_id, query_start]
-        logsumexp_ptr +=
-            batch_id * lse_dim * num_heads + head_id * lse_dim + query_start;
+        logsumexp_ptr += (int64_t(batch_id) * num_heads + head_id) * lse_dim +
+            query_start;
       }
 
       // Custom masking
@@ -281,13 +286,15 @@ struct AttentionKernel {
       num_keys_absolute = num_keys;
       if (custom_mask_type == CausalFromTopLeft ||
           custom_mask_type == CausalFromBottomRight) {
-        // the bottom row of the current block is query_start + kQueriesPerBlock
-        // the last active key is then query_start + causal_diagonal_offset +
-        // kQueriesPerBlock so num_keys is the min between actual num_keys and
-        // this to avoid extra computations
-        num_keys = cutlass::fast_min(
-            int32_t(query_start + causal_diagonal_offset + kQueriesPerBlock),
-            num_keys);
+        // Exact rather than block-granular: the remap below drops causal
+        // masking, so slack keys here would be attended unmasked.
+        int32_t rows_this_block = cutlass::fast_min(
+            int32_t(kQueriesPerBlock), num_queries - query_start);
+        num_keys = cutlass::fast_max(
+            int32_t(0),
+            cutlass::fast_min(
+                query_start + causal_diagonal_offset + rows_this_block,
+                num_keys));
       }
 
       num_queries -= query_start;
@@ -297,14 +304,18 @@ struct AttentionKernel {
       // 15/16th of tensor core compute In that case :
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
+      // Excluded under dropout: rows become heads here, but the per-row RNG
+      // offset still indexes them as queries.
       if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
-          logsumexp_ptr == nullptr && window_size == 0) {
+          logsumexp_ptr == nullptr && window_size == 0 &&
+          !(kSupportsDropout && use_dropout)) {
         if (head_id % kQueriesPerBlock != 0) {
           return false;
         }
         q_strideM = q_strideH;
         bias_strideM = bias_strideH;
-        num_queries = num_heads;
+        // Pointers are anchored at head_id, so only later heads are rows.
+        num_queries = num_heads - int32_t(head_id);
         num_heads = 1; // unused but here for intent
         // remove causal since n_query = 1
         // otherwise, offset would change with head !
@@ -609,6 +620,7 @@ struct AttentionKernel {
     TORCH_CHECK(
         p.num_heads <= 1 || p.v_strideH % kAlignmentV == 0,
         "value is not correctly aligned (strideH)");
+    TORCH_CHECK(p.q_heads_per_kv > 0, "invalid GQA group size");
     TORCH_CHECK(
         p.custom_mask_type < NumCustomMaskTypes,
         "invalid value for `custom_mask_type`");
@@ -632,7 +644,7 @@ struct AttentionKernel {
     auto& s_prime = shared_storage.s_prime;
     auto& mi = shared_storage.mi;
     auto& out_rescale = shared_storage.out_rescale;
-    const uint32_t query_start = blockIdx.x * kQueriesPerBlock;
+    const int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
     static_assert(kQueriesPerBlock < kNumWarpsPerBlock * kWarpSize, "");
     if (thread_id() < kQueriesPerBlock) {
@@ -806,13 +818,8 @@ struct AttentionKernel {
         // load bias tile Bij into shared memory
         typename MM0::BiasLoader::GmemTileIterator bias_iter(
             {cutlass::layout::RowMajor(p.bias_strideM)},
-            // attn_bias_pointer points to matrix of size (n_queries, n_keys)
-            // for the relevant batch_id and head_id
-            // `query_start` is `uint32_t`, so compute the offset in 64-bit
-            // to avoid wraparound when num_queries * num_keys > 2^32
-            const_cast<scalar_t*>(
-                p.attn_bias_ptr + int64_t(query_start) * p.bias_strideM +
-                iter_key_start),
+            // attn_bias_ptr points to the first query row for this block.
+            const_cast<scalar_t*>(p.attn_bias_ptr + iter_key_start),
             {problem_size_0_m, problem_size_0_n},
             thread_id());
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -846,7 +853,6 @@ struct AttentionKernel {
       if (p.custom_mask_type &&
           cutlass::fast_min(iter_key_start + kKeysPerBlock, p.num_keys) >=
               (query_start + p.causal_diagonal_offset)) {
-        auto query_start = blockIdx.x * kQueriesPerBlock;
         auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
             my_lane_id, my_warp_id, iteratorC_tile_offset);
         int32_t last_col;
@@ -881,7 +887,6 @@ struct AttentionKernel {
                    int32_t(kQueriesPerBlock), int32_t(p.num_queries)) -
                p.window_size >=
            iter_key_start)) {
-        auto query_start = blockIdx.x * kQueriesPerBlock;
         auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
             my_lane_id, my_warp_id, iteratorC_tile_offset);
         int32_t first_col;

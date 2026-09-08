@@ -56,6 +56,27 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
+      - name: Set up sibling workspace for the retriever
+        shell: bash
+        run: |
+          set -eux
+          # llm-target-determinator@v0.0.2 (config.py / gen_pr_items.py) resolves
+          # its own realpath and then reads the model from `<parent>/codellama` and
+          # computes the pytorch git diff from `<parent>/pytorch` -- i.e. it expects
+          # pytorch / codellama / itself to be sibling dirs. setup-linux checks
+          # pytorch out at GITHUB_WORKSPACE and the two helper repos as subdirs, so
+          # the realpath-based lookup misses the checkout (it looks for
+          # GITHUB_WORKSPACE/pytorch, which does not exist). Move the helper repos
+          # into a clean workspace and point `pytorch` at the checkout via a
+          # symlink. Because `.resolve()` follows symlinks, the helper repos must be
+          # *real* dirs here (not symlinks). Mirrors target-determination-indexer.yml.
+          WS="${RUNNER_TEMP}/td-workspace"
+          mkdir -p "${WS}"
+          mv "${GITHUB_WORKSPACE}/codellama" "${WS}/codellama"
+          mv "${GITHUB_WORKSPACE}/llm-target-determinator" "${WS}/llm-target-determinator"
+          ln -sfn "${GITHUB_WORKSPACE}" "${WS}/pytorch"
+          echo "TD_WORKSPACE=${WS}" >> "${GITHUB_ENV}"
+
       - name: Install requirements
         shell: bash
         run: |
@@ -63,15 +84,19 @@ jobs:
           # aws CLI is preinstalled on EC2 hosts but not in the container; install it
           # here so the checkpoint-fetch step below has it.
           uv pip install awscli==1.29.40
-          uv pip install -r llm-target-determinator/requirements.txt
-          cd "${GITHUB_WORKSPACE}/codellama"
+          uv pip install -r "${TD_WORKSPACE}/llm-target-determinator/requirements.txt"
+          # requirements.txt leaves numpy unpinned, so it resolves to 2.x while
+          # torch==2.0.1 is built against numpy 1.x ("Failed to initialize NumPy:
+          # _ARRAY_API not found"). Pin numpy 1.26 to match td_llm_indexer.sh.
+          uv pip install numpy==1.26.0
+          cd "${TD_WORKSPACE}/codellama"
           uv pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
         shell: bash
         run: |
           set -euxo pipefail
-          cd "${GITHUB_WORKSPACE}/codellama"
+          cd "${TD_WORKSPACE}/codellama"
           mkdir "CodeLlama-7b-Python"
           # target-determinator-assets is a public bucket; download anonymously so
           # we don't need S3 credentials for the read.
@@ -87,7 +112,7 @@ jobs:
           command: |
             set -euxo pipefail
             uv pip install awscli==1.29.40
-            cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
+            cd "${TD_WORKSPACE}"/llm-target-determinator/assets
             aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive --no-sign-request
 
             unzip -o indexer-files\*.zip
@@ -99,7 +124,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cd "${GITHUB_WORKSPACE}"/llm-target-determinator
+          cd "${TD_WORKSPACE}"/llm-target-determinator
           export PATH="$HOME/.local/bin:$PATH"
           torchrun \
             --standalone \
@@ -118,4 +143,4 @@ jobs:
           name: llm_results
           retention-days: 1
           if-no-files-found: warn
-          path: llm-target-determinator/assets/mappings.zip
+          path: ${{ env.TD_WORKSPACE }}/llm-target-determinator/assets/mappings.zip

@@ -13,11 +13,14 @@ from torch.export._trace import _export
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
-    skip,
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+)
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -42,24 +45,12 @@ hop_export_failures = {
     xfail("register_hook", "simple"),
 }
 
-# https://github.com/pytorch/pytorch/issues/178177
-inline_asm_rocm_retrace_skips = (
-    {skip("inline_asm_elementwise", "simple", device_type="cuda")}
-    if TEST_WITH_ROCM
-    else set()
-)
-
-# https://github.com/pytorch/pytorch/issues/178077
-inline_asm_rocm_serialize_skips = (
-    {skip("inline_asm_elementwise", "simple", device_type="cuda")}
-    if TEST_WITH_ROCM
-    else set()
-)
-
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-class TestHOP(TestCase):
+class TestHOPDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare(self, eager_model, export, args, kwargs):
         eager_args = copy.deepcopy(args)
         eager_kwargs = copy.deepcopy(kwargs)
@@ -119,7 +110,7 @@ class TestHOP(TestCase):
         torchdynamo._reset_guarded_backend_cache()
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
-    @skipOps(hop_export_failures | inline_asm_rocm_retrace_skips)
+    @skipOps(hop_export_failures)
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
@@ -137,11 +128,7 @@ class TestHOP(TestCase):
         torchdynamo._reset_guarded_backend_cache()
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
-    @skipOps(
-        hop_export_failures
-        | inline_asm_rocm_serialize_skips
-        | {xfail("switch", "simple")}
-    )
+    @skipOps(hop_export_failures | {xfail("switch", "simple")})
     def test_serialize_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
@@ -163,7 +150,7 @@ class TestHOP(TestCase):
         torchdynamo._reset_guarded_backend_cache()
 
 
-instantiate_device_type_tests(TestHOP, globals())
+instantiate_device_type_tests(TestHOPDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

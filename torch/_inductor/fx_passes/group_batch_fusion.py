@@ -22,7 +22,7 @@ from ..pattern_matcher import (
     MatchResult,
     stable_topological_sort,
 )
-from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
+from ..utils import is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -301,7 +301,12 @@ class PostGradBatchLinearFusion(BatchFusion):
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[1].meta["val"]  # type: ignore[union-attr]
+        # fbgemm.gmm has no precision argument and bypasses ATen/cuBLAS.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[2].meta["val"].shape  # type: ignore[union-attr]
         return (
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
@@ -316,7 +321,10 @@ class GroupLinearFusion(GroupFusion):
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[0].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[0].meta["val"]  # type: ignore[union-attr]
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
         return (
             len(input_shape) == 2
@@ -1310,7 +1318,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch simple match related ops such as nan_to_num in pre grad pass.
+    Batch simple math related ops such as nan_to_num in pre grad pass.
     """
 
     def __init__(self, op, **kwargs):
@@ -1326,6 +1334,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             child = next(iter(node.users.keys()))
             group_key = (
                 str(input.meta["example_value"].shape)
+                + str(node.args[1:])
                 + str(node.kwargs)
                 + str(child.target)
             )
@@ -1340,6 +1349,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         batch_nodes = []
         batch_inputs = []
         batch_inputs_metadata = []
+        args = subset[0].args[1:]
         kwargs = subset[0].kwargs
 
         for node in subset:
@@ -1355,11 +1365,11 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
-                args=(stack_inputs,),
+                args=(stack_inputs, *args),
                 kwargs=kwargs,
             )
             batch_op.meta["example_value"] = self.op(
-                stack_inputs.meta["example_value"], **kwargs
+                stack_inputs.meta["example_value"], *args, **kwargs
             )
             unbind_op = graph.call_function(  # type: ignore[operator]
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}

@@ -24,13 +24,14 @@ import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
 )
 
-from . import config, reset, utils
+from . import config, utils
 
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,6 @@ class TestCase(TorchTestCase):
         self._prior_nested_graph_breaks = config.nested_graph_breaks
         config.nested_graph_breaks = True
         super().setUp()
-        reset()
         utils.counters.clear()
         self.handler = logging.NullHandler()
         trace_log.addHandler(self.handler)
@@ -99,7 +99,6 @@ class TestCase(TorchTestCase):
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
             log.debug("%s %s", k, v.most_common())
-        reset()
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
@@ -109,7 +108,7 @@ class TestCase(TorchTestCase):
         config.nested_graph_breaks = self._prior_nested_graph_breaks
 
     def before_cuda_memory_leak_check(self) -> None:
-        reset()
+        super().before_cuda_memory_leak_check()
         utils.counters.clear()
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
@@ -143,6 +142,7 @@ class CPythonTestCase(TestCase):
     tracing through unittest methods.
     """
 
+    hw_classification = HardwareClassification.GENERIC
     _stack: contextlib.ExitStack
     dynamo_strict_nopython = True
 

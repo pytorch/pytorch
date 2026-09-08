@@ -20,7 +20,7 @@ __all__ = ["create_c10d_store", "get_free_port", "get_socket_with_port"]
 
 logger = get_logger(__name__)
 
-_ADDRESS_IN_USE = "Address already in use"
+_ADDRESS_IN_USE = "address already in use"
 _SOCKET_TIMEOUT = "Socket Timeout"
 
 _TCP_STORE_INIT = "_tcp_store/num_members"
@@ -91,13 +91,8 @@ def create_c10d_store(
                 _check_full_rank(store, world_size, timeout=timeout)
             logger.info("Successfully created c10d store")
             return store
-        except RuntimeError as e:
-            # this is brittle, but the underlying exception type is not properly pybinded
-            # so we parse the error msg for now, interestingly this is how torch itself
-            # detects timeouts and port conflicts in their own unittests
-            # see - caffe2/torch/testing/_internal/common_utils.py
-            # TODO properly map the exceptions in pybind (c10d/init.cpp)
-            if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
+        except dist.DistNetworkError as e:
+            if _ADDRESS_IN_USE in str(e).lower():  # this will only happen on the server
                 if attempt < retries:
                     logger.warning(
                         "port: %s already in use, attempt: [%s/%s]",
@@ -107,7 +102,7 @@ def create_c10d_store(
                     )
                     attempt += 1
                 else:
-                    raise RuntimeError(
+                    raise dist.DistNetworkError(
                         f"on {server_addr}, port: {port} already in use"
                     ) from e
             else:

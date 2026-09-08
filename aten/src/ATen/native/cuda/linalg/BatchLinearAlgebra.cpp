@@ -12,8 +12,6 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
@@ -25,13 +23,8 @@
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/linalg_eigh.h>
-#include <ATen/ops/linalg_eigvalsh.h>
 #include <ATen/ops/linalg_solve_triangular.h>
-#include <ATen/ops/zeros.h>
-#include <ATen/ops/_linalg_check_errors.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -1283,6 +1276,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   _warn_once_magma_deprecation("linalg.eig");
   linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 #else
+  // hipSolver < 3.5.0 does not have `geev`
   _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
 #endif

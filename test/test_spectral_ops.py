@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -256,13 +257,13 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
@@ -705,7 +706,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
@@ -944,6 +945,20 @@ class TestFFT(TestCase):
 
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
+
+    @onlyCUDA
+    @largeTensorTest("18GB")
+    def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
+        # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
+        # every element offset fit in int32, else a 64-bit fallback. Space the
+        # output rows 2**31 elements apart so max_out_offset exceeds INT32_MAX and
+        # the 64-bit path is taken, while the filled region itself stays tiny.
+        rows, cols, stride = 2, 8, 2 ** 31
+        x = torch.randn(rows, cols, device=device)
+        buf = torch.empty((rows - 1) * stride + cols, dtype=torch.complex64, device=device)
+        out = buf.as_strided((rows, cols), (stride, 1))
+        torch.fft.fft(x, dim=-1, out=out)
+        self.assertEqual(out, torch.fft.fft(x, dim=-1))
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
@@ -1470,7 +1485,7 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
-        stft = torch.zeros((3, 5, 2), device=device)
+        stft = torch.zeros((3, 5, 2), device=device, dtype=torch.cfloat)
         # the window is size 1 but it hops 20 so there is a gap which throw an error
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4,
@@ -1480,8 +1495,8 @@ class TestFFT(TestCase):
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
         # Input cannot be empty
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2), device=device, dtype=torch.cfloat), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2), device=device, dtype=torch.cfloat), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes

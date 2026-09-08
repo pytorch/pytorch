@@ -75,28 +75,17 @@ case ${image} in
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
-        # we want the patch version of 7.2 instead
-        if [[ "$GPU_ARCH_VERSION" == *"7.2"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
-        fi
-        # we want the patch version of 7.1 instead
-        if [[ "$GPU_ARCH_VERSION" == *"7.1"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
-        fi
-        # we want the patch version of 7.0 instead
-        if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
-        fi
-        # we want the patch version of 6.4 instead
-        if [[ "$GPU_ARCH_VERSION" == *"6.4"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.4"
-        fi
-        TARGET=rocm_final
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="13"
-        GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
-        PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950;gfx1150;gfx1151"
-        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
+        TARGET=rocm_final
+        GPU_IMAGE=amd64/almalinux:8
+        if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
+            THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+        else
+            THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+        fi
+        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         ;;
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
@@ -113,24 +102,24 @@ esac
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
-# Only activate this if in CI
-if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
-    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+# Remote BuildKit (OSDC) pushes straight to the registry on WITH_PUSH; the local
+# path (s390x) loads the built image so its workflow can tag and push it.
+if [[ -n "${REMOTE_BUILDKIT:-}" && "${WITH_PUSH:-false}" == "true" ]]; then
+    output_flag="--push"
+elif [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+    output_flag="--load"
+else
+    output_flag=""
 fi
 
-tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
-
-DOCKER_BUILDKIT=1 docker build  \
+docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
-    -t "${tmp_tag}" \
-    $@ \
+    --progress plain \
+    ${output_flag} \
+    "$@" \
     -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
     "${TOPDIR}/.ci/docker/"

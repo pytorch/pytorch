@@ -18,21 +18,6 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
  # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
-macro(disable_ubsan)
-  if(CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
-    set(CAFFE2_UBSAN_ENABLED ON)
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  endif()
-endmacro()
-
-macro(enable_ubsan)
-  if(CAFFE2_UBSAN_ENABLED)
-    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
-  endif()
-endmacro()
-
 # ---[ CUDA
 if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
@@ -47,7 +32,7 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       if(NOT CAFFE2_USE_NVRTC)
         message(FATAL_ERROR
@@ -109,9 +94,7 @@ endif()
 
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
-  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
-  enable_ubsan()
 endif()
 
 if(USE_ASAN OR USE_LSAN OR USE_TSAN)
@@ -275,7 +258,7 @@ elseif(BLAS STREQUAL "APL")
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+  if("$ENV{GENERIC_BLAS_LIBRARIES}" STREQUAL "")
     set(GENERIC_BLAS "blas")
   else()
     set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
@@ -332,7 +315,7 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
-  set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
+  set(POCKETFFT_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/third_party/pocketfft/")
   if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
     message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
   elseif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
@@ -683,6 +666,17 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable benchmark install to avoid overwriting vendor install.")
   if(NOT USE_SYSTEM_BENCHMARK)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
+    # Clang 23+ classifies __COUNTER__ in preprocessor conditions as a C2y
+    # extension. benchmark enables -Werror so this becomes fatal. Suppress
+    # only that warning on affected compilers without touching the submodule.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23.0")
+      if(TARGET benchmark)
+        target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
+      endif()
+      if(TARGET benchmark_main)
+        target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
+      endif()
+    endif()
   else()
     add_library(benchmark SHARED IMPORTED)
     find_library(BENCHMARK_LIBRARY benchmark)
@@ -715,6 +709,20 @@ if(USE_FBGEMM)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
+
+    # fbgemm's cpp_library() gives source-less aggregate targets (like fbgemm
+    # itself) a placeholder .cc named via STRING(RANDOM) and rewritten with
+    # file(WRITE) on every configure. Since we reconfigure on every build, that
+    # placeholder is a perpetually-dirty torch_cpu dependency and forces a full
+    # relink of libtorch_cpu.so and everything downstream. Swap in a stable one.
+    get_target_property(FBGEMM_SRCS fbgemm SOURCES)
+    if(FBGEMM_SRCS MATCHES "gen_placeholder_")
+      set(FBGEMM_STABLE_PLACEHOLDER "${CMAKE_BINARY_DIR}/fbgemm_placeholder.cc")
+      file(GENERATE OUTPUT "${FBGEMM_STABLE_PLACEHOLDER}" CONTENT "")
+      list(FILTER FBGEMM_SRCS EXCLUDE REGEX "gen_placeholder_")
+      list(APPEND FBGEMM_SRCS "${FBGEMM_STABLE_PLACEHOLDER}")
+      set_property(TARGET fbgemm PROPERTY SOURCES ${FBGEMM_SRCS})
+    endif()
   endif()
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
@@ -725,13 +733,6 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-endif()
-
-if(USE_OPENCL)
-  message(INFO "USING OPENCL")
-  find_package(OpenCL REQUIRED)
-  include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
 
 # ---[ NUMA
@@ -874,8 +875,34 @@ if(BUILD_PYTHON)
         caffe2_update_option(USE_NUMPY ON)
       endif()
     endif()
-    # Observers are required in the python build
-    caffe2_update_option(USE_OBSERVERS ON)
+    # When cross-compiling, FindPython does not run the interpreter to determine
+    # Python_SOABI unless CMAKE_CROSSCOMPILING_EMULATOR is set (policy CMP0190),
+    # so it is left empty. Python_add_library with WITH_SOABI would then emit
+    # extension modules without a platform suffix -- an untagged _C.so that the
+    # target interpreter will not import. A cross-python setup provides a
+    # directly runnable interpreter that reports the target's config, so when
+    # SOABI is empty, query it from the interpreter and set Python_SOABI once,
+    # for every downstream WITH_SOABI consumer.
+    #
+    # Only fill an *empty* value: a non-empty Python_SOABI is authoritative. With
+    # an emulator FindPython ran the target interpreter to compute it, and this
+    # bare invocation would run the wrong interpreter (or fail to exec the target
+    # binary), so we must not second-guess it.
+    if(CMAKE_CROSSCOMPILING AND NOT Python_SOABI)
+      execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c
+                "import sysconfig; print(sysconfig.get_config_var('SOABI') or '')"
+        OUTPUT_VARIABLE _python_target_soabi
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(_python_target_soabi)
+        message(WARNING
+          "FindPython left Python_SOABI empty while cross-compiling (it does not run "
+          "the interpreter without CMAKE_CROSSCOMPILING_EMULATOR); setting it from the "
+          "target interpreter's SOABI '${_python_target_soabi}' so Python extension "
+          "modules get a valid suffix.")
+        set(Python_SOABI "${_python_target_soabi}")
+      endif()
+    endif()
   else()
     message(WARNING "Python dependencies not met. Not compiling with python. Suppress this warning with -DBUILD_PYTHON=OFF")
     caffe2_update_option(BUILD_PYTHON OFF)
@@ -1040,6 +1067,24 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
+    # composable_kernel has no gfx1250 support, so aten/src/ATen/CMakeLists.txt
+    # filters gfx1250 out of the ck_gemm target's HIP_ARCHITECTURES. When gfx1250
+    # is the only requested arch that list is empty and CMake fails at generate
+    # time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so turn CK GEMM
+    # off entirely here -- before -DUSE_ROCM_CK_GEMM is added below, since the
+    # non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp, GroupedBlas.cpp)
+    # would otherwise reference symbols the unbuilt ck_gemm target never provides.
+    # Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable pattern in
+    # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
+    if(USE_ROCM_CK_GEMM)
+      set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
+      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      if(_ck_gemm_supported_arches STREQUAL "")
+        message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
+        caffe2_update_option(USE_ROCM_CK_GEMM OFF)
+      endif()
+      unset(_ck_gemm_supported_arches)
+    endif()
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
@@ -1107,16 +1152,17 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
-      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
-          set(CAFFE2_USE_HIPSPARSELT ON)
-      endif()
+    endif()
+    set(CAFFE2_USE_HIPSPARSELT OFF)
+    if(hipsparselt_FOUND AND USE_HIPSPARSELT AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+      set(CAFFE2_USE_HIPSPARSELT ON)
+    elseif(USE_HIPSPARSELT)
+      caffe2_update_option(USE_HIPSPARSELT OFF)
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
-    if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
+    # hipfile only ships with ROCm 7.14 and above, disable the option if not found
+    if(USE_CUFILE AND NOT hipfile_FOUND)
+      caffe2_update_option(USE_CUFILE OFF)
     endif()
 
     # ---[ Kernel asserts
@@ -1130,6 +1176,8 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+    caffe2_update_option(USE_HIPSPARSELT OFF)
+    set(CAFFE2_USE_HIPSPARSELT OFF)
   endif()
 
   # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
@@ -1195,6 +1243,11 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+if(USE_CUDA AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-deprecated-literal-operator")
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
@@ -1214,6 +1267,11 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # tensorpipe_cuda pulls in the same libnop headers via the host compiler and
+    # is only built under USE_CUDA, so it needs the same suppression.
+    if(USE_CUDA)
+      target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
+    endif()
     # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
     # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
     # But are used only once during shutdown
@@ -1260,10 +1318,6 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
-      if(USE_DISTRIBUED AND USE_TENSORPIPE)
-        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
-        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
-      endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
 
       # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
@@ -1351,34 +1405,6 @@ if(USE_GLOO)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
-endif()
-
-# ---[ profiling
-if(USE_PROF)
-  find_package(htrace)
-  if(htrace_FOUND)
-    set(USE_PROF_HTRACE ON)
-  else()
-    message(WARNING "htrace not found. Caffe2 will build without htrace prof")
-  endif()
-endif()
-
-if(USE_SNPE AND ANDROID)
-  if(SNPE_LOCATION AND SNPE_HEADERS)
-    message(STATUS "Using SNPE location specified by -DSNPE_LOCATION: " ${SNPE_LOCATION})
-    message(STATUS "Using SNPE headers specified by -DSNPE_HEADERS: " ${SNPE_HEADERS})
-    include_directories(SYSTEM ${SNPE_HEADERS})
-    add_library(snpe SHARED IMPORTED)
-    set_property(TARGET snpe PROPERTY IMPORTED_LOCATION ${SNPE_LOCATION})
-    list(APPEND Caffe2_DEPENDENCY_LIBS snpe)
-  else()
-    caffe2_update_option(USE_SNPE OFF)
-  endif()
-endif()
-
-if(USE_NNAPI AND NOT ANDROID)
-  message(WARNING "NNApi is only used in android builds.")
-  caffe2_update_option(USE_NNAPI OFF)
 endif()
 
 # ---[ Onnx
@@ -1472,6 +1498,7 @@ if(NOT INTERN_BUILD_MOBILE)
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
@@ -1537,13 +1564,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  endif()
-
-  if(NOT USE_CUDA)
-    message("disabling CUDA because NOT USE_CUDA is set")
-    set(AT_CUDA_ENABLED 0)
-  else()
-    set(AT_CUDA_ENABLED 1)
   endif()
 
   if(NOT USE_ROCM)

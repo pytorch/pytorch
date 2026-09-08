@@ -135,13 +135,15 @@ struct _str_wrapper<> final {
 
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
-inline auto str(const Args&... args) {
+[[nodiscard]] inline auto str(const Args&... args) {
   return detail::_str_wrapper<
       typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
 }
 
 template <class Container>
-inline std::string Join(const std::string& delimiter, const Container& v) {
+[[nodiscard]] inline std::string Join(
+    const std::string& delimiter,
+    const Container& v) {
   std::stringstream s;
   int cnt = static_cast<int64_t>(v.size()) - 1;
   for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
@@ -161,7 +163,7 @@ struct C10_API SourceLocation {
   const char* file;
   uint32_t line;
 
-  static constexpr SourceLocation current(
+  [[nodiscard]] static constexpr SourceLocation current(
       const char* file = __builtin_FILE(),
       const char* function = __builtin_FUNCTION(),
       const std::uint_least32_t line = __builtin_LINE()) noexcept {
@@ -172,7 +174,7 @@ struct C10_API SourceLocation {
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 
 // unix isprint but insensitive to locale
-inline bool isPrint(char s) {
+[[nodiscard]] inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
@@ -245,9 +247,11 @@ std::optional<T> tryToNumber(const std::string& symbol) = delete;
  * rejected.
  */
 template <>
-C10_API std::optional<int64_t> tryToNumber<int64_t>(const char* symbol);
+[[nodiscard]] C10_API std::optional<int64_t> tryToNumber<int64_t>(
+    const char* symbol);
 template <>
-C10_API std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol);
+[[nodiscard]] C10_API std::optional<int64_t> tryToNumber<int64_t>(
+    const std::string& symbol);
 
 /*
  * Convert a string to a double. Trailing whitespaces are not supported.
@@ -255,11 +259,13 @@ C10_API std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol);
  * be rejected.
  */
 template <>
-C10_API std::optional<double> tryToNumber<double>(const char* symbol);
+[[nodiscard]] C10_API std::optional<double> tryToNumber<double>(
+    const char* symbol);
 template <>
-C10_API std::optional<double> tryToNumber<double>(const std::string& symbol);
+[[nodiscard]] C10_API std::optional<double> tryToNumber<double>(
+    const std::string& symbol);
 
-C10_API std::vector<std::string_view> split(
+[[nodiscard]] C10_API std::vector<std::string_view> split(
     std::string_view target,
     char delimiter);
 } // namespace c10

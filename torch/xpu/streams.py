@@ -116,10 +116,15 @@ class Event(torch._C._XpuEventBase):
     Args:
         enable_timing (bool, optional): indicates if the event should measure time
             (default: ``False``)
+        blocking (bool, optional): unused and reserved (default: ``False``)
+        interprocess (bool, optional): indicates if the event should be shareable
+            between processes (default: ``False``)
     """
 
-    def __new__(cls, enable_timing=False):
-        return super().__new__(cls, enable_timing=enable_timing)
+    def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
+        return super().__new__(
+            cls, enable_timing=enable_timing, interprocess=interprocess
+        )
 
     def record(self, stream: Stream | torch.Stream | None = None) -> None:
         r"""Record the event in a given stream.
@@ -169,6 +174,35 @@ class Event(torch._C._XpuEventBase):
         This prevents the CPU thread from proceeding until the event completes.
         """
         super().synchronize()
+
+    def ipc_handle(self) -> bytes:
+        r"""Return an IPC handle of this event.
+
+        The event must have been constructed with ``interprocess=True``.
+        If not yet recorded, the event is eagerly initialized on the current device.
+
+        .. note:: The event reconstructed with :meth:`from_ipc_handle` cannot be re-exported via :meth:`ipc_handle`.
+
+        Returns:
+            bytes: an opaque byte string that can be passed to :meth:`from_ipc_handle`
+                in another process to reconstruct this event.
+        """
+        return super().ipc_handle()
+
+    @classmethod
+    def from_ipc_handle(
+        cls, device: torch.device | int | str, ipc_handle: bytes
+    ) -> Event:
+        r"""Reconstruct an event from an IPC handle on the given device.
+
+        Args:
+            device (torch.device, int, or str): the device on which to open the handle.
+            ipc_handle (bytes): the IPC handle returned by :meth:`ipc_handle`.
+
+        Returns:
+            Event: an event reconstructed from the IPC handle.
+        """
+        return super().from_ipc_handle(device, ipc_handle)
 
     @property
     def _as_parameter_(self):

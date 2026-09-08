@@ -70,6 +70,35 @@ namespace {
 
 using namespace c10d::symmetric_memory;
 
+// Warns once if the current CUDA stream differs from the stream that last
+// issued a symm_mem collective for the same group. The all-reduce kernels
+// use signal pad slots indexed by blockIdx.x with no per-stream isolation,
+// so concurrent launches from different streams on the same group will
+// trample each other's barrier slots and deadlock. Callers must serialize
+// all symm_mem collectives for a given group onto a single CUDA stream.
+static std::unordered_map<std::string, cudaStream_t> g_group_stream_map;
+static std::mutex g_group_stream_mutex;
+
+void warn_if_multi_stream(const std::string& group_name, const char* op_name) {
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  std::lock_guard<std::mutex> lock(g_group_stream_mutex);
+  auto it = g_group_stream_map.find(group_name);
+  if (it == g_group_stream_map.end()) {
+    g_group_stream_map[group_name] = stream;
+  } else if (it->second != stream) {
+    TORCH_WARN_ONCE(
+        op_name,
+        ": detected multiple CUDA streams issuing symm_mem collectives "
+        "for group \"",
+        group_name,
+        "\". symm_mem collectives use a shared signal pad indexed by "
+        "blockIdx.x with no per-stream isolation; concurrent launches "
+        "from different streams on the same group will deadlock. "
+        "Serialize all symm_mem collectives for a group onto a single "
+        "dedicated CUDA stream.");
+  }
+}
+
 size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
@@ -191,6 +220,7 @@ at::Tensor multimem_all_reduce_(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_reduce_: multicast support is required.");
+  warn_if_multi_stream(group_name, "multimem_all_reduce_");
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_all_reduce_");
@@ -411,6 +441,7 @@ at::Tensor multimem_all_gather_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_gather_out: output must have multicast support.");
+  warn_if_multi_stream(group_name, "multimem_all_gather_out");
 
   TORCH_CHECK(
       input.is_contiguous(),
@@ -621,6 +652,7 @@ at::Tensor one_shot_all_reduce_out_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  warn_if_multi_stream(group_name, "one_shot_all_reduce");
 
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
@@ -873,6 +905,7 @@ at::Tensor two_shot_all_reduce_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  warn_if_multi_stream(group_name, "two_shot_all_reduce_");
 
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
@@ -1010,6 +1043,7 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(
       symm_mem != nullptr,
       "reduce_scatter: input must be allocated with empty_strided_p2p().");
+  warn_if_multi_stream(group_name, "reduce_scatter_out");
 
   const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
 

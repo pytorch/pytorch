@@ -27,12 +27,18 @@ def update_submodules() -> None:
 
 
 def gen_compile_commands() -> None:
+    """Configure cmake to produce build/compile_commands.json for clang-tidy.
+
+    Configure-only invocation; does not run the build step. The repo-level
+    cmake/EnvVarForwarding.cmake forwards BUILD_*/USE_* environment
+    variables to the corresponding CMake cache variables, so setting them
+    in os.environ before this call propagates them through to CMake.
+    """
     os.environ["USE_NCCL"] = "0"
     os.environ["USE_PRECOMPILED_HEADERS"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    os.environ["CMAKE_ONLY"] = "1"
-    run_cmd([sys.executable, "setup.py", "build"])
+    run_cmd(["cmake", "-S", ".", "-B", "build", "-G", "Ninja"])
 
 
 def run_autogen() -> None:
