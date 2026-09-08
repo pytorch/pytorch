@@ -317,11 +317,10 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__annotations__ = annotations
         # Assign __dict__ before __type_params__: on Python < 3.12 the function
         # has no __type_params__ slot, so that write lands in __dict__ and a
-        # wholesale __dict__ assignment afterwards would discard it. Assigning
-        # the dict wholesale (rather than copying entries in) also lets the AOT
-        # pickler, which passes obj.__dict__ verbatim, round-trip a helper that
-        # stashed `self.d is self.__dict__` as the same object; the guard pickler
-        # rebuilds a fresh dict, so that identity holds only on the AOT path.
+        # wholesale __dict__ assignment afterwards would discard it. Both
+        # picklers hand a freshly built dict here (the AOT side keeps only the
+        # entries that pickle), so a helper that stashed `self.d is self.__dict__`
+        # comes back with those as two distinct objects.
         fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
@@ -641,7 +640,7 @@ _BYPASS_REASON_MAX_CHARS = 2048
 
 
 def _resume_global_renames(
-    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
+    entries: Iterable[_DynamoCodeCacheEntry], package_token: str
 ) -> dict[str, str]:
     """
     Pick a global name for every resume function that the installing package
@@ -655,8 +654,10 @@ def _resume_global_renames(
     continuation. Unlike ``__compiled_fn`` names, which carry a uuid, these
     names carry nothing that distinguishes the artifact.
 
-    The per-install token is what actually separates them: it is unique to the
-    loaded package. The ``__resume_at_<offset>_<n>`` base name still says which
+    The package token is what actually separates them: it is unique to the
+    loaded package (minted once in __init__, never per install, so a reinstall
+    rebinding the same name keeps an in-flight entry from a previous install
+    resolvable). The ``__resume_at_<offset>_<n>`` base name still says which
     code the binding belongs to, so no extra per-code digest is carried.
     """
     renames: dict[str, str] = {}
@@ -664,7 +665,7 @@ def _resume_global_renames(
         if not entry.install_to_global:
             continue
         for name in entry.function_names:
-            renames[name] = f"{name}_{install_token}"
+            renames[name] = f"{name}_{package_token}"
     return renames
 
 
