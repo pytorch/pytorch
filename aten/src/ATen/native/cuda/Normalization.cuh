@@ -56,9 +56,6 @@ template <typename scalar_t, typename accscalar_t>
 struct Float2 {
   accscalar_t v1, v2;
   __device__ Float2() = default;
-  // Parameters are accscalar_t, matching the fields. Both callers (GradOp and
-  // SumReduceOp<Float2>::warp_shfl_down) pass accumulated values; taking
-  // scalar_t here would round-trip them through the lower-precision type.
   __device__ Float2(accscalar_t v1, accscalar_t v2) : v1(v1), v2(v2) {}
   __device__ Float2(int v) : v1(static_cast<accscalar_t>(v)), v2(static_cast<accscalar_t>(v)) {}
   __device__ Float2& operator+=(const Float2& a) {
