@@ -1025,8 +1025,6 @@ def add(x, y):
         # isolate_recompiles region and serve from a context in that region,
         # so lookup is region-exact and pkg_b's own entry -- and the resume
         # functions renamed under pkg_b's per-install token -- are what run.
-        from torch._dynamo.eval_frame import _get_cache_entries_for_region
-
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1060,11 +1058,14 @@ def add(x, y):
         resume_b = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
         resume_b -= resume_a
         self.assertTrue(resume_b)
-        # pkg_a's entries stay in the default bucket; pkg_b's own bucket holds
-        # its own, told apart by region id.
+
+        # pkg_a's entries stay in the default region (-1); pkg_b's land only in
+        # compiled_b's minted region. Region-exactness is structural, not just
+        # inferred from which resume runs below.
         region = compiled_b._isolate_recompiles_id
-        self.assertEqual(len(_get_cache_entries_for_region(fn.__code__, -1)), count)
-        self.assertEqual(len(_get_cache_entries_for_region(fn.__code__, region)), count)
+        entries = _debug_get_precompile_entries(fn.__code__)
+        self.assertEqual(sum(e.isolate_recompiles_id == -1 for e in entries), count)
+        self.assertEqual(sum(e.isolate_recompiles_id == region for e in entries), count)
 
         # Poison pkg_a's resume globals: fn graph-breaks, so the served entry
         # LOAD_GLOBALs a renamed resume function. If pkg_a's default-region
@@ -1079,6 +1080,47 @@ def add(x, y):
 
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_b(x), expected)
+
+    def test_resume_function_with_freevars_reinstalls_its_closure(self):
+        # A graph break inside a closure produces a resume function whose code
+        # carries co_freevars, so install() must rebuild it through the closure
+        # factory (_make_fn) rather than a plain FunctionType. Serve it and
+        # check the captured freevar still reaches the result.
+        ctx = DiskDynamoStore()
+
+        def make_fn():
+            bias = torch.ones(3, 2)
+
+            def fn(x):
+                y = x.sin()
+                torch._dynamo.graph_break()
+                return y + x.cos() + bias
+
+            return fn
+
+        fn = make_fn()
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        self._save_eager_package(fn, ctx, (x,), guard_filter_fn)
+
+        pkg, backends = ctx.load_package(fn, self.path())
+        # A resume entry whose code has freevars is what forces install() down
+        # the closure-factory branch.
+        self.assertTrue(
+            any(
+                code.co_freevars
+                for code, entry in pkg._codes.items()
+                if entry.install_to_global
+            )
+        )
+        pkg.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(x), expected)
 
     def test_uninstall_leaves_a_users_rebinding_alone(self):
         # uninstall() pops a global only while it still holds the value this
