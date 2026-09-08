@@ -2175,7 +2175,7 @@ raise RuntimeError("device assert did not fire")
             capture_output=True,
             env=env,
         )
-        stderr = proc.stderr.decode("ascii")
+        stderr = proc.stderr.decode("utf-8", errors="replace")
         self.assertNotEqual(
             proc.returncode,
             0,
