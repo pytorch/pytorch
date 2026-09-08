@@ -78,11 +78,33 @@ def get_alignment_size_dtype(dtype: torch.dtype) -> int:
 
 
 def check_device(a: Tensor, b: Tensor) -> bool:
-    return (a.is_cuda and b.is_cuda) or (a.is_xpu and b.is_xpu)
+    # Any accelerator both operands agree on; cpu and meta can't run the padded
+    # mm. FakeTensor inputs report their target device, so this is the old set
+    # plus every other accelerator, without naming any of them.
+    a_device = a.device.type
+    return a_device == b.device.type and a_device not in ("cpu", "meta")
 
 
 def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
+
+
+def _bf16_large_k_needs_pad(device_type: str | None = None) -> bool:
+    """
+    Large-K bf16 matmuls regress without padding on XPU and on NVIDIA GPUs
+    older than Hopper (sm90); other accelerators have not shown the regression.
+
+    device_type is the device the matmul is compiled for, so that we only ever
+    probe the hardware we are deciding about. None keeps the historical
+    process-wide probe for callers that have no device to ask.
+    """
+    if device_type is None:
+        return torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0)
+    if device_type == "xpu":
+        return True
+    if device_type == "cuda":
+        return torch.cuda.get_device_capability() < (9, 0)
+    return False
 
 
 def hint_symbols(
@@ -287,7 +309,9 @@ def addmm_replace(
     )
 
 
-def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
+def is_mm_compute_bound(
+    M: int, K: int, N: int, dtype: torch.dtype, device_type: str | None = None
+) -> bool:
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -298,7 +322,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         dtype is torch.bfloat16
         and K > M
         and K > N
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        and _bf16_large_k_needs_pad(device_type)
     ):  # doesn't repro on h100s:
         return True
 
@@ -449,7 +473,9 @@ def is_padded_faster(key: str, ori_time: float, pad_time: float) -> bool:
     return padded_is_faster
 
 
-def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
+def should_pad_mm_bf16(
+    dtype: torch.dtype, M: int, N: int, K: int, device_type: str | None = None
+) -> bool:
     # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
     large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
         "pad_aten_mm_pass"
@@ -460,7 +486,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and K > N
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        and _bf16_large_k_needs_pad(device_type)
     ):  # doesn't repro on h100s:
         return True
     return False
@@ -545,12 +571,16 @@ def _should_pad(
         # Performance heuristic for bf16 large K scenarios
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
-            and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
+            and should_pad_mm_bf16(
+                mat1.dtype, m_concrete, n_concrete, k_concrete, mat1.device.type
+            )
         ):
             return True
 
         # Check if operation is compute bound (performance check)
-        if not is_mm_compute_bound(m_concrete, k_concrete, n_concrete, mat1.dtype):
+        if not is_mm_compute_bound(
+            m_concrete, k_concrete, n_concrete, mat1.dtype, mat1.device.type
+        ):
             return False
 
         # We don't want to look up the cache for cases that are trivially false
@@ -629,7 +659,7 @@ def _should_pad(
 
         if op is torch.ops.aten.addmm:
             input_pad = None
-            if input is not None and (input.is_cuda or input.is_xpu):
+            if input is not None and check_device(input, mat1):
                 input_pad = torch.randn_like(input)
             fns.append(
                 lambda: pad_addmm(
@@ -943,6 +973,24 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
+def _pad_mm_trace_device() -> str:
+    """
+    Device used to trace the example pad_mm patterns when the caller has no
+    device to give us. The default accelerator first, then the historical
+    cuda -> xpu probe, then cpu.
+    """
+    # Tracing these patterns on cpu mis-resolves the beta/alpha relationship,
+    # see https://github.com/pytorch/pytorch/issues/97894.
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is not None:
+        return accelerator.type
+    for device_type in ("cuda", "xpu"):
+        module = getattr(torch, device_type, None)
+        if module is not None and module.is_available():
+            return device_type
+    return "cpu"
+
+
 @functools.cache
 def _pad_mm_init(input_device: torch.device | None = None) -> None:
     from .joint_graph import patterns
@@ -950,13 +998,7 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
     if input_device:
         device = str(input_device)
     else:
-        if torch.cuda.is_available():
-            # workaround https://github.com/pytorch/pytorch/issues/97894
-            device = "cuda"
-        elif torch.xpu.is_available():
-            device = "xpu"
-        else:
-            device = "cpu"
+        device = _pad_mm_trace_device()
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
