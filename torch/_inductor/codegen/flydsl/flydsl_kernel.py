@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
@@ -20,7 +20,7 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 
 class FlyDSLTemplateKernel(Kernel):
-    """Minimal template kernel implementation for FlyDSL Inductor demos."""
+    """Minimal template kernel implementation for FlyDSL Inductor integration."""
 
     def __init__(
         self,

@@ -4,6 +4,34 @@ from itertools import product
 import torch._inductor.config as config
 
 
+# Keep in sync with make_gemm_gfx950_param in
+# torch/_inductor/kernel/vendored_templates/flydsl/kernels/gemm_gfx950.py
+_SMEM_CAPACITY_BY_ARCH = {
+    "gfx942": 65536,
+    "gfx950": 163840,
+}
+_DEFAULT_SMEM_CAPACITY = 65536
+
+
+def _smem_capacity() -> int:
+    """Best-effort per-arch LDS capacity, matching the vendored gfx950 kernel.
+
+    Falls back to the conservative gfx942 value so configs that only fit the
+    larger gfx950 LDS are never proposed on an unknown/smaller device.
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            gcn_arch = (
+                torch.cuda.get_device_properties(0).gcnArchName or ""
+            ).split(":", 1)[0]
+            return _SMEM_CAPACITY_BY_ARCH.get(gcn_arch, _DEFAULT_SMEM_CAPACITY)
+    except Exception:
+        pass
+    return _DEFAULT_SMEM_CAPACITY
+
+
 @dataclass(frozen=True)
 class FlyDSLGemmConfig:
     TILE_M: int = 128
@@ -40,7 +68,7 @@ def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
         return False
 
     in_dbytes = 2
-    smem_capacity = 163840
+    smem_capacity = _smem_capacity()
     smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
     if smem_bytes > smem_capacity:
         return False

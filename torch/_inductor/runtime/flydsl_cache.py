@@ -13,12 +13,16 @@ def _cache_dir() -> Path:
 
 
 def ensure_flydsl_cache_dir() -> str:
-    """Ensure FlyDSL uses TorchInductor's cache root by default.
+    """Route FlyDSL's disk cache through TorchInductor's cache root by default.
 
     FlyDSL has its own disk cache controlled by ``FLYDSL_RUNTIME_CACHE_DIR``.
     Inductor-generated kernels should participate in Inductor cache cleanup and
-    subprocess warming, so force FlyDSL to use an Inductor-owned subdirectory.
+    subprocess warming, so default FlyDSL to an Inductor-owned subdirectory --
+    but respect an explicit ``FLYDSL_RUNTIME_CACHE_DIR`` the user already set.
     """
+    existing = os.environ.get("FLYDSL_RUNTIME_CACHE_DIR")
+    if existing:
+        return existing
     cache_dir = str(_cache_dir())
     os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = cache_dir
     return cache_dir
