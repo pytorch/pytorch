@@ -11,6 +11,7 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CUDAFunctions.h>
@@ -25,11 +26,6 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
-#ifdef USE_ROCM
-#include <numeric>
-#else
-#include <cuda/std/numeric>
-#endif
 #include <type_traits>
 
 namespace at::native {
@@ -117,11 +113,7 @@ __device__ int binarySearchForMultinomial(const scalar_t* cumdist,
   CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
-#ifdef USE_ROCM
-    int mid = std::midpoint(start, end);
-#else
-    int mid = ::cuda::std::midpoint(start, end);
-#endif
+    int mid = c10::cuda::compat::midpoint(start, end);
 
     scalar_t midVal = cumdist[mid];
     if (midVal < val) {
