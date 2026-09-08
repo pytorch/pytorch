@@ -9,8 +9,8 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._higher_order_ops.utils import (
-    _check_alias_and_mutation,
     autograd_not_implemented,
+    potential_input_alias_or_mutation,
     reenter_make_fx,
     register_fake,
     unique_graph_id,
@@ -42,12 +42,16 @@ FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.baddbmm.default: FlexGemmOpSpec(
         "baddbmm", 1, 2, input_ndim=3, bias_index=0
     ),
+    torch.ops.aten._scaled_mm_v2.default: FlexGemmOpSpec(
+        "scaled_mm", 0, 1, input_ndim=2
+    ),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
     torch.addmm: torch.ops.aten.addmm.default,
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
+    torch.nn.functional.scaled_mm: torch.ops.aten._scaled_mm_v2.default,
 }
 _SUPPORTED_BACKENDS = {"NVGEMM", "QUACK", "TRITON"}
 
@@ -59,10 +63,10 @@ _PRESERVE_FLEX_GEMM_GEMM_OP = "preserve_flex_gemm_gemm_op"
 
 # Note [Preserving FlexGEMM body GEMMs]
 # FlexGEMM lowering materializes the captured epilogue by finding the body GEMM
-# node whose target matches the HOP-carried gemm_op. Generic graph passes can
-# rewrite batch-size-1 bmm into mm(...).unsqueeze(0), which removes the matching
-# node. This body pass tags FlexGEMM GEMM nodes so bmm_to_mm in joint_graph.py
-# skips them.
+# node whose target matches the HOP-carried gemm_op. Generic graph passes must
+# not replace that node with a different GEMM plus wrappers or padded operands.
+# This body pass tags the node so joint- and post-grad rewrites keep the captured
+# GEMM contract intact until FlexGEMM lowering owns the graph.
 
 
 def mark_flex_gemm_body_gemm_node(
@@ -71,11 +75,6 @@ def mark_flex_gemm_body_gemm_node(
     """Mark body GEMMs so Inductor's batch-1 bmm rewrite keeps them matchable."""
     for node in body_graph.graph.find_nodes(op="call_function", target=gemm_op):
         node.meta[_PRESERVE_FLEX_GEMM_GEMM_OP] = True
-
-
-FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
-    Callable[[torch.fx.GraphModule, torch._ops.OpOverload], None], ...
-] = (mark_flex_gemm_body_gemm_node,)
 
 
 @elementwise_type_promotion_wrapper(
@@ -115,23 +114,47 @@ FLEX_GEMM_FAST_MATH_DECOMPOSITIONS: dict[torch._ops.OpOverload, Callable[..., An
 }
 
 
+def flex_gemm_logsumexp(
+    input: torch.Tensor,
+    dim: int | tuple[int, ...] | list[int],
+    keepdim: bool = False,
+    *,
+    fallback: Callable[..., Any],
+) -> torch.Tensor:
+    """Expose one online max/sum state for a single-dimension logsumexp."""
+    if isinstance(dim, (tuple, list)):
+        if len(dim) != 1:
+            return fallback(input, dim, keepdim)
+        dim = dim[0]
+    from torch._inductor import inductor_prims
+
+    maximum, total = inductor_prims.prepare_softmax_online(input, dim)
+    if not keepdim:
+        maximum = maximum.squeeze(dim)
+        total = total.squeeze(dim)
+    return total.log() + maximum
+
+
 def flex_gemm_body_decomposition_table(
     kernel_options: dict[str, Any],
     decomposition_table: Mapping[torch._ops.OpOverload, Callable[..., Any]],
 ) -> dict[torch._ops.OpOverload, Callable[..., Any]] | None:
-    """Override composite body decompositions enabled by QUACK fast math."""
-    if (
-        kernel_options.get("backend") != "QUACK"
-        or kernel_options.get("fast_math") is not True
-    ):
+    """Override composite body decompositions used by the QUACK backend."""
+    if kernel_options.get("backend") != "QUACK":
         return None
     merged_decompositions = dict(decomposition_table)
-    merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
-    gelu = torch.ops.aten.gelu.default
-    if gelu in merged_decompositions:
-        merged_decompositions[gelu] = partial(
-            flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+    logsumexp = torch.ops.aten.logsumexp.default
+    if logsumexp in merged_decompositions:
+        merged_decompositions[logsumexp] = partial(
+            flex_gemm_logsumexp, fallback=merged_decompositions[logsumexp]
         )
+    if kernel_options.get("fast_math") is True:
+        merged_decompositions.update(FLEX_GEMM_FAST_MATH_DECOMPOSITIONS)
+        gelu = torch.ops.aten.gelu.default
+        if gelu in merged_decompositions:
+            merged_decompositions[gelu] = partial(
+                flex_gemm_fast_math_gelu, fallback=merged_decompositions[gelu]
+            )
     return merged_decompositions
 
 
@@ -229,12 +252,33 @@ def _(input_matrix: torch.Tensor) -> torch.Tensor:
     )
 
 
-def apply_flex_gemm_body_graph_passes(
-    body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
+def check_flex_gemm_alias_and_mutation(
+    body_fn: Callable[..., Any],
+    inputs: tuple[Any, ...],
+    pre_dispatch: bool,
 ) -> None:
-    """Apply FlexGEMM body annotations before generic Inductor graph passes."""
-    for graph_pass in FLEX_GEMM_BODY_GRAPH_PASSES:
-        graph_pass(body_graph, gemm_op)
+    """Allow aliased inputs while rejecting output aliases and mutation."""
+    (_, input_output_aliases, output_aliases), mutations = (
+        potential_input_alias_or_mutation(body_fn, inputs, pre_dispatch)
+    )
+    if input_output_aliases or output_aliases:
+        raise RuntimeError("flex_gemm might be aliasing an input and output")
+    if mutations:
+        raise RuntimeError("flex_gemm might be modifying an input")
+
+
+# NOTE [FlexGEMM scaled-mm surrogate]
+# ProxyTensor cannot carry an OpOverload whose schema requires exact strides as
+# a HOP input. The HOP therefore carries stride-neutral aten.mm while its body
+# contains aten._scaled_mm_v2; static kwargs identify the body op for analysis.
+# Remove this indirection once ProxyTensor supports exact-stride OpOverload inputs.
+def flex_gemm_body_gemm_op(
+    gemm_op: torch._ops.OpOverload, gemm_kwargs: dict[str, Any]
+) -> torch._ops.OpOverload:
+    """Return the GEMM op captured inside the FlexGEMM body graph."""
+    if gemm_kwargs.get("flex_gemm_op") == "scaled_mm":
+        return torch.ops.aten._scaled_mm_v2.default
+    return gemm_op
 
 
 class FlexGemm(HigherOrderOperator):
@@ -302,6 +346,25 @@ class FlexGemm(HigherOrderOperator):
 flex_gemm_hop = FlexGemm()
 
 
+def scaled_mm_arg_list(value: Any, name: str) -> tuple[torch.Tensor, ...]:
+    """Normalize one public scaled-mm tensor or tensor-list argument."""
+    values = tuple(value) if isinstance(value, list) else (value,)
+    if not values or not all(isinstance(item, torch.Tensor) for item in values):
+        raise RuntimeError(f"{name} must be a tensor or non-empty list of tensors")
+    return values
+
+
+def scaled_mm_enum_values(value: Any, name: str) -> tuple[int, ...]:
+    """Normalize one public scaled-mm enum or enum-list argument."""
+    values = tuple(value) if isinstance(value, list) else (value,)
+    if not values:
+        raise RuntimeError(f"{name} must not be empty")
+    try:
+        return tuple(item.value for item in values)
+    except AttributeError as error:
+        raise RuntimeError(f"{name} must contain enum values") from error
+
+
 def flex_gemm(
     gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
@@ -314,7 +377,90 @@ def flex_gemm(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {}
+    public_gemm_op = gemm_op
+    if public_gemm_op in (
+        torch.ops.aten._scaled_mm_v2,
+        torch.ops.aten._scaled_mm_v2.default,
+    ):
+        raise RuntimeError(
+            "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
+            "use torch.nn.functional.scaled_mm"
+        )
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
+
+    if public_gemm_op is torch.nn.functional.scaled_mm:
+        if len(gemm_args) != 4:
+            raise RuntimeError(
+                "FlexGEMM F.scaled_mm expects gemm_args=(mat_a, mat_b, scale_a, scale_b)"
+            )
+        mat_a, mat_b, scale_a_arg, scale_b_arg = gemm_args
+        scale_a = scaled_mm_arg_list(scale_a_arg, "scale_a")
+        scale_b = scaled_mm_arg_list(scale_b_arg, "scale_b")
+        options = dict(gemm_kwargs)
+        try:
+            recipe_a = scaled_mm_enum_values(
+                options.pop("scale_recipe_a"), "scale_recipe_a"
+            )
+            recipe_b = scaled_mm_enum_values(
+                options.pop("scale_recipe_b"), "scale_recipe_b"
+            )
+        except KeyError as error:
+            raise RuntimeError(
+                f"missing required scaled-mm option {error.args[0]!r}"
+            ) from error
+        swizzle_a_arg = options.pop("swizzle_a", None)
+        swizzle_b_arg = options.pop("swizzle_b", None)
+        swizzle_a = (
+            ()
+            if swizzle_a_arg is None
+            else scaled_mm_enum_values(swizzle_a_arg, "swizzle_a")
+        )
+        swizzle_b = (
+            ()
+            if swizzle_b_arg is None
+            else scaled_mm_enum_values(swizzle_b_arg, "swizzle_b")
+        )
+        bias = options.pop("bias", None)
+        if bias is not None:
+            raise NotImplementedError(
+                "FlexGEMM F.scaled_mm tensor bias is not supported yet"
+            )
+        output_dtype = options.pop("output_dtype", torch.bfloat16)
+        contraction_dim = tuple(options.pop("contraction_dim", ()))
+        use_fast_accum = options.pop("use_fast_accum", False)
+        if options:
+            raise RuntimeError(
+                f"unsupported FlexGEMM F.scaled_mm options: {sorted(options)}"
+            )
+        scale_a_end = 2 + len(scale_a)
+        flat_gemm_args = (mat_a, mat_b, *scale_a, *scale_b)
+        gemm_kwargs = {"flex_gemm_op": "scaled_mm"}
+
+        def body_fn(*args: Any) -> Any:
+            return epilogue_fn(
+                gemm_op(
+                    args[0],
+                    args[1],
+                    list(args[2:scale_a_end]),
+                    list(recipe_a),
+                    list(swizzle_a),
+                    list(args[scale_a_end:]),
+                    list(recipe_b),
+                    list(swizzle_b),
+                    None,
+                    output_dtype,
+                    list(contraction_dim),
+                    use_fast_accum,
+                )
+            )
+
+        return flex_gemm_hop(
+            torch.ops.aten.mm.default,
+            body_fn,
+            flat_gemm_args,
+            gemm_kwargs,
+            kernel_options,
+        )
 
     def body_fn(*args: Any) -> Any:
         # Keep the traced body positional-only; the HOP carries gemm_kwargs for lowering.
@@ -342,10 +488,9 @@ def flex_gemm_fake_tensor_mode(gemm_op, body_fn, args, kwargs, kernel_options):
 def flex_gemm_functionalize(ctx, gemm_op, body_fn, args, kwargs, kernel_options):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        _check_alias_and_mutation(
+        check_flex_gemm_alias_and_mutation(
             body_fn,
             unwrapped_args,
-            "flex_gemm",
             hasattr(ctx, "mode") and ctx.mode.pre_dispatch,
         )
         return ctx.wrap_tensors(
@@ -365,17 +510,16 @@ def flex_gemm_proxy_torch_dispatch_mode(
 ):
     if proxy_mode.enable_tracing:
         flat_args = tuple(args)
-
-        def tracing_body_fn(*flat_body_args):
-            return body_fn(*flat_body_args)
-
         body_graph = reenter_make_fx(
-            tracing_body_fn,
+            body_fn,
             subgraph_decomp_table=flex_gemm_body_decomposition_table(
                 kernel_options, proxy_mode.decomposition_table
             ),
         )(*flat_args)
-        apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
+        if kernel_options.get("backend") == "QUACK":
+            mark_flex_gemm_body_gemm_node(
+                body_graph, flex_gemm_body_gemm_op(gemm_op, kwargs)
+            )
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(

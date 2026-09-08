@@ -4,14 +4,14 @@ The pinned upstream commit is recorded in ``__upstream_sha__`` below and is
 sourced from ``PINNED_SHA`` in tools/vendoring/quack/vendor.sh. The
 vendoring script verifies that commit is reachable from Dao-AILab/quack main
 before applying the local FlexGEMM patchset. Only the modules required by
-torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue implementation
-paths are vendored. Imports are rewritten to be package-relative
-so this copy is independent of any ``quack`` top-level package that may be
-installed via pip. Custom op namespaces are renamed from ``quack::`` to
-``torch_vendor_quack::`` for the same reason.
+torch._native.ops.norm.rmsnorm_impl, torch._inductor.kernel.flex_gemm, and the
+symmetric GEMM are vendored. Imports are rewritten to absolute
+torch._vendor.quack imports so this copy is independent of any ``quack``
+top-level package that may be installed via pip. Custom op namespaces are
+renamed from ``quack::`` to ``torch_vendor_quack::`` for the same reason.
 """
-__version__ = "0.5.0"
-__upstream_sha__ = "99bd7973bf3dc6db40961e413d4bdfea6c6fee3e"
+__version__ = "0.6.4"
+__upstream_sha__ = "4709411169dcc3dc4e23f8f32f385eb4b6871d9d"
 
 # Two CuTeDSL workarounds, both must run before the first cute.compile call:
 #   - cutlass#3161: duplicate .text section flags break MCJIT in multi-process
