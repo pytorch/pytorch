@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from torch._inductor import inductor_prims, ir
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -14,6 +15,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
 from .bmm import blackwell_ws_persistent_tma_bmm_template, BlackwellBMMConfig
+
+
+USE_META_WS = meta_ws_enabled()
 
 
 # TODO(@jananisriram): Refine the max-autotune search space.
@@ -166,6 +170,8 @@ def _blackwell_decompose_k_partial_kwargs(
     if (k_split - 1) * k_part >= k:
         raise NotImplementedError("aligned split leaves an empty final partition")
 
+    use_meta_ws = meta_ws_enabled()
+    two_ctas = use_meta_ws and config.two_ctas
     m_tiles = m_pad // config.block_m
     kwargs = {
         "BLOCK_M": config.block_m,
@@ -192,18 +198,18 @@ def _blackwell_decompose_k_partial_kwargs(
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
         "ALLOW_TF32": False,
-        "USE_META_WS": True,
+        "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
-        "FLATTEN": False,
+        "FLATTEN": not use_meta_ws,
         "DATA_PARTITION_FACTOR": config.data_partition_factor,
         "SEPARATE_EPILOGUE_STORE": config.separate_epilogue_store,
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
-        "TWO_CTAS": config.two_ctas,
+        "TWO_CTAS": two_ctas,
         "FLATTEN_OUTPUT": True,
         "tma_store": True,
         "transpose_discontiguous_tensor_descriptors_override": True,
     }
-    if config.two_ctas:
+    if two_ctas:
         kwargs["ctas_per_cga"] = (2, 1, 1)
     return kwargs
 
@@ -236,7 +242,7 @@ def lower_blackwell_decompose_k_partial(
     n = int(mat2.get_size()[1])
 
     m_tiles = math.ceil(m / partial_config.block_m)
-    if partial_config.two_ctas:
+    if meta_ws_enabled() and partial_config.two_ctas:
         m_tiles = math.ceil(m_tiles / 2) * 2
 
     expected_m_pad = m_tiles * partial_config.block_m
@@ -280,7 +286,7 @@ def blackwell_decompose_k_partial(a, b, k_split, config_index):
     n = b.shape[1]
 
     m_tiles = (m + config.block_m - 1) // config.block_m
-    if config.two_ctas:
+    if USE_META_WS and config.two_ctas:
         m_tiles = (m_tiles + 1) // 2 * 2
 
     m_pad = m_tiles * config.block_m
