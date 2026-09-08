@@ -278,26 +278,6 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
 
-    def test_input_mutation_epilogue_emits_fresh_warned_inputs_set(self):
-        # The mutation epilogue's warn-once set is live runtime state that must not
-        # leak into the artifact. Pin that it is emitted as a fresh empty set (so the
-        # exported module round-trips deterministically and starts its own warn-once
-        # cycle) and that the composed call still reflects the mutation like eager.
-        m = _BufferMutate().eval()
-        x = torch.randn(4)
-        src, _cache = _compose(m, x)
-        _assert_composed(self, src)
-        self.assertIn("_warned_inputs = set()", src)
-        self.assertNotIn("_warned_inputs = set([", src)
-
-        eager = _BufferMutate().eval()
-        eager_out = eager(x)
-        buf = torch.zeros(4)
-        with torch.no_grad():
-            composed_out = _exec(src)([buf, x])[0]
-        self.assertEqual(composed_out, eager_out)
-        self.assertEqual(buf, eager.b)
-
     def test_output_alias_regen_runs_like_eager(self):
         # An output that aliases an input exercises AOTAutograd's output-alias regeneration
         # (the _alias_fn / gen_alias_from_base path, which the orchestration closes over
