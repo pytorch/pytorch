@@ -91,9 +91,10 @@ def _patch_consolidate_hf_safetensors() -> None:
     from . import _consolidate_hf_safetensors as consolidate
     from ._hf_utils import (
         DEFAULT_EXTRA_METADATA_KEY,
+        DTYPE_KEY,
         SAVED_OFFSETS_KEY,
         SHAPE_KEY,
-        DTYPE_KEY,
+        _get_dcp_custom_metadata,
     )
     from safetensors.torch import _getdtype
 
@@ -101,7 +102,7 @@ def _patch_consolidate_hf_safetensors() -> None:
         fqn_to_size_mapping = {}
         for file_data in input_files_data.values():
             metadata = file_data.metadata
-            dcp_sharding_info = _state_dict._get_dcp_custom_metadata(metadata)
+            dcp_sharding_info = _get_dcp_custom_metadata(metadata)
             if not dcp_sharding_info:
                 raise ValueError(
                     "No DCP custom metadata found in safetensors file. The file must be saved with DCP to be consolidated."
