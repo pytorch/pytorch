@@ -50,6 +50,27 @@ if TYPE_CHECKING:
     from ..symbolic_convert import InstructionTranslatorBase
 
 
+def _install_identity_guards(*operands: VariableTracker) -> None:
+    """Guard the identity of source-backed operands of an identity comparison.
+
+    When vt_identity_compare folds an ``is``/``is not``/identity-``==`` result
+    from the current Python objects behind the operands, the fold is only
+    valid while those objects keep their identity.  If an operand is read back
+    from a source that can change between calls (a local argument, an attribute
+    of a mutable object, ...), a rebinding to a different -- even same-typed --
+    object must invalidate the compiled code.  Without an ID_MATCH guard only
+    the operand's type is checked, so the stale graph is silently reused.
+    """
+    from ..guards import GuardBuilder, install_guard
+
+    for operand in operands:
+        source = operand.source
+        if source is not None and (
+            operand.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
+        ):
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
+
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
@@ -60,6 +81,7 @@ def vt_identity_compare(
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
     if left is right:
+        _install_identity_guards(left, right)
         return ConstantVariable.create(True)
 
     left_val = left.get_real_python_backed_value()
@@ -68,6 +90,7 @@ def vt_identity_compare(
     right_known = right_val is not NO_SUCH_SUBOBJ
 
     if left_known and right_known:
+        _install_identity_guards(left, right)
         return (
             ConstantVariable.create(True)
             if left_val is right_val
