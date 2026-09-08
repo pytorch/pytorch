@@ -1194,7 +1194,7 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertGreater(metrics.generated_kernel_count, 1)
 
-    def test_producer_consumer_rejects_sub_parent_mutation(self):
+    def test_producer_consumer_sub_parent_mutation(self):
         B, D, G = 32, 1024, 16
 
         def f(x, weight, out):
@@ -1213,8 +1213,7 @@ class _NestedReductionBase:
         actual = torch.compile(f, fullgraph=True)(x, weight, out)
         self.assertEqual(actual, expected)
         self.assertEqual(out, ref_out)
-        self.assertEqual(metrics.codegen_nested_reduction, 1)
-        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.check_fusion()
 
     def test_producer_consumer_sub_parent_source_mutated_later(self):
         B, D, G = 8, 1024, 16
@@ -2395,7 +2394,7 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
-    def test_standalone_sub_parent_rejects_mutation(self):
+    def test_standalone_sub_parent_mutation(self):
         B, D, G = 32, 1024, 16
 
         def f(x, out):
@@ -2412,8 +2411,28 @@ class _NestedReductionBase:
         act_scale = torch.compile(f, fullgraph=True)(x, out)
         self.assertEqual(act_scale, ref_scale, atol=1e-2, rtol=1e-2)
         self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+
+    def test_standalone_sub_parent_rejects_shared_mutation_target(self):
+        """Two epilogues storing into one destination cannot both be hoisted."""
+        B, D, G = 32, 1024, 16
+
+        def f(x, out):
+            xg = x.view(B, D // G, G)
+            scale = (xg.float().abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = xg.view(B, D // G, G // 2, 2)
+            out[..., :4].copy_(pairs[..., 0].float()[..., :4] / scale.unsqueeze(-1))
+            out[..., 4:].copy_(pairs[..., 1].float()[..., 4:] / scale.unsqueeze(-1))
+            return scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        out = torch.randn(B, D // G, G // 2, device=GPU_TYPE)
+        ref_out = out.clone()
+        ref_scale = f(x, ref_out)
+        act_scale = torch.compile(f, fullgraph=True)(x, out)
+        self.assertEqual(act_scale, ref_scale, atol=1e-2, rtol=1e-2)
+        self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
         self.check_no_fusion()
-        self.assertGreater(metrics.generated_kernel_count, 1)
 
     def test_fullres_x_epilogue_rejects_intermediate_dependency(self):
         """Do not fuse a full-res consumer before its extra producer."""
