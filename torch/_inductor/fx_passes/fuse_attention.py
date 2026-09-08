@@ -994,8 +994,10 @@ def _is_matmul_derived(node) -> bool:
         target = getattr(n, "target", None)
         if target in _matmul_like_ops:
             return True
-        if target in _reshape_like_ops and n.args and isinstance(
-            n.args[0], torch.fx.Node
+        if (
+            target in _reshape_like_ops
+            and n.args
+            and isinstance(n.args[0], torch.fx.Node)
         ):
             stack.append(n.args[0])
     return False
