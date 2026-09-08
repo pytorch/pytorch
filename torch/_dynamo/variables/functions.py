@@ -4701,8 +4701,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        name = self.descriptor.__name__
-        return self.obj.call_method(tx, name, args, kwargs)
+        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)

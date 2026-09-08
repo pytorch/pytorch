@@ -1992,13 +1992,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if arg_type is self.fn:
                     return generic_hash(tx, arg)
                 # Explicit base-class unbound call, e.g. int.__hash__(self)
-                # called from inside a subclass's own __hash__ override.
-                # generic_hash(tx, arg) would dispatch polymorphically via
-                # arg's most-derived type and re-enter the override --
-                # infinite recursion if the override itself calls
-                # base.__hash__(self) (as e.g. HashCountingInt does). Call
-                # the base type's real slot directly on the underlying
-                # object instead, mirroring CPython's wrapperdescr_call.
                 real_value = arg.get_real_python_backed_value()
                 if real_value is not NO_SUCH_SUBOBJ:
                     # pyrefly: ignore[bad-argument-count]
@@ -3342,12 +3335,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0]
             if isinstance(obj, UserDefinedObjectVariable):
-                # dict.name(obj) explicitly calls the real dict method,
-                # bypassing any subclass override of `name` -- obj.call_method
-                # would dispatch polymorphically and re-enter the override
-                # (infinite recursion if the override itself calls
-                # dict.name(self), e.g. `def items(self): return
-                # reversed(dict.items(self))`).
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
 

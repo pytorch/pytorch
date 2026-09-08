@@ -8598,13 +8598,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
         # Python <= 3.12 compiles a call with a literal keyword argument to
         # KW_NAMES (pushes the arg names tuple into co_consts) followed by
         # CALL, rather than 3.13+'s CALL_KW (which pushes the names tuple
-        # onto the stack). The KW_NAMES handler stashes the names via
-        # `self.kw_names = ConstantVariable.create(value=kw_names)`, but
-        # ConstantVariable.create() routes tuple values to TupleVariable, not
-        # ConstantVariable -- so `self.kw_names` ends up a TupleVariable, and
-        # CALL's `self.kw_names.value` (only ConstantVariable has `.value`)
-        # raises AttributeError. Every compiled call with a literal keyword
-        # argument hits this on 3.11/3.12.
+        # onto the stack).
         def helper(a, b=1):
             return a + b
 

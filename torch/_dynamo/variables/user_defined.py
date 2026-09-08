@@ -1912,12 +1912,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         if name == "__getattribute__":
             # object.__getattribute__(obj, name) mirrors PyObject_GenericGetAttr,
-            # which is implemented here by generic_getattr -- not inherited from
-            # somewhere above UserDefinedObjectVariable in the MRO like the other
-            # slots this method handles. The generic MRO walk below would land on
-            # VariableTracker's bare tp_getattro_impl stub instead, which doesn't
-            # implement full attribute-lookup semantics and lets a genuinely
-            # missing attribute's NotImplementedError escape uncaught.
+            # which is implemented here by generic_getattr
             return slotdef.wrapper(
                 self, tx, UserDefinedObjectVariable.generic_getattr, args, kwargs
             )

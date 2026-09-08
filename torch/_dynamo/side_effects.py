@@ -737,10 +737,6 @@ class SideEffects:
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
 
-        # A UserDefinedDictVariable/UserDefinedSetVariable is itself a
-        # ConstDictVariable/SetVariable (MI), so its content-modified state is
-        # self-contained (items vs. original_items) and doesn't depend on
-        # mutation_type/store_attr_mutations tracking.
         if (
             isinstance(
                 item,
@@ -750,12 +746,6 @@ class SideEffects:
         ):
             return True
 
-        # UserDefinedListVariable/UserDefinedDequeVariable have no self-diff
-        # (no original_items/has_new_items on BaseListVariable), so fall back
-        # to whether mutation() was ever called on them -- mutation() records
-        # var.source in mutated_sources unconditionally, unlike
-        # store_attr_mutations (attribute-axis only) or ValueMutationExisting
-        # (a mutation_type this AttributeMutationExisting object doesn't have).
         if (
             isinstance(
                 item,
