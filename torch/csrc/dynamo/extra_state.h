@@ -402,16 +402,14 @@ py::object lookup_optional(py::handle handle, PyObject* name);
 // Create a new cache entry at extra_state holding on to guarded_code. Only
 // called from C++ (the frame evaluator), so it lives outside the extern "C"
 // block: the new entry's code (owned) and trace annotation are filled into the
-// caller's py::object / std::string under the cache lock, and the returned
-// pointer must not be dereferenced after this returns -- a concurrent clear
-// can destroy the entry the moment the lock drops.
+// caller's py::object / std::string under the cache lock. The entry itself is
+// never returned -- a concurrent clear can destroy it the moment the lock
+// drops, so there is no pointer the caller could safely dereference.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
 //  - guarded_code: Borrowed
-// return:
-//  - cache_entry: Borrowed reference
-CacheEntry* create_cache_entry(
+void create_cache_entry(
     ExtraState* extra_state,
     PyObject* guraded_code,
     PyObject* callback,
