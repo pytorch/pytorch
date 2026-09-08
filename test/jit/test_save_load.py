@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import NamedTuple, Optional
+from unittest.mock import patch
 
 import torch
 from torch import Tensor
@@ -15,8 +16,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
-    TEST_CUDA,
     TemporaryFileName,
+    TEST_CUDA,
 )
 
 
@@ -619,13 +620,14 @@ class TestSaveLoad(JitTestCase):
             validate_map_location(torch.device("cpu:0")), torch.device("cpu:0")
         )
 
-    def test_validate_map_location_meta_passthrough(self):
-        # Devices without a registered torch.<type> module (e.g. meta) keep
-        # the previous pass-through behavior: no availability/index checks.
-        self.assertFalse(hasattr(torch, "meta"))
+    def test_validate_map_location_unregistered_device_module_passthrough(self):
+        # Preserve the existing pass-through behavior when torch.<device>
+        # does not provide a module that can validate availability and indices.
         dev = torch.device("meta")
-        self.assertEqual(validate_map_location(dev), dev)
-        self.assertEqual(validate_map_location("meta"), torch.device("meta"))
+        with patch("torch.jit._serialization._validate_device") as mock_validate:
+            self.assertEqual(validate_map_location(dev), dev)
+            self.assertEqual(validate_map_location("meta"), dev)
+        mock_validate.assert_not_called()
 
     def test_validate_map_location_invalid_type(self):
         with self.assertRaisesRegex(ValueError, "map_location should be either None"):
