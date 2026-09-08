@@ -3122,9 +3122,7 @@ def _new_process_group_helper(
 
 def _release_nvshmem_team_pool(group_name: str) -> None:
     # NVSHMEM is optional, so this binding is present only in NVSHMEM builds.
-    release = getattr(
-        torch._C._distributed_c10d, "_release_nvshmem_team_pool", None
-    )
+    release = getattr(torch._C._distributed_c10d, "_release_nvshmem_team_pool", None)
     if release is not None:
         release(group_name)
 
