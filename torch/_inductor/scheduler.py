@@ -6888,7 +6888,13 @@ class Scheduler:
                 config.loop_ordering_after_fusion
                 or config.loop_index_inversion_in_fusion
             ):
-                nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+                # A reordered fusion can expose a further fusion with the new
+                # fused node, so iterate like the plain rounds above.
+                for _ in range(10):
+                    old_len = len(nodes)
+                    nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+                    if len(nodes) == old_len or len(nodes) == 1:
+                        break
             return nodes
 
     def process_grouped_nodes(self) -> None:
