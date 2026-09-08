@@ -39,12 +39,8 @@ class Adafactor(_Adafactor):
             if not params_with_grad:
                 continue
 
-            by_dtype = defaultdict(list)
-            for i, param in enumerate(params_with_grad):
-                by_dtype[param.dtype].append(i)
-
-            if len(by_dtype) == 1:
-                dtype = next(iter(by_dtype))
+            dtype = params_with_grad[0].dtype
+            if all(param.dtype == dtype for param in params_with_grad[1:]):
                 dtype_eps1 = eps1
                 if dtype_eps1 is None:
                     dtype_eps1 = torch.finfo(dtype).eps
@@ -68,6 +64,10 @@ class Adafactor(_Adafactor):
                     has_complex=has_complex,
                 )
                 continue
+
+            by_dtype = defaultdict(list)
+            for i, param in enumerate(params_with_grad):
+                by_dtype[param.dtype].append(i)
 
             for dtype, indices in by_dtype.items():
                 dtype_eps1 = eps1
