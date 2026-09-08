@@ -19,7 +19,7 @@ from . import (
     functional_export,
     resume_execution,
 )
-from ._bytecode_debugger_fix import _CodeIdSet
+from . import _bytecode_debugger_fix as _bytecode_debugger_fix
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
