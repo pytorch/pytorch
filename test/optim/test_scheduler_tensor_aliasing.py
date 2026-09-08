@@ -16,5 +16,13 @@ def test_scheduler_base_lr_does_not_alias_tensor_initial_lr():
     assert scheduler.base_lrs[0].item() == 0.1
 
 
+def test_scheduler_fix_installation_is_idempotent():
+    from torch.optim import _scheduler_fixes
+
+    init = torch.optim.lr_scheduler.LRScheduler.__init__
+    _scheduler_fixes.install()
+    assert torch.optim.lr_scheduler.LRScheduler.__init__ is init
+
+
 if __name__ == "__main__":
     torch.testing._internal.common_utils.run_tests()
