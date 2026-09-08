@@ -446,6 +446,22 @@ class DecoratedDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
+def keep_defaults_element(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDefaultsElementForwardModule(torch.nn.Module):
+    @keep_defaults_element
+    def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
+        return x * scale
+
+
 # A module-level lambda's qualname is "<lambda>", which resolves to nothing.
 GLOBAL_LAMBDA = lambda x: x * 2  # noqa: E731
 GLOBAL_LAMBDA.scale_flag = 2.0
@@ -1427,6 +1443,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             inner.tag = 2.0
+
+    def test_fqn_mismatched_function_prunes_unpicklable_defaults(self):
+        # A guard through __defaults__[0] registers the tuple itself. Carrying
+        # it verbatim would drag the unpicklable unguarded sibling default into
+        # the pickle; pruning per value keeps the guarded slot and drops the
+        # sibling. The guarded default must still round-trip.
+        mod = DecoratedDefaultsElementForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        original = inner.__defaults__
+        inner.__defaults__ = (3.0, original[1])
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__defaults__ = original
 
     def test_guard_rooted_at_a_lambda(self):
         # A module-level lambda is an fqn mismatch too (see GLOBAL_LAMBDA) and
