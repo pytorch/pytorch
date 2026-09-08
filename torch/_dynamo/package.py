@@ -373,10 +373,26 @@ class FunctionPicklerBase(pickle.Pickler):
         # wrong when that does not resolve back to the same function; those
         # carry the function and self explicitly.
         func = method.__func__
-        inner = getattr(method.__self__, func.__name__, None)
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
             inner = inner.__func__
-        if func is inner:
+        # `func is inner` proves resolution NOW, but a name satisfied only by a
+        # per-instance __dict__ will NOT resolve at load: self.__dict__ is
+        # restored AFTER the method is rebuilt, so an instance monkeypatch
+        # (m.forward = MethodType(f, m)) would round-trip to the class default.
+        # A class namespace (when __self__ is itself a type, e.g. a classmethod)
+        # is restored with the class, so it is exempt.
+        self_dict = getattr(method.__self__, "__dict__", None)
+        in_instance_dict = (
+            not isinstance(method.__self__, type)
+            and isinstance(self_dict, dict)
+            and name in self_dict
+        )
+        if func is inner and not in_instance_dict:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
 
@@ -1322,7 +1338,9 @@ class CompilePackage:
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
     2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
     3. `package.install(backends) which will handle all the side-effectful global scope
-        updates with compiled functions and resume functions.
+        updates with compiled functions and resume functions. The install is tied
+        to the package's lifetime by a finalizer, so a caller that installs must
+        retain the package; dropping it undoes these updates.
     """
 
     def __init__(
@@ -1618,7 +1636,11 @@ class CompilePackage:
                 continue
             self._source_info.add_code(code)
 
-    def update_device_type(self, graph: torch.fx.Graph | None) -> None:
+    def update_device_type(
+        self,
+        graph: torch.fx.Graph | None,
+        codegen_config: dict[str, Any] | None = None,
+    ) -> None:
         # A bypassed entry is never installed, so skip the device scan (and the
         # C++ toolchain probe it can trigger), matching add_guarded_code and
         # add_inlined_source. This can also run outside a code_context (no
@@ -1636,13 +1658,25 @@ class CompilePackage:
         needs_cpu_codegen = (
             self._requires_native_backend_compatibility and "cpu" in device_types
         )
+        # Sample under the backend's inductor config: this runs after backend()
+        # returns, so the _TorchCompileInductorWrapper's config patch (e.g.
+        # cpp.simdlen) has already exited. Without re-applying it the fingerprint
+        # records the ambient ISA, not the one the kernels were actually tiled
+        # for -- the same bug the AOT path fixes at capture time.
+        codegen_ctx: contextlib.AbstractContextManager[Any] = (
+            torch._inductor.config.patch(codegen_config)
+            if codegen_config
+            else nullcontext()
+        )
         if self._system_info is None:
-            self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
+            with codegen_ctx:
+                self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         elif needs_cpu_codegen:
             # Re-read per cpu compile, not the whole SystemInfo: the toolchain
             # probe is cached, and the inductor config it folds in can change
             # between compiles of one process.
-            current_target = _current_cpu_codegen_target()
+            with codegen_ctx:
+                current_target = _current_cpu_codegen_target()
             if self._system_info.cpu_codegen_target is None:
                 self._system_info = dataclasses.replace(
                     self._system_info, cpu_codegen_target=current_target
@@ -2164,6 +2198,16 @@ class CompilePackage:
                             _PACKAGE_SKIP_STRATEGY,
                         )
                         continue
+                    # Default bucket (region_id < 0): the skip is written as the
+                    # code object's GLOBAL exec strategy, which isolated regions
+                    # inherit per field when they hold no entry of their own (see
+                    # extra_state_get_region_exec_strategy). This is the one
+                    # un-scoped clobber install still makes -- a trivial entry
+                    # here turns dynamo off for this code in every region until
+                    # uninstall. Scoping it the way the region branch above does
+                    # is follow-up work; the _SKIP_INSTALLERS registry below at
+                    # least refcounts overlapping default-bucket owners so the
+                    # prior strategy is restored exactly once.
                     self._skipped_codes.append(target_code)
                     with _INSTALLER_REGISTRY_LOCK:
                         state = _SKIP_INSTALLERS.get(target_code)
@@ -2444,7 +2488,15 @@ class DynamoStore(abc.ABC):
         Loads a package from a given path and returns it plus a list of deserialized backends
         """
         entry = self.load_cache_entry(key)
-        package = CompilePackage(fn, entry.dynamo)
+        # Restore the loaded native-compat gate: initialize() resets it to the
+        # ctor default, and the monotone |= at 1551 cannot recover a False from
+        # a True default, so a False-saved (eager) entry would come back
+        # native-gated and pay the toolchain probe on re-save.
+        package = CompilePackage(
+            fn,
+            entry.dynamo,
+            requires_native_backend_compatibility=entry.dynamo.requires_native_backend_compatibility,
+        )
         return package, entry.backends
 
 
@@ -2584,6 +2636,11 @@ class DiskDynamoCache(DiskDynamoStore):
         """
         Load directly into a package and install backends.
 
+        The returned package OWNS the install: install effects are tied to its
+        lifetime via a weakref finalizer, so the caller must retain it. Dropping
+        the result uninstalls immediately on refcounted CPython, before the
+        install can even be observed.
+
         ``isolate_recompiles_id`` must be the region the caller will look up in:
         precompile entries match their own region only, so installing into the
         default bucket for an isolated caller loads the artifact and then serves
@@ -2593,7 +2650,11 @@ class DiskDynamoCache(DiskDynamoStore):
         if results is None:
             return None
         else:
-            package = CompilePackage(fn, results.dynamo)
+            package = CompilePackage(
+                fn,
+                results.dynamo,
+                requires_native_backend_compatibility=results.dynamo.requires_native_backend_compatibility,
+            )
             package.install(
                 results.backends, isolate_recompiles_id=isolate_recompiles_id
             )

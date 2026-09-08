@@ -409,6 +409,21 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return _fn
 
 
+def _inductor_codegen_config(compiler_fn: Any) -> dict[str, Any] | None:
+    # The precompile fingerprint's cpu_codegen_target is sampled after backend()
+    # returns, so the _TorchCompileInductorWrapper's config patch (e.g.
+    # cpp.simdlen) has already exited. Recover it from the wrapper chain so
+    # update_device_type can re-apply it while sampling; otherwise the
+    # fingerprint records the ambient ISA, not the one the kernels were tiled
+    # for, and a plain host reloads 256-tiled kernels under 512-bit flags.
+    fn = compiler_fn
+    while fn is not None:
+        if isinstance(fn, torch._TorchCompileInductorWrapper):
+            return fn.config
+        fn = getattr(fn, "_torchdynamo_orig_backend", None)
+    return None
+
+
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
@@ -2050,7 +2065,10 @@ def _compile(
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
             output.package.add_inlined_source(output.tracing_context.traced_code)
-            output.package.update_device_type(output.current_tracer.graph)
+            output.package.update_device_type(
+                output.current_tracer.graph,
+                codegen_config=_inductor_codegen_config(compiler_fn),
+            )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
