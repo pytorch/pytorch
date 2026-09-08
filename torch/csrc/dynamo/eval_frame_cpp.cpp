@@ -416,8 +416,10 @@ PyObject* dynamo__custom_eval_frame(
   py::handle recursive_callback = callback; // borrowed
   PyCodeObject* cached_code = nullptr; // borrowed
   // Owned copy: the CacheEntry whose annotation this came from can be
-  // destroyed by a concurrent unload before eval_custom() consumes it.
-  std::string trace_annotation;
+  // destroyed by a concurrent unload before eval_custom() consumes it. A small
+  // inline buffer keeps the copy off the heap on the cache-hit fast path (the
+  // annotation is short but past libstdc++'s 15-char SSO threshold).
+  c10::SmallVector<char, 64> trace_annotation(1, '\0');
   PyObject* eval_result = nullptr; // strong reference
 
   // exit functions
@@ -486,7 +488,7 @@ PyObject* dynamo__custom_eval_frame(
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(
-        tstate, frame, cached_code, trace_annotation.c_str(), throw_flag);
+        tstate, frame, cached_code, trace_annotation.data(), throw_flag);
     if (!callback.is(recursive_callback)) {
       eval_frame_callback_set(callback.ptr());
     }
@@ -545,8 +547,15 @@ PyObject* dynamo__custom_eval_frame(
   }
   // The marker also keeps a RUN_ONLY recursive action from demoting callees to
   // Py_False: their misses must reach the same callback rather than run eager.
+  // Under fullgraph, though, keeping the real callback is strictly worse: the
+  // eval_custom() block below turns a live callback fully off (py::none()) for
+  // sub-frames, weaker than the run-only Py_False the base demotion produces.
+  // So under fullgraph fall back to the demotion (recursive_callback becomes
+  // Py_False and eval_custom()'s !is(false) guard leaves it there); the marker
+  // only forces the callback outside fullgraph.
   if (!force_callback_on_cache_miss ||
-      strategy.recursive_action != FrameAction::RUN_ONLY) {
+      strategy.recursive_action != FrameAction::RUN_ONLY ||
+      fullgraph_compiled_frame_count >= 0) {
     recursive_callback =
         _callback_from_action(recursive_callback, strategy.recursive_action);
   }
