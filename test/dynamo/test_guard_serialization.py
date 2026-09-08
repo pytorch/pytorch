@@ -996,6 +996,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
 
+    def test_reduce_keeps_the_function_dict_key_set(self):
+        # __dict__ must round-trip with its key set intact: an unguarded value
+        # prunes to _Missing IN PLACE, exactly like the sibling containers
+        # (__defaults__/__kwdefaults__/__annotations__). Dropping the key
+        # instead shrinks the dict, so a guard reading its shape rebakes against
+        # the smaller dict at load and never matches again. See the attributes
+        # branch in _reduce_fqn_mismatched_function.
+        def base(x):
+            return x
+
+        base.tag = 2.0  # guarded
+        base.cache = threading.Lock()  # unpicklable and unguarded
+        buf = io.BytesIO()
+        gtv = {id(base): base, id(base.tag): base.tag}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(set(out.__dict__), {"tag", "cache"})
+        self.assertEqual(out.__dict__["tag"], 2.0)
+        self.assertIsInstance(out.__dict__["cache"], _Missing)
+
     def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
         # after reload; rebuilding every cell silently unshares them.
