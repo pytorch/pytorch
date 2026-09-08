@@ -12,15 +12,15 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch import nn
 from torch.amp import autocast
-from torch.testing._internal.common_utils import TEST_MULTIACCELERATOR
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipMeta,
     skipCPUIf,
+    skipMeta,
 )
 from torch.testing._internal.common_utils import (
+    TEST_MULTIACCELERATOR,
     _assertGradAndGradgradChecks,
     dtype2prec_DONTUSE,
     gradcheck,
@@ -45,7 +45,9 @@ class TestDataParallel(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_buffers_requiring_grad(self, device):
         class TestModule(nn.Module):
             def __init__(self, t):
@@ -70,7 +72,9 @@ class TestDataParallel(TestCase):
         gradcheck(fn, (m.t_rg,))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_rnn(self, device):
         class TestModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -106,7 +110,9 @@ class TestDataParallel(TestCase):
             self.assertEqual(p1, p2)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_lazy_linear(self, device):
         with self.assertRaisesRegex(
             ValueError, "Attempted to use an uninitialized parameter"
@@ -115,12 +121,18 @@ class TestDataParallel(TestCase):
             model_dp(torch.rand(10, 10).to(device))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_parallel_apply(self, device):
         l1 = nn.Linear(10, 5).to(device, torch.float)
-        l2 = nn.Linear(10, 5).to(torch.device(torch.device(device).type, 1), torch.float)
+        l2 = nn.Linear(10, 5).to(
+            torch.device(torch.device(device).type, 1), torch.float
+        )
         i1 = torch.randn(2, 10, device=device, dtype=torch.float)
-        i2 = torch.randn(2, 10, device=torch.device(torch.device(device).type, 1), dtype=torch.float)
+        i2 = torch.randn(
+            2, 10, device=torch.device(torch.device(device).type, 1), dtype=torch.float
+        )
         expected1 = l1(i1)
         expected2 = l2(i2)
         modules = (l1, l2)
@@ -134,7 +146,9 @@ class TestDataParallel(TestCase):
                 self.assertEqual(out, expected)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_parallel_apply_autocast(self, device):
         l1 = nn.Linear(10, 5).to(device, torch.float)
         l2 = nn.Linear(10, 5).to(device, torch.float)
@@ -155,7 +169,9 @@ class TestDataParallel(TestCase):
                 self.assertEqual(out, expected)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_parallel_apply_passes_exception(self, device):
         # we define and instantiate a module that will throw a KeyError
         class TestModule(nn.Module):
@@ -174,7 +190,9 @@ class TestDataParallel(TestCase):
             dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_multiple_input(self, device):
         class TestModule(nn.Module):
             def forward(self, var1, var2, float1, var3=None):
@@ -242,7 +260,9 @@ class TestDataParallel(TestCase):
         local_test(out)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_small_back(self, device):
         l = nn.Linear(10, 5).float().to(device)
         i = torch.randn(20, 10, dtype=torch.float, device=device)
@@ -250,7 +270,9 @@ class TestDataParallel(TestCase):
         self.assertEqual(out, l(i))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_model_device(self, device):
         r"""Test device[0] check at forward time."""
         l = nn.Linear(2, 2)
@@ -296,13 +318,31 @@ class TestDataParallel(TestCase):
                 nn.parallel.data_parallel(inner_m.to(dp_device), inp, device_ids)
 
         test(l.to("cpu"), None, inp, None, should_fail=True)
-        test(l.to(torch.device(torch.device(device).type, 1)), None, inp_cuda0, None, should_fail=True)
+        test(
+            l.to(torch.device(torch.device(device).type, 1)),
+            None,
+            inp_cuda0,
+            None,
+            should_fail=True,
+        )
         test(l.to(device), None, inp_cuda0, [1, 0], should_fail=True)
 
         test(l.to(device), None, inp_cuda0, None, should_fail=False)
         test(l.cpu(), device, inp_cuda0, None, should_fail=False)
-        test(l.to(torch.device(torch.device(device).type, 1)), None, inp_cuda1, [1, 0], should_fail=False)
-        test(l.cpu(), torch.device(torch.device(device).type, 1), inp_cuda1, [1, 0], should_fail=False)
+        test(
+            l.to(torch.device(torch.device(device).type, 1)),
+            None,
+            inp_cuda1,
+            [1, 0],
+            should_fail=False,
+        )
+        test(
+            l.cpu(),
+            torch.device(torch.device(device).type, 1),
+            inp_cuda1,
+            [1, 0],
+            should_fail=False,
+        )
 
         s = nn.Sequential(l.cpu())
         test(s, None, inp, None, should_fail=True)
@@ -314,7 +354,9 @@ class TestDataParallel(TestCase):
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(l.to(device), deepcopy(l).to(torch.device(torch.device(device).type, 1)))
+        s = nn.Sequential(
+            l.to(device), deepcopy(l).to(torch.device(torch.device(device).type, 1))
+        )
         test(s, None, inp, None, should_fail=True)
         test(s, None, inp, [0, 1], should_fail=True)
         test(s, None, inp, [1, 0], should_fail=True)
@@ -324,10 +366,18 @@ class TestDataParallel(TestCase):
         test(s, None, inp, [0, 1], should_fail=False)
         test(s, None, inp, [1, 0], should_fail=True)
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
-        test(s.to(torch.device(torch.device(device).type, 1)), None, inp, [1, 0], should_fail=False)
+        test(
+            s.to(torch.device(torch.device(device).type, 1)),
+            None,
+            inp,
+            [1, 0],
+            should_fail=False,
+        )
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_model_no_refcycles(self, device):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -351,7 +401,9 @@ class TestDataParallel(TestCase):
         self.assertEqual(refcycles, 0)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_no_grad(self, device):
         test = self
 
@@ -367,10 +419,14 @@ class TestDataParallel(TestCase):
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel(self, device):
         l = nn.Linear(10, 5).float().to(device)
-        i = torch.randn(20, 10, dtype=torch.float, device=torch.device(torch.device(device).type, 1))
+        i = torch.randn(
+            20, 10, dtype=torch.float, device=torch.device(torch.device(device).type, 1)
+        )
         l.to(torch.device(torch.device(device).type, 1))
         expected_out = l(i)
         loss = expected_out.sum()
@@ -396,10 +452,19 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(l, i)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_sparse(self, device):
-        l = nn.Embedding(10, 5, sparse=True).to(torch.device(torch.device(device).type, 1))
-        i = torch.randint(10, (20, 5), device=torch.device(torch.device(device).type, 1), dtype=torch.long)
+        l = nn.Embedding(10, 5, sparse=True).to(
+            torch.device(torch.device(device).type, 1)
+        )
+        i = torch.randint(
+            10,
+            (20, 5),
+            device=torch.device(torch.device(device).type, 1),
+            dtype=torch.long,
+        )
         expected_out = l(i)
         loss = expected_out.sum()
         loss.backward()
@@ -424,7 +489,9 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(l, i)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_nested_output(self, device):
         def fn(input):
             return [
@@ -458,7 +525,9 @@ class TestDataParallel(TestCase):
         self.assertIsInstance(output[3]["b"][0], torch.Tensor)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_nested_input(self, device):
         def fn(input):
             return input[1][0]
@@ -467,14 +536,18 @@ class TestDataParallel(TestCase):
             def forward(self, *input):
                 return fn(input)
 
-        i = torch.randn(20, 3, dtype=torch.float, device=torch.device(torch.device(device).type, 1))
+        i = torch.randn(
+            20, 3, dtype=torch.float, device=torch.device(torch.device(device).type, 1)
+        )
         input = (i.cos(), (i.sin(), i), i.sin())
         gpus = range(torch.accelerator.device_count())
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_module_zero_inputs(self, device):
         class TestModule(nn.Module):
             def forward(self):
@@ -494,7 +567,9 @@ class TestDataParallel(TestCase):
         test_helper(dp.data_parallel(model, (), [0, 1]), expected)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_device_args(self, device):
         dev0 = torch.device(device)
         dev1 = torch.device(torch.device(device).type, 1)
@@ -512,7 +587,9 @@ class TestDataParallel(TestCase):
         self.assertEqual(out, l(i))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_function_deletion(self, device):
         # this test case is originated from #16532
         def gradient_penalty(net, x):
@@ -540,7 +617,9 @@ class TestDataParallel(TestCase):
         )
         self.assertEqual(torch.tensor([0.0], device=device), grads[1])
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_scatter(self, device):
         x = torch.randn((4, 4), dtype=torch.double, device=device).requires_grad_()
         result = dp.scatter(x, (0, 1))
@@ -556,7 +635,9 @@ class TestDataParallel(TestCase):
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_complex_parameters(self, device):
         # test that complex parameters are handled correctly by DataParallel
         class ComplexModel(torch.nn.Module):
@@ -630,7 +711,9 @@ class TestDataParallel(TestCase):
                 )
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_data_parallel_complex_mixed_parameters(self, device):
         # test that mix complex and real parameters are handled correctly by DataParallel
         class MixedModel(torch.nn.Module):
@@ -708,12 +791,20 @@ class TestDataParallel(TestCase):
                 )
 
     @skipCPUIf(True, "dp.gather does not support CPU output_device")
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_gather(self, device):
-        output_device = -1 if torch.device(device).type == 'cpu' else 0
+        output_device = -1 if torch.device(device).type == "cpu" else 0
         inputs = (
             torch.randn(2, 4, device=device, requires_grad=True, dtype=torch.double),
-            torch.randn(2, 4, device=torch.device(torch.device(device).type, 1), requires_grad=True, dtype=torch.double),
+            torch.randn(
+                2,
+                4,
+                device=torch.device(torch.device(device).type, 1),
+                requires_grad=True,
+                dtype=torch.double,
+            ),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
@@ -736,7 +827,12 @@ class TestDataParallel(TestCase):
         # test scalar inputs, should stack into a vector in this case
         inputs = (
             torch.randn((), device=device, requires_grad=True, dtype=torch.double),
-            torch.randn((), device=torch.device(torch.device(device).type, 1), requires_grad=True, dtype=torch.double),
+            torch.randn(
+                (),
+                device=torch.device(torch.device(device).type, 1),
+                requires_grad=True,
+                dtype=torch.double,
+            ),
         )
         result = dp.gather(inputs, output_device)
         self.assertEqual(result.size(), torch.Size([2]))
@@ -757,20 +853,34 @@ class TestDataParallel(TestCase):
         )
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_gather_different_len_dicts(self, device):
         inputs = (
             {"a": torch.randn(1, 2, requires_grad=True, device=device)},
             {
-                "b": torch.randn(1, 2, requires_grad=True, device=torch.device(torch.device(device).type, 1)),
-                "a": torch.randn(1, 2, requires_grad=True, device=torch.device(torch.device(device).type, 1)),
+                "b": torch.randn(
+                    1,
+                    2,
+                    requires_grad=True,
+                    device=torch.device(torch.device(device).type, 1),
+                ),
+                "a": torch.randn(
+                    1,
+                    2,
+                    requires_grad=True,
+                    device=torch.device(torch.device(device).type, 1),
+                ),
             },
         )
         with self.assertRaises(ValueError):
             _ = dp.gather(inputs, target_device=device)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_replicate(self, device):
         module = nn.Linear(10, 5).float().to(device)
         input = torch.randn(2, 10, dtype=torch.float, device=device)
@@ -784,7 +894,9 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica(replica_input), expected_output)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_replicate_buffers(self, device):
         net = nn.Module()
         net.bn = nn.BatchNorm2d(10)
@@ -807,7 +919,9 @@ class TestDataParallel(TestCase):
                 )
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_zero_grad(self, device):
         # zero_grad should warn about using gradients inside forward
 
@@ -829,7 +943,9 @@ class TestDataParallel(TestCase):
         dpm(torch.rand(4, 3, 6, 5))
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_autocast(self, device):
         class Model(torch.nn.Linear):
             def __init__(self) -> None:
@@ -844,7 +960,9 @@ class TestDataParallel(TestCase):
         self.assertTrue(model(input).dtype is torch.float16)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_save_replica_module(self, device):
         # DataParallel replicas can be saved (gh-37182)
         module = torch.nn.Linear(8, 8).to(device)
@@ -855,7 +973,9 @@ class TestDataParallel(TestCase):
         torch.save(dpm, data)
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_strided_grad_layout(self, device):
         class ConvNet(nn.Module):
             def __init__(self, layouts, dtype_list):
@@ -960,7 +1080,9 @@ class TestDataParallel(TestCase):
                         raise
 
     @onlyAccelerator
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "multi-accelerator not supported"
+    )
     def test_parameter_list_dict_replica(self, device):
         class MyMod(torch.nn.Module):
             def __init__(self, data, check_fn):
