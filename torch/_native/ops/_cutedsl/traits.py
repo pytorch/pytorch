@@ -1,29 +1,17 @@
 # CuTeDSL trait library for native reductions: the trait protocol plus the cross-thread reduce
-# helpers (warp_reduce / block_reduce). Under _cutedsl/ so pointwise ops can reuse it; the kernels
-# and overrides live in ../reductions/.
+# helpers. Under _cutedsl/ so pointwise ops can reuse it.
 #
-# THREE value methods, and the split is what lets any trait ride any fold order:
-#   leaf(val, idx)               one ELEMENT as a standalone accumulator
-#   combine(a, b)                merge two accumulators; associative, so a fold may re-associate
-#   reduce(acc, val, idx, valid) the SERIAL update, which may use a cheaper online formula
-# A tree fold cannot use `reduce` -- it needs each contribution separately -- so anything that
-# TRANSFORMS an element must say so in `leaf`, or a tree order silently folds raw values.
+# THREE value methods, and the split is what lets any trait ride any fold order: `leaf` makes
+# one element a standalone accumulator, `combine` merges two associatively, and `reduce` is the
+# serial update, which may use a cheaper online formula. A tree fold cannot use `reduce`, so
+# anything that TRANSFORMS an element must say so in `leaf` or a tree silently folds raw
+# values. reduce/combine/project are ATen's own names (SharedReduceOps.h); `leaf` is the
+# addition a tree needs, since ATen folds serially from an identity and can hide the transform.
 #
-# reduce / combine / project are ATen's own names and semantics for this
-# (aten/src/ATen/native/SharedReduceOps.h). `leaf` is the addition a tree fold needs: ATen folds
-# serially from an identity, so its per-element transform can hide inside reduce (MeanOps::reduce is
-# combine(a, cast(b))), while a tree has no serial accumulator to hide it in.
-#
-# The ACCUMULATOR DTYPE is a parameter (`acc`), threaded through fdtypes and every literal, with the
-# identity taken from the dtype via _zero/_one/_pos_id/_neg_id so it is correct for any acc type. An
-# index field is Int32, or Int64 when the reduced extent can exceed 2^31.
-#
-# DSL idioms this file relies on:
-#   scalar select  a Python ternary INSIDE a @cute.jit body; it does NOT lower in an undecorated
-#                  callee, which is why every trait value-method is @cute.jit
-#   isnan(x)       x != x        -inf   -<acc>.inf        abs   cute.math.absf
-#   fmax           cute.arch.fmax is NaN-SUPPRESSING, so NaN handling is explicit via x != x
-#   butterfly      cute.arch.shuffle_sync_bfly(value, offset=...)
+# The ACCUMULATOR DTYPE is a parameter, with identities taken from the dtype so they are right
+# for any acc type. Two DSL idioms this file rests on: a scalar select only lowers inside a
+# @cute.jit body, which is why every value method is decorated; and cute.arch.fmax is NaN-
+# SUPPRESSING, so NaN handling is always explicit via x != x.
 
 import cutlass
 import cutlass.cute as cute
@@ -32,10 +20,9 @@ from cutlass import Boolean, const_expr, Float32, Int32, Int64
 
 WARP = 32
 
-# argmax/argmin "no winner yet" sentinel, per index dtype. Int32 is the default (an
-# index is a position, not an accumuland, and the narrow field halves partial-buffer
-# traffic + speeds the warp shuffle); the builder switches an index trait to Int64
-# only when the reduced extent can exceed the Int32 range (see _idx_sentinel).
+# argmax/argmin "no winner yet" sentinel, per index dtype. Int32 by default, since an index is
+# a position and the narrow field halves partial traffic; Int64 only when the extent can
+# exceed the Int32 range.
 _INT32_MAX = (1 << 31) - 1
 _INT64_MAX = (1 << 63) - 1
 
@@ -45,11 +32,9 @@ def _idx_sentinel(idx_dtype):
 
 
 def _pos_id(acc):
-    # "Largest" identity for a min-reduction's init / the value that loses every max:
-    # +inf for floats, the max representable value for integer accumulators (Int32 and
-    # Int64 have no .inf). Wrap in `acc(...)` so the result carries the accumulator
-    # dtype -- a bare Python number would be treated as Float32, breaking the ifexp
-    # type-match in `_pick` for fp64.
+    # The value that loses every max: +inf for floats, the max representable for integers, which
+    # have no .inf. Wrapped in `acc(...)` so it carries the accumulator dtype -- a bare Python
+    # number is treated as Float32 and breaks the ifexp type-match for fp64.
     if acc is Int32:
         return acc(_INT32_MAX)
     if acc is Int64:
@@ -156,23 +141,17 @@ class NormOps:
 
 @cute.jit
 def _welford_denom(acc_dtype, nf, correction):
-    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0
-    # (-> +inf, which is what aten returns and what the numpy-reference tests expect
-    # after their inf->nan mapping), NOT by a negative number. Unclamped, a
-    # correction larger than the reduced extent returned a NEGATIVE variance.
-    # `nf` is a runtime value, so this is a select, not a python max().
+    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0, giving the
+    # +inf ATen returns, not by a negative number, which returned a NEGATIVE variance. `nf` is a
+    # runtime value, so this is a select rather than a python max().
     d = nf - acc_dtype(correction)
     z = acc_dtype(0.0)
     return d if d > z else z  # noqa: FURB136 -- see the note above _maxnan
 
 
 class WelfordOps:
-    # acc = (mean, m2, nf) all in the accumulator dtype.
-    #   reduce  = ONLINE (Welford) update of a single element.
-    #   combine = PARALLEL (Chan) merge of two partial accumulators.
-    # These two formulas are deliberately different. project computes
-    #   var = m2 / max(nf - correction, 0), optionally sqrt, optionally mean.
-    # Validates vs torch.var / torch.std (dim=-1, correction).
+    # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
+    # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
@@ -235,15 +214,10 @@ class WelfordOps:
 
 
 class ArgMaxOps:
-    # acc = (best_val: acc dtype, best_idx: idx dtype, default Int32).
-    # GreaterOrNan winner: NaN beats everything; exact tie -> LOWER index wins;
-    # otherwise larger value wins. Matches torch.argmax (first NaN, first max).
-    # has_index: the accumulator carries a per-element INDEX. The index dtype is a
-    # parameter: Int32 by default (cheaper partials + shuffle), Int64 when the reduced
-    # extent can exceed 2^31 so the winning position never overflows -- the builder
-    # picks it from N (this is what lets the cross-CTA split serve huge-N argmax; the
-    # stage-1 fold's chunk-global column must be computed in the same width, see
-    # tile.TileMap.col_base).
+    # acc = (best value, best index). NaN beats everything, an exact tie goes to the LOWER index,
+    # otherwise the larger value wins -- torch.argmax's first-NaN, first-max rule. The index dtype
+    # is Int32 by default and Int64 when the extent can exceed 2**31, which is what lets the
+    # cross-CTA split serve huge-N argmax.
     nfields = 2
     has_index = True
 
@@ -639,12 +613,9 @@ class ArgMinOps:
 
 
 class AMaxOps:
-    # acc = (max,). Pure single-field NaN-propagating max -- amax returns only the
-    # value, so it does NOT carry the index accumulator argmax needs. Keeping it
-    # 1-field (vs subclassing ArgMaxOps) halves the warp-shuffle / smem traffic and,
-    # because it is not has_index, lets the dispatcher take the cross-CTA fast path
-    # at huge N. NaN propagates: if either operand is NaN the result is NaN (matches
-    # torch.amax). Validates vs torch.amax(x, dim=-1).
+    # acc = (max,). Single-field on purpose: amax returns only the value, so keeping it 1-field
+    # rather than subclassing the argmax trait halves the shuffle and smem traffic and, by not
+    # being has_index, lets the dispatcher take the cross-CTA fast path at huge N.
     nfields = 1
 
     def __init__(self, acc=Float32):
@@ -656,16 +627,10 @@ class AMaxOps:
 
     @cute.jit
     def _maxnan(self, a, b):
-        # NaN-propagating max: b if (b > a or b is NaN) else a. b != b detects NaN.
-        #
-        # Spelled out rather than `max(a, b)` because the two are not interchangeable here: a
-        # FURB136 autofix rewrote one such ternary over Int32 bounds in tile.py into the builtin
-        # and changed the emitted bits, which a bitwise test caught. (FURB136 does not match this
-        # compound form, so no noqa is needed on it; the plain `a if a > b else b` shapes in the
-        # datapath do carry one.) AbsMaxOps below does use builtin max, and it agrees with
-        # vector_norm(ord=inf) including NaN rows -- pinned by a test that lands with the row
-        # kernel rather than by argument, because what the builtin lowers to over these
-        # accumulators is not evident from the source.
+        # NaN-propagating max, spelled out rather than `max(a, b)`: a FURB136 autofix rewrote one such
+        # ternary into the builtin and changed the emitted bits. What the builtin lowers to over these
+        # accumulators is not evident from the source, so the shapes that do use it are pinned by a
+        # test rather than by argument.
         return b if ((b > a) or (b != b)) else a
 
     @cute.jit
@@ -731,10 +696,9 @@ class AMinOps:
 
 
 def _offsets(threads_per_row, ascending: bool = False):
-    # Decreasing butterfly offsets: matches the PyTorch/Triton fp reduction order.
-    # ASCENDING (1, 2, 4, ...) is ATen's WarpReduceDirection::ASCENDING, which the tile
-    # datapath's lane merge uses. Same result mathematically, different add order ->
-    # different fp bits, so the direction is part of a kernel's numerics contract.
+    # Decreasing butterfly offsets match PyTorch/Triton; ASCENDING is ATen's, which the tile
+    # datapath's lane merge uses. Same result, different add order, so the direction is part of a
+    # kernel's numerics contract.
     n = min(threads_per_row, WARP)
     offs = []
     if ascending:
@@ -770,13 +734,9 @@ def block_reduce(
     warps_per_row: cutlass.Constexpr,
     rows_per_block: cutlass.Constexpr = 1,
 ):
-    # Cross-warp reduction WITHIN each row's warp group. A block may hold
-    # rows_per_block rows, each spanning warps_per_row warps; warp w belongs to
-    # row (w // warps_per_row) at group position (w % warps_per_row). Each row
-    # reduces its own group independently -- mixing groups (the old flat version)
-    # corrupted multi-row blocks. Smem bufs are (rows_per_block, warps_per_row)
-    # per field; lane 0 of each warp writes its group slot, then the group's
-    # position-0 warp re-reduces its row's warps_per_row partials.
+    # Cross-warp reduction WITHIN each row's warp group: a block may hold several rows, each
+    # spanning several warps, and each row must reduce its own group -- mixing them (the old flat
+    # version) corrupted multi-row blocks.
     lane = cute.arch.lane_idx()
     warp = cute.arch.warp_idx()
     row_g = warp // warps_per_row
@@ -797,16 +757,13 @@ def block_reduce(
     return out
 
 
-# --- Two-output traits (var_mean / std_mean, max.dim / min.dim, aminmax). They
-# reuse the single-output accumulators above and only change project() to return
-# a tuple of `nouts` values; nouts (1 or 2) tells the kernel how many outputs to
-# store. ---
+# --- Two-output traits. They reuse the single-output accumulators above and only change
+# project() to return a tuple; nouts tells the kernel how many outputs to store. ---
 
 
 class VarMeanOps(WelfordOps):
-    # Reuse the validated Welford accumulator (mean, m2, nf); project BOTH the
-    # variance/std AND the mean. correction and take_sqrt behave as in the base.
-    # Validates vs torch.var_mean / torch.std_mean (dim=-1, correction).
+    # Reuse the Welford accumulator and project BOTH the variance/std and the mean. correction and
+    # take_sqrt behave as in the base.
     nouts = 2
 
     def __init__(self, correction=1, take_sqrt=False, acc=Float32):
@@ -840,9 +797,8 @@ class MinDimOps(ArgMinOps):
 
 
 class AMinMaxOps:
-    # acc = (min_val, max_val), both the accumulator dtype. reduce/combine track
-    # both extremes; project returns (min, max). NaN-propagating like torch.aminmax
-    # (any NaN in the row makes both outputs NaN). Validates vs torch.aminmax.
+    # acc = (min, max), tracking both extremes and projecting the pair. NaN-propagating like
+    # torch.aminmax: any NaN in the row makes both outputs NaN.
     nfields = 2
     nouts = 2
 
@@ -855,9 +811,8 @@ class AMinMaxOps:
 
     @cute.jit
     def _fmin(self, a, b):
-        # NaN-propagating min: if EITHER operand is NaN the result is NaN. Written as an explicit
-        # truth table because that is the property being relied on, not as an optimization
-        # choice; see the note above AMaxOps._maxnan for why these are not builtin min/max.
+        # NaN-propagating min, as an explicit truth table because that is the property being relied
+        # on. See AMaxOps._maxnan for why these are not the builtins.
         return (a if a != a else (a if a < b else b)) if b == b else b  # noqa: FURB136
 
     @cute.jit
