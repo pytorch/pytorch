@@ -175,7 +175,6 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _T = TypeVar("_T")
@@ -1361,14 +1360,26 @@ def _require_device_triton(device):
         raise unittest.SkipTest(str(exc)) from exc
 
 
-def skip_if_no_accelerator_triton(fn):
+def skip_if_no_accelerator_triton(fn=None, *, allow_mps=False):
+    if fn is None:
+        return functools.partial(skip_if_no_accelerator_triton, allow_mps=allow_mps)
+
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
         device = accelerator_device(self.device)
-        _require_device_triton(device)
+        if not (allow_mps and torch.device(device).type == "mps"):
+            _require_device_triton(device)
         return fn(self, *args, **kwargs)
 
     return wrapper
+
+
+def _require_multiple_accelerators(device):
+    device_type = torch.device(device).type
+    if torch.get_device_module(device_type).device_count() < 2:
+        raise unittest.SkipTest(f"requires multiple {device_type} devices")
+    if device_type != "mps":
+        _require_device_triton(device)
 
 
 def skip_if_halide(fn):
@@ -3831,16 +3842,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.Tensor([]),))
 
-    @requires_multigpu()
     def test_linspace4(self):
+        device = torch.device(accelerator_device(self.device)).type
+        _require_multiple_accelerators(device)
+
         def fn(x):
             return torch.linspace(
                 0,
                 2,
                 0,
-                device=torch.device(
-                    torch.device(accelerator_device(self.device)).type, 1
-                ),
+                device=torch.device(device, 1),
             )
 
         self.common(fn, (torch.Tensor([]),))
@@ -4127,9 +4138,10 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @skipCPUIf(True, "requires CUDA/Triton")
-    @requires_cuda_and_triton
+    @skipCPUIf(True, "requires accelerator Triton")
     def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
+        _require_device_triton(self.device)
+
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
 
@@ -6147,7 +6159,7 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     def test_to_device(self):
         device = accelerator_device(self.device)
 
@@ -6178,7 +6190,7 @@ for dtype in (torch.int32, torch.int64):
             ),
         )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     def test_to_device_constant(self):
         device = accelerator_device(self.device)
 
@@ -6221,7 +6233,7 @@ for dtype in (torch.int32, torch.int64):
         code = "\n".join(code)
         self.assertNotIn("'*fp64'", code)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @xfail_if_triton_cpu
     def test_multi_device(self):
         device = accelerator_device(self.device)
@@ -6249,10 +6261,10 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
-    @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
         device = torch.device(accelerator_device(self.device)).type
+        _require_multiple_accelerators(device)
         x = torch.rand([4], device=device)
 
         def fn(x, y):
@@ -6262,11 +6274,11 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
-    @requires_multigpu()
     @recover_orig_fp32_precision
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
         device = torch.device(accelerator_device(self.device)).type
+        _require_multiple_accelerators(device)
 
         def gemm(x, y):
             return x @ y
@@ -10822,16 +10834,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # The following 2 tests are meant to check the logic that drops
     # xmask from triton load/store if xnumel = 1
-    @skip_if_no_accelerator_triton
     def test_single_elem(self):
+        if torch.device(self.device).type not in ("cpu", "mps"):
+            _require_device_triton(self.device)
+
         def fn(a):
             b = a + 1
             return (b,)
 
         self.common(fn, (torch.randn(1),))
 
-    @skip_if_no_accelerator_triton
     def test_single_elem_indirect(self):
+        if torch.device(self.device).type not in ("cpu", "mps"):
+            _require_device_triton(self.device)
+
         def fn(a, b):
             c = a[b] + 1
             return (c,)
@@ -10844,8 +10860,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # This test is meant to check for issues from the logic
     # that drops xmask from trito load/store if XBLOCK divides xnumel
 
-    @skip_if_no_accelerator_triton
     def test_xblock_divides_xnumel(self):
+        if torch.device(self.device).type not in ("cpu", "mps"):
+            _require_device_triton(self.device)
+
         def fn(a):
             b = a + 1
             return (b,)
@@ -13058,7 +13076,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(a0.shape, a1.shape)
         self.assertEqual(a0.stride(), a1.stride())
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_triton_cpu("Flaky on Triton CPU")
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
@@ -13813,7 +13831,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @skip_if_accelerator_not_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
@@ -14462,7 +14479,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Shape padding causes the inputs to all get specialized, so the codegen
     # test fails
     @expectedFailureCodegenDynamic
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
@@ -14520,7 +14537,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(out_ref.stride(), out_test.stride())
             self.assertEqual(x_ref, x_test)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -14564,7 +14581,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         dynamic_specialized = inductor_matmul(dynamic_specialized_a, b)
         self.assertEqual(dynamic, dynamic_specialized)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -14591,7 +14608,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertEqual(no_override(x_small), override(x_small))
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -14631,7 +14648,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ):
             branching(x_small)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_not_triton
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -14676,7 +14693,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda msg: f"{msg}\nsecond compilation has hint {HINT_A}; stale cache hit",
         )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -15031,7 +15048,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # expanded dim should not cause copy in require_stride_order
         assertGeneratedKernelCountEqual(self, 0)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @parametrize("prefer_nd_tiling", (False, True))
     @parametrize(
         "use_block_ptr",
@@ -15115,7 +15132,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if not is_halide_backend(self.device):
                 self.assertEqual(have_block_ptr, use_block_ptr)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -15160,7 +15177,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1e4,
         )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -15853,7 +15870,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_gpu_halide
     @skip_if_not_triton
     def test_searchsorted_broadcast(self):
@@ -16112,7 +16129,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             for right in [True, False]:
                 self.common(fn, (boundaries, out_int32, right), check_lowp=False)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @skip_if_gpu_halide
     @skip_if_not_triton
     def test_bucketize_broadcast(self):
@@ -16836,7 +16853,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             compiled_inductor_out = compiled_inductor_f(x)
             self.assertEqual(compiled_inductor_out, eager_out)
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_fixed_layout_channels_last(self):
         class Block(nn.Module):
@@ -17841,7 +17858,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(model.bias.grad.shape, model.bias.shape)
             self.assertEqual(model.bias.grad, torch.zeros_like(model.bias))
 
-    @skip_if_no_accelerator
+    @skip_if_no_accelerator_triton(allow_mps=True)
     @config.patch(fallback_random=True)
     def test_mix_device_index(self):
         """
@@ -20357,6 +20374,83 @@ class _AcceleratorTestCase(TestCase):
         super().setUp()
 
 
+class _CommonLayoutTests:
+    @skip_if_no_accelerator_triton
+    def test_noncontiguous_reshape_cat_backward(self):
+        # Cross the 1024-element padding threshold with a non-aligned width.
+        width = 342
+
+        def fn(x, offset, weight):
+            query, key, value = (
+                part.view(2, 3, 1, width) + offset
+                for part in (x @ weight.T).chunk(3, -1)
+            )
+            query_sigmoid = torch.sigmoid(query).transpose(1, 2)
+            query_tanh = torch.tanh(query).transpose(1, 2)
+            key_sigmoid = torch.sigmoid(key).transpose(1, 2)
+            key_tanh = torch.tanh(key).transpose(1, 2)
+            scores = (
+                query_sigmoid @ key_sigmoid.transpose(-2, -1)
+                + query_tanh @ key_tanh.transpose(-2, -1)
+                - query_sigmoid @ key_tanh.transpose(-2, -1)
+            )
+            return scores @ value.transpose(1, 2)
+
+        torch.manual_seed(0xC0FFEE)
+        self.common(
+            fn,
+            (
+                torch.randn(2, 3, 1, requires_grad=True),
+                torch.randn(2, 3, 1, width, requires_grad=True),
+                torch.randn(3 * width, 1, requires_grad=True),
+            ),
+            atol=1e-4,
+            check_gradient=True,
+            check_lowp=False,
+            grad_atol=2e-3,
+            grad_rtol=1e-5,
+            reference_in_float=False,
+            rtol=1e-4,
+        )
+
+    @skip_if_no_accelerator_triton
+    def test_complex_view_as_complex_exact_stride_copy_cuda(self):
+        def fn(x):
+            y = x.transpose(1, 2)
+            z = y.reshape(2, 8, 4, -1, 2)
+            return torch.view_as_complex(z)
+
+        x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    @skip_if_no_accelerator_triton
+    def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
+        def fn(x):
+            y = torch.view_as_complex(x)
+            return y.expand(2, 3, 4)
+
+        x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    @skip_if_no_accelerator_triton
+    def test_complex_copy_strided_stride_order_copy_cuda(self):
+        def fn(x):
+            y = torch.view_as_complex(x)
+            return torch.ops.prims.copy_strided.default(y, [1, 2])
+
+        x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+
+
 if RUN_GPU or HAS_MPS:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
@@ -20365,49 +20459,10 @@ if RUN_GPU or HAS_MPS:
 
     SweepInputsGPUTest.populate()
 
-    class GPUTests(_AcceleratorTestCase):
+    class GPUTests(_CommonLayoutTests, _AcceleratorTestCase):
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_noncontiguous_reshape_cat_backward(self):
-            # Cross the 1024-element padding threshold with a non-aligned width.
-            width = 342
-
-            def fn(x, offset, weight):
-                query, key, value = (
-                    part.view(2, 3, 1, width) + offset
-                    for part in (x @ weight.T).chunk(3, -1)
-                )
-                query_sigmoid = torch.sigmoid(query).transpose(1, 2)
-                query_tanh = torch.tanh(query).transpose(1, 2)
-                key_sigmoid = torch.sigmoid(key).transpose(1, 2)
-                key_tanh = torch.tanh(key).transpose(1, 2)
-                scores = (
-                    query_sigmoid @ key_sigmoid.transpose(-2, -1)
-                    + query_tanh @ key_tanh.transpose(-2, -1)
-                    - query_sigmoid @ key_tanh.transpose(-2, -1)
-                )
-                return scores @ value.transpose(1, 2)
-
-            torch.manual_seed(0xC0FFEE)
-            self.common(
-                fn,
-                (
-                    torch.randn(2, 3, 1, requires_grad=True),
-                    torch.randn(2, 3, 1, width, requires_grad=True),
-                    torch.randn(3 * width, 1, requires_grad=True),
-                ),
-                atol=1e-4,
-                check_gradient=True,
-                check_lowp=False,
-                grad_atol=2e-3,
-                grad_rtol=1e-5,
-                reference_in_float=False,
-                rtol=1e-4,
-            )
 
         @skip_if_not_cuda
         @skip_if_no_accelerator_triton
@@ -20479,46 +20534,6 @@ if RUN_GPU or HAS_MPS:
                         expected = fn(x)
                         torch.testing.assert_close(actual, expected, equal_nan=True)
                         self.assertTrue(torch.isnan(actual[:3]).all())
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_view_as_complex_exact_stride_copy_cuda(self):
-            def fn(x):
-                y = x.transpose(1, 2)
-                z = y.reshape(2, 8, 4, -1, 2)
-                return torch.view_as_complex(z)
-
-            x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-
-            self.assertEqual(actual, expected, exact_stride=True)
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
-            def fn(x):
-                y = torch.view_as_complex(x)
-                return y.expand(2, 3, 4)
-
-            x = torch.randn([2, 1, 4, 2], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-
-            self.assertEqual(actual, expected, exact_stride=True)
-
-        @skip_if_not_cuda
-        @skip_if_no_accelerator_triton
-        def test_complex_copy_strided_stride_order_copy_cuda(self):
-            def fn(x):
-                y = torch.view_as_complex(x)
-                return torch.ops.prims.copy_strided.default(y, [1, 2])
-
-            x = torch.randn([2, 3, 2], device=self.device, dtype=torch.float32)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-
-            self.assertEqual(actual, expected, exact_stride=True)
 
         def test_addmm_beta_zero_mismatched_bias_cuda(self):
             device_type = torch.device(self.device).type
@@ -20654,7 +20669,7 @@ if RUN_GPU or HAS_MPS:
 
 else:
 
-    class GPUTests(_AcceleratorTestCase):
+    class GPUTests(_CommonLayoutTests, _AcceleratorTestCase):
         hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
 
