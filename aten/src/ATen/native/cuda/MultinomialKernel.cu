@@ -25,6 +25,11 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
+#ifdef USE_ROCM
+#include <numeric>
+#else
+#include <cuda/std/numeric>
+#endif
 #include <type_traits>
 
 namespace at::native {
@@ -112,7 +117,11 @@ __device__ int binarySearchForMultinomial(const scalar_t* cumdist,
   CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
-    int mid = start + (end - start) / 2;
+#ifdef USE_ROCM
+    int mid = std::midpoint(start, end);
+#else
+    int mid = cuda::std::midpoint(start, end);
+#endif
 
     scalar_t midVal = cumdist[mid];
     if (midVal < val) {

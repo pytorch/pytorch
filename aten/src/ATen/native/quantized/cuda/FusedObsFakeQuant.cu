@@ -18,6 +18,11 @@
 #endif
 
 #include <cmath>
+#ifdef USE_ROCM
+#include <numeric>
+#else
+#include <cuda/std/numeric>
+#endif
 #include <utility>
 
 namespace at::native {
@@ -77,7 +82,13 @@ __global__ void ChooseQuantizationParamsKernelImpl(
     // to be a middle value between qmin and qmax.
     // If either min or max is 0, then we just use 0 as zero_point.
     if (min_val < 0 && max_val > 0 && preserve_sparsity) {
-      initial_zero_point = static_cast<double>(qmin + qmax) / 2;
+#ifdef USE_ROCM
+      initial_zero_point = std::midpoint(
+          static_cast<double>(qmin), static_cast<double>(qmax));
+#else
+      initial_zero_point = cuda::std::midpoint(
+          static_cast<double>(qmin), static_cast<double>(qmax));
+#endif
     }
     // Now we need to nudge the zero point to be an integer
     // (our zero points are integer, and this is motivated by the

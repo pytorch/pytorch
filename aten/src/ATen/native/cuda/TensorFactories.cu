@@ -30,6 +30,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#ifdef USE_ROCM
+#include <numeric>
+#else
+#include <cuda/std/numeric>
+#endif
 
 namespace at::native {
 
@@ -147,7 +152,11 @@ inline int64_t resolve_root_int(
     // binary search for the correct answer
     x <<= 1; // the loop always compares with 2x, so do it once here
     while (l + 1 < r) {
-      auto m = (l + r) >> 1;
+#ifdef USE_ROCM
+      auto m = std::midpoint(l, r);
+#else
+      auto m = cuda::std::midpoint(l, r);
+#endif
       // for tril:
       //    b = 2f - 1, sign = 1, hence (2f + m - 1) * m / 2
       // for triu:
