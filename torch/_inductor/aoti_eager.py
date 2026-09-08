@@ -404,15 +404,14 @@ def aoti_compile_with_persistent_cache(
                         raise AssertionError(
                             f"expected loaded_data to be list, got {type(loaded_data)}"
                         )
-                    json_data: list[object] = cast(list[object], loaded_data)
+                    json_data = cast(list[object], loaded_data)
                     for item in json_data:
                         if not isinstance(item, dict):
                             raise AssertionError(
                                 f"expected item to be dict, got {type(item)}"
                             )
                         # Same kernel meta info already exists in the json file
-                        cached_meta_info: object = item["meta_info"]
-                        if cached_meta_info == kernel_metadata_items:
+                        if item["meta_info"] == kernel_metadata_items:
                             update_json = False
                             break
 
