@@ -18,10 +18,8 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
-from torch.testing._internal.common_device_type import (
-    deviceCountAtLeast,
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -408,14 +406,14 @@ class TestLocalMap(DTensorTestBase):
             )
             self.assertEqual(W_dt.grad.full_tensor(), W.grad)
 
-    @deviceCountAtLeast(4)
+    @skip_if_lt_x_gpu(4)
     @with_comms
-    def test_multi_mesh_inputs(self, devices):
+    def test_multi_mesh_inputs(self, device):
         """
         Test the function can be applied to accept DTensors that lives
         on different device meshes.
         """
-        device_type = torch.device(devices[0]).type
+        device_type = torch.device(device).type
         mesh_full = init_device_mesh(
             device_type=device_type, mesh_shape=(self.world_size,)
         )
