@@ -18,15 +18,20 @@ def _copy_state_value(
     return result.clone()
 
 
-def _clone_tensors(value):
+def _clone_tensors(value, memo=None):
+    if memo is None:
+        memo = {}
     if isinstance(value, torch.Tensor):
-        return value.clone()
+        key = id(value)
+        if key not in memo:
+            memo[key] = value.clone()
+        return memo[key]
     if isinstance(value, dict):
-        return {key: _clone_tensors(item) for key, item in value.items()}
+        return {key: _clone_tensors(item, memo) for key, item in value.items()}
     if isinstance(value, list):
-        return [_clone_tensors(item) for item in value]
+        return [_clone_tensors(item, memo) for item in value]
     if isinstance(value, tuple):
-        return tuple(_clone_tensors(item) for item in value)
+        return tuple(_clone_tensors(item, memo) for item in value)
     return value
 
 
