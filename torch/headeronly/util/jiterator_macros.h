@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/macros/Macros.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <string>
 
 #define JITERATOR_HOST_DEVICE C10_HOST_DEVICE
