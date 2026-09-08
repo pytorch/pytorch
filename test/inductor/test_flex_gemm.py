@@ -7666,53 +7666,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("tile", lambda m, n: (m, n)),
-            ("row", lambda m, n: (1, n)),
-            ("col", lambda m, n: (m, 1)),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
-        kind, shape_fn = case
-
-        def epilogue_fn(acc, scale):
-            return (acc.float() * scale).relu()
-
-        def fn(a, b, scale):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                lambda acc: epilogue_fn(acc, scale),
-                kernel_options={"backend": "QUACK"},
-            )
-
-        m, k, n = 128, 64, 128
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        scale = torch.randn(*shape_fn(m, n), device="cuda", dtype=torch.float32)
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
-        )
-
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b, scale),
-            epilogue_fn(a.double() @ b.double(), scale.double()),
-            a.shape[1],
-        )
-        self.assertFlexGemmGeneratedCode(
-            code,
-            "epilogue_args=",
-            f"epilogue_arg_kinds=('{kind}',)",
-        )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        (
+            ("tile", (128, 128), lambda acc, w: (acc.float() * w).relu(), "tile"),
+            ("row", (1, 128), lambda acc, w: (acc.float() * w).relu(), "row"),
+            ("col", (128, 1), lambda acc, w: (acc.float() * w).relu(), "col"),
             ("row_broadcast", (128,), lambda acc, w: acc.float() + w, "row"),
             ("row_unsqueeze", (128,), lambda acc, w: acc.float() * w[None, :], "row"),
             ("col_unsqueeze", (128,), lambda acc, w: acc.float() + w[:, None], "col"),
@@ -7721,7 +7677,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_generated_code_reads_1d_captured_tensor_epilogue_arg(self, case):
+    def test_mm_generated_code_reads_captured_tensor_epilogue_arg(self, case):
         """M == N so plain broadcasting reads [N] as a row while w[:, None] reads it as a column."""
         _, shape, epilogue_fn, kind = case
 
