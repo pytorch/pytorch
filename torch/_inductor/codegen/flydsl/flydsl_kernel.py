@@ -17,8 +17,10 @@ from torch._logging import getArtifactLogger
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from typing import Any
+
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 MAIN_SUFFIX = "main"
@@ -57,6 +59,8 @@ class FlyDSLTemplateKernel(Kernel):
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
         self._template_signature_defined = False
+        self.original_output_name: str | None = None
+        self.epilogue_nodes: Sequence[BaseSchedulerNode] = ()
 
     @staticmethod
     def _get_reinterpret_view(node) -> ReinterpretView | None:
@@ -84,20 +88,21 @@ class FlyDSLTemplateKernel(Kernel):
         return params.getvalue()
 
     def gen_epilogue(self) -> str:
-        epilogue_nodes = getattr(self, "epilogue_nodes", None)
-        if not epilogue_nodes:
+        if not self.epilogue_nodes:
             return (
                 "HAS_EPILOGUE: fx.Constexpr = False\n"
                 "EPILOGUE_KEY: fx.Constexpr = 'identity'\n"
                 "EPILOGUE_FN = lambda acc: acc\n"
             )
+        if self.original_output_name is None:
+            raise AssertionError("Fused FlyDSL epilogue requires an output name")
 
         from torch._inductor.kernel.flydsl.epilogue import (
             materialize_flydsl_scheduler_epilogue,
         )
 
         _, source = materialize_flydsl_scheduler_epilogue(
-            self.original_output_name, list(epilogue_nodes)
+            self.original_output_name, list(self.epilogue_nodes)
         )
         return source
 
