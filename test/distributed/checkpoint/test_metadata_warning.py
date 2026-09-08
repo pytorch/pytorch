@@ -32,6 +32,11 @@ class TestMetadataWarning(TestCase):
         finally:
             _metadata_warning._warned = original_warned
 
+    def test_installation_is_idempotent(self):
+        installed = FileSystemReader.read_metadata
+        _metadata_warning.install()
+        self.assertIs(FileSystemReader.read_metadata, installed)
+
 
 if __name__ == "__main__":
     torch.testing._internal.common_utils.run_tests()
