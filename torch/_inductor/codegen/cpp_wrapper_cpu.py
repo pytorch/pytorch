@@ -39,7 +39,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
-    DEVICE_TO_ATEN,
+    device_to_aten,
     DEVICE_TO_INT,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -2304,17 +2304,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
-            # When enable_kernel_profile is on, each kernel call is wrapped in
-            # its own {} scope block, so we must redeclare the variable each
-            # time since prior declarations are no longer visible.
-            self.kernel_numel_expr.add((arg.inner, graph))
+        if in_profile_scope or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When inside a kernel profile {} scope block, we must always
+            # redeclare since prior declarations from other scope blocks are
+            # not visible. We intentionally skip adding to kernel_numel_expr
+            # in that case because the block-scoped declaration won't be
+            # visible at function scope either. At function scope, we declare
+            # on first use and assign thereafter.
+            if not in_profile_scope:
+                self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
@@ -2481,9 +2481,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
-        if device.type not in DEVICE_TO_ATEN:
-            raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
-        device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
+        device_str = device_to_aten(device.type)[5:].lower()  # remove "at::k"
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index or 0}"
 
@@ -4047,13 +4045,9 @@ if (!custom_op_wrapper) {
                     return codegen_ivalue(raw_arg, arg_type.getElementType())
 
                 if isinstance(raw_arg, torch.device):
-                    if raw_arg.type not in DEVICE_TO_ATEN:
-                        raise AssertionError(
-                            raw_arg.type + " not found in DEVICE_TO_ATEN"
-                        )
                     return (
                         "c10::IValue(c10::Device("
-                        f"{DEVICE_TO_ATEN[raw_arg.type]}, "
+                        f"{device_to_aten(raw_arg.type)}, "
                         f"{raw_arg.index if raw_arg.index is not None else 0}))"
                     )
                 if isinstance(raw_arg, torch.dtype):
@@ -4510,22 +4504,43 @@ if (!custom_op_wrapper) {
 
         return tmp_var_name
 
-    def write_kernel_context_guard_begin(
+    @contextlib.contextmanager
+    def kernel_profile_scope(
         self,
+        kernel_name: str,
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        enabled: bool | None = None,
     ):
-        # Beginning of a kernel context guarded block.
-        # The block looks like this:
-        # {
-        # KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
-        # ... operations...
-        # }
-        self.writeline("{")
+        """Emit a kernel call inside a profiling {} scope block:
 
-    def write_kernel_context_guard_end(
-        self,
-    ):
-        # End of a kernel context guarded block.
-        self.writeline("}")
+            {
+            KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
+            ... operations...
+            }
+
+        Owning both braces here is what keeps kernel_profile_scope_depth
+        balanced: the depth decides whether a symbolic numel is redeclared, so
+        leaking it past a kernel that failed to emit would mis-scope every
+        numel after it.
+
+        enabled defaults to config.cpp.enable_kernel_profile and is read once,
+        so the block cannot open and fail to close. Callers that also record a
+        RecordFunction pass kernel_profile_enabled() instead, which additionally
+        requires a platform where the handle exists.
+        """
+        if enabled is None:
+            enabled = config.cpp.enable_kernel_profile
+        try:
+            if enabled:
+                self.kernel_profile_scope_depth += 1
+                self.writeline("{")
+                if config.cpp.enable_kernel_context_guard:
+                    self.write_kernel_context_guard(kernel_name, node_schedule)
+            yield
+        finally:
+            if enabled:
+                self.kernel_profile_scope_depth -= 1
+                self.writeline("}")
 
     def write_kernel_context_guard(
         self,
