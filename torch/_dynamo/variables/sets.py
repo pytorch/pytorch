@@ -764,6 +764,9 @@ class SetVariable(BaseSetVariable):
             return ConstantVariable.create(NotImplemented)
 
         tx.output.side_effects.mutation(self)
+        # Removal-only, so has_new_items() alone would miss it and the
+        # mutation replay would be skipped (difference_update sets this too).
+        self.should_reconstruct_all = True
         for k in list(other.items.keys()):  # type: ignore[missing-attribute]
             self.items.pop(k, None)
         return self
@@ -827,7 +830,7 @@ class OrderedSetClassVariable(VariableTracker):
                 raise_args_mismatch(
                     tx,
                     name,
-                    "OrderedSet.__new__ only accepts one arg"
+                    "OrderedSet.__new__ only accepts one arg",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
@@ -861,24 +864,11 @@ class OrderedSetClassVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "OrderedSetVariable":
-        if not args and set(kwargs) == {"iterable"}:
-            # OrderedSet(iterable=...): the parameter's name in __init__.
-            args = [kwargs["iterable"]]
-        elif len(args) > 1 or kwargs:
-            raise_args_mismatch(
-                tx,
-                "OrderedSet",
-                "OrderedSet only accepts one arg"
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-
-        if len(args) == 0 or args[0].is_constant_none():
-            # OrderedSet(iterable=None): the documented empty constructor.
-            # pyrefly: ignore [implicit-any]
-            items = []
-        else:
-            items = unpack_iterable(tx, args[0])
-        return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())
+        # tp_new + tp_init: the argument handling lives in tp_init_impl so the
+        # constructor and an explicit __init__ call cannot drift apart.
+        var = variables.OrderedSetVariable([], mutation_type=ValueMutationNew())
+        var.tp_init_impl(tx, args, kwargs)
+        return var
 
 
 class OrderedSetVariable(BaseSetVariable):
@@ -1085,6 +1075,44 @@ class OrderedSetVariable(BaseSetVariable):
     ) -> VariableTracker:
         self.call_method(tx, "difference_update", [other], {})
         return self
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args and set(kwargs) == {"iterable"}:
+            # OrderedSet(iterable=...): the parameter's name in __init__.
+            args = [kwargs["iterable"]]
+        elif len(args) > 1 or kwargs:
+            raise_args_mismatch(
+                tx,
+                "OrderedSet",
+                "OrderedSet only accepts one arg",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+
+        # OrderedSet(iterable=None): the documented empty constructor.
+        items = (
+            []
+            if len(args) == 0 or args[0].is_constant_none()
+            else unpack_iterable(tx, args[0])
+        )
+        # Build first, mutate second: eager __init__ hashes every element via
+        # dict.fromkeys before touching _dict, so a TypeError leaves the set
+        # unchanged. Clearing first would empty it on the caught-exception path.
+        new_items = {}
+        for item in items:
+            # pyrefly: ignore [bad-argument-type]
+            new_items[HashableTracker(item.realize())] = (
+                BaseSetVariable._default_value()
+            )
+        tx.output.side_effects.mutation(self)
+        self.should_reconstruct_all = True
+        self.items.clear()
+        self.items.update(new_items)
+        return ConstantVariable.create(None)
 
     tp_methods = {
         "intersection": Method(BaseSetVariable.intersection),

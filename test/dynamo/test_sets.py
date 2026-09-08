@@ -1496,21 +1496,116 @@ class OrderedSetHierarchyTests(torch._dynamo.test_case.TestCase):
         literals was also registered for attribute mutation and lost its
         mutations. A literal set never hit it."""
 
-        def fn(x, s):
-            s.add(9)
-            s.discard(slice(0, 1))
-            return x + 1
+        class Key:
+            # Hashable on every supported Python (a slice is not, below 3.12)
+            # and not a dynamo literal, so the set takes the non-literal
+            # builder branch. One shared instance: the eager and compiled
+            # sets below must compare equal.
+            pass
 
-        for make in (lambda: {slice(0, 1), 3}, lambda: {3, 1, 2}):
-            with self.subTest(literal=all(isinstance(v, int) for v in make())):
-                eager_s = make()
-                fn(torch.ones(1), eager_s)
+        key = Key()
+
+        def add_discard(s):
+            s.add(9)
+            s.discard(key)
+
+        def isub(s):
+            # Removal-only: nothing new is added, so this is the case the
+            # mutation replay used to skip entirely.
+            s -= {3}
+
+        def ior(s):
+            s |= {9, 8}
+
+        def iand(s):
+            s &= {key, 9}
+
+        def ixor(s):
+            s ^= {key, 9}
+
+        for mutate in (add_discard, isub, ior, iand, ixor):
+            for make in (lambda: {key, 3}, lambda: {3, 1, 2}):
+                for fullgraph in (True, False):
+                    with self.subTest(
+                        op=mutate.__name__,
+                        literal=all(isinstance(v, int) for v in make()),
+                        fullgraph=fullgraph,
+                    ):
+
+                        def fn(x, s):
+                            mutate(s)
+                            return x + 1
+
+                        eager_s = make()
+                        fn(torch.ones(1), eager_s)
+                        torch._dynamo.reset()
+                        compiled_s = make()
+                        torch.compile(fn, backend="eager", fullgraph=fullgraph)(
+                            torch.ones(1), compiled_s
+                        )
+                        self.assertEqual(compiled_s, eager_s)
+
+    def test_explicit_dunder_init_matches_eager(self):
+        """OrderedSet.__init__(s, ...) re-initializes in place, like set's.
+
+        Only the unbound form is covered: the bound form (``s.__init__(...)``)
+        inlines OrderedSet's Python body and graph-breaks on the ``_dict``
+        store, the same way ``set``'s bound ``__init__`` is not modelled.
+        """
+        from torch.utils._ordered_set import OrderedSet
+
+        def unbound():
+            s = OrderedSet([3, 1, 2])
+            alias = s
+            OrderedSet.__init__(s, [9, 4])
+            return s is alias, s
+
+        def kwarg():
+            s = OrderedSet([3, 1, 2])
+            alias = s
+            OrderedSet.__init__(s, iterable=[9, 4])
+            return s is alias, s
+
+        def none():
+            s = OrderedSet([3, 1, 2])
+            alias = s
+            OrderedSet.__init__(s, None)
+            return s is alias, s
+
+        def no_arg():
+            s = OrderedSet([3, 1, 2])
+            alias = s
+            OrderedSet.__init__(s)
+            return s is alias, s
+
+        for fn in (unbound, kwarg, none, no_arg):
+            with self.subTest(fn=fn.__name__):
+                self._assert_matches_eager(fn)
+
+        # Argument errors match eager, and a failing __init__ leaves the set
+        # unchanged (eager hashes every element before touching _dict).
+        def two_args():
+            return OrderedSet([1], [2])
+
+        def bad_kwarg():
+            return OrderedSet(items=[1])
+
+        def unhashable_reinit():
+            s = OrderedSet([3, 1, 2])
+            try:
+                OrderedSet.__init__(s, [[1], 2])
+            except TypeError:
+                pass
+            return s
+
+        for fn, exc in ((two_args, TypeError), (bad_kwarg, TypeError)):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaises(exc):
+                    fn()
                 torch._dynamo.reset()
-                compiled_s = make()
-                torch.compile(fn, backend="eager", fullgraph=True)(
-                    torch.ones(1), compiled_s
-                )
-                self.assertEqual(compiled_s, eager_s)
+                with self.assertRaises(exc):
+                    torch.compile(fn, backend="eager", fullgraph=False)()
+        self._assert_matches_eager(unhashable_reinit)
 
     def test_constructor_none_and_iterables(self):
         """OrderedSet(None) is the documented empty constructor."""
