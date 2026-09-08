@@ -6032,6 +6032,29 @@ class TestKL(DistributionsTestCase):
         self.assertEqual(expected_kl, actual_kl)
 
     @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
+
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_kl_lowrank_multivariate_normal(self):
         n = 5  # Number of tests for lowrank_multivariate_normal
         for i in range(n):

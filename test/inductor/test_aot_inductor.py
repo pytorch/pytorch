@@ -15,6 +15,8 @@ import zipfile
 from unittest import skip
 from unittest.mock import patch
 
+import sympy
+
 import torch
 import torch._export
 import torch._inductor
@@ -27,6 +29,8 @@ from torch._dynamo.utils import counters
 from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.codegen.wrapper import SymbolicCallArg
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -103,6 +107,7 @@ from torch.testing._internal.inductor_utils import (
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
@@ -248,11 +253,10 @@ def get_triton_grid_info(kernel, total_elements, src_code):
 # copy_tests() only copies test_* methods onto the concrete device classes, so
 # helpers shared by the bmm_shared_a tests have to live at module level.
 def _skip_unless_bmm_shared_a_runnable(test):
-    # Any Triton-capable accelerator can run the template; it is only ever
-    # offered under max-autotune.
+    # The template is only offered under max-autotune on Triton-capable accelerators.
     if test.device != GPU_TYPE:
         raise unittest.SkipTest("requires an accelerator")
-    if not is_big_gpu():
+    if not IS_BIG_GPU:
         raise unittest.SkipTest("requires modern GPU to run max-autotune")
 
 
@@ -362,6 +366,62 @@ class AOTInductorTestsTemplate:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
+
+    def test_invoke_subgraph_nested_region(self):
+        # Two call sites, so the region is not single-use: it has to be emitted twice
+        # and each copy scoped, and it survives inlining on its own merits rather than
+        # only because of the config patch below.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(gn(x * 2)) + gn(x * 3)
+
+        with torch._dynamo.config.patch(
+            enable_invoke_subgraph_regional_compile=True,
+            inline_single_use_invoke_subgraph=False,
+        ):
+
+            @torch.compiler.nested_compile_region
+            def gn(x):
+                return torch.sin(x) + 1
+
+            example_inputs = (torch.randn(8, 8, device=self.device),)
+            model = Model()
+            # check_model covers the round trip including dlopen; the FileCheck pins
+            # that the region reached codegen_invoke_subgraph, which a correctness-only
+            # assertion would keep passing without.
+            self.check_model(model, example_inputs)
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            FileCheck().check_count("// subgraph: ", 2).run(code)
+
+    def test_invoke_subgraph_nested_region_config(self):
+        # Same, but the region carries a per-region Inductor config patch, so
+        # the config.patch in CppWrapperCpu.codegen_subgraph is on the path too.
+        # fallback_by_default routes the region's ops to the proxy executor
+        # while the parent keeps its normal lowering.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_invoke_subgraph_compile_options,
+        )
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(gn(x * 2))
+
+        with torch._dynamo.config.patch(
+            enable_invoke_subgraph_regional_compile=True,
+            inline_single_use_invoke_subgraph=False,
+        ):
+            opts = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"fallback_by_default": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=opts)
+            def gn(x):
+                return torch.sin(x) + 1
+
+            example_inputs = (torch.randn(8, 8, device=self.device),)
+            self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
@@ -6031,21 +6091,28 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, *inputs):
-                result = inputs[0]
-                for i in range(1, len(inputs)):
-                    result = result + inputs[i]
-                return result
+                # Export preserves unused user inputs and generates runtime checks for them.
+                return inputs[0]
 
+        num_inputs = 100 if self.use_minimal_arrayref_interface else 1000
         inputs = []
-        for _ in range(1000):
+        for _ in range(num_inputs):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
         with torch.no_grad():
-            AOTIRunnerUtil.compile(
+            # This test calls compile directly rather than self.check_model, so
+            # propagate the copied test class' ArrayRef settings explicitly.
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
                 model,
                 inputs,
+                inductor_configs={
+                    "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                    "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                },
             )
+        FileCheck().check(f"check_input_{num_inputs - 1}(input_handles);").run(code)
 
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):
@@ -6774,21 +6841,23 @@ class AOTInductorTestsTemplate:
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
             )
-            # When profiling is enabled, every kernel numel variable must have
-            # the int64_t type declaration since each kernel call lives in its
-            # own scope block. Verify no bare assignment (without int64_t)
-            # appears for numel variables.
+            # Every kernel in this model is wrapped in a profiling block, so
+            # each of the repeated calls must declare the numel rather than
+            # assign it. The rule is per block, not global: a numel emitted at
+            # function scope is declared once and assigned thereafter.
             if self.device == GPU_TYPE:
-                # Match bare numel assignments like "foo_xnumel = expr;"
-                # but not declarations like "int64_t foo_xnumel = expr;"
-                bare_numel_assign = re.compile(r"^\s*(\w+_[xr]numel)\s*=\s*.+;$")
-                for line in code.splitlines():
-                    m = bare_numel_assign.match(line)
-                    if m:
-                        self.fail(
-                            f"Found numel assignment without int64_t declaration "
-                            f"in profiling mode: {line.strip()}"
-                        )
+                numel_lines = [
+                    line.strip()
+                    for line in code.splitlines()
+                    if re.match(r"^\s*(int64_t )?triton_\w*numel = ", line)
+                ]
+                self.assertTrue(numel_lines)
+                for line in numel_lines:
+                    self.assertTrue(
+                        line.startswith("int64_t "),
+                        f"numel emitted inside a profiling block must be "
+                        f"declared, not assigned: {line}",
+                    )
 
             self.check_model(
                 Model(),
@@ -7380,6 +7449,187 @@ class AOTInductorTestsTemplate:
         # Try it again without runtime assertions.
         with config.patch({"scalar_asserts": False}):
             AOTIRunnerUtil.run_multiple(model, [example_inputs, unexpected_inputs])
+
+    def test_scalar_range_asserts_disabled_drops_inferred_bound(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(64, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((64, 32), device=self.device)
+        # 0/1 specialization floors this dim at 2, and u0 is tied to it.
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        INFERRED_BOUND = "u0 >= 2"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(INFERRED_BOUND).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(INFERRED_BOUND).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_equality_asserts(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(8, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((8, 32), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        EQUALITY_ASSERT = "Eq(u0, s"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+
+        FileCheck().check(EQUALITY_ASSERT).run(code)
+
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        compiled(*example_inputs)
+
+    def test_scalar_range_asserts_disabled_drops_user_check(self):
+        # Input must be dynamic. Against a static one the inferred range
+        # already implies u0 < 10 and ShapeEnv folds the check away.
+        class Model(torch.nn.Module):
+            def forward(self, a):
+                nz = torch.nonzero(a)
+                unbacked = nz.size(0)
+                torch._check(unbacked < 10)
+                return a.new_ones([unbacked])
+
+        model = Model()
+        nonzero_input = torch.ones(8, device=self.device)
+        torch._dynamo.mark_dynamic(nonzero_input, 0)
+        example_inputs = (nonzero_input,)
+        USER_CHECK = "u0 < 10"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(USER_CHECK).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(USER_CHECK).run(code)
+
+        # The point of the flag: 16 nonzeros exceeds the dropped bound, and runs.
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        over_the_bound = torch.ones(16, device=self.device)
+        self.assertEqual(compiled(over_the_bound).shape, torch.Size([16]))
+
+    def test_scalar_range_asserts_disabled_keeps_two_sided_inequality(self):
+        # Relates two data-dependent sizes, so ShapeEnv cannot fold it into
+        # var_to_range and it survives as its own assert.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        model = Model()
+        example_inputs = (
+            torch.ones(4, device=self.device),
+            torch.ones(8, device=self.device),
+        )
+        TWO_SIDED = "Expected u0 <= u1"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check(TWO_SIDED).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_unbacked_vs_backed_bound(self):
+        # Bounded by a dim the caller declared, so a contract, not a sample.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                count = torch.nonzero(a).size(0)
+                torch._check(count <= b.size(0))
+                return b.new_ones([count])
+
+        model = Model()
+        nonzero_input = torch.ones(4, device=self.device)
+        backed_dim_input = torch.randn((8, 2), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, backed_dim_input)
+        MIXED_BOUND = r"Expected u\d+ <= s\d+"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(MIXED_BOUND).run(code)
+
+    def test_scalar_range_asserts_disabled_keeps_sum_equality(self):
+        # The jagged total-length contract -- highest-value assert we keep.
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                total = torch.cat([a, b]).size(0)
+                count = torch.nonzero(c).size(0)
+                torch._check(count == total)
+                return c.new_ones([count])
+
+        model = Model()
+        first = torch.randn(4, device=self.device)
+        second = torch.randn(4, device=self.device)
+        torch._dynamo.mark_dynamic(first, 0)
+        torch._dynamo.mark_dynamic(second, 0)
+        example_inputs = (first, second, torch.ones(8, device=self.device))
+        SUM_EQUALITY = r"Expected Eq\(u\d+, s\d+ \+ s\d+\)"
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(SUM_EQUALITY).run(code)
+
+    @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
+    def test_scalar_range_asserts_disabled_under_full_runtime_assert(self):
+        # Here asserts arrive as lowered aten._assert_scalar args rather than
+        # from var_to_range. It is a JK rollout in fbcode, so flipping it must
+        # not silently un-drop these bounds.
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                return torch.add(ones, c)
+
+        model = Model()
+        nonzero_input = torch.ones(64, device=self.device)
+        width = torch.randn((32,), device=self.device)
+        backed_dim_input = torch.randn((64, 32), device=self.device)
+        torch._dynamo.mark_dynamic(backed_dim_input, 0)
+        example_inputs = (nonzero_input, width, backed_dim_input)
+        INFERRED_BOUND = "u0 >= 2"
+
+        _, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+        FileCheck().check(INFERRED_BOUND).run(code)
+
+        with config.patch({"unsafe_skip_scalar_range_asserts": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_not(INFERRED_BOUND).run(code)
 
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
@@ -8136,6 +8386,9 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
+        external_weight_use_counts = {
+            name: tensor._use_count() for name, tensor in external_weights.items()
+        }
 
         if self.device == "cpu":
             normal_runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
@@ -8165,16 +8418,18 @@ class AOTInductorTestsTemplate:
                 so_path, 1, self.device, "", external_weights
             )
         self.assertFalse(runner.did_call_load_constants())
+        for name, tensor in external_weights.items():
+            self.assertEqual(tensor._use_count(), external_weight_use_counts[name] + 1)
 
-        def runner_call(*args, **kwargs):
+        def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
 
-            call_spec = runner.get_call_spec()
+            call_spec = aoti_runner.get_call_spec()
             in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
             flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
             flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-            flat_outputs = runner.run(flat_inputs)
+            flat_outputs = aoti_runner.run(flat_inputs)
             return pytree.tree_unflatten(flat_outputs, out_spec)
 
         test_inputs = torch.randn(M, K, device=self.device)
@@ -8188,9 +8443,66 @@ class AOTInductorTestsTemplate:
             external_weights["L__self___weight"],
             external_weights["L__self___bias"],
         )
-        output = runner_call(test_inputs)
+        output = runner_call(runner, test_inputs)
         self.assertEqual(expected, output)
         self.assertFalse(runner.did_call_load_constants())
+
+        del runner
+        for name, tensor in external_weights.items():
+            self.assertEqual(tensor._use_count(), external_weight_use_counts[name])
+
+    def test_user_managed_buffer_tensor_handle_lifetime(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(6, 16, device=device)
+                self.bias = torch.randn(6, device=device)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(8, 16, device=self.device),)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        weights = {
+            "L__self___weight": torch.randn(6, 16, device=self.device),
+            "L__self___bias": torch.randn(6, device=self.device),
+        }
+        weight_use_counts = {
+            name: tensor._use_count() for name, tensor in weights.items()
+        }
+
+        runner.update_constant_buffer(weights, True, True, True)
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name] + 1)
+
+        # Preserve the existing free behavior: non-folded map entries remain.
+        runner.free_inactive_constant_buffer()
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name] + 1)
+
+        replacement_weights = {
+            "L__self___weight": torch.randn(6, 16, device=self.device),
+            "L__self___bias": torch.randn(6, device=self.device),
+        }
+        replacement_use_counts = {
+            name: tensor._use_count() for name, tensor in replacement_weights.items()
+        }
+        runner.update_constant_buffer(replacement_weights, True, True, True)
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name])
+        for name, tensor in replacement_weights.items():
+            self.assertEqual(tensor._use_count(), replacement_use_counts[name] + 1)
+
+        del runner
+        for name, tensor in replacement_weights.items():
+            self.assertEqual(tensor._use_count(), replacement_use_counts[name])
 
     def test_update_user_managed_buffer(self):
         if self.device not in ["cuda", "xpu"]:
@@ -8228,20 +8540,20 @@ class AOTInductorTestsTemplate:
             free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
             return -free_memory
 
-        def runner_call(*args, **kwargs):
+        def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
 
-            call_spec = runner.get_call_spec()
+            call_spec = aoti_runner.get_call_spec()
             in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
             flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
             flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-            flat_outputs = runner.run(flat_inputs)
+            flat_outputs = aoti_runner.run(flat_inputs)
             return pytree.tree_unflatten(flat_outputs, out_spec)
 
         test_inputs = torch.randn(M, K, device=self.device)
         expected = model(test_inputs)
-        output = runner_call(test_inputs)
+        output = runner_call(runner, test_inputs)
         self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
 
         new_weights = {
@@ -8255,7 +8567,7 @@ class AOTInductorTestsTemplate:
         self.assertGreater(mem_after, mem_before)
 
         runner.swap_constant_buffer()
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8265,7 +8577,7 @@ class AOTInductorTestsTemplate:
         new_weights["L__self___weight"].add_(1)
         new_weights["L__self___bias"].add_(1)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         # Same as the previous result
         self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
         new_expected = torch.nn.functional.linear(
@@ -8283,14 +8595,17 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
+        retained_weight = new_weights["L__self___weight"]
+        retained_weight_use_count = retained_weight._use_count()
         mem_before = constant_buffer_memory_used()
         # Try user managed_buffer, should not allocate an owned constant buffer.
         runner.update_constant_buffer(new_weights, True, False, True)
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count + 1)
         mem_after = constant_buffer_memory_used()
         self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8300,7 +8615,7 @@ class AOTInductorTestsTemplate:
         new_weights["L__self___weight"].add_(1)
         new_weights["L__self___bias"].add_(1)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8313,6 +8628,8 @@ class AOTInductorTestsTemplate:
 
         runner.update_constant_buffer(new_weights, True, False, True)
         runner.swap_constant_buffer()
+        runner.free_inactive_constant_buffer()
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count + 1)
 
         model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
         model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
@@ -8324,12 +8641,15 @@ class AOTInductorTestsTemplate:
 
         model.load_state_dict(updated_state_dict)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         expected_output = model(test_inputs)
         torch.testing.assert_close(new_output, expected_output, atol=1e-3, rtol=1e-3)
 
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
+
+        del runner
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count)
 
     def test_load_constants_allow_h2d_copy(self):
         # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
@@ -9998,6 +10318,99 @@ class AOTInductorLoggingTest(LoggingTestCase):
         ):
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+
+class KernelProfileNumelScopeTest(TestCase):
+    """Declaration rules for symbolic numels under kernel profiling.
+
+    Profiling wraps each kernel call in its own {} block, so a numel emitted
+    inside one is block-scoped and has to be redeclared, while a numel at
+    function scope is declared once and assigned thereafter. The wrapper
+    method is driven directly because the two rules only diverge when the same
+    numel reaches function scope twice, which needs a graph large enough for a
+    deduped kernel to be called twice outside a block -- combo kernels suffix
+    a numel per sub-kernel and template kernels emit theirs inside a block, so
+    no small model produces it.
+    """
+
+    def _wrapper(self):
+        # CppWrapperCpu.__init__ emits the whole C++ preamble and needs a live
+        # GraphLowering; only the numel bookkeeping is under test here.
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        wrapper.kernel_numel_expr = OrderedSet()
+        wrapper.kernel_profile_scope_depth = 0
+        wrapper.lines = []
+        return wrapper
+
+    @staticmethod
+    def _numel_arg():
+        return SymbolicCallArg(sympy.Symbol("kern_xnumel"), sympy.Integer(64))
+
+    def test_function_scope_numel_is_declared_once(self):
+        # The declaration survives to the next use at function scope, so
+        # redeclaring it there is a C++ redefinition error.
+        #
+        # The helper does not read cpp.enable_kernel_profile -- the scope comes
+        # from in_profile_scope. Profiling is turned on because that is the
+        # configuration the rule has to hold under: it is what makes the
+        # kernels emit {} blocks in the first place, and what the version of
+        # this helper that redeclared unconditionally keyed on.
+        wrapper = self._wrapper()
+        arg = self._numel_arg()
+        graph = object()
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            wrapper._generate_symbolic_call_arg_helper(arg, graph)
+            wrapper._generate_symbolic_call_arg_helper(arg, graph)
+        self.assertEqual(len(wrapper.lines), 2)
+        self.assertTrue(wrapper.lines[0].startswith("int64_t kern_xnumel = "))
+        self.assertTrue(wrapper.lines[1].startswith("kern_xnumel = "))
+
+    def test_profile_scope_numel_is_redeclared_every_time(self):
+        # Each block gets its own declaration, and a block-scoped one is not
+        # visible at function scope, so it must not suppress the declaration
+        # of a later function-scope use.
+        wrapper = self._wrapper()
+        arg = self._numel_arg()
+        graph = object()
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            wrapper._generate_symbolic_call_arg_helper(arg, graph, True)
+            wrapper._generate_symbolic_call_arg_helper(arg, graph, True)
+            wrapper._generate_symbolic_call_arg_helper(arg, graph)
+        self.assertEqual(len(wrapper.lines), 3)
+        for line in wrapper.lines:
+            self.assertTrue(line.startswith("int64_t kern_xnumel = "))
+
+    def test_scope_depth_unwinds_when_the_body_raises(self):
+        # The depth decides whether a numel is redeclared, so leaking it past a
+        # kernel that failed to emit would mis-scope every numel after it.
+        wrapper = self._wrapper()
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            with self.assertRaises(RuntimeError):
+                with wrapper.kernel_profile_scope("kern", []):
+                    raise RuntimeError("kernel emission failed")
+        self.assertEqual(wrapper.kernel_profile_scope_depth, 0)
+
+    def test_guard_blocks_nest_and_track_their_depth(self):
+        # Both halves matter: the braces are what scope the numel in the
+        # generated code, and the depth is what the recording side reads to
+        # know it is inside them.
+        wrapper = self._wrapper()
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            self.assertEqual(wrapper.kernel_profile_scope_depth, 0)
+            with wrapper.kernel_profile_scope("outer", []):
+                self.assertEqual(wrapper.kernel_profile_scope_depth, 1)
+                with wrapper.kernel_profile_scope("inner", []):
+                    self.assertEqual(wrapper.kernel_profile_scope_depth, 2)
+        self.assertEqual(wrapper.kernel_profile_scope_depth, 0)
+        self.assertEqual(wrapper.lines, ["{", "{", "}", "}"])
+
+    def test_no_block_is_emitted_when_profiling_is_off(self):
+        wrapper = self._wrapper()
+        with config.patch({"cpp.enable_kernel_profile": False}):
+            with wrapper.kernel_profile_scope("kern", []):
+                pass
+        self.assertEqual(wrapper.lines, [])
+        self.assertEqual(wrapper.kernel_profile_scope_depth, 0)
 
 
 class TestAOTInductorConfig(TestCase):

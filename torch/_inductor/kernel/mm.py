@@ -50,6 +50,7 @@ from ..utils import (
     _use_cutlass_for_op,
     ceildiv,
     GPU_ALIGN_BYTES,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
@@ -64,6 +65,7 @@ from ..utils import (
     use_triton_tma_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     _use_small_mm_pointwise,
     load_kernel_template,
@@ -136,10 +138,10 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
-    name="blackwell_ws_persistent_device_tma",
+blackwell_ws_persistent_tma_mm_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
 
@@ -218,21 +220,6 @@ def check_supported_striding(mat_a, mat_b) -> None:
     )
 
 
-def _fits_int32_buffer_span(
-    rows: int, row_stride: int | None, cols: int, itemsize: int
-) -> bool:
-    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
-    # 32-bit byte offset.
-    int32_max = (1 << 31) - 1
-    return (
-        0 < rows <= int32_max
-        and 0 < cols <= int32_max
-        and row_stride is not None
-        and 0 <= row_stride <= int32_max
-        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
-    )
-
-
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
@@ -253,11 +240,21 @@ def get_flydsl_mm_template_kwargs(
     mat2_stride = mat2.get_stride()
     out_stride = layout.stride
 
-    if not sizevars.statically_known_equals(mat1_stride[1], 1):
+    if sizevars.statically_known_equals(mat1_stride[1], 1):
+        a_is_transposed = False
+    elif sizevars.statically_known_equals(mat1_stride[0], 1):
+        a_is_transposed = True
+    else:
         return []
-    # FlyDSL consumes the RHS as an [N, K] view of this stride-1 K dimension.
-    if not sizevars.statically_known_equals(mat2_stride[0], 1):
+
+    # FlyDSL consumes aten.mm's logical [K, N] RHS view directly.
+    if sizevars.statically_known_equals(mat2_stride[0], 1):
+        b_is_transposed = True
+    elif sizevars.statically_known_equals(mat2_stride[1], 1):
+        b_is_transposed = False
+    else:
         return []
+
     if not sizevars.statically_known_equals(out_stride[1], 1):
         return []
 
@@ -268,13 +265,16 @@ def get_flydsl_mm_template_kwargs(
     if dtype not in (torch.float16, torch.bfloat16):
         return []
 
+    a_leading_stride = mat1_stride[1] if a_is_transposed else mat1_stride[0]
+    b_leading_stride = mat2_stride[1] if b_is_transposed else mat2_stride[0]
+
     # Require vectorized tensor origins and row increments to stay GPU-aligned.
     itemsize = dtype.itemsize
     aligned_byte_expressions = (
         mat1.get_layout().offset * itemsize,
-        mat1_stride[0] * itemsize,
+        a_leading_stride * itemsize,
         mat2.get_layout().offset * itemsize,
-        mat2_stride[1] * itemsize,
+        b_leading_stride * itemsize,
     )
     if (
         is_unaligned(mat1)
@@ -294,12 +294,20 @@ def get_flydsl_mm_template_kwargs(
     k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
     if m_static is None or n_static is None or k_static is None:
         return []
-    if n_static % 32 != 0 or k_static % 32 != 0:
+    if k_static % 32 != 0:
         return []
 
     tensor_spans = (
-        (m_static, mat1_stride[0], k_static),
-        (n_static, mat2_stride[1], k_static),
+        (
+            k_static if a_is_transposed else m_static,
+            a_leading_stride,
+            m_static if a_is_transposed else k_static,
+        ),
+        (
+            n_static if b_is_transposed else k_static,
+            b_leading_stride,
+            k_static if b_is_transposed else n_static,
+        ),
         (m_static, out_stride[0], n_static),
     )
     if any(
@@ -313,7 +321,6 @@ def get_flydsl_mm_template_kwargs(
     ):
         return []
 
-    # The wrapper transposes aten.mm's [K, N] RHS view to FlyDSL's [N, K].
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
     gemm_dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
@@ -325,6 +332,8 @@ def get_flydsl_mm_template_kwargs(
             "GEMM_M": m_static,
             "GEMM_N": n_static,
             "GEMM_K": k_static,
+            "A_IS_TRANSPOSED": a_is_transposed,
+            "B_IS_TRANSPOSED": b_is_transposed,
         }
         for gemm_config in get_gemm_configs()
         if is_gemm_config_valid_for_shape(
@@ -333,6 +342,8 @@ def get_flydsl_mm_template_kwargs(
             k_static,
             gemm_dtype_id,
             gemm_config,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
         )
     ]
 
@@ -458,6 +469,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     if out_dtype is not None:
         input_dtype = mat1.get_dtype()
         torch._check(
@@ -521,7 +533,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
+    if (
+        not use_bf16x9
+        and out_dtype is None
+        and _use_small_mm_pointwise(m, k, n, layout.device.type)
+    ):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -554,6 +570,21 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_handler = aten_mm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
+
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
     if use_aten_gemm_kernels():
@@ -580,7 +611,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
-                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
             elif use_triton_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
@@ -776,7 +807,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    if beta == 0 and mat1.get_device().type == "cuda":
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    if not use_bf16x9 and beta == 0 and mat1.get_device().type == "cuda":
         _check_addmm_input_metadata(inp, mat1, mat2)
         if alpha == 0:
             _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
@@ -835,8 +867,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         mat2.get_dtype(),
         layout,
     )
-    if (not is_nonzero) or (
-        not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
+    if (
+        use_bf16x9
+        or (not is_nonzero)
+        or (not (inductor_config.max_autotune or inductor_config.max_autotune_gemm))
     ):
         choices.extend(
             V.choices.get_template_configs(
@@ -873,7 +907,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_triton_blackwell_tma_template(
             mat1, mat2, output_layout=layout, add_guards=True
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             if torch.version.hip is None:
                 templates_to_use.append(persistent_tma_mm_template)
@@ -1269,10 +1303,8 @@ def tuned_scaled_mm_v2(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
@@ -1446,10 +1478,8 @@ def tuned_scaled_mm(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
