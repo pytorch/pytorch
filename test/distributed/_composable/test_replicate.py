@@ -24,8 +24,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-
-
 class Net(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -248,6 +246,7 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
+
 class ReplicateFullyShardInit(ReplicateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -285,7 +284,9 @@ class ReplicateFullyShardInit(ReplicateTest):
             self.assertTrue(isinstance(linear.weight, DTensor))
 
 
-instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    ReplicateTest, globals(), except_for="cpu", allow_xpu=True
+)
 instantiate_device_type_tests(ReplicateTestNoXPU, globals(), except_for="cpu")
 instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu")
 
