@@ -12,6 +12,7 @@
 
 #ifdef __cplusplus
 
+#include <c10/util/SmallVector.h>
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <atomic>
@@ -403,7 +404,7 @@ py::object lookup_optional(py::handle handle, PyObject* name);
 // Create a new cache entry at extra_state holding on to guarded_code. Only
 // called from C++ (the frame evaluator), so it lives outside the extern "C"
 // block: the new entry's code (owned) and trace annotation are filled into the
-// caller's py::object / std::string under the cache lock. The entry itself is
+// caller's py::object / char buffer under the cache lock. The entry itself is
 // never returned -- a concurrent clear can destroy it the moment the lock
 // drops, so there is no pointer the caller could safely dereference.
 // Ownership contract
@@ -415,11 +416,11 @@ void create_cache_entry(
     PyObject* guraded_code,
     PyObject* callback,
     py::object* code_out,
-    std::string* trace_annotation_out);
+    c10::SmallVectorImpl<char>* trace_annotation_out);
 
 // Lookup the cache held by extra_state. Only called from C++ (the frame
 // evaluator), so it lives outside the extern "C" block: trace_annotation is
-// copied out under the cache lock into the caller's std::string, because the
+// copied out under the cache lock into the caller's small buffer, because the
 // entry that owns the original may be destroyed as soon as this returns. The
 // code object is handed back as a NEW reference for the same reason: the entry
 // that owns it can be evicted the moment the cache lock drops.
@@ -435,7 +436,7 @@ void lookup(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    std::string* trace_annotation,
+    c10::SmallVectorImpl<char>* trace_annotation,
     bool is_skip_guard_eval_unsafe);
 
 // Try to resolve a cache lookup without materializing frame locals or running
@@ -447,7 +448,7 @@ bool try_lookup_without_guard_eval(
     PyObject* backend,
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
-    std::string* trace_annotation,
+    c10::SmallVectorImpl<char>* trace_annotation,
     bool is_skip_guard_eval_unsafe);
 
 // Returns the list of CacheEntry corresponding to code_obj.
