@@ -486,7 +486,9 @@ class BaseBuiltinVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    # Unbound Type.__str__/__repr__(x) is not the 0-arg tp_str/tp_repr slot.
+    # Unbound Type.__str__/__repr__(x): operand slot, not this type object's
+    # 0-arg tp_str/tp_repr. Types that inherit object.__str__ use tp_repr
+    # (object.tp_str is PyObject_Repr; list.__str__ is object.__str__).
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -495,9 +497,12 @@ class BaseBuiltinVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__str__" and len(args) == 1 and not kwargs:
-            return generic_str(tx, args[0])
+            fn = self.as_python_constant()
+            if isinstance(fn, type) and fn.__str__ is object.__str__:
+                return args[0].tp_repr_impl(tx)
+            return args[0].tp_str_impl(tx)
         if name == "__repr__" and len(args) == 1 and not kwargs:
-            return generic_repr(tx, args[0])
+            return args[0].tp_repr_impl(tx)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1818,29 +1823,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
-        # object/type.__str__/__repr__ bypass subclass/metaclass slots.
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            if self.fn is object:
-                return generic_repr(tx, args[0])
-            if self.fn is type:
-                arg = args[0]
-                if isinstance(arg, variables.UserDefinedClassVariable):
-                    return VariableTracker.build(tx, type.__str__(arg.value))
-                const = arg.as_python_constant() if arg.is_python_constant() else None
-                if isinstance(const, type):
-                    return VariableTracker.build(tx, type.__str__(const))
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            if self.fn is object and isinstance(
-                args[0], variables.UserDefinedObjectVariable
-            ):
-                return VariableTracker.build(tx, object.__repr__(args[0].value))
-            if self.fn is type:
-                arg = args[0]
-                if isinstance(arg, variables.UserDefinedClassVariable):
-                    return VariableTracker.build(tx, type.__repr__(arg.value))
-                const = arg.as_python_constant() if arg.is_python_constant() else None
-                if isinstance(const, type):
-                    return VariableTracker.build(tx, type.__repr__(const))
+        # type.tp_repr, not the class's tp_repr_impl (that follows the metaclass).
+        if name == "__repr__" and len(args) == 1 and not kwargs and self.fn is type:
+            arg = args[0]
+            if isinstance(arg, variables.UserDefinedClassVariable):
+                return VariableTracker.build(tx, type.__repr__(arg.value))
+            const = arg.as_python_constant() if arg.is_python_constant() else None
+            if isinstance(const, type):
+                return VariableTracker.build(tx, type.__repr__(const))
 
         if name == "__new__":
             # Supported __new__ methods
