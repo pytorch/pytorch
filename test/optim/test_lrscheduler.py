@@ -891,6 +891,9 @@ class TestLRScheduler(TestCase):
                 milestones=[2],
             )
 
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        one_level_scheduler = make_scheduler(one_level_optimizer)
+
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
         two_level_scheduler = SequentialLR(
             two_level_optimizer,
@@ -898,11 +901,8 @@ class TestLRScheduler(TestCase):
             milestones=[],
         )
 
-        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        one_level_scheduler = make_scheduler(one_level_optimizer)
-
-        two_level_lrs = self._get_lrs(two_level_scheduler)
         one_level_lrs = self._get_lrs(one_level_scheduler)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
         self.assertEqual(two_level_lrs, one_level_lrs)
 
     def test_nested_chained_scheduler_does_not_skip_an_epoch(self):
@@ -916,6 +916,9 @@ class TestLRScheduler(TestCase):
                 optimizer=optimizer,
             )
 
+        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
+        one_level_scheduler = make_scheduler(one_level_optimizer)
+
         two_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
         two_level_scheduler = SequentialLR(
             two_level_optimizer,
@@ -923,11 +926,8 @@ class TestLRScheduler(TestCase):
             milestones=[],
         )
 
-        one_level_optimizer = SGD([Parameter(torch.zeros(1))], lr=0.1)
-        one_level_scheduler = make_scheduler(one_level_optimizer)
-
-        two_level_lrs = self._get_lrs(two_level_scheduler)
         one_level_lrs = self._get_lrs(one_level_scheduler)
+        two_level_lrs = self._get_lrs(two_level_scheduler)
         self.assertEqual(two_level_lrs, one_level_lrs)
 
     def test_chained_lr2_get_last_lr_before_step(self):
