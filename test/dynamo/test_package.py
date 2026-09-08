@@ -875,6 +875,11 @@ def add(x, y):
             pkg.install(backends)
         # Reaching that error means install() bound the resume global and an
         # entry before it raised: a genuinely partial install to tear down.
+        # Pin that, so a future ordering change that raised before binding
+        # anything cannot leave this test trivially passing over an empty
+        # teardown.
+        self.assertTrue(set(module_dict) - before)
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
         del pkg, backends
         gc.collect()
@@ -1044,7 +1049,7 @@ def add(x, y):
             raise AssertionError("pkg_a resume served in pkg_b's region")
 
         for name in resume_a:
-            self.addCleanup(module_dict.__setitem__, name, module_dict[name])
+            self.addCleanup(module_dict.pop, name, None)
             module_dict[name] = _poison
 
         with torch.compiler.set_stance("fail_on_recompile"):
