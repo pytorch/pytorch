@@ -146,8 +146,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
   // Invalidations that arrived while cache_mutex was contended. invalidate()
   // must never BLOCK on cache_mutex: it is reached from weakref.finalize,
-  // which GC can fire while ANOTHER ExtraState's cache_mutex is held during
-  // its guard evaluation, and two threads doing that against each other's
+  // which GC can fire while ANOTHER ExtraState holds its cache_mutex across
+  // the Python it runs under the lock (create_cache_entry's guard-manager
+  // attribute stores), and two threads doing that against each other's
   // states deadlock (CacheLock releases only the GIL, not the peer's lock).
   // Parked requests are applied by the next cache_mutex holder that runs at
   // cache_python_depth 0; a nested (mid-guard-eval) holder re-parks them.
