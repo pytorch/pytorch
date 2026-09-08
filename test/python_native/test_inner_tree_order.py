@@ -1,11 +1,9 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# The reproducible-DAG fold order, opt-in via PYTORCH_NATIVE_INNER_TREE.
-#
-# The claim this order makes is a BIT PATTERN, so that is what gets asserted: equality with
-# upstream's inner-tree kernel compared as integers, not allclose. It also must not narrow
-# coverage -- a shape the order does not cover keeps the default order rather than falling back
-# to aten -- and it must stay off by default.
+# The reproducible-DAG fold order. Its claim is a BIT PATTERN, so that is what is asserted:
+# integer equality with upstream's kernel, not allclose. It must also not narrow coverage --
+# a shape it does not cover keeps the default order, never falls back to aten -- and must
+# stay off by default.
 
 import os
 import unittest
@@ -37,14 +35,10 @@ def _order_on():
             os.environ[rt._INNER_TREE_ENV] = prev
 
 
-# GOLDEN BIT PATTERNS, pinned so the bitwise contract outlives its reference,
-# `ops/reductions/inner_tree_kernel.py` -- which is a live fallback today but is meant to be deleted,
-# and a differential test cannot outlive it. There is no ATen kernel to regenerate against.
-#
-# Hardware-independent by construction (the DAG is fixed by N alone and IEEE add/multiply are exact),
-# so these travel across GPUs. A changed hash means the ORDER changed, for every entry
-# test_golden_input_can_detect_a_reorder covers; the narrow dtypes are value checks only. Regenerate
-# against the reference kernel, never against an unverified change to our own fold.
+# GOLDEN BIT PATTERNS, pinned so the contract outlives its reference kernel, which is meant
+# to be deleted -- and a differential test cannot. There is no ATen kernel to regenerate
+# against. Hardware-independent by construction, since the DAG is fixed by N alone and IEEE
+# add is exact. A changed hash means the ORDER changed.
 _GOLDEN = {
     # --- sum ---
     ("sum", "float16", 8, 4): "7069267eff54930e",  # multirow
@@ -164,11 +158,8 @@ _GOLDEN = {
 
 
 def _golden_input(m, n, dtype, prod):
-    """The input the table was generated from, reproduced exactly. Three requirements, each load-
-    bearing: the values must ROUND (or reassociation cannot move a bit and the table pins nothing
-    about the order), they must be APERIODIC over the largest row (lcm of the moduli, 830879, exceeds
-    the largest m*n), and they must be RNG-free so the table reproduces anywhere. Ratios of primes
-    give the full-length binary expansions the first requirement needs.
+    """The input the table was generated from, reproduced exactly. Values must ROUND, be
+    APERIODIC over the largest row, and be RNG-free, or the table pins nothing.
     """
     v = torch.arange(m * n, device="cuda", dtype=torch.float64).reshape(m, n)
     vals = ((v % 29) - 14) / 29 + ((v % 7) - 3) / 13 + ((v % 4093) - 2046) / 4093 / 4
@@ -190,10 +181,9 @@ def _sha(t):
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestInnerTreeOrder(TestCase):
-    # At least one shape per SHAPE the plan can pick, since each is a different DAG: a row inside
-    # one thread's fragment (multirow), warps cooperating over up to three baked batches
-    # (looped), and a partials pass plus a per-row combine (split). Plus ragged N in each, where
-    # the row does not fill its last vector and the tail folds identities.
+    # One shape per SHAPE the plan can pick, since each is a different DAG: a row inside one
+    # thread's fragment, warps cooperating over baked batches, and a partials pass plus a
+    # combine. Plus ragged N in each, where the tail folds identities.
     SHAPES = [
         (65536, 4),
         (65536, 16),
@@ -228,10 +218,9 @@ class TestInnerTreeOrder(TestCase):
         self.assertFalse(rt.inner_tree_order_enabled())
 
     def test_plan_covers_every_n(self):
-        # Coverage has to be TOTAL: a shape with no plan would keep the launch-shape-derived
-        # order silently, which is exactly the property this order exists to remove. Also assert
-        # the compile-time tile stays under the unroll ceiling -- over it, TileMap raises, so a
-        # missing bound would be a crash rather than a fallback.
+        # Coverage has to be TOTAL: a shape with no plan would silently keep the launch-shape order,
+        # which is the property this order exists to remove. The unroll ceiling is asserted too --
+        # over it TileMap raises, so a missing bound is a crash rather than a fallback.
         from torch._native.ops.reductions import kernel_rowtile as rt, tile
 
         for itemsize in (2, 4, 8):
@@ -275,15 +264,13 @@ class TestInnerTreeOrder(TestCase):
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float64])
     def test_bitwise_equal_to_upstream_dtypes(self, dtype):
-        # vec is 16 bytes' worth of elements, so the dtype sets the tree's WIDTH (8 for the
-        # 16-bit types, 2 for fp64) and below width 4 the in-vector fold is linear rather than a
-        # tree. Every one of those is a different DAG.
+        # vec is 16 bytes' worth of elements, so the dtype sets the tree's WIDTH, and below width 4
+        # the in-vector fold is linear rather than a tree. Every one of those is a different DAG.
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import inner_tree_kernel as up
 
-        # PROD as well as sum: the two differ in their identity and in what a ragged tail pads
-        # with, and prod was previously checked in fp32 only -- so the 16-bit tree widths and the
-        # fp64 pair width went unverified for it.
+        # PROD as well as sum: they differ in their identity and in what a ragged tail pads with, and
+        # prod was previously checked in fp32 only.
         ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
         for op in ("sum", "prod"):
             trait = T.ProdOps if op == "prod" else T.SumOps
@@ -314,10 +301,9 @@ class TestInnerTreeOrder(TestCase):
                     )
 
     def test_signed_zero_matches_upstream_per_shape(self):
-        # The case that catches a stray identity in the fold: `0.0 + -0.0` is `+0.0`, so seeding
-        # a cross-batch accumulator changes the RESULT BITS for an all -0.0 row. Upstream seeds
-        # in its looped kernel and not in the other two, so the shapes genuinely disagree here
-        # and matching "closely" would hide it.
+        # The case that catches a stray identity: `0.0 + -0.0` is `+0.0`, so seeding a cross-batch
+        # accumulator changes the RESULT BITS for an all -0.0 row. Upstream seeds in one shape and
+        # not the others, so they genuinely disagree and matching closely would hide it.
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as up,
@@ -337,9 +323,8 @@ class TestInnerTreeOrder(TestCase):
                 )
 
     def test_order_is_reproducible_across_batch(self):
-        # The reason to want this order: its DAG comes from N alone, so a row's result does not
-        # depend on how many rows were reduced with it. The default order picks its launch
-        # shape per call and carries no such guarantee.
+        # The reason to want this order: its DAG comes from N alone, so a row's result does not depend
+        # on how many rows were reduced with it. The default order carries no such guarantee.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -402,13 +387,11 @@ class TestInnerTreeOrder(TestCase):
         self.assertEqual(checked, len(_GOLDEN) // 2)
 
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
-        # tile.load takes an UNPREDICATED wide load when `tm.exact` -- which only says the tile
-        # covers its own N from column 0. A narrower `bound` (the split shape's chunk end, there to
-        # stop a short chunk reading the next chunk's elements) or a shifted `base_col` invalidate
-        # that, so `load` requires them absent. This is the other half of that guard: it is free
-        # only because no plan pairs them, and nothing else says so. A plan change that broke the
-        # pairing would otherwise just make the fast path quietly read the wrong columns -- and
-        # since the fold is bit-neutral by design, the numbers would still look plausible.
+        # `tm.exact` only says the tile covers its own N from column 0, so a narrower bound or a
+        # shifted base column invalidate the unpredicated load. This is the other half of that guard:
+        # it is free only because no plan pairs them, and nothing else says so. A plan change that
+        # broke the pairing would just read the wrong columns, and the fold being bit-neutral means
+        # the numbers would still look plausible.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         checked = paired = 0
@@ -442,11 +425,9 @@ class TestInnerTreeOrder(TestCase):
 
     def test_golden_input_can_detect_a_reorder(self):
         # The table is worth nothing if its input cannot tell two orders apart, so assert the
-        # discriminating power rather than trusting the generator, one shape per plan shape.
-        #
-        # fp32/fp64 only, and N > 4, both structurally: a narrowing store cannot carry an
-        # fp32-accumulator difference into 8 or 11 mantissa bits, and at N=4 one thread owns the
-        # whole row, so there is no reassociation to detect.
+        # discriminating power rather than trusting the generator. fp32/fp64 and N > 4, both
+        # structurally: a narrowing store cannot carry the difference, and at N=4 one thread owns the
+        # whole row so there is nothing to reassociate.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -478,9 +459,8 @@ class TestInnerTreeOrder(TestCase):
                         )
 
     def test_the_gate_routes_the_dispatcher_through_the_order(self):
-        # What the gate is FOR, asserted through the DISPATCHER rather than the fold. Neither failure
-        # mode this guards is visible in the numbers, because both wrong paths compute a correct
-        # reduction -- only the bits differ.
+        # What the gate is FOR, asserted through the DISPATCHER rather than the fold: neither failure
+        # mode is visible in the numbers, because both wrong paths compute a correct reduction.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -511,15 +491,11 @@ class TestInnerTreeOrder(TestCase):
                 )
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
-        # nfields > 1 gives the fold one smem staging buffer and one split partial buffer PER
-        # FIELD, and nouts == 2 projects two results from one accumulator -- machinery the
-        # single-field value traits never touch. A RAGGED N as well, so the identity padding that
-        # the fold's docstring calls part of the DAG is exercised rather than skipped by a tile
-        # that happens to cover the row exactly.
-        #
-        # Compared against the same trait under the launch-shape fold, not against aten: what is
-        # under test is that the order's own per-field plumbing carries every field, and the two
-        # DAGs associate differently by design, so a tolerance is the right comparison.
+        # nfields > 1 gives the fold a staging and a partial buffer PER FIELD, and nouts == 2 projects
+        # two results from one accumulator -- machinery the single-field traits never touch. A RAGGED
+        # N too, so the identity padding is exercised. Compared against the same trait under the
+        # launch-shape fold, since what is under test is the per-field plumbing and the two DAGs
+        # associate differently by design.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -564,12 +540,10 @@ class TestInnerTreeOrder(TestCase):
                         )
 
     def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
-        # THE LAW the trait protocol has to satisfy, and the reason `leaf` exists:
-        #     combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b)
-        # A trait carrying its per-element transform only in `reduce` folds RAW values under a tree
-        # order and returns a plausible WRONG number, which a protocol test checking only which
-        # methods exist cannot see. Compared with a tolerance, since the two DAGs associate
-        # differently on purpose.
+        # THE LAW the trait protocol must satisfy, and the reason `leaf` exists:
+        # combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b). A trait carrying its per-element
+        # transform only in `reduce` folds RAW values under a tree order and returns a plausible
+        # WRONG number, which a protocol test checking only which methods exist cannot see.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
