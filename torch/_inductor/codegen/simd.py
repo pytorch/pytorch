@@ -1531,6 +1531,21 @@ class _SubParentFusion(enum.Enum):
     FUSE = enum.auto()
 
 
+# Pointwise ops whose parent-resolution twin may stand in for a lane replay.
+_FOLDABLE_LANE_OPS = frozenset(
+    [
+        "abs", "add", "sub", "mul", "truediv", "div", "neg", "reciprocal",
+        "square", "exp", "exp2", "expm1", "log", "log2", "log1p", "sqrt", "rsqrt",
+        "pow", "maximum", "minimum", "where", "to_dtype", "identity", "sigmoid",
+        "tanh", "relu", "sign", "signbit", "isnan", "isinf", "floor", "ceil",
+        "round", "trunc", "fma", "copysign", "erf", "sin", "cos", "tan",
+        "eq", "ne", "lt", "le", "gt", "ge", "logical_and", "logical_or",
+        "logical_not", "bitwise_and", "bitwise_or", "bitwise_xor", "bitwise_not",
+        "bitwise_left_shift", "bitwise_right_shift", "fmod", "remainder",
+    ]
+)  # fmt: skip
+
+
 def _select_lane(
     parts: tuple[CSEVariable, ...],
     lane: sympy.Expr,
@@ -2063,28 +2078,18 @@ class _GroupedReductionLayout:
             family.set_value_masks(kernel, (value,))
             return value
         if parent_dim == self.num_groups_str:
-            broadcast = self._broadcast_value_to_axis_resolution(
-                kernel,
-                value,
-                parent_extent=self.child_block(factor),
-                elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
+            # Lift to the parent tile and split it like a parent value. Every
+            # lane is equal, but reshaping straight to lane width lands in a
+            # different Triton layout than the split parent values it meets,
+            # which costs a shared-memory conversion per element.
+            value = self._broadcast_value_to_parent_resolution(
+                kernel, value, materialize_singleton=False
             )
-            family.set_value_masks(kernel, (broadcast,))
-            return broadcast
-        if parent_dim != self.parent_block:
+            shape = value.shape
+            parent_dim = self.parent_block
+        if parent_dim != self.parent_block or shape is None:
             return None
-        sub_parent_tree = family.sub_parent_tree()
-        child_block = sub_parent_tree.block_size_str()
-        factor_dim = str(factor)
-        if len(shape) == 2:
-            # make_sub_parent_family requires the split parent axis to be R,
-            # so reshape can expose the lane factor on the trailing axis.
-            passthrough_dim = str(shape[1 - self.parent_axis])
-            reshape_shape = (passthrough_dim, child_block, factor_dim)
-            part_shape = (passthrough_dim, child_block)
-        else:
-            reshape_shape = (child_block, factor_dim)
-            part_shape = (child_block,)
+        reshape_shape, part_shape = self.sub_parent_split_shapes(family, factor, shape)
         parts = tuple(
             kernel.cse.newvar(bounds=value.bounds, dtype=value.dtype, shape=part_shape)
             for _ in range(factor)
@@ -2092,6 +2097,25 @@ class _GroupedReductionLayout:
         kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
         family.set_value_masks(kernel, parts)
         return parts
+
+    def sub_parent_split_shapes(
+        self,
+        family: _DerivedIterationFamily,
+        factor: int,
+        shape: Sequence[int | str],
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Reshape and per-lane shapes that split a parent tile into lanes."""
+        child_block = family.sub_parent_tree().block_size_str()
+        factor_dim = str(factor)
+        if len(shape) == 2:
+            # make_sub_parent_family requires the split parent axis to be R,
+            # so reshape can expose the lane factor on the trailing axis.
+            passthrough_dim = str(shape[1 - self.parent_axis])
+            return (passthrough_dim, child_block, factor_dim), (
+                passthrough_dim,
+                child_block,
+            )
+        return (child_block, factor_dim), (child_block,)
 
     def _broadcast_value_to_axis_resolution(
         self,
@@ -2452,6 +2476,120 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
+        # Lane values and the (parent value, lane) they project. Pending ones
+        # have not been split yet; they materialize when a consumer needs them.
+        self._lane_origins: dict[CSEVariable, tuple[CSEVariable, int]] = {}
+        self._pending_lanes: dict[CSEVariable, tuple[CSEVariable, int]] = {}
+        self._lane_invariant: OrderedSet[CSEVariable] = OrderedSet()
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        folded = self._try_fold_lane_op(name, args, kwargs)
+        if folded is not None:
+            return folded
+        args, kwargs = pytree.tree_map(self._resolve_pending, (args, kwargs))
+        if name == "masked":
+            mask, body, other = args
+
+            def resolved_body() -> Any:
+                return self._resolve_pending(body())
+
+            resolved_body.graph = body.graph  # type: ignore[attr-defined]
+            args = (mask, resolved_body, other)
+        return getattr(self._inner, name)(*args, **kwargs)
+
+    def _parent_handler(self) -> Any:
+        handler = self._inner
+        while isinstance(handler, WrapperHandler):
+            handler = handler._inner
+        return getattr(handler, "parent_handler", None)
+
+    def _lane_origin(self, value: CSEVariable) -> tuple[CSEVariable, int] | None:
+        origin = self._pending_lanes.get(value)
+        return origin if origin is not None else self._lane_origins.get(value)
+
+    def _is_lane_invariant(self, value: CSEVariable) -> bool:
+        if value in self._lane_invariant:
+            return True
+        shape = value.shape
+        if shape is None:
+            return False
+        return shape == () or self._layout.parent_dim(shape) == "1"
+
+    def _resolve_pending(self, value: Any) -> Any:
+        """Split a deferred lane value now that a consumer needs it."""
+        if not isinstance(value, CSEVariable):
+            return value
+        pending = self._pending_lanes.get(value)
+        if pending is None:
+            return value
+        parent, lane = pending
+        materialized = self._materialize(parent)
+        if not isinstance(materialized, tuple):
+            raise AssertionError("pending lane value lost its parent tile")
+        real = _select_lane(materialized, sympy.Integer(lane))
+        if real is None:
+            raise AssertionError(f"invalid pending lane {lane}")
+        self._lane_origins[real] = (parent, lane)
+        return real
+
+    def _try_fold_lane_op(
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> CSEVariable | None:
+        """Replay a lane pointwise op as the lane of its parent-resolution twin.
+
+        The epilogue body recomputes the parent's pointwise chain per lane from
+        split loads. When the same op on the same operands already exists at
+        parent resolution, the lane is a projection of that computed value, so
+        the chain collapses into one split of its final value. The split is
+        deferred so intermediate lanes never reach the generated code.
+        """
+        if name not in _FOLDABLE_LANE_OPS or self._kernel._load_mask is not None:
+            return None
+        if not (self._lane_origins or self._pending_lanes):
+            return None
+        if any(isinstance(v, CSEVariable) for v in kwargs.values()):
+            return None
+        parent_handler = self._parent_handler()
+        if parent_handler is None:
+            return None
+        lane: int | None = None
+        parent_args: list[Any] = []
+        for arg in args:
+            if isinstance(arg, CSEVariable):
+                origin = self._lane_origin(arg)
+                if origin is not None:
+                    if lane is not None and lane != origin[1]:
+                        return None
+                    lane = origin[1]
+                    parent_args.append(origin[0])
+                elif self._is_lane_invariant(arg):
+                    parent_args.append(arg)
+                else:
+                    return None
+            elif isinstance(arg, (tuple, list)):
+                return None
+            else:
+                parent_args.append(arg)
+        if lane is None:
+            return None
+        expr = getattr(parent_handler, name)(*parent_args, **kwargs)
+        if not isinstance(expr, str):
+            return None
+        parent_value = self._kernel.cse.try_get(expr)
+        if parent_value is None or parent_value.shape is None:
+            return None
+        if not self._kernel.cse.contains_value(cast("TritonCSEVariable", parent_value)):
+            return None
+        if self._layout.parent_dim(parent_value.shape) != self._layout.parent_block:
+            return None
+        _, part_shape = self._layout.sub_parent_split_shapes(
+            self._sub_parent_family, self._sub_parent_factor, parent_value.shape
+        )
+        placeholder = self._kernel.cse.newvar(
+            bounds=parent_value.bounds, dtype=parent_value.dtype, shape=part_shape
+        )
+        self._pending_lanes[placeholder] = (parent_value, lane)
+        return placeholder
 
     def _record(self, name: str, value: CSEVariable, *, store: bool) -> None:
         """Cache a value when its operation can produce the planned source."""
@@ -2487,6 +2625,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         mode: Any = None,
     ) -> None:
         """Record a non-atomic source store after ordinary codegen emits it."""
+        value = self._resolve_pending(value)
         self._inner.store(name, index, value, mode=mode)
         # Atomic stores expose the update operand, not the resulting memory value.
         if mode is None:
@@ -2494,6 +2633,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         """Record an in-kernel reduction source after ordinary codegen emits it."""
+        value = self._resolve_pending(value)
         self._inner.store_reduction(name, index, value)
         self._record(name, value, store=True)
 
@@ -2526,20 +2666,30 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if not self.is_group_width_shape(value.shape):
             return value
         materialized = self._materialize(value)
+        if isinstance(materialized, tuple):
+            # Every lane of a per-group value is equal; keep the first.
+            materialized = materialized[0]
         if not isinstance(materialized, CSEVariable):
-            raise AssertionError("group-width value did not materialize directly")
+            raise AssertionError("group-width value did not materialize")
+        self._lane_invariant.add(materialized)
         return materialized
 
     def materialize_sources(
         self, relations: Iterable[scheduler.SubParentAccessRelation]
     ) -> None:
-        """Preserve required lane sources before the parent body is flushed."""
+        """Preserve required lane sources before the parent body is flushed.
+
+        External sources are plain loads: their lanes split lazily when a
+        consumer needs them, or reload if the value has expired by then.
+        """
         for name in OrderedSet(relation.consumer_access.name for relation in relations):
+            if not self._contracts[name].source_is_internal:
+                continue
             materialized = any(
                 self._materialize(value) is not None
                 for value in self._values.get(name, ())
             )
-            if self._contracts[name].source_is_internal and not materialized:
+            if not materialized:
                 raise AssertionError(f"lost required sub-parent source {name!r}")
 
     def is_planned(self, name: str) -> bool:
@@ -2565,35 +2715,61 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         index: sympy.Expr,
     ) -> CSEVariable | None:
         """Materialize one source alternative and select its proved lane."""
+        allowed_lanes = self._contracts[name].parent_lanes
+        source_shape = source.shape
+        deferrable = (
+            allowed_lanes is not None
+            and source not in self._materialized
+            and source_shape is not None
+            and self._layout.parent_dim(source_shape) == self._layout.parent_block
+        )
+        if deferrable:
+            # Defer the split: consumers that fold onto the parent chain never
+            # need the raw lane, so it may never be emitted.
+            if not self._kernel.cse.contains_value(cast("TritonCSEVariable", source)):
+                return None
+            lane_value = self._planned_lane(name, index)
+            _, part_shape = self._layout.sub_parent_split_shapes(
+                self._sub_parent_family, self._sub_parent_factor, source_shape
+            )
+            pending = self._kernel.cse.newvar(
+                bounds=source.bounds, dtype=source.dtype, shape=part_shape
+            )
+            self._pending_lanes[pending] = (source, lane_value)
+            return pending
         materialized = self._materialize(source)
         if materialized is None:
             return None
         if not isinstance(materialized, tuple):
-            value = materialized
-        else:
-            allowed_lanes = self._contracts[name].parent_lanes
-            if allowed_lanes is None:
-                raise AssertionError(f"lane projection missing for {name!r}")
-            lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
-                index,
-                self._sub_parent_factor,
-                self._sub_parent_family.lane_index_subs,
-                self._sub_parent_family.lane_source_sizes,
-            )
-            lane_value = next(
-                (
-                    candidate_lane
-                    for candidate_lane in allowed_lanes
-                    if V.graph.sizevars.statically_known_equals(lane, candidate_lane)
-                ),
-                None,
-            )
-            if lane_value is None:
-                raise AssertionError(f"unplanned lane {lane} for {name!r}")
-            value = _select_lane(materialized, sympy.Integer(lane_value))
-            if value is None:
-                raise AssertionError(f"invalid lane {lane_value} for {name!r}")
+            return materialized
+        lane_value = self._planned_lane(name, index)
+        value = _select_lane(materialized, sympy.Integer(lane_value))
+        if value is None:
+            raise AssertionError(f"invalid lane {lane_value} for {name!r}")
+        self._lane_origins[value] = (source, lane_value)
         return value
+
+    def _planned_lane(self, name: str, index: sympy.Expr) -> int:
+        allowed_lanes = self._contracts[name].parent_lanes
+        if allowed_lanes is None:
+            raise AssertionError(f"lane projection missing for {name!r}")
+        lane = scheduler.NestedReduction.interleaved_sub_parent_lane(
+            index,
+            self._sub_parent_factor,
+            self._sub_parent_family.lane_index_subs,
+            self._sub_parent_family.lane_source_sizes,
+        )
+        lane_value = next(
+            (
+                candidate_lane
+                for candidate_lane in allowed_lanes
+                if V.graph.sizevars.statically_known_equals(lane, candidate_lane)
+            ),
+            None,
+        )
+        if lane_value is None:
+            raise AssertionError(f"unplanned lane {lane} for {name!r}")
+        return lane_value
 
     def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
         """Try each live source, requiring in-kernel values to resolve."""
