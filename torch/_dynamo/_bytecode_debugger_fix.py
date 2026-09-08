@@ -1,15 +1,15 @@
 from . import bytecode_debugger, eval_frame
 
 
-class _CodeIdSet(set[int]):
+class _CodeIdSet(set[tuple[int, object]]):
     def add(self, code):
-        super().add(id(code))
+        super().add((id(code), code))
 
     def __contains__(self, code):
-        return super().__contains__(id(code))
+        return super().__contains__((id(code), code))
 
     def discard(self, code):
-        super().discard(id(code))
+        super().discard((id(code), code))
 
 
 _original_init = bytecode_debugger._DebugContext.__init__
