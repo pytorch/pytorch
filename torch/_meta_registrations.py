@@ -230,7 +230,7 @@ def meta__transformer_encoder_layer_fwd(
         )
     if src.numel() == 0:
         return src.clone()
-    return torch.empty_like(src)
+    return src.new_empty(src.shape)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
