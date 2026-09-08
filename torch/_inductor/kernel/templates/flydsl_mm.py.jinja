@@ -1,0 +1,84 @@
+import functools
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    SPLIT_K_SEMAPHORE_MAX_LEN,
+    compile_hgemm_kernel,
+)
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.tensor_shim import (
+    _run_compiled,
+)
+
+{{gen_defines()}}
+
+
+@functools.lru_cache(maxsize=128)
+def _get_hgemm_semaphore(stream, device):
+    semaphore = torch.zeros(
+        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
+    )
+    signal = torch.zeros(
+        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
+    )
+    return semaphore, signal
+
+
+def _hgemm_splitk_mm(output, mat1, mat2, stream):
+    k = mat1.shape[-1]
+    if mat2.shape[-1] == k:
+        mat2_nk = mat2
+    elif mat2.shape[0] == k:
+        mat2_nk = mat2.transpose(0, 1)
+    else:
+        raise AssertionError(
+            f"Expected RHS shape [N, {k}] or [{k}, N], got {tuple(mat2.shape)}"
+        )
+
+    hgemm_kwargs = {
+        "TILE_M": TILE_M,
+        "TILE_N": TILE_N,
+        "TILE_K": TILE_K,
+        "STAGES": STAGES,
+        "SPLIT_K": SPLIT_K,
+        "BLOCK_M_WARPS": BLOCK_M_WARPS,
+        "BLOCK_N_WARPS": BLOCK_N_WARPS,
+        "BLOCK_K_WARPS": BLOCK_K_WARPS,
+        "B_TO_LDS": B_TO_LDS,
+        "HAS_BIAS": False,
+    }
+
+    semaphore, signal = _get_hgemm_semaphore(stream, mat1.device)
+    mat1_mk = mat1.view(-1, k)
+    m = mat1_mk.shape[0]
+    n = mat2_nk.shape[0]
+    output_mn = output.view(-1, n)
+    bias_tensor = mat1_mk
+
+    if mat2_nk.shape[1] != k:
+        raise AssertionError(f"Expected mat2_nk.shape[1] == k, got {mat2_nk.shape[1]} and {k}")
+    if output_mn.shape[0] != m:
+        raise AssertionError(f"Expected output_mn.shape[0] == m, got {output_mn.shape[0]} and {m}")
+
+    if mat1_mk.dtype == torch.half:
+        exe = compile_hgemm_kernel("f16", n, k, **hgemm_kwargs)
+    elif mat1_mk.dtype == torch.bfloat16:
+        exe = compile_hgemm_kernel("bf16", n, k, **hgemm_kwargs)
+    else:
+        raise NotImplementedError(f"Unsupported dtype for FlyDSL hgemm: {mat1_mk.dtype}")
+
+    _run_compiled(
+        exe,
+        output_mn,
+        mat1_mk,
+        mat2_nk,
+        bias_tensor,
+        m,
+        semaphore,
+        signal,
+        stream,
+    )
+    return output
+
+
+{{def_kernel("mat1", "mat2")}}
+    output = {{get_output()}}
+    return _hgemm_splitk_mm(output, mat1, mat2, stream)
