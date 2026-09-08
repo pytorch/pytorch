@@ -1,3 +1,4 @@
+import tempfile
 import warnings
 
 import torch
@@ -8,13 +9,14 @@ from torch.distributed.checkpoint.filesystem import FileSystemReader
 
 class TestMetadataWarning(TestCase):
     def test_read_metadata_warns_about_pickle(self):
-        reader = FileSystemReader("/tmp/nonexistent-dcp-checkpoint")
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            try:
-                reader.read_metadata()
-            except FileNotFoundError:
-                pass
+        with tempfile.TemporaryDirectory() as path:
+            reader = FileSystemReader(path)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                try:
+                    reader.read_metadata()
+                except FileNotFoundError:
+                    pass
 
         self.assertTrue(
             any("deserialized with pickle" in str(w.message) for w in caught)
