@@ -233,10 +233,8 @@ private:
 } // namespace impl
 } // namespace c10
 
-// Lets indirectly_readable's common_reference_with<ListElementReference&&,
-// T&> hold consistently instead of depending on each stdlib's own fallback
-// for the pair: MSVC's STL doesn't accept it (see #196002, #196245), while
-// libstdc++ and libc++ happen to.
+// MSVC's STL, unlike libstdc++/libc++, needs this to satisfy
+// indirectly_readable's common_reference_with check (#196002, #196245).
 namespace std {
 template <
     class T,

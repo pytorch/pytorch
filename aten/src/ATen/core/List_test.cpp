@@ -22,15 +22,9 @@ static_assert(list_iterators_conform<
               at::Tensor,
               std::optional<std::string>>);
 
-// The random_access_iterator check above alone doesn't prove the
-// basic_common_reference specialization in List.h is doing anything: on
-// libstdc++/libc++, common_reference_t<ListElementReference&&, T&> already
-// resolves to T via the stdlib's own fallback, specialization or not. Only
-// MSVC's STL lacks that fallback (see #196002, #196245), which this
-// translation unit can't exercise -- but instantiating the specialization's
-// ::type directly does verify it exists and is well-formed: the primary
-// basic_common_reference template has no ::type member, so this fails to
-// compile if the specialization is ever removed.
+// The random_access_iterator check above passes via a stdlib fallback on
+// libstdc++/libc++ even without the specialization; this instantiates
+// basic_common_reference's ::type directly so removing it fails to compile.
 template <class T>
 using ListRef =
     c10::impl::ListElementReference<T, c10::detail::ListImpl::list_type::iterator>;
