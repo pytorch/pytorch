@@ -792,9 +792,10 @@ def _cpu_codegen_target_problem(
         # No current tuple to compare against, so no component-level reason is
         # available -- the host simply reports no target of its own.
         return (
-            "This host reports no CPU codegen target (no C++ toolchain or no "
-            "supported vector ISA), so it cannot reproduce the target the "
-            "artifact's CPU kernels were built for."
+            "This host reports no CPU codegen target (no C++ toolchain, no "
+            "supported vector ISA, or a torch._inductor.config.cpp.simdlen that "
+            "matches no available ISA width), so it cannot reproduce the target "
+            "the artifact's CPU kernels were built for."
         )
     machine, vec_isa, vec_isa_width, vec_isa_macro, _simdlen, _march = cached
     if machine != current[0]:
@@ -899,8 +900,10 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
-        # A cached None means the artifact predates this field, not "no vector
-        # ISA"; for a release build that is every artifact already on disk.
+        # A cached None means the artifact recorded no vector ISA -- it predates
+        # this field (for a release build, every artifact already on disk), or it
+        # was captured with vectorization disabled (cpp.simdlen=1, or any width
+        # no valid ISA has) -- so there is nothing to compare.
         if (
             check_codegen
             and device_type == "cpu"
@@ -957,7 +960,9 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    system_info: SystemInfo = dataclasses.field(
+        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
+    )
     # device_type keeps the collapsed accelerator-wins value for BC; a mixed
     # cpu+accelerator capture still holds native CPU code, so keep the full set.
     device_types: frozenset[str] | None = None
