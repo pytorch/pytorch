@@ -2,6 +2,7 @@
 #include <ATen/native/BinaryOps.h>
 
 #include <cmath>
+#include <numeric>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
@@ -1186,7 +1187,7 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
 void gcd_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-      return calc_gcd(a, b);
+      return std::gcd(a, b);
     });
   });
 }
@@ -1194,8 +1195,7 @@ void gcd_kernel(TensorIteratorBase& iter) {
 void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-      scalar_t g = calc_gcd(a, b);
-      return (g == 0) ? 0 : std::abs(a / g * b);
+      return std::lcm(a, b);
     });
   });
 }
