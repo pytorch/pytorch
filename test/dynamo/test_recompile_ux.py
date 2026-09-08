@@ -949,6 +949,50 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         entries = _get_cache_entries_for_region(code, -1)
         self.assertTrue(any(e.trace_annotation == "Invalidated" for e in entries))
 
+    def test_invalidate_targets_the_entry_by_guard_manager_identity(self):
+        # invalidate_locked finds its victim by the identity of the live guard
+        # manager, never by a handed-in node/entry address: a std::list node is
+        # recycled, so an address check could invalidate a fresh entry that
+        # happens to sit at a reused address. With two live entries, a wrapper
+        # that owns no entry must invalidate nothing, and invalidating one entry
+        # must leave the other intact.
+        from torch._dynamo.guards import DeletedGuardManagerWrapper
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        opt(torch.randn(3))
+        opt(torch.randn(4))  # a second static shape -> a second cache entry
+        code = f.__code__
+        entries = _get_cache_entries_for_region(code, -1)
+        self.assertEqual(len(entries), 2)
+        w0, w1 = entries[0].guard_manager, entries[1].guard_manager
+        extra_state = w0.extra_state
+
+        def invalidated():
+            return [
+                e
+                for e in _get_cache_entries_for_region(code, -1)
+                if e.trace_annotation == "Invalidated"
+            ]
+
+        # A wrapper that is not any entry's guard manager names no victim.
+        extra_state.invalidate(
+            DeletedGuardManagerWrapper("unrelated"),
+            DeletedGuardManagerWrapper("owns no entry"),
+        )
+        self.assertEqual(invalidated(), [])
+
+        # Invalidating w0 marks exactly the w0 entry; w1 survives unchanged.
+        extra_state.invalidate(DeletedGuardManagerWrapper("gone"), w0)
+        entries = _get_cache_entries_for_region(code, -1)
+        marked = [e for e in entries if e.trace_annotation == "Invalidated"]
+        survived = [e for e in entries if e.trace_annotation != "Invalidated"]
+        self.assertEqual(len(marked), 1)
+        self.assertEqual(len(survived), 1)
+        self.assertIs(survived[0].guard_manager, w1)
+
     def _install_eager_package(self, fn, region):
         # A DiskDynamoStore round trip is the only way to get a package whose
         # install() loads precompile entries for fn.__code__.
@@ -2392,6 +2436,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
             _debug_get_precompile_entries,
+            _has_precompile_entries,
             _load_precompile_entry,
             _reset_precompile_entries_for_owner,
             _reset_precompile_entries_for_region,
@@ -2409,17 +2454,30 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         _load_precompile_entry(code, entry.guard_manager, entry.code, -1, second)
         try:
             self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
+            # Pin the entries to region -1 specifically: the global count above
+            # is region-agnostic, so a region-scoped readback is what catches an
+            # entry that landed in the wrong region.
+            self.assertTrue(_has_precompile_entries(code, -1))
+            self.assertFalse(_has_precompile_entries(code, 7))
+            # None is not a valid scoping owner (Py_None is a singleton, so it
+            # would match every no-owner entry); the binding rejects it.
+            with self.assertRaisesRegex(RuntimeError, "non-None owner"):
+                _reset_precompile_entries_for_owner(code, -1, None)
             _reset_precompile_entries_for_owner(code, -1, first)
             # The neighbour survives.
             self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
             # Removing an owner that holds nothing here is a no-op.
             _reset_precompile_entries_for_owner(code, -1, first)
             self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-            # Same owner, different region: also a no-op.
+            # Same owner, different region: also a no-op, and region -1 still
+            # holds the survivor while region 7 never held anything.
             _reset_precompile_entries_for_owner(code, 7, second)
             self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            self.assertTrue(_has_precompile_entries(code, -1))
+            self.assertFalse(_has_precompile_entries(code, 7))
             _reset_precompile_entries_for_owner(code, -1, second)
             self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+            self.assertFalse(_has_precompile_entries(code, -1))
         finally:
             _reset_precompile_entries_for_region(code, -1)
 
@@ -2596,6 +2654,14 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             region_a,
             FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY),
         )
+        # Seed the neighbour a DISTINCT strategy so the post-clear assertion on
+        # it is not vacuous: a clear that wrongly wiped a neighbour's
+        # region_strategy_map entry would reset it to DEFAULT and be caught.
+        set_code_region_exec_strategy(
+            code,
+            region_b,
+            FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT),
+        )
         self.assertEqual(
             get_code_region_exec_strategy(code, region_a).cur_action,
             FrameAction.RUN_ONLY,
@@ -2607,15 +2673,16 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 0)
         self.assertEqual(_get_total_cache_entry_count(code), total_before - 2)
         # The region strategy is erased too: it reads back the inherited DEFAULT
-        # it had before any strategy was recorded, and the untouched neighbour
-        # stays DEFAULT as well.
+        # it had before any strategy was recorded, while the untouched neighbour
+        # KEEPS the distinct strategy it was seeded (proving the clear did not
+        # reach into region_b's strategy_map entry).
         self.assertEqual(
             get_code_region_exec_strategy(code, region_a).cur_action,
             FrameAction.DEFAULT,
         )
         self.assertEqual(
             get_code_region_exec_strategy(code, region_b).cur_action,
-            FrameAction.DEFAULT,
+            FrameAction.RUN_ONLY,
         )
         # The neighbour region is untouched and still serves its entry.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
