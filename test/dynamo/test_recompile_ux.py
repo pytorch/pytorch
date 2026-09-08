@@ -544,9 +544,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         the GIL before it waits. A short switch interval makes the handoff
         frequent.
 
-        Stress test; not a deterministic reproduction. A wedge fails this test:
-        the joins are bounded by a shared deadline and any thread still alive
-        after it trips the assertion below.
+        Every shape is warmed above, so the racing calls are all cache hits and
+        no compile runs Python under the lock here; on a GIL build this is a
+        smoke test of the recursive lock's GIL-release-before-wait under heavy
+        concurrent lookups, not a deterministic reproduction. A wedge fails this
+        test: the joins are bounded by a shared deadline and any thread still
+        alive after it trips the assertion below.
         """
 
         def f(x):
@@ -558,10 +561,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             opt(arg)
 
         errors = queue.SimpleQueue()
+        stop = threading.Event()
 
         def hammer():
             try:
                 for _ in range(200):
+                    if stop.is_set():
+                        break
                     for arg in args:
                         opt(arg)
             except Exception as e:
@@ -577,6 +583,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             for thread in threads:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
+            # A worker that outran the join must be told to stop and re-joined,
+            # or it runs on into the next test and corrupts its cache state.
+            stop.set()
+            rejoin_deadline = time.monotonic() + 30
+            for thread in threads:
+                thread.join(timeout=max(0.0, rejoin_deadline - time.monotonic()))
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
@@ -663,9 +675,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         deferred until the readers holding the snapshot finish, and a reader
         never touches a freed node. The threads are joined
         under a shared deadline and asserted not alive, so a wedge fails this
-        test. Stress test; not a deterministic reproduction, and it passes on
-        the lock-free parent as well: it guards the locking against
-        regressions.
+        test. Stress test; not a deterministic reproduction. It pins that the
+        install / owner-reset / lookup paths stay consistent under contention:
+        every lookup serves the right graph or misses cleanly, and the trailing
+        owner resets leave no entry behind.
         """
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -691,17 +704,22 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(installables), 2)
 
         errors = queue.SimpleQueue()
+        iters = queue.SimpleQueue()
         stop = threading.Event()
         owners = [object(), object()]
 
         def caller():
+            n = 0
             try:
                 while not stop.is_set():
                     for arg, want in zip(args, expected):
                         if not torch.equal(opt(arg), want):
                             raise AssertionError("lookup served the wrong result")
+                    n += 1
             except Exception as e:
                 errors.put(e)
+            finally:
+                iters.put(n)
 
         def installer(owner):
             try:
@@ -744,6 +762,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(
             any(t.is_alive() for t in callers + installers), "a call wedged"
         )
+        # Pin that the callers actually ran against the installers -- without a
+        # floor the two phases can stop overlapping and the test degrades into a
+        # smoke test while every assertion below still holds.
+        total_iters = 0
+        while not iters.empty():
+            total_iters += iters.get_nowait()
+        self.assertGreater(total_iters, 0, "callers never interleaved with installers")
         # A reset that raced an in-flight lookup was parked (on the raised
         # cache_python_depth, or a failed try-lock during the snapshot window);
         # the entry reader applies whatever is still parked, nothing survives.
@@ -835,9 +860,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     def test_invalidation_racing_an_in_flight_lookup_parks_and_drains(self):
         """invalidate() reached from weakref.finalize must never block behind
-        an in-flight lookup (GC can fire it during another thread's guard
-        evaluation while a second ExtraState's cache_mutex is held; two threads
-        doing that against each other's states would deadlock ABBA-style, so
+        an in-flight lookup (GC can fire it while a second ExtraState holds its
+        cache_mutex across the Python it runs under the lock -- e.g.
+        create_cache_entry's guard-manager attribute stores; two threads doing
+        that against each other's states would deadlock ABBA-style, so
         invalidate() must never block on cache_mutex). This pins the contended
         path itself: the very call finalize runs, arriving while a lookup is
         mid-comparison at raised depth, must return promptly (parked on
@@ -890,13 +916,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 errors.put(e)
 
         thread = threading.Thread(target=caller, daemon=True)
-        # One shared wall-clock budget for the whole race: the polls below and
-        # the joins in finally all draw from this single deadline, so a wedge
-        # fails at ~120s rather than summing each wait's independent timeout.
-        deadline = time.monotonic() + 120
-        thread.start()
         inv_thread = None
         try:
+            # One shared wall-clock budget for the whole race: the polls below
+            # and the joins in finally all draw from this single deadline, so a
+            # wedge fails at ~120s rather than summing each wait's independent
+            # timeout. Started inside the try so a raise between here and the
+            # finally still runs release_eq.set() and frees the caller.
+            deadline = time.monotonic() + 120
+            thread.start()
             # If the caller raised before reaching __eq__, in_eq never fires;
             # surface that exception instead of waiting out the full timeout.
             while not in_eq.wait(timeout=1):
@@ -904,8 +932,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(thread.is_alive(), "caller exited before __eq__")
                 now = time.monotonic()
                 self.assertLess(now, deadline, "caller never reached __eq__")
-            # The caller thread is inside lookup, mid-backend-comparison with
-            # cache_python_depth raised (the cache lock is released here).
+            # The caller thread is inside try_lookup_without_guard_eval,
+            # mid-backend-comparison with cache_python_depth raised (the cache
+            # lock is released here).
             # This is exactly what a guarded object's weakref.finalize runs;
             # it must park on the raised depth rather than serve the eviction
             # underneath the in-flight lookup.
@@ -941,11 +970,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # takes a BLOCKING cache_mutex, so its return here (rather than a
             # hang to the deadline) can only happen because the parked lookup
             # released cache_mutex before entering __eq__.
+            region_entries = _get_cache_entries_for_region(code, -1)
+            self.assertEqual(len(region_entries), 1)
             self.assertTrue(
-                all(
-                    e.trace_annotation != "Invalidated"
-                    for e in _get_cache_entries_for_region(code, -1)
-                )
+                all(e.trace_annotation != "Invalidated" for e in region_entries)
             )
         finally:
             # Join inside finally: an assertion above must not leave the caller
@@ -1083,8 +1111,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     def test_region_clear_from_inside_a_lookup_is_parked(self):
         # _clear_cache_entries_for_region run by a backend __eq__ inside
-        # lookup() used to splice and destroy the very list lookup was
-        # walking (a use-after-free that segfaulted); the cache-entry splice
+        # try_lookup_without_guard_eval() used to splice and destroy the very
+        # list the lookup was walking (a use-after-free that segfaulted); the
+        # cache-entry splice
         # now parks like reset_code does, and the next depth-zero holder
         # applies it. Only that splice parks, though: the region's
         # region_strategy_map / region_frame_state_map erasures run
@@ -1176,8 +1205,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     def test_precompile_reset_from_inside_a_lookup_is_parked(self):
         # Same hazard for _reset_precompile_entries: run by a backend __eq__
-        # inside lookup() it now parks, and the next depth-zero holder (the
-        # precompile-entry reader here) applies it.
+        # inside try_lookup_without_guard_eval() it now parks, and the next
+        # depth-zero holder (the precompile-entry reader here) applies it.
         from torch._C._dynamo.eval_frame import (
             _debug_get_precompile_entries,
             _reset_precompile_entries,
@@ -2390,10 +2419,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # lookup is therefore gated on a flag that only a backend carrying such
         # a key turns on. Nothing else in the tree sets that attribute, so the
         # gate is invisible; this pins that the switch exists and is one-way.
-        # The gate is process-global and one-way, and anything that imports the
-        # precompile backend flips it, so the OFF half can only be observed in a
-        # fresh interpreter. Two wrappers over ONE shared backend are the
-        # discriminator: with the gate off get_backend follows
+        # The gate is process-global, one-way, and never cleared: flipping it
+        # in-process would poison every later test in this file, so the OFF half
+        # is measured in a fresh interpreter. Two wrappers over ONE shared
+        # backend are the discriminator: with the gate off get_backend follows
         # _torchdynamo_orig_backend to that shared object and both compilations
         # share one cache identity; with it on, their distinct cache keys are
         # two identities.
@@ -2409,9 +2438,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
 
             class Backend:
-                # The shape _PrecompileBackend (added in #195917) has, minus the
-                # __init__ that would flip the gate before the OFF half is
-                # measured.
+                # Carries the _torchdynamo_cache_key / _torchdynamo_orig_backend
+                # attributes get_backend inspects, without an __init__ that would
+                # flip the gate before the OFF half is measured.
                 def __init__(self, inner):
                     self._torchdynamo_orig_backend = inner
                     self._torchdynamo_cache_key = object()
@@ -2427,9 +2456,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 a, b = Backend(inner), Backend(inner)
                 if same_key:
                     b._torchdynamo_cache_key = a._torchdynamo_cache_key
-                # optimize(), not compile(backend=), because compile() wraps the
-                # backend in a _TorchCompileWrapper that is not in the chain
-                # get_backend walks.
+                # optimize(), not compile(backend=): compile() wraps the backend
+                # in a _TorchCompileWrapper, which get_backend returns as the
+                # chain terminus (it has no _torchdynamo_orig_backend), so the
+                # real backend stashed in its compiler_fn is off-chain and its
+                # _torchdynamo_cache_key is never reached.
                 torch._dynamo.optimize(a)(fn)(x)
                 torch._dynamo.optimize(b)(fn)(x)
                 return len(_debug_get_cache_entry_list(fn.__code__))
