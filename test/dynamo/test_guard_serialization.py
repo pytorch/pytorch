@@ -462,6 +462,22 @@ class DecoratedDefaultsElementForwardModule(torch.nn.Module):
         return x * scale
 
 
+def keep_none_default(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] is None:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedNoneDefaultForwardModule(torch.nn.Module):
+    @keep_none_default
+    def forward(self, x, cfg=None, junk=threading.Lock()):  # guarded slot is None
+        return x * 2
+
+
 # A module-level lambda's qualname is "<lambda>", which resolves to nothing.
 GLOBAL_LAMBDA = lambda x: x * 2  # noqa: E731
 GLOBAL_LAMBDA.scale_flag = 2.0
@@ -1481,6 +1497,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # sibling. The guarded default must still round-trip.
         mod = DecoratedDefaultsElementForwardModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        original = inner.__defaults__
+        inner.__defaults__ = (3.0, original[1])
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__defaults__ = original
+
+    def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):
+        # The container->element edge is recorded on the source, not the
+        # element's value, so a guard rooted at a None-valued default still
+        # prunes the tuple per value and drops the unpicklable sibling. Gating
+        # the edge on `value is not None` would carry the tuple verbatim and
+        # bypass the whole package on this ordinary `cfg=None` shape.
+        mod = DecoratedNoneDefaultForwardModule()
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__
         inputs = {"self": mod, "x": torch.randn(3), "func": inner}
         self._test_check_fn(ref, loaded, inputs, True)

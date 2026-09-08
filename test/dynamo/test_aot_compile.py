@@ -793,9 +793,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(loaded.__kwdefaults__, {"k": 2})
         self.assertEqual(loaded.tag, 2.0)
 
-    def test_aot_compile_rejects_a_helper_with_an_unpicklable_attribute(self):
-        # A helper's __dict__ travels with it now, so an attribute that cannot
-        # pickle fails the save instead of being silently dropped.
+    def test_aot_compile_prunes_a_helpers_unpicklable_attribute(self):
+        # A helper's __dict__ travels with it, but an entry that cannot pickle
+        # is dropped per-entry rather than failing the whole save -- the runtime
+        # never forces it, so the save succeeds and the reload runs.
         def outer():
             def helper(x):
                 return x * 2
@@ -809,13 +810,44 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             return helper(x) + 1
 
         inputs = (torch.randn(3),)
+        expected = fn(*inputs)
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled_fn = compiled_fn.aot_compile((inputs, {}))
-        with self.assertRaisesRegex(
-            TypeError,
-            r"cannot pickle '_thread.lock' object[\s\S]*Mark it\n?\s*as external data",
-        ):
-            compiled_fn.save_compiled_function(self.path())
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*inputs), expected)
+
+    def test_aot_compile_prunes_functools_wraps_wrapped(self):
+        # functools.wraps writes __wrapped__ into the wrapper's __dict__, so a
+        # helper that merely decorates another function drags the wrapped one
+        # (and anything hanging off it) into the artifact. An unpicklable value
+        # there must be pruned, not fail the save.
+        def build():
+            def base(x):
+                return x * 3
+
+            base.lock = threading.Lock()
+
+            @functools.wraps(base)
+            def helper(x):
+                return x * 2
+
+            return helper
+
+        helper = build()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        expected = fn(*inputs)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*inputs), expected)
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -1337,6 +1369,38 @@ from user code:
             ]
         )
         model.forward.compiled_results[0].disable_guard_check()
+        with _set_pooling("mean"):
+            self.assertEqual(model(x), expected["mean"])
+
+    def test_all_results_disabled_still_dispatches_by_guard(self):
+        # Disabling the check on EVERY result (the only way to skip guard
+        # overhead on a module artifact -- there is no model-level API) must
+        # still dispatch by guard, not fall through to compiled_results[0]:
+        # guard_check() evaluates guards regardless of the flag, so the scan
+        # can still pick the right graph, and only a genuine no-match falls back
+        # to an opted-out result.
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        expected = {}
+        for mode in ("sum", "mean"):
+            with _set_pooling(mode):
+                expected[mode] = mod(x)
+        self.assertNotEqual(expected["sum"].tolist(), expected["mean"].tolist())
+
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+        for result in model.forward.compiled_results:
+            result.disable_guard_check()
         with _set_pooling("mean"):
             self.assertEqual(model(x), expected["mean"])
 
