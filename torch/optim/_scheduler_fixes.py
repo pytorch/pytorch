@@ -1,7 +1,16 @@
 from . import lr_scheduler
 
 
+_original_constant_lr_init = lr_scheduler.ConstantLR.__init__
 _original_linear_lr_init = lr_scheduler.LinearLR.__init__
+
+
+def _constant_lr_init(self, optimizer, factor=1.0 / 3, total_iters=5, last_epoch=-1):
+    if factor <= 0:
+        raise ValueError("factor must be greater than 0")
+    if total_iters < 0:
+        raise ValueError("total_iters must be non-negative")
+    _original_constant_lr_init(self, optimizer, factor, total_iters, last_epoch)
 
 
 def _linear_lr_init(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total_iters=5, last_epoch=-1):
@@ -13,4 +22,5 @@ def _linear_lr_init(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total
 
 
 def install() -> None:
+    lr_scheduler.ConstantLR.__init__ = _constant_lr_init
     lr_scheduler.LinearLR.__init__ = _linear_lr_init
