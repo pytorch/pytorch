@@ -2478,19 +2478,42 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
         self._lane_projections: dict[CSEVariable, _LaneProjection] = {}
-        handler = inner
-        while isinstance(handler, WrapperHandler):
-            handler = handler._inner
-        # The expression-level handler; replaying an op through it yields the
-        # cache key of the op's parent-resolution twin.
-        self._parent_ops = getattr(handler, "parent_handler", None)
+        # Pointwise results at parent resolution, recorded as they are
+        # emitted, so a lane replay of the same op can fold onto them.
+        self._parent_twins: dict[str, CSEVariable] = {}
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         folded = self._try_fold_lane_op(name, args, kwargs)
         if folded is not None:
             return folded
         args, kwargs = pytree.tree_map(self._resolve_pending, (args, kwargs))
-        return getattr(self._inner, name)(*args, **kwargs)
+        result = getattr(self._inner, name)(*args, **kwargs)
+        self._record_parent_twin(name, args, kwargs, result)
+        return result
+
+    @staticmethod
+    def _twin_key(name: str, args: Sequence[Any], kwargs: dict[str, Any]) -> str:
+        """The same equivalence CSE uses -- op plus operand names -- keyed
+        before formatting instead of after."""
+        parts = [name]
+        parts.extend(
+            f"v{arg}" if isinstance(arg, CSEVariable) else f"c{arg!r}" for arg in args
+        )
+        parts.extend(f"{key}={value!r}" for key, value in sorted(kwargs.items()))
+        return "\0".join(parts)
+
+    def _record_parent_twin(
+        self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any], result: Any
+    ) -> None:
+        if name not in registered_pointwise_ops or self._kernel._load_mask is not None:
+            return
+        if not isinstance(result, CSEVariable) or result.shape is None:
+            return
+        if self._layout.parent_dim(result.shape) != self._layout.parent_block:
+            return
+        if any(isinstance(value, CSEVariable) for value in kwargs.values()):
+            return
+        self._parent_twins[self._twin_key(name, args, kwargs)] = result
 
     def _is_lane_invariant(self, value: CSEVariable) -> bool:
         shape = value.shape
@@ -2520,14 +2543,14 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         """Replay a lane pointwise op as the lane of its parent-resolution twin.
 
         The epilogue body recomputes the parent's pointwise chain per lane from
-        split loads. When the same op on the same operands already exists at
-        parent resolution, the lane is a projection of that computed value, so
-        the chain collapses into one split of its final value. The split is
-        deferred so intermediate lanes never reach the generated code.
+        split loads. When the same op ran on the same operands at parent
+        resolution, its recorded result already holds every lane, so the chain
+        collapses into one split of its final value. The split is deferred so
+        intermediate lanes never reach the generated code.
         """
         if name not in registered_pointwise_ops or self._kernel._load_mask is not None:
             return None
-        if not self._lane_projections or self._parent_ops is None:
+        if not self._lane_projections or not self._parent_twins:
             return None
         if any(isinstance(v, CSEVariable) for v in kwargs.values()):
             return None
@@ -2551,15 +2574,10 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 parent_args.append(arg)
         if lane is None:
             return None
-        expr = getattr(self._parent_ops, name)(*parent_args, **kwargs)
-        if not isinstance(expr, str):
-            return None
-        parent_value = self._kernel.cse.try_get(expr)
+        parent_value = self._parent_twins.get(self._twin_key(name, parent_args, kwargs))
         if parent_value is None or parent_value.shape is None:
             return None
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", parent_value)):
-            return None
-        if self._layout.parent_dim(parent_value.shape) != self._layout.parent_block:
             return None
         _, part_shape = self._layout.sub_parent_split_shapes(
             self._sub_parent_family, self._sub_parent_factor, parent_value.shape
