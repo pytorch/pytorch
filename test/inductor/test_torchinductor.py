@@ -8,6 +8,7 @@ import functools
 import gc
 import importlib
 import itertools
+import json
 import logging
 import math
 import operator
@@ -1737,6 +1738,43 @@ class CommonTemplate:
             kernel_libs_abs_path.append(kernel_path.as_posix())
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
+
+    @parametrize(
+        "json_data",
+        [
+            subtest({}, name="non_list"),
+            subtest([{"meta_info": []}], name="missing_kernel_path"),
+            subtest(
+                [
+                    {
+                        "kernel_path": "kernel.so",
+                        "meta_info": [{"dtype": 1}],
+                    }
+                ],
+                name="non_string_dtype",
+            ),
+            subtest(
+                [
+                    {
+                        "kernel_path": "kernel.so",
+                        "meta_info": [{"dtype": "torch.nn"}],
+                    }
+                ],
+                name="invalid_dtype",
+            ),
+        ],
+    )
+    def test_aoti_eager_malformed_cache(self, json_data):
+        namespace = "test"
+        op_name = "malformed"
+        device = "test"
+        device_kernel_cache = aoti_eager_cache_dir(namespace, device)
+        device_kernel_cache.mkdir(parents=True)
+        (device_kernel_cache / "kernel.so").touch()
+        with open(device_kernel_cache / f"{op_name}.json", "w") as f:
+            json.dump(json_data, f)
+
+        self.assertEqual(load_aoti_eager_cache(namespace, op_name, device), [])
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti

@@ -73,7 +73,7 @@ def load_aoti_eager_cache(
                         f"expected loaded_data to be list, got {type(loaded_data)}"
                     )
 
-                json_data: list[dict[str, object] | None] = []
+                json_data: list[dict[str, object]] = []
                 for loaded_item in loaded_data:
                     if not isinstance(loaded_item, dict):
                         raise AssertionError(
@@ -115,11 +115,11 @@ def load_aoti_eager_cache(
                             and metadata["device_type"] == "cpu"
                         ):
                             metadata["device_index"] = -1
-                        for torch_value_key in [
-                            "dtype",
-                            "dtype_value",
-                            "layout_value",
-                            "memory_format_value",
+                        for torch_value_key, expected_type in [
+                            ("dtype", torch.dtype),
+                            ("dtype_value", torch.dtype),
+                            ("layout_value", torch.layout),
+                            ("memory_format_value", torch.memory_format),
                         ]:
                             if torch_value_key not in metadata:
                                 continue
@@ -129,13 +129,17 @@ def load_aoti_eager_cache(
                                     f"expected {torch_value_key} to be str, got "
                                     f"{type(torch_value)}"
                                 )
-                            metadata[torch_value_key] = getattr(
-                                torch, torch_value.split(".")[-1]
-                            )
+                            resolved_value = getattr(torch, torch_value.split(".")[-1])
+                            if not isinstance(resolved_value, expected_type):
+                                raise AssertionError(
+                                    f"expected {torch_value_key} to resolve to "
+                                    f"{expected_type}, got {type(resolved_value)}"
+                                )
+                            metadata[torch_value_key] = resolved_value
 
                     json_data.append(item)
 
-                return json_data
+                return cast(list[dict[str, Any] | None], json_data)
     except Exception as e:
         err_msg = f"Failed to load aoti eager cache: {e}"
         log.exception(err_msg)
@@ -386,7 +390,6 @@ def aoti_compile_with_persistent_cache(
                 Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
             )
 
-            json_data: list[object] = []
             update_json = True
             op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
             mode = "r" if op_conf.exists() else "w"
@@ -401,15 +404,15 @@ def aoti_compile_with_persistent_cache(
                         raise AssertionError(
                             f"expected loaded_data to be list, got {type(loaded_data)}"
                         )
-                    json_data = cast(list[object], loaded_data)
+                    json_data: list[object] = cast(list[object], loaded_data)
                     for item in json_data:
                         if not isinstance(item, dict):
                             raise AssertionError(
                                 f"expected item to be dict, got {type(item)}"
                             )
-                        item = cast(dict[str, object], item)
                         # Same kernel meta info already exists in the json file
-                        if item["meta_info"] == kernel_metadata_items:
+                        cached_meta_info: object = item["meta_info"]
+                        if cached_meta_info == kernel_metadata_items:
                             update_json = False
                             break
 
