@@ -32,9 +32,6 @@ class _EpilogueOps(OpsHandler[Any]):
     def _binary(self, op: str, a: Any, b: Any) -> _Expr:
         return _Expr(f"({a} {op} {b})")
 
-    def _unary(self, op: str, x: Any) -> _Expr:
-        return _Expr(f"{op}({x})")
-
     def load(self, name: str, index: Any) -> _Expr:
         if name != self.accumulator_name:
             raise NotImplementedError(
@@ -49,33 +46,29 @@ class _EpilogueOps(OpsHandler[Any]):
             )
         return repr(value)
 
-    def add(self, a: Any, b: Any, *, alpha: Any = 1) -> _Expr:
-        if alpha != 1:
-            b = self.mul(b, alpha)
-        return self._binary("+", a, b)
+    def add(self, x0: Any, x1: Any) -> _Expr:
+        return self._binary("+", x0, x1)
 
-    def sub(self, a: Any, b: Any, *, alpha: Any = 1) -> _Expr:
-        if alpha != 1:
-            b = self.mul(b, alpha)
-        return self._binary("-", a, b)
+    def sub(self, x0: Any, x1: Any) -> _Expr:
+        return self._binary("-", x0, x1)
 
-    def mul(self, a: Any, b: Any) -> _Expr:
-        return self._binary("*", a, b)
+    def mul(self, x0: Any, x1: Any) -> _Expr:
+        return self._binary("*", x0, x1)
 
-    def neg(self, x: Any) -> _Expr:
-        return self._unary("-", x)
+    def neg(self, x0: Any) -> _Expr:
+        return _Expr(f"-({x0})")
 
-    def gt(self, a: Any, b: Any) -> _Expr:
-        return self._binary(">", a, b)
+    def gt(self, x0: Any, x1: Any) -> _Expr:
+        return self._binary(">", x0, x1)
 
     def where(self, condition: Any, input: Any, other: Any) -> _Expr:
         return _Expr(f"({condition}).select({input}, {other})")
 
-    def maximum(self, a: Any, b: Any) -> _Expr:
-        return self.where(self.gt(a, b), a, b)
+    def maximum(self, x0: Any, x1: Any) -> _Expr:
+        return self.where(self.gt(x0, x1), x0, x1)
 
-    def relu(self, x: Any) -> _Expr:
-        return self.maximum(x, 0)
+    def relu(self, x0: Any) -> _Expr:
+        return self.maximum(x0, 0)
 
 
 def materialize_flydsl_scheduler_epilogue(
@@ -83,34 +76,22 @@ def materialize_flydsl_scheduler_epilogue(
     epilogue_nodes: list[BaseSchedulerNode],
 ) -> str:
     """Render supported scheduler nodes as a capture-free constexpr lambda."""
-    if not epilogue_nodes:
-        return (
-            "HAS_EPILOGUE: fx.Constexpr = False\n"
-            "EPILOGUE_KEY: fx.Constexpr = 'identity'\n"
-            "EPILOGUE_FN = lambda acc: acc\n"
-        )
+    if len(epilogue_nodes) != 1:
+        raise NotImplementedError("FlyDSL GEMM supports one epilogue node")
 
-    env: dict[str, Any] = {original_buffer_name: _Expr("acc")}
+    scheduler_nodes = list(epilogue_nodes[0].get_nodes())
+    if len(scheduler_nodes) != 1:
+        raise NotImplementedError("FlyDSL GEMM supports one epilogue node")
+    ir_node = scheduler_nodes[0].node
+    if not isinstance(ir_node, ComputedBuffer) or not isinstance(
+        ir_node.data, Pointwise
+    ):
+        raise NotImplementedError("FlyDSL GEMM epilogue must be pointwise")
+
     handler = _EpilogueOps(original_buffer_name)
-    for scheduler_group in epilogue_nodes:
-        if scheduler_group.is_reduction():
-            raise NotImplementedError("FlyDSL GEMM epilogue reductions unsupported")
-        for scheduler_node in scheduler_group.get_nodes():
-            ir_node = scheduler_node.node
-            if not isinstance(ir_node, ComputedBuffer) or not isinstance(
-                ir_node.data, Pointwise
-            ):
-                raise NotImplementedError("FlyDSL GEMM epilogue must be pointwise")
-            with V.set_ops_handler(handler):
-                result = ir_node.data.inner_fn(*ir_node.data.inner_fn_args())
-            env[ir_node.get_name()] = result
-            env[scheduler_group.get_name()] = result
-
-    final_name = epilogue_nodes[-1].get_name()
-    if final_name not in env:
-        raise AssertionError(f"missing final FlyDSL epilogue value {final_name}")
-
-    result = str(env[final_name])
+    with V.set_ops_handler(handler):
+        result = ir_node.data.inner_fn(*ir_node.data.inner_fn_args())
+    result = str(result)
     key = hashlib.sha256(result.encode()).hexdigest()
     return (
         "HAS_EPILOGUE: fx.Constexpr = True\n"

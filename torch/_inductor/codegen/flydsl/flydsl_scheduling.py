@@ -11,8 +11,14 @@ from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...codecache import code_hash, get_path
+from ...dependencies import MemoryDep
 from ...ir import ComputedBuffer, FlyDSLTemplateBuffer, Pointwise
-from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
+from ...scheduler import (
+    BaseSchedulerNode,
+    BaseScheduling,
+    FusedSchedulerNode,
+    SchedulerNode,
+)
 from ...select_algorithm import PartialRender
 from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
@@ -51,6 +57,12 @@ class FlyDSLScheduling(BaseScheduling):
             node.node, FlyDSLTemplateBuffer
         )
 
+    @staticmethod
+    def is_flydsl_fused_template(node: BaseSchedulerNode) -> bool:
+        return isinstance(node, FusedSchedulerNode) and isinstance(
+            node.get_template_node(), FlyDSLTemplateBuffer
+        )
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -64,40 +76,75 @@ class FlyDSLScheduling(BaseScheduling):
         if not isinstance(template, FlyDSLTemplateBuffer):
             return False
 
-        reads = OrderedSet()
-        for scheduler_node in node2.get_nodes():
-            node = scheduler_node.node
-            if not isinstance(node, ComputedBuffer) or not isinstance(
-                node.data, Pointwise
-            ):
-                return False
-            if not V.graph.sizevars.statically_known_list_equals(
-                node.get_size(), template.get_size()
-            ):
-                return False
-            if node.get_dtype() != template.get_dtype():
-                log.debug(
-                    "Rejecting FlyDSL GEMM epilogue fusion: output dtype %s "
-                    "does not match GEMM dtype %s",
-                    node.get_dtype(),
-                    template.get_dtype(),
-                )
-                return False
-            reads |= OrderedSet(read.name for read in scheduler_node.read_writes.reads)
-
-        if reads != OrderedSet([template.get_name()]):
+        epilogue_nodes = list(node2.get_nodes())
+        if len(epilogue_nodes) != 1:
             log.debug(
-                "Rejecting FlyDSL GEMM epilogue fusion: expected only %s, got reads %s",
-                template.get_name(),
-                reads,
+                "Rejecting FlyDSL GEMM epilogue fusion: expected one epilogue "
+                "node, got %d",
+                len(epilogue_nodes),
             )
             return False
+        epilogue_node = epilogue_nodes[0]
+        node = epilogue_node.node
+        if not isinstance(node, ComputedBuffer) or not isinstance(node.data, Pointwise):
+            return False
+        if not V.graph.sizevars.statically_known_list_equals(
+            node.get_size(), template.get_size()
+        ):
+            return False
+        if node.get_dtype() != template.get_dtype():
+            log.debug(
+                "Rejecting FlyDSL GEMM epilogue fusion: output dtype %s "
+                "does not match GEMM dtype %s",
+                node.get_dtype(),
+                template.get_dtype(),
+            )
+            return False
+
+        reads = list(epilogue_node.read_writes.reads)
+        writes = list(epilogue_node.read_writes.writes)
+        if (
+            len(reads) != 1
+            or len(writes) != 1
+            or not isinstance(reads[0], MemoryDep)
+            or not isinstance(writes[0], MemoryDep)
+            or reads[0].name != template.get_name()
+            or (
+                reads[0].index,
+                reads[0].var_names,
+                reads[0].size,
+            )
+            != (
+                writes[0].index,
+                writes[0].var_names,
+                writes[0].size,
+            )
+        ):
+            log.debug(
+                "Rejecting FlyDSL GEMM epilogue fusion: expected one identity "
+                "read from %s",
+                template.get_name(),
+            )
+            return False
+
+        fused_node_names = OrderedSet(
+            (template_node.get_name(), epilogue_node.get_name(), node2.get_name())
+        )
+        scheduler = V.graph.scheduler
+        if scheduler is None or not scheduler.can_buffer_be_removed_through_fusion(
+            template.get_name(), fused_node_names
+        ):
+            log.debug(
+                "Rejecting FlyDSL GEMM epilogue fusion: GEMM output %s has "
+                "additional users",
+                template.get_name(),
+            )
+            return False
+
         try:
             from .epilogue import materialize_flydsl_scheduler_epilogue
 
-            materialize_flydsl_scheduler_epilogue(
-                template.get_name(), list(node2.get_nodes())
-            )
+            materialize_flydsl_scheduler_epilogue(template.get_name(), [epilogue_node])
         except NotImplementedError as error:
             log.debug("Rejecting FlyDSL GEMM epilogue fusion: %s", error)
             return False
@@ -173,6 +220,8 @@ class FlyDSLScheduling(BaseScheduling):
         kernel, render = ftb.make_kernel_render(output_node)  # type: ignore[misc]
         kernel.original_output_name = ftb.get_name()
         kernel.epilogue_nodes = epilogue_nodes
+        if epilogue_nodes:
+            V.graph.removed_buffers.add(ftb.get_name())
         template_node.mark_run()
         src_code = render()
         if isinstance(src_code, PartialRender):
@@ -180,7 +229,7 @@ class FlyDSLScheduling(BaseScheduling):
         else:
             src_code_str = src_code
 
-        precompile_metadata = self._build_precompile_metadata(kernel, ftb)
+        precompile_metadata = self._build_precompile_metadata(kernel, output_node)
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
@@ -189,16 +238,13 @@ class FlyDSLScheduling(BaseScheduling):
             )
         self.codegen_comment(node_schedule, kernel_name)
         if epilogue_nodes:
-            V.graph.removed_buffers.add(ftb.get_name())
-            for node in epilogue_nodes[:-1]:
-                V.graph.removed_buffers.add(node.get_name())
             for node in epilogue_nodes:
                 node.mark_run()
-        kernel.call_kernel(kernel_name, output_node)
+        kernel.call_kernel(kernel_name, ftb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
-    def _build_precompile_metadata(self, kernel, ftb):
+    def _build_precompile_metadata(self, kernel, output_node):
         """Extract concrete tensor metadata for FlyDSL subprocess precompilation."""
         if not kernel._template_signature_defined:
             return None
@@ -206,6 +252,7 @@ class FlyDSLScheduling(BaseScheduling):
         precompile_shapes = {}
         precompile_strides = {}
         precompile_dtypes = {}
+        output_layout = output_node.get_layout()
 
         try:
             for arg_name, input_node in kernel._template_input_args:
@@ -218,11 +265,13 @@ class FlyDSLScheduling(BaseScheduling):
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 
-            output_size = ftb.layout.size
+            output_size = output_layout.size
             precompile_shapes["output"] = [int(s) for s in output_size]
-            output_stride = ftb.layout.stride
+            output_stride = output_layout.stride
             precompile_strides["output"] = [int(s) for s in output_stride]
-            precompile_dtypes["output"] = str(ftb.layout.dtype).removeprefix("torch.")
+            precompile_dtypes["output"] = str(output_layout.dtype).removeprefix(
+                "torch."
+            )
         except (TypeError, RuntimeError, ValueError):
             log.debug(
                 "Skipping FlyDSL precompile metadata: symbolic sizes cannot be "
@@ -230,7 +279,7 @@ class FlyDSLScheduling(BaseScheduling):
             )
             return None
 
-        device = ftb.layout.device
+        device = output_layout.device
         device_index = device.index if device.index is not None else 0
 
         import torch

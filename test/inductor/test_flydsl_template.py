@@ -527,6 +527,29 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once_with(dispatch)
 
+    def test_flydsl_epilogue_expression_codegen(self):
+        from torch._inductor.codegen.flydsl.epilogue import _EpilogueOps
+
+        ops = _EpilogueOps("accumulator")
+        value = ops.load("accumulator", 0)
+        value = ops.add(value, "1.0")
+        value = ops.mul(value, "0.5")
+        value = ops.sub(value, "2.0")
+        value = ops.relu(ops.neg(value))
+        source = str(value)
+
+        self.assertIn("(acc + 1.0)", source)
+        self.assertIn("* 0.5", source)
+        self.assertIn("- 2.0", source)
+        self.assertIn(".select(", source)
+        self.assertEqual(ops.constant(1.5, torch.float32), "1.5")
+        with self.assertRaisesRegex(NotImplementedError, "accumulator reads"):
+            ops.load("bias", 0)
+        with self.assertRaisesRegex(NotImplementedError, "finite scalar constants"):
+            ops.constant(float("inf"), torch.float32)
+        with self.assertRaises(NotImplementedError):
+            ops.sin(value)
+
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
         compile_started = threading.Event()
@@ -1179,6 +1202,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
         self.assertIn("EPILOGUE_FN = lambda acc:", code)
         self.assertNotIn("triton_poi_", code)
+        self.assertNotIn("buf0 = empty_strided_cuda", code)
         self.assertIn(
             f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}",
             code,
@@ -1209,6 +1233,9 @@ class TestFlyDSLTemplate(TestCase):
         def different_output_dtype(a, b, unused):
             return torch.mm(a, b.t()) > 0
 
+        def non_identity_read(a, b, unused):
+            return torch.flip(torch.mm(a, b.t()), dims=(1,)) + 1.0
+
         dtype = torch.bfloat16
         a = torch.randn(32, 128, device="cuda", dtype=dtype)
         b = torch.randn(128, 128, device="cuda", dtype=dtype)
@@ -1217,6 +1244,7 @@ class TestFlyDSLTemplate(TestCase):
             ("unsupported_op", unsupported_sin),
             ("extra_tensor_read", extra_tensor_read),
             ("different_output_dtype", different_output_dtype),
+            ("non_identity_read", non_identity_read),
         ):
             with self.subTest(name=name):
                 torch._dynamo.reset()
@@ -1234,6 +1262,62 @@ class TestFlyDSLTemplate(TestCase):
                     self.assertEqual(result, expected)
                 else:
                     self.assertEqual(result, expected, atol=3e-2, rtol=3e-2)
+
+        def supported_add(a, b):
+            return torch.mm(a, b.t()) + 1.0
+
+        torch._dynamo.reset()
+        with torch._inductor.config.patch(epilogue_fusion=False):
+            result, (code,) = run_and_get_code(
+                torch.compile(supported_add, backend="inductor", dynamic=False),
+                a,
+                b,
+            )
+        self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
+        self.assertIn("triton_poi_", code)
+        self.assertEqual(result, supported_add(a, b), atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        epilogue_fusion=True,
+        epilogue_fusion_first=True,
+    )
+    def test_flydsl_gemm_epilogue_fusion_multi_user_safety(self):
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        def template_output_has_other_user(a, b):
+            result = torch.mm(a, b.t())
+            return result, result + 1.0
+
+        def fused_output_has_other_user(a, b):
+            result = torch.mm(a, b.t()) + 1.0
+            return result, result * 2.0
+
+        dtype = torch.bfloat16
+        a = torch.randn(32, 128, device="cuda", dtype=dtype)
+        b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        cases = (
+            ("template_output", template_output_has_other_user, False),
+            ("fused_output", fused_output_has_other_user, True),
+        )
+        for name, fn, expect_fused in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                result, (code,) = run_and_get_code(
+                    torch.compile(fn, backend="inductor", dynamic=False), a, b
+                )
+                assertion = self.assertIn if expect_fused else self.assertNotIn
+                assertion("HAS_EPILOGUE: fx.Constexpr = True", code)
+                self.assertIn("triton_poi_", code)
+                self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
 
 
 if __name__ == "__main__":

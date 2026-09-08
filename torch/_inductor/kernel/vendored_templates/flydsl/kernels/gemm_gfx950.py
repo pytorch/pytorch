@@ -739,8 +739,9 @@ def gemm_gfx950_kernel(
     frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
     if const_expr(param.has_epilogue):
         for i in range_constexpr(fx.size(frag_C.shape).unpack()):
-            # Match the dtype boundary seen by an unfused pointwise consumer.
-            frag_C_out[i] = epilogue_fn(frag_C[i].to(elem_dtype)).to(elem_dtype)
+            # Round the GEMM result, then upcast for pointwise computation.
+            value = frag_C[i].to(elem_dtype).to(fx.Float32)
+            frag_C_out[i] = epilogue_fn(value).to(elem_dtype)
     else:
         frag_C_out.store(frag_C.load().to(elem_dtype))
 
@@ -1022,8 +1023,8 @@ def gemm_hti_gfx950_kernel(
                 safe_global_n_idx = (global_n_idx < n).select(global_n_idx, 0)
                 val = val + bias_buf[safe_global_n_idx].to(fx.Float32)
             if const_expr(param.has_epilogue):
-                # Match the dtype boundary seen by an unfused pointwise consumer.
-                val = epilogue_fn(val.to(elem_dtype))
+                # Round the GEMM result, then upcast for pointwise computation.
+                val = epilogue_fn(val.to(elem_dtype).to(fx.Float32))
             frag_C_out[i] = val.to(elem_dtype)
 
         fx.gpu.barrier()
