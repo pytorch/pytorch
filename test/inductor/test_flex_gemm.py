@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    recover_orig_fp32_precision,
     run_tests,
     skipIfNoCuteDSL,
     TestCase,
@@ -228,6 +229,37 @@ class TestFlexGemmOutputLayout(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexGemmRuntimeHelpers(TestCase):
+    @recover_orig_fp32_precision
+    def test_quack_fp32_operands_follow_matmul_precision(self):
+        from torch._inductor.kernel.flex_gemm.lowering import (
+            check_quack_fp32_operands,
+            QuackFallbackUnsupported,
+        )
+
+        def operands(dtype, device="cuda"):
+            arg = SimpleNamespace(
+                get_dtype=lambda: dtype,
+                get_device_or_error=lambda: torch.device(device),
+            )
+            return (arg, arg)
+
+        fp32 = operands(torch.float32)
+        torch.set_float32_matmul_precision("highest")
+        with self.assertRaisesRegex(
+            QuackFallbackUnsupported,
+            r"'highest'.*set_float32_matmul_precision\('high'\)",
+        ):
+            check_quack_fp32_operands(fp32)
+        check_quack_fp32_operands(operands(torch.bfloat16))
+        check_quack_fp32_operands(operands(torch.float16))
+        check_quack_fp32_operands(operands(torch.float32, device="cpu"))
+        for precision in ("high", "medium"):
+            torch.set_float32_matmul_precision(precision)
+            check_quack_fp32_operands(fp32)
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        check_quack_fp32_operands(fp32)
+
     def test_tensorssa_clamp_codegen_uses_public_cutlass_api(self):
         from torch._inductor.kernel.flex_gemm.epilogue import (
             FlexGemmTensorSSAOpOverrides,
@@ -2455,6 +2487,95 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double()),
             a.shape[1],
         )
+
+    def makeRouterFp32Mm(self):
+        """torchtitan-style router gate GEMM kept in fp32 on purpose."""
+        torch.manual_seed(0)
+        a = torch.randn(2048, 2048, device="cuda", dtype=torch.float32)
+        b = torch.randn(2048, 64, device="cuda", dtype=torch.float32) / 2048**0.5
+        return a, b
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @recover_orig_fp32_precision
+    def test_mm_fp32_highest_precision_falls_back(self):
+        from torch._inductor.kernel.flex_gemm.debug import flex_gemm_log
+
+        torch.set_float32_matmul_precision("highest")
+        a, b = self.makeRouterFp32Mm()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertLogs(flex_gemm_log, level="INFO") as records:
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            )
+
+        (fallback,) = [
+            r.getMessage()
+            for r in records.records
+            if "===== FALLBACK =====" in r.getMessage()
+        ]
+        self.assertIn("float32 GEMM operands in TF32", fallback)
+        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertIn("extern_kernels.mm", code)
+        torch.testing.assert_close(actual, (a @ b).relu(), rtol=0, atol=1e-5)
+        fp64 = (a.double() @ b.double()).relu()
+        self.assertLess((actual.double() - fp64).abs().max().item(), 1e-4)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @recover_orig_fp32_precision
+    def test_mm_fp32_high_precision_runs_tf32_on_quack(self):
+        torch.set_float32_matmul_precision("high")
+        a, b = self.makeRouterFp32Mm()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertIn("flex_gemm_runtime(", code)
+        self.assertMatchesLowPrecisionEager(
+            actual, (a @ b).relu(), (a.double() @ b.double()).relu(), a.shape[1]
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @recover_orig_fp32_precision
+    def test_mm_fp32_highest_precision_pinned_config_raises(self):
+        torch.set_float32_matmul_precision("highest")
+        a, b = self.makeRouterFp32Mm()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.relu(),
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": False}},
+            )
+
+        with self.assertRaisesRegex(
+            Exception,
+            r"float32 GEMM operands in TF32.*'highest'.*set_float32_matmul_precision\('high'\)",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

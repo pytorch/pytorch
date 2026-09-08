@@ -33,7 +33,7 @@ from ...lowering import (
     register_lowering,
     view,
 )
-from ...utils import _IntLike, ceildiv
+from ...utils import _IntLike, ceildiv, is_gpu
 from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape_equal
 from .configs import flex_gemm_default_config, flex_gemm_search_space
 from .constraints import (
@@ -101,6 +101,30 @@ class QuackScaledMmUnsupported(QuackFallbackUnsupported):
 
 class QuackGroupedMmUnsupported(QuackFallbackUnsupported):
     """Grouped-mm contract QuACK's varlen-M path does not cover."""
+
+
+class QuackFp32PrecisionUnsupported(QuackFallbackUnsupported):
+    """float32 GEMM operands while the fp32 matmul precision forbids TF32."""
+
+
+# Silent fallback would drop a pinned QUACK ``config``; these raise instead.
+QUACK_PINNED_CONFIG_ERRORS = (QuackGroupedMmUnsupported, QuackFp32PrecisionUnsupported)
+
+
+def check_quack_fp32_operands(gemm_args: Sequence[TensorBox]) -> None:
+    """QuACK computes float32 GEMM operands in TF32; honor "highest" like Inductor's mm lowering."""
+    if not any(
+        arg.get_dtype() is torch.float32 and is_gpu(arg.get_device_or_error().type)
+        for arg in gemm_args
+    ):
+        return
+    if torch.backends.cuda.matmul.fp32_precision == "tf32":
+        return
+    raise QuackFp32PrecisionUnsupported(
+        "FlexGEMM QUACK computes float32 GEMM operands in TF32, but "
+        f"torch.get_float32_matmul_precision() is {torch.get_float32_matmul_precision()!r}; "
+        "opt in with torch.set_float32_matmul_precision('high') or use bfloat16/float16 operands"
+    )
 
 
 def has_flex_gemm_quack() -> bool:
@@ -633,6 +657,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    check_quack_fp32_operands(gemm_args)
     epilogue_arg_placeholders = (
         *mainloop_scale_nodes,
         *flex_gemm_epilogue_arg_placeholders(subgraph.graph_module, gemm_fx_node),
@@ -1015,7 +1040,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             )
         except QuackFallbackUnsupported as error:
             if (
-                isinstance(error, QuackGroupedMmUnsupported)
+                isinstance(error, QUACK_PINNED_CONFIG_ERRORS)
                 and "config" in kernel_options
             ):
                 raise
