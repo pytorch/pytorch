@@ -188,6 +188,8 @@ class WrappedFunction:
     constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
+    cudagraph_managed_input_rerecord_limit: int
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"]
     kernel_free_cudagraph: bool = False
     user_visible_output_idxs: frozenset[int] = dataclasses.field(
         default_factory=frozenset
