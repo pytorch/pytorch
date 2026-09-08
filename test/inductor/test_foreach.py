@@ -770,6 +770,41 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    def test_fuse_concat_dynamic_shapes(self):
+        # The number of inputs has to exceed config.max_pointwise_cat_inputs, or cat
+        # is lowered as a single pointwise kernel with masked loads and never builds a
+        # ConcatKernel, so the foreach grouping is never exercised.
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
+
+        self.check_model_gpu(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", False)
+    def test_fuse_concat_dynamic_shapes_fallback(self):
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
+
+        self.check_model_gpu(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, n)
+
+    @requires_gpu
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -1393,7 +1428,6 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):

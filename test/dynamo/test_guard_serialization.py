@@ -720,6 +720,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_transparent_subclass_tensor_match(self):
+        # AsyncCollectiveTensor is a transparent traceable wrapper subclass: its
+        # __torch_dispatch__ desugars ops to the inner tensor, so
+        # torch.empty_like(act) returns a plain Tensor and drops the subclass
+        # type. Guard-state serialization must round-trip such an input by
+        # unflattening through the recorded pytype rather than type(meta_tensor)
+        # (which would be torch.Tensor, with no __tensor_unflatten__).
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(w):
+            return w.sum()
+
+        base = torch.randn(3, 4)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, AsyncCollectiveTensor(base)
+        )
+        self._test_check_fn(ref, loaded, {"w": AsyncCollectiveTensor(base)}, True)
+        # The reloaded guard must also match the resolved plain Tensor -- the
+        # ACT->Tensor reuse this relaxation enables, and the case that matters
+        # for precompile under FSDP+TP.
+        self._test_check_fn(ref, loaded, {"w": base}, True)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
@@ -752,6 +775,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             },
             False,
         )
+
+    def test_autocast_equals_match(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ x
+
+        module = Module(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        x = torch.randn(4, 4)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", module, x)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, False)
 
     def test_constant_match(self):
         # === bool constant ===
@@ -970,14 +1014,42 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_dict_version(self):
+    def test_supported_nodes_dict_keys_match(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        with self.assertRaisesRegex(
-            PackageError, "DICT_VERSION guard cannot be serialized."
-        ):
-            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
+        ref, loaded = self._test_serialization(
+            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
+        )
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
+
+        # Sticky flag must survive pickling so load keeps keys-match instead of
+        # re-promoting SUPPORTED_NODES to DICT_VERSION.
+        guards_state = torch._dynamo.package.load_guards_state(
+            self._cached_guards_state
+        )
+        self.assertTrue(
+            any(g._force_dict_keys_match for g in guards_state.output_graph.guards)
+        )
+
+        # Loaded keys-match guard must observe SUPPORTED_NODES key changes, not
+        # only changes to the user input dict.
+        class _TmpPytreeNode:
+            def __init__(self, x):
+                self.x = x
+
+        inputs = {"x": {"t": torch.randn(3)}}
+        self.assertTrue(loaded.check(inputs))
+        try:
+            pytree.register_pytree_node(
+                _TmpPytreeNode,
+                lambda n: ([n.x], None),
+                lambda xs, _: _TmpPytreeNode(xs[0]),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            pytree._deregister_pytree_node(_TmpPytreeNode)
 
     def test_dict_contains(self):
         def fn(x):

@@ -3,6 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/safe_numerics.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -55,6 +56,21 @@ safe_downcast(src_t v)
   return c10::checked_convert<dest_t>(v, "dest_t");
 }
 
+// dilation * (kernelSize - 1) + 1, i.e. how far the kernel reaches into the
+// input. Overflow wraps this negative, which makes every shape check computed
+// from it meaningless, so reject it instead.
+template<typename T>
+inline T effective_kernel_size(T kernelSize, T dilation) {
+    T size = 0;
+    bool overflow = c10::add_overflows(kernelSize, T(-1), &size);
+    overflow |= c10::mul_overflows(size, dilation, &size);
+    overflow |= c10::add_overflows(size, T(1), &size);
+    TORCH_CHECK(!overflow,
+                "effective kernel size overflows, but got kernel_size=",
+                kernelSize, " and dilation=", dilation);
+    return size;
+}
+
 template<typename T>
 inline T pooling_output_shape_pad_lr(
         T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
@@ -78,7 +94,7 @@ inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
                 "pad must be non-negative, but got pad: ", pad);
-    TORCH_CHECK(pad <= ((kernelSize - 1) * dilation + 1) / 2,
+    TORCH_CHECK(pad <= effective_kernel_size(kernelSize, dilation) / 2,
                 "pad should be at most half of effective kernel size, but got pad=",
                 pad, ", kernel_size=", kernelSize, " and dilation=", dilation)
     return pooling_output_shape_pad_lr(
@@ -101,7 +117,8 @@ std::pair<T, T> _pooling_same_mode_padding_lr(
   }
 
   auto left = total_padding / 2;
-  return {left, total_padding - left};
+  auto right = total_padding - left;
+  return {std::move(left), std::move(right)};
 }
 
 inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(

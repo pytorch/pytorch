@@ -5,16 +5,20 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
 )
 from torch.testing._internal.common_dtype import complex_types
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, TestCase
-
-
-devices = (torch.device("cpu"), torch.device("cuda:0"))
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    set_default_dtype,
+    TestCase,
+)
 
 
 class TestComplexTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    _default_dtype_check_enabled = True
+
     @dtypes(*complex_types())
     def test_to_list(self, device, dtype):
         # test that the complex float tensor has expected values and
@@ -60,7 +64,6 @@ class TestComplexTensor(TestCase):
 
         self.assertFalse(torch.any(x))
 
-    @onlyCPU
     @dtypes(*complex_types())
     def test_eq(self, device, dtype):
         "Test eq on complex types"
@@ -257,7 +260,6 @@ class TestComplexTensor(TestCase):
                 msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
             )
 
-    @onlyCPU
     @dtypes(*complex_types())
     def test_ne(self, device, dtype):
         "Test ne on complex types"
@@ -458,5 +460,4 @@ class TestComplexTensor(TestCase):
 instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == "__main__":
-    TestCase._default_dtype_check_enabled = True
     run_tests()

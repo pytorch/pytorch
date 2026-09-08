@@ -6,6 +6,19 @@
 
 namespace c10d::symmetric_memory {
 
+// Validates a peer rank used to index the per-peer arrays of buffer/signal
+// pad pointers. An out-of-range rank reads or writes through a wild pointer,
+// or lands past the signal pad in the peer's tensor data.
+inline void check_rank(int rank, int world_size) {
+  TORCH_CHECK(
+      rank >= 0 && rank < world_size,
+      "rank must be in [0, ",
+      world_size,
+      ") (got ",
+      rank,
+      ")");
+}
+
 // SymmetricMemory represents symmetric allocations across a group of devices.
 // The allocations represented by a SymmetricMemory object are accessible by
 // all devices in the group. The class can be used for op-level custom

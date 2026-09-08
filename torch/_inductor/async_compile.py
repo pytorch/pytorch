@@ -459,7 +459,7 @@ class AsyncCompile:
           cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
-          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+          and pickled to us via `CachingAutotuner.save_cache_hook`.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
@@ -739,6 +739,72 @@ class AsyncCompile:
                 )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+    def flydsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
+        """
+        Compile FlyDSL kernels.
+
+        FlyDSL generated source is written through PyCodeCache and its
+        `{kernel_name}_main` entry point is exposed through the standard
+        kernel ``.run()`` interface.
+        """
+        from torch._inductor.codegen.flydsl import flydsl_utils
+        from torch._inductor.codegen.flydsl.flydsl_kernel import (
+            FlyDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        if not flydsl_utils.runtime_available():
+            raise RuntimeError("FlyDSL runtime is unavailable")
+
+        kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
+        _compile_start()
+
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            extra_env = _pycodecache_kernel_compile_env()
+            extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ.get(
+                "FLYDSL_RUNTIME_CACHE_DIR"
+            )
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> FlyDSLKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "FlyDSL kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name,
+                    MAIN_SUFFIX,
+                    FlyDSLKernelWrapper,
+                    key,
+                    path,
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            return self._load_kernel_wrapper(
+                kernel_name,
+                MAIN_SUFFIX,
+                FlyDSLKernelWrapper,
+                key,
+                path,
+            )
 
     def pallas(self, kernel_name: str, source_code: str):
         """

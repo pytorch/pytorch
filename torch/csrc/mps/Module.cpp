@@ -564,7 +564,12 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_stopCapture", []() {
+    // See MPSModule_deviceSynchronize: stopCapture drains the stream, so the
+    // GIL must be released while waiting on GPU work
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSProfiler().stopCapture();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });

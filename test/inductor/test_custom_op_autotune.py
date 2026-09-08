@@ -544,7 +544,7 @@ class TestCustomOpAutoTune(TestCase):
         test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
 
         def find_shape_dispatch(code_list):
-            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]|_selector\s*=\s*int\(.*\bs\d+")
             return [
                 line.strip()
                 for code in code_list
@@ -1458,7 +1458,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors and establish baseline with some mm activity
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1503,7 +1503,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)

@@ -253,7 +253,7 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex() && !other.is_complex() &&
               (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
               "heaviside is not yet implemented for complex tensors.");
   TORCH_CHECK(self.dtype() == other.dtype() &&
@@ -331,22 +331,22 @@ CREATE_BINARY_META_FUNC(igammac)
 CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
@@ -1575,8 +1575,8 @@ static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& othe
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .build();
 
   ldexp_stub(iter.device_type(), iter);
@@ -1589,6 +1589,7 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
+      result.scalar_type() == self.scalar_type() &&
       ldexp_stub.is_device_supported(self.device().type())) {
     return _ldexp_int_exponent(self, other, result);
   }
