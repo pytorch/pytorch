@@ -182,7 +182,7 @@ inline int cublasLtMatmulScaleMode(
   switch (scaling_type) {
     case at::blas::ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
-#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+#if CUDA_VERSION >= 12080 || defined(USE_ROCM)
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else
       TORCH_CHECK(
