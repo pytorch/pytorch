@@ -5,10 +5,6 @@ from . import state_dict as _state_dict
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     for param_group in optim.param_groups:
-        if any(param.grad is not None for param in param_group["params"]):
-            return
-
-    for param_group in optim.param_groups:
         missing = [
             param
             for param in param_group["params"]
