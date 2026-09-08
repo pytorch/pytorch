@@ -16,6 +16,8 @@ from torch._inductor.runtime.flydsl_cache import (
 
 {{gen_defines()}}
 
+{{gen_epilogue()}}
+
 
 _gemm_param = None
 _gemm_param_lock = threading.Lock()
@@ -88,6 +90,7 @@ def _inductor_tensor_arg(tensor):
             gemm_gfx950,
             *compile_args,
             constexpr_param=param,
+            extra_cache_key=EPILOGUE_KEY,
             compiler=flyc.compile,
             dispatch_args=(output, mat1, mat2, param, EPILOGUE_FN, stream),
         )

@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
-
-import torch
+from typing import Any, TYPE_CHECKING
 
 from torch._inductor.ir import ComputedBuffer, Pointwise
-from torch._inductor.scheduler import BaseSchedulerNode
+from torch._inductor.ops_handler import OpsHandler
 from torch._inductor.virtualized import V
+
+
+if TYPE_CHECKING:
+    import torch
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 class _Expr:
@@ -19,7 +22,7 @@ class _Expr:
         return self.source
 
 
-class _EpilogueOps:
+class _EpilogueOps(OpsHandler[Any]):
     def __init__(self, accumulator_name: str):
         self.accumulator_name = accumulator_name
 
@@ -58,25 +61,6 @@ class _EpilogueOps:
     def neg(self, x: Any) -> _Expr:
         return self._unary("-", x)
 
-    def maximum(self, a: Any, b: Any) -> _Expr:
-        raise NotImplementedError("FlyDSL GEMM maximum epilogues are not supported yet")
-
-    def minimum(self, a: Any, b: Any) -> _Expr:
-        raise NotImplementedError("FlyDSL GEMM minimum epilogues are not supported yet")
-
-    def where(self, condition: Any, a: Any, b: Any) -> _Expr:
-        raise NotImplementedError("FlyDSL GEMM where epilogues are not supported yet")
-
-    def to_dtype(
-        self, x: Any, dtype: torch.dtype, *, use_compute_types: bool = False
-    ) -> _Expr:
-        raise NotImplementedError("FlyDSL GEMM dtype casts are not supported yet")
-
-    convert_element_type = to_dtype
-
-    def __getattr__(self, name: str):
-        raise AttributeError(name)
-
 
 def materialize_flydsl_scheduler_epilogue(
     original_buffer_name: str,
@@ -85,32 +69,35 @@ def materialize_flydsl_scheduler_epilogue(
     if not epilogue_nodes:
         return "", (
             "HAS_EPILOGUE: fx.Constexpr = False\n"
+            "EPILOGUE_KEY: fx.Constexpr = 'identity'\n"
             "EPILOGUE_FN = lambda acc: acc\n"
         )
 
     env: dict[str, Any] = {original_buffer_name: _Expr("acc")}
     handler = _EpilogueOps(original_buffer_name)
-    for scheduler_node in epilogue_nodes:
-        if scheduler_node.is_reduction():
+    for scheduler_group in epilogue_nodes:
+        if scheduler_group.is_reduction():
             raise NotImplementedError("FlyDSL GEMM epilogue reductions unsupported")
-        for node in scheduler_node.get_nodes():
-            if not isinstance(node.node, ComputedBuffer) or not isinstance(
-                node.node.data, Pointwise
+        for scheduler_node in scheduler_group.get_nodes():
+            ir_node = scheduler_node.node
+            if not isinstance(ir_node, ComputedBuffer) or not isinstance(
+                ir_node.data, Pointwise
             ):
                 raise NotImplementedError("FlyDSL GEMM epilogue must be pointwise")
-            with V.set_ops_handler(handler), V.set_current_node(node.node):
-                result = node.node.data.inner_fn(*node.node.data.inner_fn_args())
-            env[node.node.get_name()] = result
-            env[scheduler_node.get_name()] = result
+            with V.set_ops_handler(handler):
+                result = ir_node.data.inner_fn(*ir_node.data.inner_fn_args())
+            env[ir_node.get_name()] = result
+            env[scheduler_group.get_name()] = result
 
     final_name = epilogue_nodes[-1].get_name()
     if final_name not in env:
         raise AssertionError(f"missing final FlyDSL epilogue value {final_name}")
 
     result = str(env[final_name])
-    hashlib.sha256(result.encode()).hexdigest()[:16]
+    key = hashlib.sha256(result.encode()).hexdigest()[:16]
     return (
-        "flydsl_gemm_epilogue",
-        f"EPILOGUE_FN = lambda acc: {result}\n"
-        "HAS_EPILOGUE: fx.Constexpr = True\n",
+        key,
+        "HAS_EPILOGUE: fx.Constexpr = True\n"
+        f"EPILOGUE_KEY: fx.Constexpr = {key!r}\n"
+        f"EPILOGUE_FN = lambda acc: {result}\n",
     )

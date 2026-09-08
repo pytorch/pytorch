@@ -508,6 +508,24 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
 
+    def test_compiled_cache_keys_on_extra_constexpr(self):
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+        dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
+
+        for key in ("epilogue_a", "epilogue_b"):
+            run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                extra_cache_key=key,
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        self.assertEqual(compiler.call_count, 2)
+
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
         compile_started = threading.Event()
@@ -1133,9 +1151,7 @@ class TestFlyDSLTemplate(TestCase):
                     torch.compile(fn, backend="inductor", dynamic=False), a, b
                 )
                 self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
-                self.assertTrue(
-                    torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2)
-                )
+                self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
 
 
 if __name__ == "__main__":

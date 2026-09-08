@@ -40,15 +40,17 @@ def run_cached_flydsl(
     jit_func: Any,
     *compile_args: Any,
     constexpr_param: Any,
+    extra_cache_key: Any = None,
     compiler: Callable[..., Any],
     dispatch_args: tuple[Any, ...],
 ) -> Any:
-    """Cache a layout-dynamic FlyDSL dispatcher by constexpr param."""
+    """Cache a layout-dynamic FlyDSL dispatcher by its constexpr inputs."""
     device = getattr(dispatch_args[0], "device", None)
     cache_key = (
         os.getpid(),
         getattr(device, "index", None),
         constexpr_param.__cache_signature__(),
+        extra_cache_key,
     )
     compiled_cache = getattr(jit_func, "_compiled_cache", None)
     if compiled_cache is not None:
