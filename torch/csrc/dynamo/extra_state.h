@@ -93,10 +93,14 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // this cache_mutex must take compile_lock FIRST (reset()/remove_from_cache
   // do). cache_mutex is recursive and drops the GIL while waiting. What keeps
   // this sound is that lookup() releases cache_mutex before guard evaluation
-  // (see extra_state.cpp), so the hot path runs no Python under the lock. Sites
-  // that DO run Python while holding cache_mutex are knowingly exempt because
-  // they run only at compile/debug time, not on the hot path:
-  // drain_pending_invalidations (from lookup()/_debug_get_cache_entry_list)
+  // (see extra_state.cpp), so the hot path runs no Python under the lock EXCEPT
+  // when a parked invalidation drains: drain_pending_invalidations runs from
+  // lookup() at cache_python_depth 0, and invalidate_locked's decrefs of the
+  // entry's code/backend/old guard_manager can fire a user __del__ under the
+  // lock. A __del__ that takes compile_lock is a residual ABBA this design does
+  // NOT rule out; it is accepted because a drain on the hot path is rare. The
+  // other sites that run Python while holding cache_mutex are exempt because
+  // they run only at compile/debug time: drain from _debug_get_cache_entry_list
   // and create_cache_entry's CacheEntry ctor (try_lookup_without_guard_eval,
   // like lookup(), releases cache_mutex before backend_match). A second cycle
   // needs no compile_lock at all:
