@@ -11,7 +11,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import FlyDSLTemplateBuffer
+from ...ir import ComputedBuffer, FlyDSLTemplateBuffer, Pointwise
 from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
 from ...select_algorithm import PartialRender
 from ...utils import get_fused_kernel_name, get_kernel_metadata
@@ -54,7 +54,42 @@ class FlyDSLScheduling(BaseScheduling):
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        return False
+        if not config.epilogue_fusion or not self.is_flydsl_template(node1):
+            return False
+        if node2.has_aliasing_or_mutation() or node2.is_reduction():
+            return False
+
+        template_node = cast(SchedulerNode, node1)
+        template = template_node.node
+        if not isinstance(template, FlyDSLTemplateBuffer):
+            return False
+
+        reads = OrderedSet()
+        for scheduler_node in node2.get_nodes():
+            node = scheduler_node.node
+            if not isinstance(node, ComputedBuffer) or not isinstance(
+                node.data, Pointwise
+            ):
+                return False
+            if not V.graph.sizevars.statically_known_list_equals(
+                node.get_size(), template.get_size()
+            ):
+                return False
+            reads |= OrderedSet(read.name for read in scheduler_node.read_writes.reads)
+
+        if reads != OrderedSet([template.get_name()]):
+            return False
+        try:
+            from torch._inductor.kernel.flydsl.epilogue import (
+                materialize_flydsl_scheduler_epilogue,
+            )
+
+            materialize_flydsl_scheduler_epilogue(
+                template.get_name(), list(node2.get_nodes())
+            )
+        except (AttributeError, NotImplementedError):
+            return False
+        return True
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -116,15 +151,16 @@ class FlyDSLScheduling(BaseScheduling):
                 "Template node passed to FlyDSLScheduling.codegen_template must be a "
                 "SchedulerNode that wraps a FlyDSLTemplateBuffer"
             )
-        if epilogue_nodes:
-            raise AssertionError("FlyDSL doesn't support epilogue fusion yet")
         if prologue_nodes:
             raise AssertionError("FlyDSL doesn't support prologue fusion yet")
 
         template_node = cast(SchedulerNode, template_node)
         ftb: FlyDSLTemplateBuffer = cast(FlyDSLTemplateBuffer, template_node.node)
 
-        kernel, render = ftb.make_kernel_render(ftb)  # type: ignore[misc]
+        output_node = epilogue_nodes[-1].node if epilogue_nodes else ftb
+        kernel, render = ftb.make_kernel_render(output_node)  # type: ignore[misc]
+        kernel.original_output_name = ftb.get_name()
+        kernel.epilogue_nodes = epilogue_nodes
         template_node.mark_run()
         src_code = render()
         if isinstance(src_code, PartialRender):
@@ -135,12 +171,18 @@ class FlyDSLScheduling(BaseScheduling):
         precompile_metadata = self._build_precompile_metadata(kernel, ftb)
 
         with V.set_kernel_handler(kernel):
-            node_schedule = [template_node]
+            node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(
                 src_code_str, node_schedule, precompile_metadata
             )
         self.codegen_comment(node_schedule, kernel_name)
-        kernel.call_kernel(kernel_name, ftb)
+        if epilogue_nodes:
+            V.graph.removed_buffers.add(ftb.get_name())
+            for node in epilogue_nodes[:-1]:
+                V.graph.removed_buffers.add(node.get_name())
+            for node in epilogue_nodes:
+                node.mark_run()
+        kernel.call_kernel(kernel_name, output_node)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 

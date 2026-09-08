@@ -6630,6 +6630,10 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         self.template = template
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]
+        if self.name is None:
+            raise AssertionError("Expected FlyDSL template buffer name")
+        self.epilogue_fusable_outputs = {self.name: self.name}
+        self.allow_epilogue_fusion = True
 
         if mutated_inputs is not None:
             if not isinstance(self.inputs[0], IRNode):
@@ -6664,6 +6668,10 @@ class FlyDSLTemplateBuffer(TemplateBuffer):
         self.template = template
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]
+        if self.name is None:
+            raise AssertionError("Expected FlyDSL template buffer name")
+        self.epilogue_fusable_outputs = {self.name: self.name}
+        self.allow_epilogue_fusion = True
 
         if mutated_inputs is not None:
             if not isinstance(self.inputs[0], IRNode):

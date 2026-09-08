@@ -230,8 +230,6 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._flydsl_scheduling.is_flydsl_template(template_node):
-            if epilogue_nodes:
-                raise AssertionError("flydsl template does not support epilogue nodes")
             if prologue_nodes:
                 raise AssertionError("flydsl template does not support prologue nodes")
             return self._flydsl_scheduling.codegen_template(

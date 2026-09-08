@@ -1160,6 +1160,7 @@ def gemm_gfx950(
         b_leading_stride,
         tiled_mma,
         param,
+        epilogue_fn,
     ).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
