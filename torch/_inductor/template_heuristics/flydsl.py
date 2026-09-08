@@ -44,6 +44,7 @@ class FlyDSLGemmConfig:
     BLOCK_K_WARPS: int = 1
     GROUP_M: int = 0
     B_TO_LDS: bool = True
+    USE_HALF_TILE_INTERLEAVED: bool = False
 
 
 def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
@@ -54,6 +55,9 @@ def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
     m_waves = int(gemm_config["BLOCK_M_WARPS"])
     n_waves = int(gemm_config["BLOCK_N_WARPS"])
     group_m = int(gemm_config["GROUP_M"])
+    use_half_tile_interleaved = bool(
+        gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
+    )
     mma_m = 16
     mma_n = 16
     mma_k = 32
@@ -68,8 +72,33 @@ def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
         return False
 
     in_dbytes = 2
+    out_dbytes = 2
+    cshuffle_vec_size = 16 // out_dbytes
+    if use_half_tile_interleaved:
+        half_block_m = block_m // 2
+        half_block_n = block_n // 2
+        if stages != 2:
+            return False
+        if m_waves != 2 or n_waves < 2:
+            return False
+        if half_block_m * 2 != block_m or half_block_n * 2 != block_n:
+            return False
+        mma_m_half_repeat = half_block_m // m_waves // mma_m
+        mma_n_half_repeat = half_block_n // n_waves // mma_n
+        if mma_m_half_repeat * m_waves * mma_m != half_block_m:
+            return False
+        if mma_n_half_repeat * n_waves * mma_n != half_block_n:
+            return False
+        if mma_n_half_repeat != 2:
+            return False
+        if half_block_n % cshuffle_vec_size != 0:
+            return False
+    elif block_n % cshuffle_vec_size != 0:
+        return False
+
     smem_capacity = _smem_capacity()
     smem_bytes = stages * (block_m + block_n) * block_k * in_dbytes
+    smem_bytes = max(smem_bytes, block_m * block_n * out_dbytes)
     if smem_bytes > smem_capacity:
         return False
 
@@ -86,6 +115,13 @@ def _is_valid_gemm_config(gemm_config: dict[str, int | bool]) -> bool:
         return False
     ldg_a_iters = (block_m * block_k) // load_elems_per_iter
     ldg_b_iters = (block_n * block_k) // load_elems_per_iter
+    if use_half_tile_interleaved:
+        half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
+        half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
+        if half_ldg_a_iters * load_elems_per_iter != (block_m // 2) * block_k:
+            return False
+        if half_ldg_b_iters * load_elems_per_iter != (block_n // 2) * block_k:
+            return False
     if ldg_a_iters <= 0 or ldg_b_iters <= 0:
         return False
     if (stages - 2) * (ldg_a_iters + ldg_b_iters) >= 63:
@@ -108,7 +144,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     selections = {
         "TILE_M": [16, 32, 48, 64, 96, 128, 256],
-        "TILE_N": [64, 96, 128, 256],
+        "TILE_N": [16, 32, 64, 96, 128, 256],
         "TILE_K": [64, 128, 256],
         "STAGES": [i for i in range(2, 10)],
         "BLOCK_M_WARPS": [1, 2, 4],
@@ -117,6 +153,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "BLOCK_K_WARPS": [1],
         "GROUP_M": [0, 4],
         "B_TO_LDS": [True],
+        "USE_HALF_TILE_INTERLEAVED": [False, True],
     }
     keys = selections.keys()
     values = selections.values()
@@ -160,6 +197,24 @@ def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
         (64, 64, 256, 2, 1, 2, 2, 1, 0, True),
         (128, 128, 64, 4, 1, 4, 4, 1, 4, True),
         (256, 256, 64, 2, 1, 4, 4, 1, 4, True),
+        # Small-N tiles help small-M decode GEMMs.
+        (16, 16, 128, 8, 1, 1, 1, 1, 4, True),
+        (16, 16, 64, 8, 1, 1, 1, 1, 0, True),
+        (32, 32, 64, 8, 1, 2, 2, 1, 4, True),
+        (64, 32, 128, 4, 1, 4, 2, 1, 4, True),
+        (64, 64, 64, 7, 1, 4, 2, 1, 4, True),
+        (64, 128, 64, 6, 1, 2, 4, 1, 4, True),
+        (128, 128, 64, 4, 1, 2, 4, 1, 4, True),
+        (128, 256, 64, 3, 1, 4, 4, 1, 4, True),
+        (32, 64, 64, 8, 1, 2, 2, 1, 0, True),
+        (16, 64, 128, 3, 1, 1, 4, 1, 4, True),
+        (64, 64, 64, 6, 1, 4, 2, 1, 4, True),
+        # Trailing True enables the half-tile interleaved kernel.
+        (128, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
+        (128, 128, 64, 2, 1, 2, 2, 1, 4, True, True),
+        (128, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
+        (256, 128, 64, 2, 1, 2, 2, 1, 0, True, True),
+        (256, 256, 64, 2, 1, 2, 4, 1, 0, True, True),
     ]
     configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
     return [

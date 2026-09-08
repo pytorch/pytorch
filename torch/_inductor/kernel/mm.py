@@ -252,7 +252,7 @@ def get_flydsl_mm_template_kwargs(
     if mat2.get_dtype() != dtype or layout.dtype != dtype:
         return []
 
-    if dtype != torch.bfloat16:
+    if dtype not in (torch.float16, torch.bfloat16):
         return []
 
     # FlyDSL GEMM consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
@@ -274,9 +274,17 @@ def get_flydsl_mm_template_kwargs(
     # The FlyDSL GEMM template consumes the RHS as contiguous [N, K].  The
     # aten.mm lowering sees B.T as a [K, N] ReinterpretView, so pass the
     # underlying B buffer and bake the static GEMM dimensions into the template.
+    from .vendored_templates.flydsl.kernels import (
+        GEMM_DTYPE_BF16,
+        GEMM_DTYPE_FP16,
+    )
+
     return [
         {
             **gemm_config,
+            "GEMM_DTYPE_ID": (
+                GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
+            ),
             "MAT2_IS_NK": True,
             "GEMM_M": m_static,
             "GEMM_N": n_static,
