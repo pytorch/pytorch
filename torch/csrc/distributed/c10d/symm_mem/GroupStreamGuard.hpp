@@ -35,8 +35,11 @@ namespace c10d::symmetric_memory {
 //
 // Under graph capture the record and wait become graph nodes, ordering
 // streams forked inside one capture. The event belongs to the capture it was
-// recorded in, so the wait is skipped, with a warning, when the next
-// operation runs in a different capture context.
+// recorded in, so the wait is skipped when the next operation runs in a
+// different capture context. A program that warms up on one stream and then
+// captures on another hits that on its first captured operation, which is the
+// normal pattern and not something a caller can act on, so the skip is logged
+// at debug level rather than warned about.
 class TORCH_API GroupStreamGuard {
  public:
   struct State;
