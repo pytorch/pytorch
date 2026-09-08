@@ -65,6 +65,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
