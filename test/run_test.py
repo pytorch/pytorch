@@ -270,8 +270,6 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
-    # new failures to investigate and fix
-    "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
     "dynamo/test_backends",
