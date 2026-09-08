@@ -694,33 +694,36 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
 }
 
 bool MPSHeapAllocatorImpl::recordStream(const void* ptr, MPSStream* stream) {
-  std::lock_guard<std::recursive_mutex> lock(m_mutex);
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED) || stream == buffer_block->stream) {
-    // Usage by the allocation stream is sequential, so it can be skipped.
-    return false;
+  MPSEventPtr event;
+  {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+    if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED) || stream == buffer_block->stream) {
+      // Usage by the allocation stream is sequential, so it can be skipped.
+      return false;
+    }
+    // Each consumer stream gets its own event so that recording a new stream
+    // never discards tracking for an earlier stream that is not complete yet,
+    // since we don't know what order the streams will complete in.
+    auto it = buffer_block->stream_uses.find(stream);
+    if (it == buffer_block->stream_uses.end()) {
+      it = buffer_block->stream_uses.emplace(stream, m_event_pool->acquireEvent(false, stream)).first;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(it->second);
+    }
+    event = it->second;
   }
-  // Each consumer stream gets its own event so that recording a new stream
-  // never discards tracking for an earlier stream that is not complete yet,
-  // since we don't know what order the streams will complete in.
-  auto it = buffer_block->stream_uses.find(stream);
-  if (it == buffer_block->stream_uses.end()) {
-    it = buffer_block->stream_uses.emplace(stream, m_event_pool->acquireEvent(false, stream)).first;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(it->second);
-  }
-  it->second->record(/*needsLock*/ true);
+  // Record on the event only after releasing the mutex, to avoid any deadlock
+  event->record(/*needsLock*/ true);
   return true;
 }
 
 bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
-  struct PendingWait {
-    BufferBlock* buffer_block;
+  bool waitedForEvent = false;
+
+  for (const auto& buffer : buffers) {
     std::vector<MPSEventPtr> events;
-  };
-  std::vector<PendingWait> pending_waits;
-  {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    for (const auto& buffer : buffers) {
+    {
+      std::lock_guard<std::recursive_mutex> lock(m_mutex);
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
       // wait on events if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
@@ -728,7 +731,6 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
         auto& event = buffer_block->event;
         auto& stream_uses = buffer_block->stream_uses;
         size_t num_events = stream_uses.size() + (event ? 1 : 0);
-        std::vector<MPSEventPtr> events;
         events.reserve(num_events);
         if (event) {
           events.push_back(event);
@@ -736,32 +738,19 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
         for (auto& stream_use : stream_uses) {
           events.push_back(stream_use.second);
         }
-        if (!events.empty()) {
-          pending_waits.push_back({buffer_block, std::move(events)});
-        }
       }
     }
-  }
-  bool waitedForEvent = false;
-
-  for (const auto& pending_wait : pending_waits) {
-    // check for retain count again as the previous wait might have released the buffer
-    if (pending_wait.buffer_block->retainCount() > 1) {
+    if (!events.empty()) {
       bool waitedOnCPU = false;
       // Every consumer stream that was recorded on this buffer must finish.
-      for (MPSEventPtr event : pending_wait.events) {
+      for (MPSEventPtr event : events) {
         waitedOnCPU |= event->synchronize();
       }
       if (waitedOnCPU) {
         // after waiting, it's a good time to free some pending inactive buffers
         freeInactiveBuffers();
-        waitedForEvent |= pending_wait.buffer_block->retainCount() <= 1;
-      } else {
-        // even if one of the buffers weren't recorded beforehand, we return
-        // without continuing with other buffers since retainCount > 1
-        waitedForEvent = false;
-        break;
       }
+      waitedForEvent |= waitedOnCPU;
     }
   }
   return waitedForEvent;

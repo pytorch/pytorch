@@ -39,7 +39,8 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -49,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    expectedFailureMPSPre27, skipMeta, get_all_device_types
+    expectedFailureMPSPre27, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -75,6 +76,18 @@ if TEST_SCIPY:
 
 if TEST_NUMPY:
     import numpy as np
+
+
+def _graph_node_names(grad_fn):
+    names, stack, seen = set(), [grad_fn], set()
+    while stack:
+        node = stack.pop()
+        if node is None or node in seen:
+            continue
+        seen.add(node)
+        names.add(node.name())
+        stack.extend(nxt for nxt, _ in node.next_functions)
+    return names
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -9268,6 +9281,84 @@ class TestNNDeviceType(NNTestCase):
         mod = torch.nn.Linear(7, 7).to(device)
         inp = torch.randn(0, 7, device=device)
         _test_module_empty_input(self, mod, inp)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipMPS
+    @parametrize_test('shape', [
+        subtest((6, 8), name='2d'),
+        subtest((2, 3, 8), name='3d'),
+        subtest((2, 3, 4, 8), name='4d'),
+        subtest((0, 3, 8), name='zeroBatch'),
+        subtest((2, 3, 0), name='zeroFeatures'),
+    ])
+    def test_linear_inplace_activation(self, device, shape):
+        # The nD contiguous+bias fast path flattens, calls addmm and reshapes back.
+        # A plain view there makes the result a differentiable view, so a following
+        # in-place op rebases history onto CopySlices and copies in backward.
+        x = torch.randn(*shape, device=device, dtype=torch.double, requires_grad=True)
+        w = torch.randn(16, shape[-1], device=device, dtype=torch.double, requires_grad=True)
+        b = torch.randn(16, device=device, dtype=torch.double, requires_grad=True)
+
+        y = F.linear(x, w, b)
+        y.relu_()
+
+        nodes = _graph_node_names(y.grad_fn)
+        self.assertFalse([n for n in nodes if 'CopySlices' in n or 'AsStrided' in n], nodes)
+        # 2D returns the addmm result directly, without any reshape
+        if len(shape) > 2:
+            self.assertIn('UnsafeViewBackward0', nodes)
+
+        # matmul path, which does not go through _flatten_nd_linear
+        expected = (x @ w.t() + b).relu()
+        self.assertEqual(y, expected)
+
+        grads = torch.autograd.grad(y.sum(), [x, w, b])
+        grads_expected = torch.autograd.grad(expected.sum(), [x, w, b])
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
+
+        if x.numel() > 0:
+            def fn(x, w, b):
+                return F.linear(x, w, b).relu_()
+            # dynamo_wrapped runs backward through compiled autograd, which freezes
+            # double backward's gradient accumulation into torch.add nodes. Those
+            # cannot take the None cotangent the undefined-grad probe feeds them,
+            # while eager just treats it as zero.
+            undef = not TEST_WITH_TORCHDYNAMO
+            self.assertTrue(gradcheck(fn, (x, w, b), check_undefined_grad=undef))
+            self.assertTrue(gradgradcheck(fn, (x, w, b), check_undefined_grad=undef))
+
+    @skipIfTorchDynamo("compiled autograd hits an IndexError in pgo.is_stride_dynamic wrapping the sparse weight")
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipMPS
+    @skipCUDAIfNoSparseGeneric
+    @parametrize_test('weight_layout', [
+        subtest(torch.sparse_coo, name='weightCOO'),
+        subtest(torch.sparse_csr, name='weightCSR'),
+        subtest(torch.sparse_csc, name='weightCSC'),
+    ])
+    def test_linear_sparse_inplace_activation(self, device, weight_layout):
+        # Sparse weights reach the same fast path via a transpose of the addmm
+        # result, which is equally a non-escaping temporary
+        x = torch.randn(2, 3, 8, device=device, dtype=torch.double, requires_grad=True)
+        wd = torch.randn(16, 8, device=device, dtype=torch.double)
+        b = torch.randn(16, device=device, dtype=torch.double, requires_grad=True)
+        w = wd.to_sparse(layout=weight_layout).requires_grad_()
+
+        y = F.linear(x, w, b)
+        y.relu_()
+
+        nodes = _graph_node_names(y.grad_fn)
+        self.assertFalse([n for n in nodes if 'CopySlices' in n or 'AsStrided' in n], nodes)
+        self.assertIn('UnsafeViewBackward0', nodes)
+
+        expected = (x @ wd.t() + b).relu()
+        self.assertEqual(y, expected)
+        for g, ge in zip(torch.autograd.grad(y.sum(), [x, b]),
+                         torch.autograd.grad(expected.sum(), [x, b])):
+            self.assertEqual(g, ge)
 
     def test_one_hot(self, device):
         # cpu raises synchronously; mps reports the bad index from its scatter
