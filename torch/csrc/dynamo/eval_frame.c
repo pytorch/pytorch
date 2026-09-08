@@ -781,6 +781,10 @@ static int clear_state(PyObject* module) {
   return -1;
 }
 
+// Knowingly still process-global, unlike the thread-local isolate_recompiles
+// id: the same cross-thread capture argument applies (a skip-guard-eval region
+// entered on one thread makes every other thread's frames take the diff-guard
+// path), but converting it is left out of this locking-only change.
 bool is_skip_guard_eval_unsafe = false;
 
 // -1 means inactive, >= 0 means active with that many compiled frames.
