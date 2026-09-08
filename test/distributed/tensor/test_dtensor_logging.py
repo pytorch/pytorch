@@ -68,7 +68,7 @@ class TestDTensorLogging(TestCase):
         )
         x_dt2 + x_dt2
 
-        self.assertEqual(
+        self.assertExpectedInline(
             log_string(),
             f"""\
 sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
@@ -96,7 +96,7 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
         )
         propagator.propagate_op_sharding(op_schema)  # Python cache miss
         propagator.propagate_op_sharding(op_schema)  # Python cache hit
-        self.assertEqual(
+        self.assertExpectedInline(
             log_string(),
             f"""\
 sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
