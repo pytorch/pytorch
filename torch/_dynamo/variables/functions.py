@@ -3633,7 +3633,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             hints=[],
         )
 
-    def is_callable(self, maybe_callable: VariableTracker) -> bool:
+    def is_callable(self, maybe_callable: object) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
