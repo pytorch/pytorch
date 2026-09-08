@@ -47,7 +47,7 @@ class Range(object):
         self.last_insert = idx, item
 
 
-class TestBisect:
+class _TestBisect:
     def setUp(self):
         super().setUp()
         self.precomputedCases = [
@@ -310,15 +310,15 @@ class TestBisect:
         self.assertEqual(i1, 40)
         self.assertEqual(i2, 41)
 
-class TestBisectPython(TestBisect, CPythonTestCase):
+class TestBisectPython(_TestBisect, CPythonTestCase):
     module = py_bisect
 
-class TestBisectC(TestBisect, CPythonTestCase):
+class TestBisectC(_TestBisect, CPythonTestCase):
     module = c_bisect
 
 #==============================================================================
 
-class TestInsort:
+class _TestInsort:
     def test_vsBuiltinSort(self, n=500):
         from random import choice
         for insorted in (list(), UserList()):
@@ -345,10 +345,10 @@ class TestInsort:
         self.module.insort_right(lst, 5)
         self.assertEqual([5, 10], lst.data)
 
-class TestInsortPython(TestInsort, CPythonTestCase):
+class TestInsortPython(_TestInsort, CPythonTestCase):
     module = py_bisect
 
-class TestInsortC(TestInsort, CPythonTestCase):
+class TestInsortC(_TestInsort, CPythonTestCase):
     module = c_bisect
 
 #==============================================================================
@@ -373,7 +373,7 @@ class CmpErr:
     __eq__ = __lt__
     __ne__ = __lt__
 
-class TestErrorHandling:
+class _TestErrorHandling:
     def test_non_sequence(self):
         for f in (self.module.bisect_left, self.module.bisect_right,
                   self.module.insort_left, self.module.insort_right):
@@ -400,15 +400,15 @@ class TestErrorHandling:
                   self.module.insort_left, self.module.insort_right):
             self.assertRaises(TypeError, f, 10)
 
-class TestErrorHandlingPython(TestErrorHandling, CPythonTestCase):
+class TestErrorHandlingPython(_TestErrorHandling, CPythonTestCase):
     module = py_bisect
 
-class TestErrorHandlingC(TestErrorHandling, CPythonTestCase):
+class TestErrorHandlingC(_TestErrorHandling, CPythonTestCase):
     module = c_bisect
 
 #==============================================================================
 
-class TestDocExample:
+class _TestDocExample:
     def test_grades(self):
         def grade(score, breakpoints=[60, 70, 80, 90], grades='FDCBA'):
             i = self.module.bisect(breakpoints, score)
@@ -427,10 +427,10 @@ class TestDocExample:
         self.assertEqual(data[bisect_left(keys, 5)], ('red', 5))
         self.assertEqual(data[bisect_left(keys, 8)], ('yellow', 8))
 
-class TestDocExamplePython(TestDocExample, CPythonTestCase):
+class TestDocExamplePython(_TestDocExample, CPythonTestCase):
     module = py_bisect
 
-class TestDocExampleC(TestDocExample, CPythonTestCase):
+class TestDocExampleC(_TestDocExample, CPythonTestCase):
     module = c_bisect
 
 #------------------------------------------------------------------------------
