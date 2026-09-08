@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TYPE_CHECKING
 from typing_extensions import assert_never
 
@@ -62,6 +62,7 @@ def gen_registration_headers(
             headers.append("#include <ATen/hip/EmptyTensor.h>")
         else:
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
+        headers.append("#include <ATen/NativeAotStubs.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.XPU:
@@ -269,6 +270,11 @@ class RegisterDispatchKey:
     # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
     skip_dispatcher_op_registration: bool
 
+    # Ops with AOT kernels at this dispatch key, keyed by base name. The wrapper
+    # consults the op's DispatchStub between op.meta() and op.impl(), and the stub
+    # signature matches the impl signature, so the same argument exprs serve both.
+    native_aot_manifests: dict = field(default_factory=dict, kw_only=True)
+
     @staticmethod
     def gen_device_check(
         type: DeviceCheckType, args: list[Argument], method_name: str
@@ -394,6 +400,7 @@ class RegisterDispatchKey:
             self.class_method_name,
             self.skip_dispatcher_op_registration,
             g,
+            native_aot_manifests=self.native_aot_manifests,
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
@@ -970,7 +977,19 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         context, structured.impl_arguments(self.g), method=False
                     )
                 )
-                sig_body.append(f"op.impl({impl_exprs});")
+                # Exact overload name wins over base name: "gt.Tensor" hooks only
+                # that overload, "topk" the unique structured group.
+                aot_manifest = self.native_aot_manifests.get(
+                    str(self.g.functional.func.name)
+                ) or self.native_aot_manifests.get(
+                    self.g.functional.func.name.name.base
+                )
+                if aot_manifest is not None:
+                    from torchgen.native_aot import gen_stub_consultation
+
+                    sig_body.append(gen_stub_consultation(aot_manifest, impl_exprs))
+                else:
+                    sig_body.append(f"op.impl({impl_exprs});")
 
             # Go over each output, and check if there is a proxy created for it.
             # If so, copy it over to the original output.
