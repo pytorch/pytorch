@@ -2295,6 +2295,26 @@ class SliceVariable(VariableTracker):
                 )
             step = step.call_method(tx, "item", [], {})
 
+        # Coerce non-constant user objects implementing __index__ (nb_index) to
+        # their integer value, mirroring CPython's PySlice_Unpack ->
+        # evaluate_slice_index. Without this a slice bound such as a class with an
+        # __index__ method reaches consumers that proxy the slice into the FX
+        # graph (e.g. tensor indexing) unconverted and fails. Constant bounds
+        # (ints, enum members, ...) already proxy fine and are left untouched.
+        if tx is not None:
+            from .tensor import SymNodeVariable
+
+            coerced = []
+            for bound in (start, stop, step):
+                if (
+                    not isinstance(bound, (ConstantVariable, SymNodeVariable))
+                    and not bound.is_python_constant()
+                    and pyindex_check(maybe_get_python_type(bound))
+                ):
+                    bound = pynumber_index(tx, bound)
+                coerced.append(bound)
+            start, stop, step = coerced
+
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)
