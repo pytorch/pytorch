@@ -392,6 +392,13 @@ class AOTCompiledFunction:
         *,
         guard_globals: dict[str, object] | None = None,
     ) -> "AOTCompiledFunction":
+        # f_globals and guard_globals have distinct contracts and must not be
+        # conflated: f_globals is MERGED over the scope reconstructed from the
+        # serialized bytecode (extra names the compiled fn may reference), so a
+        # name it omits still resolves to the baked-in value. guard_globals
+        # REPLACES the guard scope with no such fallback -- a name it lacks
+        # fails the guard rather than resolving to a serialized value -- so it
+        # is the live namespace global guards are re-rooted at on load.
         from torch._dynamo.package import SerializedCode
 
         f = io.BytesIO(data)
@@ -559,6 +566,21 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         backend_name = getattr(backend, "compiler_name", "unknown")
+        # The codegen probe runs the C++ toolchain; only pay for it when the
+        # artifact can hold native CPU code. torch.compile(options={...}) builds a
+        # _TorchCompileInductorWrapper that patches inductor config (e.g.
+        # cpp.simdlen) only for the duration of backend(); that scope has exited
+        # by now, so re-apply the wrapper's config while sampling. Otherwise the
+        # fingerprint records the ambient ISA rather than the one the kernels were
+        # actually tiled for, and the load-time gate rejects the matching host and
+        # accepts a wider one.
+        codegen_config_ctx: AbstractContextManager[Any] = nullcontext()
+        if isinstance(backend, torch._TorchCompileInductorWrapper):
+            codegen_config_ctx = torch._inductor.config.patch(backend.config)
+        with codegen_config_ctx:
+            system_info = SystemInfo.current(
+                cpu_codegen=(emits_native_code(backend_name) and "cpu" in device_types)
+            )
         artifacts = CompileArtifacts(
             signature=convert_frame._get_signature(fn),
             guard_manager=check_fn.guard_manager,
@@ -570,11 +592,7 @@ def aot_compile_fullgraph(
             source_info=source_info,
             device_type=device_type,
             backend_name=backend_name,
-            # The codegen probe runs the C++ toolchain; only pay for it when the
-            # artifact can hold native CPU code.
-            system_info=SystemInfo.current(
-                cpu_codegen=(emits_native_code(backend_name) and "cpu" in device_types)
-            ),
+            system_info=system_info,
             device_types=device_types,
         )
         aot_compiled_fn = AOTCompiledFunction(
@@ -613,7 +631,9 @@ class AOTCompiledModel:
             if not result._guard_check_enabled:
                 continue
             if result.guard_check(self.model, *args, **kwargs):
-                return result(self.model, *args, **kwargs)
+                # guard_check already passed; call fn directly so result()
+                # does not re-run the guard eval on this hot dispatch path.
+                return result.fn(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything,
         # but only after a real match has been sought.
         for result in self.compiled_results:
