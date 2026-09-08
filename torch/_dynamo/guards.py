@@ -5018,12 +5018,23 @@ def pickle_guards_state(
     # Anything dump raises means a guarded value cannot be serialized, which is
     # a bypass (an error under strict_precompile), never a compiler crash. A
     # PackageError raised inside reducer_override already carries its message.
-    # RecursionError is a cycle the reducers did not route through pickle state
-    # (see FunctionPicklerBase), which is a bug here and must stay loud.
     try:
         pickler.dump(state)
-    except (torch._dynamo.exc.PackageError, RecursionError):
+    except torch._dynamo.exc.PackageError:
         raise
+    except RecursionError as e:
+        # A guard rooted at an fqn-mismatched function is now traversed rather
+        # than dropped, so pickle walks whatever user data hangs off it -- and a
+        # deep (but finite, acyclic) object graph, or a pathological __reduce__
+        # that never memoizes, overflows the recursion limit here. That is a
+        # serialization limit, not a compiler bug: bypass it (or raise under
+        # strict_precompile) like any other unpicklable value, rather than
+        # hard-failing a program that compiled fine before. The path diagnostic
+        # is skipped deliberately -- it would recurse again off an already
+        # exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "guard state exceeded the recursion limit while pickling"
+        ) from e
     except Exception as e:
         # Deliberately broad, including AssertionError. It is tempting to let
         # that one through as "our bug", but it is not ours to claim:
