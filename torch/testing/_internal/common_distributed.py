@@ -979,26 +979,31 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
+        # Choose the rendezvous port once, in the parent, before spawning any
+        # rank; the ranks inherit it via os.environ. A fixed port collides when
+        # distributed tests run concurrently (sharded CI, or containers sharing
+        # a network namespace) and rank 0 dies with EADDRINUSE at init.
         self.processes = []
-        for rank in range(int(self.world_size)):
-            parent_conn, child_conn = torch.multiprocessing.Pipe()
-            process = proc(
-                target=self.__class__._run,
-                name="process " + str(rank),
-                args=(
-                    rank,
-                    self._current_test_name(),
-                    self.file_name,
-                    child_conn,
-                ),
-                kwargs={
-                    "fake_pg": getattr(self, "fake_pg", False),
-                },
-            )
-            process.start()
-            logger.info("Started process %s with pid %s", rank, process.pid)
-            self.pid_to_pipe[process.pid] = parent_conn
-            self.processes.append(process)
+        with patch.dict(os.environ, {"MASTER_PORT": str(find_free_port())}):
+            for rank in range(int(self.world_size)):
+                parent_conn, child_conn = torch.multiprocessing.Pipe()
+                process = proc(
+                    target=self.__class__._run,
+                    name="process " + str(rank),
+                    args=(
+                        rank,
+                        self._current_test_name(),
+                        self.file_name,
+                        child_conn,
+                    ),
+                    kwargs={
+                        "fake_pg": getattr(self, "fake_pg", False),
+                    },
+                )
+                process.start()
+                logger.info("Started process %s with pid %s", rank, process.pid)
+                self.pid_to_pipe[process.pid] = parent_conn
+                self.processes.append(process)
 
     def _spawn_processes(self) -> None:
         try:
@@ -1745,7 +1750,7 @@ def _dynamo_dist_per_rank_init(
         backend = c10d.get_default_backend_for_device(device_type)
 
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "6789"
+    os.environ.setdefault("MASTER_PORT", "6789")
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1785,7 +1790,7 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
                 os.environ,
                 {
                     "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
+                    "MASTER_PORT": str(find_free_port()),
                 },
             )
         )

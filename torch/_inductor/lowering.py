@@ -1808,6 +1808,31 @@ def as_strided(
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset),
     )
+    # aten.as_strided offsets are storage-relative, but a realized buffer holds only
+    # what was allocated for it: whatever else the original tensor aliased is simply
+    # not there, so reinterpreting past the buffer would codegen an unmasked
+    # out-of-bounds read. The bound is the allocation and not the layout, because
+    # inplace padding deliberately over-allocates and records that in
+    # buffer_to_padded_size, which is what codegen sizes the buffer by. InputBuffers
+    # are exempt -- their real storage may legitimately extend past the layout, and
+    # the adjustment above has already rebased the offset onto the incoming pointer.
+    needed = new_layout.storage_size()
+    buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
+    if buffer is not None and not isinstance(buffer, ir.InputBuffer):
+        allocated = V.graph.get_allocation_storage_size(buffer)
+        if V.graph.sizevars.statically_known_gt(needed, allocated):
+            raise NotImplementedError(
+                f"as_strided({size}, {stride}, {storage_offset}) requires {needed} "
+                f"elements but {buffer.get_name()} holds only {allocated}. This "
+                f"happens when a tensor aliasing a larger storage is realized as its own "
+                f"buffer; clone the base and re-derive the view instead."
+            )
+        # Symbolic extents are not always statically comparable: check_leq raises
+        # when the shape env can refute this, and otherwise defers a runtime
+        # assertion. A warm FX graph cache replays the artifact without re-running
+        # this lowering, so the deferred half does not survive a cache hit -- backed
+        # shapes fail loudly either way, an unbacked over-extent may not.
+        V.graph.sizevars.check_leq(needed, allocated)
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
@@ -5526,7 +5551,7 @@ def inplace_constant_pad_nd(
         return None
 
     npad = padding[1]
-    if npad == 0:
+    if not V.graph.sizevars.statically_known_gt(npad, 0):
         return None
 
     stride0 = strides[0]
@@ -8461,18 +8486,11 @@ def _use_triton_topk(x, k, dim) -> bool:
     ):
         return False
     k, width = int(k), int(shape[dim])
-    capability = torch.cuda.get_device_capability(device)
-    # On SM100+ the in-tree CuTeDSL aten::topk override (torch/_native/ops/topk)
-    # serves fp32 k=16 rows of 512 to 2048 lanes faster than this kernel.
-    native_wins = (
-        x.dtype == torch.float32 and k == 16 and width >= 512 and capability >= (10, 0)
-    )
     return (
         2 <= k <= _TRITON_TOPK_MAX_K
         and k <= width <= _TRITON_TOPK_MAX_WIDTH
         and k * next_power_of_2(width) <= _TRITON_TOPK_MAX_WORK
-        and capability >= (9, 0)
-        and not native_wins
+        and torch.cuda.get_device_capability(device) >= (9, 0)
         and V.graph.sizevars.optimization_hint(sympy_product(shape[:dim])) > 0
     )
 
