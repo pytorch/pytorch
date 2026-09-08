@@ -370,6 +370,106 @@ namespace {
             [](vec v) { return v.cos(); },
             test_case);
     }
+    TEST(TrigonometricFloat, SinPreservesSignedZero) {
+      constexpr int size = vfloat::size();
+      constexpr int zero_count = size > 1 ? size - 1 : size;
+      CACHE_ALIGN float input[size];
+      CACHE_ALIGN float output[size];
+
+      for (const auto i : c10::irange(size)) {
+        input[i] = i % 2 == 0 ? -0.0f : 0.0f;
+      }
+      if constexpr (size > 1) {
+        input[size - 1] = 0x1.be07aap+77f;
+      }
+
+      vfloat::loadu(input).sin().store(output);
+      for (const auto i : c10::irange(zero_count)) {
+        EXPECT_EQ(
+            c10::bit_cast<uint32_t>(input[i]),
+            c10::bit_cast<uint32_t>(output[i]));
+      }
+    }
+    TEST(TrigonometricFloat, SinLargeRangeAndSpecialValues) {
+      const float range_below = 0x1.fffffep+19f;
+      const float range_boundary = 0x1p20f;
+      const float range_above = 0x1.000002p+20f;
+      const float fast_case = 0x1.4b0d9cp+13f;
+      const float large_case = 0x1.be07aap+77f;
+      const float inf = std::numeric_limits<float>::infinity();
+      const float nan = std::numeric_limits<float>::quiet_NaN();
+      auto test_case =
+          TestingCase<vfloat>::getBuilder()
+              .addDomain(CheckWithinDomains<float>{
+                  {{-0x1p80f, -0x1p20f}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{0x1p20f, 0x1p80f}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{range_below, range_above}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{-range_above, -range_below}}, true, 4.0e-7f})
+              .addCustom({{range_below}, std::sin(range_below)})
+              .addCustom({{-range_below}, std::sin(-range_below)})
+              .addCustom({{range_boundary}, std::sin(range_boundary)})
+              .addCustom({{-range_boundary}, std::sin(-range_boundary)})
+              .addCustom({{range_above}, std::sin(range_above)})
+              .addCustom({{-range_above}, std::sin(-range_above)})
+              .addCustom({{fast_case}, std::sin(fast_case)})
+              .addCustom({{-fast_case}, std::sin(-fast_case)})
+              .addCustom({{large_case}, std::sin(large_case)})
+              .addCustom({{-large_case}, std::sin(-large_case)})
+              .addCustom({{inf}, nan})
+              .addCustom({{-inf}, nan})
+              .addCustom({{nan}, nan})
+              .setTrialCount(16000)
+              .setTestSeed(TestSeed());
+      test_unary<vfloat>(
+          NAME_INFO(sin_large_range_and_special_values),
+          RESOLVE_OVERLOAD(std::sin),
+          [](vfloat v) { return v.sin(); },
+          test_case);
+    }
+    TEST(TrigonometricFloat, CosLargeRangeAndSpecialValues) {
+      const float range_below = 0x1.fffffep+19f;
+      const float range_boundary = 0x1p20f;
+      const float range_above = 0x1.000002p+20f;
+      const float fast_case = 0x1.dea2f2p+19f;
+      const float large_case = 0x1.ff3afcp+53f;
+      const float inf = std::numeric_limits<float>::infinity();
+      const float nan = std::numeric_limits<float>::quiet_NaN();
+      auto test_case =
+          TestingCase<vfloat>::getBuilder()
+              .addDomain(CheckWithinDomains<float>{
+                  {{-0x1p80f, -0x1p20f}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{0x1p20f, 0x1p80f}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{range_below, range_above}}, true, 4.0e-7f})
+              .addDomain(CheckWithinDomains<float>{
+                  {{-range_above, -range_below}}, true, 4.0e-7f})
+              .addCustom({{range_below}, std::cos(range_below)})
+              .addCustom({{-range_below}, std::cos(-range_below)})
+              .addCustom({{range_boundary}, std::cos(range_boundary)})
+              .addCustom({{-range_boundary}, std::cos(-range_boundary)})
+              .addCustom({{range_above}, std::cos(range_above)})
+              .addCustom({{-range_above}, std::cos(-range_above)})
+              .addCustom({{fast_case}, std::cos(fast_case)})
+              .addCustom({{-fast_case}, std::cos(-fast_case)})
+              .addCustom({{large_case}, std::cos(large_case)})
+              .addCustom({{-large_case}, std::cos(-large_case)})
+              .addCustom({{0.0f}, 1.0f})
+              .addCustom({{-0.0f}, 1.0f})
+              .addCustom({{inf}, nan})
+              .addCustom({{-inf}, nan})
+              .addCustom({{nan}, nan})
+              .setTrialCount(16000)
+              .setTestSeed(TestSeed());
+      test_unary<vfloat>(
+          NAME_INFO(cos_large_range_and_special_values),
+          RESOLVE_OVERLOAD(std::cos),
+          [](vfloat v) { return v.cos(); },
+          test_case);
+    }
     TYPED_TEST(Trigonometric, Tan) {
         using vec = TypeParam;
         test_unary<vec>(

@@ -104,10 +104,102 @@ static inline svfloat32_t fexp_u20(svfloat32_t values) {
       y);
   return y;
 }
+
+// Fast-path sin and cos implementations adapted from AOR:
+// https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/sinf.c
+// https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/cosf.c
+struct TrigData {
+  float neg_pio2_1 = -0x1.921fb6p+0f;
+  float neg_pio2_2 = 0x1.777a5cp-25f;
+  float neg_pio2_3 = 0x1.ee59dap-50f;
+  float inv_pio2 = 0x1.45f306p-1f;
+  float shift;
+};
+
+inline constexpr TrigData sin_data{
+    .shift = 0x1.8p+23f,
+};
+
+inline constexpr TrigData cos_data{
+    .shift = 0x1.800002p+23f,
+};
+
+/* Vector version of sinf.
+   The maximum observed error is 1.44 + 0.5 ULP when |x| < 0x1p20.
+   _ZGVsMxv_sinf(0x1.4b0d9cp+13)
+    got 0x1.fc28cep-3
+   want 0x1.fc28d2p-3.  */
+static inline svfloat32_t sinf_fast_path(svfloat32_t x) {
+  const TrigData* d = &sin_data;
+  const svbool_t pg_all = svptrue_b32();
+
+  svfloat32_t negpio2_and_invpio2 = svld1rq(pg_all, &d->neg_pio2_1);
+
+  svfloat32_t q = svmla_lane(svdup_n_f32(d->shift), x, negpio2_and_invpio2, 3);
+  svfloat32_t n = svsub_x(pg_all, q, d->shift);
+
+  svfloat32_t r = x;
+  r = svmla_lane(r, n, negpio2_and_invpio2, 0);
+  r = svmla_lane(r, n, negpio2_and_invpio2, 1);
+  r = svmla_lane(r, n, negpio2_and_invpio2, 2);
+
+  svuint32_t q_u = svreinterpret_u32(q);
+  svfloat32_t f = svtssel(r, q_u);
+  svfloat32_t r2 = svtsmul(r, q_u);
+  svfloat32_t y = svdup_n_f32(0.0f);
+  y = svtmad(y, r2, 4);
+  y = svtmad(y, r2, 3);
+  y = svtmad(y, r2, 2);
+  y = svtmad(y, r2, 1);
+  y = svtmad(y, r2, 0);
+
+  svfloat32_t fast_result = svmul_x(pg_all, f, y);
+  svbool_t is_zero = svcmpeq(pg_all, x, svdup_n_f32(0.0f));
+  fast_result = svsel(is_zero, x, fast_result);
+  return fast_result;
+}
+
+/* Vector version of cosf.
+   The maximum observed error is 1.56 + 0.5 ULP if |x| < 0x1p20.
+   _ZGVsMxv_cosf (0x1.dea2f2p+19)
+    got 0x1.fffe7ap-6
+   want 0x1.fffe76p-6  */
+static inline svfloat32_t cosf_fast_path(svfloat32_t x) {
+  const TrigData* d = &cos_data;
+  const svbool_t pg_all = svptrue_b32();
+
+  /* Load some constants in quad-word chunks to minimise memory access.  */
+  svfloat32_t negpio2_and_invpio2 = svld1rq(pg_all, &d->neg_pio2_1);
+
+  /* n = rint(x/(pi/2)).  */
+  svfloat32_t q = svmla_lane(svdup_n_f32(d->shift), x, negpio2_and_invpio2, 3);
+  svfloat32_t n = svsub_x(pg_all, q, d->shift);
+
+  /* r = x - n*(pi/2)  (range reduction into -pi/4 .. pi/4).  */
+  svfloat32_t r = x;
+  r = svmla_lane(r, n, negpio2_and_invpio2, 0);
+  r = svmla_lane(r, n, negpio2_and_invpio2, 1);
+  r = svmla_lane(r, n, negpio2_and_invpio2, 2);
+
+  /* Final multiplicative factor: 1.0 or x depending on bit #0 of q.  */
+  svuint32_t q_u = svreinterpret_u32(q);
+  svfloat32_t f = svtssel(r, q_u);
+
+  /* cos(r) poly approx.  */
+  svfloat32_t r2 = svtsmul(r, q_u);
+  svfloat32_t y = svdup_n_f32(0.0f);
+  y = svtmad(y, r2, 4);
+  y = svtmad(y, r2, 3);
+  y = svtmad(y, r2, 2);
+  y = svtmad(y, r2, 1);
+  y = svtmad(y, r2, 0);
+
+  /* Apply factor.  */
+  return svmul_x(pg_all, f, y);
+}
 #endif
 
 #if defined(CPU_CAPABILITY_SVE256)
-
 template <>
 struct is_vec_specialized_for<float> : std::bool_constant<true> {};
 
@@ -438,9 +530,19 @@ class Vectorized<float> {
         Vectorized<float>(Sleef_log1pfx_u10sve(values)), map(std::log1p));
   }
   Vectorized<float> frac() const;
+  // Uses the AOR fast path when every lane satisfies |x| < 0x1p20f. AOR
+  // sinf.c reports a maximum observed error of 1.44 + 0.5 ULP in this range.
+  // If any lane is outside this range, the entire vector uses the existing
+  // SLEEF u10 implementation instead of duplicating AOR's separate large-range
+  // reduction. SLEEF documents an error bound of 1.0 ULP for this path.
   Vectorized<float> sin() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, values, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
+    }
+    return Vectorized<float>(sinf_fast_path(values));
   }
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
@@ -448,9 +550,19 @@ class Vectorized<float> {
   Vectorized<float> sinh() const {
     return map(std::sinh);
   }
+  // Uses the AOR fast path when every lane satisfies |x| < 0x1p20f. AOR
+  // cosf.c reports a maximum observed error of 1.56 + 0.5 ULP in this range.
+  // If any lane is outside this range, the entire vector uses the existing
+  // SLEEF u10 implementation instead of duplicating AOR's separate large-range
+  // reduction. SLEEF documents an error bound of 1.0 ULP for this path.
   Vectorized<float> cos() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, values, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
+    }
+    return Vectorized<float>(cosf_fast_path(values));
   }
   Vectorized<float> cosh() const {
     return map(std::cosh);
