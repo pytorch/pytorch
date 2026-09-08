@@ -2,7 +2,6 @@
 
 import copy
 import functools
-import os
 import sys
 from copy import deepcopy
 
@@ -25,12 +24,9 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -340,7 +336,9 @@ class ReplicateTest(MultiProcContinuousTest):
             self.assertEqual(losses[0], losses[1])
 
 
-instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    ReplicateTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
