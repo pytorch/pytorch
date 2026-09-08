@@ -529,7 +529,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     def _num_cache_entries(code):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
 
-    # ===== Basic isolation: independent caches per compile call =====
+    # ===== ExtraState cache lock: concurrency and lifetime =====
 
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
         """lookup() takes the ExtraState cache lock to snapshot the cache
@@ -1166,6 +1166,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # The parked reset left the entry in place until the lookup finished.
         self.assertEqual(seen, [1])
         package.uninstall()
+
+    # ===== Basic isolation: independent caches per compile call =====
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -2445,13 +2447,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return x.sin()
 
-        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        opt(torch.randn(3))
+        opt(torch.randn(4))  # a second static shape -> a second cache entry
         code = f.__code__
-        entry = _debug_get_cache_entry_list(code)[0]
+        e0, e1 = _debug_get_cache_entry_list(code)
 
         first, second = object(), object()
-        _load_precompile_entry(code, entry.guard_manager, entry.code, -1, first)
-        _load_precompile_entry(code, entry.guard_manager, entry.code, -1, second)
+        _load_precompile_entry(code, e0.guard_manager, e0.code, -1, first)
+        _load_precompile_entry(code, e1.guard_manager, e1.code, -1, second)
         try:
             self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
             # Pin the entries to region -1 specifically: the global count above
@@ -2464,8 +2468,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(RuntimeError, "non-None owner"):
                 _reset_precompile_entries_for_owner(code, -1, None)
             _reset_precompile_entries_for_owner(code, -1, first)
-            # The neighbour survives.
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # The neighbour survives -- and it is second's entry, not first's.
+            # Distinct guard managers are what make "which one survived"
+            # observable; a bare count passes even if the owner test is inverted.
+            survivors = _debug_get_precompile_entries(code)
+            self.assertEqual(len(survivors), 1)
+            self.assertIs(survivors[0].guard_manager, e1.guard_manager)
             # Removing an owner that holds nothing here is a no-op.
             _reset_precompile_entries_for_owner(code, -1, first)
             self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
@@ -2603,6 +2611,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(region9.recursive_action, FrameAction.SKIP)
             region7 = get_code_region_exec_strategy(code, 7)
             self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+            self.assertEqual(region7.recursive_action, FrameAction.DEFAULT)
             # A mixed global (only recursive_action is SKIP) inherits per field:
             # SKIP flows to recursive_action, RUN_ONLY does not flow to
             # cur_action. The SKIP/SKIP and RUN_ONLY/RUN_ONLY cases above are
@@ -2660,7 +2669,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         set_code_region_exec_strategy(
             code,
             region_b,
-            FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT),
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
         )
         self.assertEqual(
             get_code_region_exec_strategy(code, region_a).cur_action,
@@ -2681,8 +2690,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             FrameAction.DEFAULT,
         )
         self.assertEqual(
-            get_code_region_exec_strategy(code, region_b).cur_action,
-            FrameAction.RUN_ONLY,
+            get_code_region_exec_strategy(code, region_b).recursive_action,
+            FrameAction.SKIP,
         )
         # The neighbour region is untouched and still serves its entry.
         self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
