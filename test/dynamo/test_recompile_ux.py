@@ -925,7 +925,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # (drain_pending_invalidations / apply_pending_evictions both no-op
             # at depth != 0): the request must be parked, not applied. Nothing
             # is marked Invalidated until a later depth-zero holder drains it,
-            # which is what separates parking from an immediate apply.
+            # which is what separates parking from an immediate apply. The read
+            # below is also the regression probe for lookup holding cache_mutex
+            # across guard/backend evaluation: _get_cache_entries_for_region
+            # takes a BLOCKING cache_mutex, so its return here (rather than a
+            # hang to the deadline) can only happen because the parked lookup
+            # released cache_mutex before entering __eq__.
             self.assertTrue(
                 all(
                     e.trace_annotation != "Invalidated"
@@ -950,11 +955,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     def test_invalidate_targets_the_entry_by_guard_manager_identity(self):
         # invalidate_locked finds its victim by the identity of the live guard
-        # manager, never by a handed-in node/entry address: a std::list node is
-        # recycled, so an address check could invalidate a fresh entry that
-        # happens to sit at a reused address. With two live entries, a wrapper
-        # that owns no entry must invalidate nothing, and invalidating one entry
-        # must leave the other intact.
+        # manager, never by a handed-in node/entry address. (The motivation:
+        # a std::list node address can be recycled onto a fresh entry, so an
+        # address check could hit the wrong one -- this test does not recreate
+        # that recycling, it pins the identity semantics directly.) With two
+        # live entries, a wrapper that owns no entry must invalidate nothing,
+        # and invalidating one entry must leave the other intact.
         from torch._dynamo.guards import DeletedGuardManagerWrapper
 
         def f(x):
@@ -995,8 +1001,18 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     def test_region_clear_from_inside_a_lookup_is_parked(self):
         # _clear_cache_entries_for_region run by a backend __eq__ inside
         # lookup() used to splice and destroy the very list lookup was
-        # walking (a use-after-free that segfaulted); it now parks like
-        # reset_code does, and the next depth-zero holder applies it.
+        # walking (a use-after-free that segfaulted); the cache-entry splice
+        # now parks like reset_code does, and the next depth-zero holder
+        # applies it. Only that splice parks, though: the region's
+        # region_strategy_map / region_frame_state_map erasures run
+        # unconditionally (they touch no iterator the lookup holds), so the
+        # strategy readback below shows the strategy already gone while the
+        # cache entry is still parked -- pinning that asymmetry.
+        from torch._C._dynamo.eval_frame import (
+            get_code_region_exec_strategy,
+            set_code_region_exec_strategy,
+        )
+
         def f(x):
             return x.sin() + x.cos()
 
@@ -1031,7 +1047,19 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
         ctx._isolate_recompiles_id = region
 
+        # Seed a distinct region strategy so its unconditional erasure is
+        # observable: DEFAULT after the clear would be vacuous otherwise. Only
+        # recursive_action is set (cur_action stays DEFAULT) so the region is
+        # not RUN_ONLY/SKIP, which would suppress the recompile this test also
+        # asserts on.
+        set_code_region_exec_strategy(
+            code,
+            region,
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+        )
+
         seen = []
+        strategy_seen = []
 
         def clear():
             for _ in range(3):
@@ -1039,11 +1067,17 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # Recorded, not asserted: an exception raised inside a backend
             # __eq__ is swallowed by the lookup as a mismatch.
             seen.append(len(_get_cache_entries_for_region(code, region)))
+            strategy_seen.append(
+                get_code_region_exec_strategy(code, region).recursive_action
+            )
 
         hook.append(clear)
         self.assertEqual(ctx(f)(x), f(x))
-        # Still walked by the interrupted lookup, so nothing was gone yet.
+        # Still walked by the interrupted lookup, so the cache entry was not
+        # gone yet -- but the strategy erasure does not park, so it was already
+        # back to the inherited DEFAULT mid-lookup.
         self.assertEqual(seen, [1])
+        self.assertEqual(strategy_seen, [FrameAction.DEFAULT])
         # The next depth-zero lookup applies the parked clear before scanning
         # candidates, so the bucket is already empty: it misses with no guard to
         # evaluate and recompiles into the region.
