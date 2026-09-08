@@ -178,6 +178,8 @@ def _composite_initial_step(self):
 
 
 def install() -> None:
+    if getattr(lr_scheduler.LRScheduler, "_native_neo_fixes_installed", False):
+        return
     lr_scheduler.LRScheduler.__init__ = _lrscheduler_init
     lr_scheduler.ConstantLR.__init__ = _constant_lr_init
     lr_scheduler.LinearLR.__init__ = _linear_lr_init
@@ -189,3 +191,4 @@ def install() -> None:
     lr_scheduler.ReduceLROnPlateau._reduce_lr = _reduce_lr
     lr_scheduler.SequentialLR._initial_step = _composite_initial_step
     lr_scheduler.ChainedScheduler._initial_step = _composite_initial_step
+    lr_scheduler.LRScheduler._native_neo_fixes_installed = True
