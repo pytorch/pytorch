@@ -26,7 +26,7 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 param.grad = torch.zeros_like(param, dtype=grad_dtype)
             if "lr" in param_group:
                 param_group["lr"] = (
-                    torch.tensor(0.0, device=missing[0].device)
+                    torch.zeros_like(original_lr)
                     if isinstance(original_lr, torch.Tensor)
                     else 0.0
                 )
