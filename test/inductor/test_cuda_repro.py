@@ -2971,7 +2971,12 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(gathered.view(int_dtype), values.view(int_dtype))
         self.assertTrue((indices.sort(dim=-1).values.diff(dim=-1) > 0).all())
         self.assertEqual(actual[2:], expected[2:])
-        if expect_triton:
+        if expect_triton and k == 1:
+            # A single rank lowers to a fused max/min reduction instead.
+            FileCheck().check_not("torch.ops.aten.topk.default(").check_not(
+                "topk_with_index"
+            ).run(code)
+        elif expect_triton:
             FileCheck().check("topk_with_index").check_not(
                 "torch.ops.aten.topk.default("
             ).run(code)
@@ -3027,6 +3032,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             (4, 4096),
             (64, 1000),
             (2, 12000),
+            (1, 33),
+            (8, 16384),
         ],
     )
     @parametrize("largest", [True, False])
@@ -3106,7 +3113,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         [
             ("k_too_large", (128, 256), 129, -1),
             ("too_much_work", (256, 4096), 32, -1),
-            ("k_one", (128, 33), 1, -1),
             ("wide_input", (128, 16385), 4, -1),
             ("non_last_dim", (33, 128), 4, 0),
         ],
