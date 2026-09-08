@@ -159,6 +159,9 @@ Global Hooks For Module
     nn.CircularPad1d
     nn.CircularPad2d
     nn.CircularPad3d
+    nn.SymmetricPad1d
+    nn.SymmetricPad2d
+    nn.SymmetricPad3d
 ```
 
 ## Non-linear Activations (weighted sum, nonlinearity)

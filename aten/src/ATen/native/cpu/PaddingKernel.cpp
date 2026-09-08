@@ -95,6 +95,20 @@ struct ReplicationPad {
   }
 };
 
+struct SymmetricPad {
+  static int64_t index(int64_t j, int64_t size, int64_t pad, int64_t offset) {
+    int64_t i;
+    if (j < pad) {
+      i = pad * 2 - j - 1;
+    } else if (j >= pad && j < size + pad) {
+      i = j;
+    } else {
+      i = (size + pad - 1) * 2 - j + 1;
+    }
+    return i + offset;
+  }
+};
+
 template <typename scalar_t>
 inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
   using Vec = Vectorized<scalar_t>;
@@ -708,6 +722,126 @@ void replication_pad3d_backward_kernel_impl(
   }
 }
 
+// symmetric padding
+void symmetric_pad1d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qsymmetric_pad1d", [&] {
+      cpu_padding<scalar_t, SymmetricPad>(output, input, param);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, input.scalar_type(),
+        "symmetric_pad1d", [&] {
+      cpu_padding<scalar_t, SymmetricPad>(output, input, param);
+    });
+  }
+}
+
+void symmetric_pad1d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(),
+      "symmetric_pad1d_backward", [&] {
+    cpu_padding_backward<scalar_t, SymmetricPad>(grad_input, grad_output, param);
+  });
+}
+
+void symmetric_pad2d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qsymmetric_pad2d", [&] {
+      cpu_padding<scalar_t, SymmetricPad>(output, input, param);
+    });
+  } else {
+    switch (input.suggest_memory_format()) {
+      case at::MemoryFormat::Contiguous: {
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, input.scalar_type(),
+            "symmetric_pad2d", [&] {
+          cpu_padding<scalar_t, SymmetricPad>(output, input, param);
+        });
+        break;
+      }
+      case at::MemoryFormat::ChannelsLast: {
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, input.scalar_type(),
+            "symmetric_pad2d_channels_last", [&]{
+          cpu_padding_channels_last<scalar_t, SymmetricPad>(output, input, param);
+        });
+        break;
+      }
+      default:
+        TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    }
+  }
+}
+
+void symmetric_pad2d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  switch (grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(),
+          "symmetric_pad2d_backward", [&] {
+        cpu_padding_backward<scalar_t, SymmetricPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(),
+          "symmetric_pad2d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, SymmetricPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
+}
+
+void symmetric_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  switch (padding_memory_format_3d(input)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input.scalar_type(),
+          "symmetric_pad3d", [&] {
+        cpu_padding<scalar_t, SymmetricPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input.scalar_type(),
+          "symmetric_pad3d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, SymmetricPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
+}
+
+void symmetric_pad3d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  switch (padding_memory_format_3d(grad_output)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
+          "symmetric_pad3d_backward", [&] {
+        cpu_padding_backward<scalar_t, SymmetricPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
+          "symmetric_pad3d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, SymmetricPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
+}
+
 } // anonymous namespace
 
 // reflection padding
@@ -725,5 +859,13 @@ REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl)
 REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl)
 REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl)
 REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl)
+
+// symmetric padding
+REGISTER_DISPATCH(symmetric_pad1d_kernel, &symmetric_pad1d_kernel_impl)
+REGISTER_DISPATCH(symmetric_pad1d_backward_kernel, &symmetric_pad1d_backward_kernel_impl)
+REGISTER_DISPATCH(symmetric_pad2d_kernel, &symmetric_pad2d_kernel_impl)
+REGISTER_DISPATCH(symmetric_pad2d_backward_kernel, &symmetric_pad2d_backward_kernel_impl)
+REGISTER_DISPATCH(symmetric_pad3d_kernel, &symmetric_pad3d_kernel_impl)
+REGISTER_DISPATCH(symmetric_pad3d_backward_kernel, &symmetric_pad3d_backward_kernel_impl)
 
 } // at::native

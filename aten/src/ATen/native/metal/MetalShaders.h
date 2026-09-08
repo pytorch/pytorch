@@ -520,6 +520,49 @@ kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture
   }
 }
 
+constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
+constant bool out_is_tex = !out_is_arr;
+constant bool in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
+constant bool in_is_tex = !in_is_arr;
+kernel void symmetric_pad2d(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(in_is_arr)]],
+                             texture2d<half, access::read> in_tex[[texture(0),function_constant(in_is_tex)]],
+                             texture2d_array<half, access::write> out_arr[[texture(1), function_constant(out_is_arr)]],
+                             texture2d<half, access::write> out_tex[[texture(1), function_constant(out_is_tex)]],
+                             ushort3 gid[[thread_position_in_grid]]) {
+  const ushort H2 = ushort_arg_0;
+  const ushort W2 = ushort_arg_1;
+  if (gid.x >= W2 || gid.y >= H2) {
+      return;
+  }
+
+  const ushort pad_left = ushort_arg_8;
+  const ushort pad_right = ushort_arg_9;
+  const ushort pad_top = ushort_arg_10;
+  const ushort pad_bottom = ushort_arg_11;
+
+  const ushort2 out_size = ushort2(W2, H2);
+  const ushort xoff_pre  = 2*max(pad_left - gid.x, 0) - max(sign(pad_left - gid.x),0);
+  const ushort xoff_post = 2*max(gid.x - (out_size.x - 1 - pad_right), 0) - max(sign(gid.x - (out_size.x - 1 - pad_right)),0);
+  const ushort yoff_pre  = 2*max(pad_top - gid.y, 0) - max(sign(pad_top - gid.y),0);
+  const ushort yoff_post = 2*max(gid.y - (out_size.y - 1 - pad_bottom), 0) - max(sign(gid.y - (out_size.y - 1 - pad_bottom)),0);
+  ushort2 inpos = ushort2(
+      gid.x + xoff_pre - xoff_post - pad_left,
+      gid.y + yoff_pre - yoff_post - pad_top);
+
+  half4 intex;
+  if (in_is_arr) {
+    intex = in_arr.read(inpos, gid.z);
+  } else {
+    intex = in_tex.read(inpos);
+  }
+
+  if (out_is_arr) {
+      out_arr.write(intex, gid.xy, gid.z);
+  } else {
+      out_tex.write(intex, gid.xy);
+  }
+}
+
 constant bool reshape_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
 constant bool reshape_out_is_tex = !reshape_out_is_arr;
 constant bool reshape_in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
