@@ -183,7 +183,6 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
@@ -1852,11 +1851,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
-        if self._base_vt is not None:
-            return side_effects.is_modified(self._base_vt)
-        return False
 
     def reconstruct_pycode(self, codegen):
         if self.source:
