@@ -179,9 +179,16 @@ def dense_gemm_config_priority_keys() -> tuple[GemmConfigKey, ...]:
     return tuple(gemm_config_key(config) for config in configs)
 
 
-def candidate_gemm_configs_for_device(device: torch.device):
-    """Return all device-compatible QuACK configs before shape-specific ranking."""
-    device_capacity = torch.cuda.get_device_capability(device)[0]
+def candidate_gemm_configs_for_device(
+    device: torch.device,
+    device_capacity_override: tuple[int, int] | None = None,
+):
+    """Return device-compatible QuACK configs without requiring CUDA in workers."""
+    device_capacity = (
+        torch.cuda.get_device_capability(device)[0]
+        if device_capacity_override is None
+        else device_capacity_override[0]
+    )
     if device_capacity == 11:
         device_capacity = 10
     priority_map = {
