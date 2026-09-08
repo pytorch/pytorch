@@ -49,9 +49,9 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
     flattened = "state" not in state_dict
     if flattened:
         missing = []
-        for param in params:
+        for index, param in enumerate(params):
             saved_state = optim.state.get(param, {})
-            if not saved_state or not requires_grad[params.index(param)]:
+            if not saved_state or not requires_grad[index]:
                 continue
             fqns = info.fqn_param_mapping.get(param, ())
             for fqn in fqns:
