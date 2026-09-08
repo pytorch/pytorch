@@ -548,6 +548,108 @@ INSTANTIATE_APPLY_TRSM(L, false, float)
 INSTANTIATE_APPLY_TRSM(U, true, float2)
 INSTANTIATE_APPLY_TRSM(L, false, float2)
 
+// op(A)(i, j): row-major (n x n) A, optionally transposed and/or conjugated.
+template <typename T>
+inline T tri_opA(
+    device const T* Ab,
+    uint i,
+    uint j,
+    uint n,
+    bool transpose,
+    bool conj) {
+  T v = transpose ? Ab[j * n + i] : Ab[i * n + j];
+  return conj ? c10::metal::conj(v) : v;
+}
+
+// General batched triangular solve via forward/back substitution. Each thread
+// owns one independent RHS vector (a column for the left case, a row for the
+// right case) and solves it serially, so there are no cross-thread hazards.
+// Correctness-first: this is O(n^2) per RHS with no blocking. Complex support
+// comes from the c10::metal mul/div/conj helpers, which are no-ops for real T.
+template <typename T>
+kernel void triangular_solve(
+    device const T* A [[buffer(0)]],
+    device const T* B [[buffer(1)]],
+    device T* X [[buffer(2)]],
+    constant TriangularSolveParams& p [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const uint n = p.n;
+  const uint k = p.k;
+  if (tid >= p.nbatch * k) {
+    return;
+  }
+  const uint batch = tid / k;
+  const uint vec = tid % k;
+  device const T* Ab = A + batch * n * n;
+  const bool tr = p.transpose;
+  const bool cj = p.conj;
+  // A is upper before op; a transpose flips the effective triangle.
+  const bool eff_upper = (p.upper != 0) != (p.transpose != 0);
+
+  if (p.left) {
+    // op(A) x = b, x/b are columns of an (n x k) matrix; solve over rows.
+    device const T* b = B + batch * n * k + vec;
+    device T* x = X + batch * n * k + vec;
+    if (eff_upper) {
+      for (int i = int(n) - 1; i >= 0; --i) {
+        T sum = b[uint(i) * k];
+        for (uint j = uint(i) + 1; j < n; ++j) {
+          sum = sum -
+              c10::metal::mul(tri_opA(Ab, uint(i), j, n, tr, cj), x[j * k]);
+        }
+        x[uint(i) * k] = p.unit
+            ? sum
+            : c10::metal::div(sum, tri_opA(Ab, uint(i), uint(i), n, tr, cj));
+      }
+    } else {
+      for (uint i = 0; i < n; ++i) {
+        T sum = b[i * k];
+        for (uint j = 0; j < i; ++j) {
+          sum = sum - c10::metal::mul(tri_opA(Ab, i, j, n, tr, cj), x[j * k]);
+        }
+        x[i * k] =
+            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, i, i, n, tr, cj));
+      }
+    }
+  } else {
+    // x op(A) = b, x/b are rows of a (k x n) matrix; solve over columns.
+    device const T* b = B + batch * k * n + vec * n;
+    device T* x = X + batch * k * n + vec * n;
+    if (eff_upper) {
+      for (uint j = 0; j < n; ++j) {
+        T sum = b[j];
+        for (uint i = 0; i < j; ++i) {
+          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, j, n, tr, cj));
+        }
+        x[j] =
+            p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, j, j, n, tr, cj));
+      }
+    } else {
+      for (int j = int(n) - 1; j >= 0; --j) {
+        T sum = b[uint(j)];
+        for (uint i = uint(j) + 1; i < n; ++i) {
+          sum = sum - c10::metal::mul(x[i], tri_opA(Ab, i, uint(j), n, tr, cj));
+        }
+        x[uint(j)] = p.unit
+            ? sum
+            : c10::metal::div(sum, tri_opA(Ab, uint(j), uint(j), n, tr, cj));
+      }
+    }
+  }
+}
+
+#define INSTANTIATE_TRIANGULAR_SOLVE(DTYPE)                      \
+  template [[host_name("triangular_solve_" #DTYPE)]] kernel void \
+  triangular_solve<DTYPE>(                                       \
+      device const DTYPE* A [[buffer(0)]],                       \
+      device const DTYPE* B [[buffer(1)]],                       \
+      device DTYPE* X [[buffer(2)]],                             \
+      constant TriangularSolveParams& p [[buffer(3)]],           \
+      uint tid [[thread_position_in_grid]]);
+
+INSTANTIATE_TRIANGULAR_SOLVE(float);
+INSTANTIATE_TRIANGULAR_SOLVE(float2);
+
 template <bool upper>
 inline void syrk_simdgroup_tile(
     device float* A,
@@ -3425,6 +3527,10 @@ kernel void svd_jacobi(
   if (params.compute_uv && simd_group == 0) {
     device T* out = params.transposed ? V_b : U_b;
     const uint32_t ld = params.transposed ? params.v_ld : params.u_ld;
+    // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
+    // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
+    const uint32_t col_off = (params.transposed == 0u) ? ld : 1u;
+    const uint32_t elem_step = (params.transposed == 0u) ? 1u : ld;
     // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
     // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
     // gets completed. An absolute eps would keep noise-amplified columns.
@@ -3448,14 +3554,14 @@ kernel void svd_jacobi(
         ++cand;
         for (uint32_t pass = 0; pass < 2; ++pass) {
           for (uint32_t l = 0; l < j; ++l) {
-            device T* cl = out + l * ld;
+            device T* cl = out + l * col_off;
             T partial = T(0);
             for (uint32_t i = simd_lane; i < m; i += kSimd) {
-              partial += svd_conjmul(cl[i], col[i]);
+              partial += svd_conjmul(cl[i * elem_step], col[i]);
             }
             T dot = svd_simd_sum(partial);
             for (uint32_t i = simd_lane; i < m; i += kSimd) {
-              col[i] -= svd_mul(dot, cl[i]);
+              col[i] -= svd_mul(dot, cl[i * elem_step]);
             }
           }
         }
@@ -3466,9 +3572,9 @@ kernel void svd_jacobi(
         const float nrm_sq = c10::metal::simd_sum(partial_n);
         if (nrm_sq > kIndepThreshSq) {
           const float inv = 1.0f / precise::sqrt(nrm_sq);
-          device T* cj = out + j * ld;
+          device T* cj = out + j * col_off;
           for (uint32_t i = simd_lane; i < m; i += kSimd) {
-            cj[i] = col[i] * inv;
+            cj[i * elem_step] = col[i] * inv;
           }
           break;
         }
