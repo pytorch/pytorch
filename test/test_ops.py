@@ -143,7 +143,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("diag"),
     xfail("geqrf"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
