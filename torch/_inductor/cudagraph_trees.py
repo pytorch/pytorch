@@ -2449,6 +2449,22 @@ class CUDAGraphTreeManager:
             ):
                 pass
 
+            # Priming the pool with one large allocation reserves a single
+            # contiguous segment for later recordings to carve up, rather than
+            # growing the pool a segment at a time, which reduces fragmentation.
+            # The block is freed immediately but stays cached in the pool.
+            # NB: must run after the empty capture above, which keeps the pool's
+            # use count positive for the manager's lifetime.
+            prime_gb = config.triton.cudagraph_initial_mempool_allocation_gb
+            if prime_gb:
+                with _use_cuda_memory_pool_manager(
+                    device_index, self.cuda_graphs_thread_pool, self.stream
+                ):
+                    nbytes = int(prime_gb * (1 << 30))
+                    torch.empty(
+                        nbytes, dtype=torch.uint8, device=f"cuda:{device_index}"
+                    )
+
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
 
