@@ -2444,22 +2444,13 @@ def gen_source_files(
             dispatch_key != DispatchKey.CompositeImplicitAutogradNestedTensor
         )
 
-        native_aot_manifests_for_key = {
-            op: m
-            for (key, op), m in native_aot_manifests.items()
-            if key == dispatch_key
-        }
-
         register_dispatch_key_base_env = {
             "extra_cuda_headers": extra_cuda_headers
             if is_cuda_dispatch_key(dispatch_key)
             else "",
             "external_backend_headers": "",
             "dispatch_headers": dest.gen_registration_headers(
-                backend_index,
-                per_operator_headers,
-                rocm,
-                has_native_aot=bool(native_aot_manifests_for_key),
+                backend_index, per_operator_headers, rocm
             ),
             # ops_headers *could* be sharded, but doesn't seem necessary?
             "ops_headers": operator_headers(),
@@ -2468,6 +2459,12 @@ def gen_source_files(
                 if gen_dispatch_helpers
                 else []
             ),
+        }
+
+        native_aot_manifests_for_key = {
+            op: m
+            for (key, op), m in native_aot_manifests.items()
+            if key == dispatch_key
         }
 
         def register_dispatch_key_env_callable(
