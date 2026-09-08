@@ -1,18 +1,10 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Structural conformance for the reduction trait protocol -- what these guard is the protocol
-# itself: a trait that implements only part of it folds the wrong thing silently rather than
-# failing. With this in place the kernels can be tested per fold ORDER instead of per trait x order.
-#
-# SHAPE, with one numeric exception. The protocol's LAW -- combine(leaf(a), leaf(b)) ==
-# reduce(reduce(init(), a), b), whose violation is what made norm fold raw values and return a
-# plausible wrong number -- cannot be checked here: it takes two real fold shapes to compare, and
-# only one exists at this commit. It is pinned once the second lands, by the inner-tree order's
-# test_tree_fold_matches_the_serial_fold_for_every_value_trait. The exception is the var/std
-# divisor clamp: the trait methods are @cute.jit and reject host-side values ("only float is
-# supported"), but a one-thread probe kernel needs no reduction kernel, so that claim is asserted
-# here rather than two commits later.
-#
+# Structural conformance for the reduction trait protocol: a trait implementing only part of
+# it folds the wrong thing silently rather than failing. SHAPE only, with one exception -- the
+# protocol's LAW needs two real fold shapes to compare and is pinned by the inner-tree order's
+# suite; the var/std divisor clamp is asserted here, since a one-thread probe needs no
+# reduction kernel and this is where the clamp is defined.
 import inspect
 import sys
 import unittest
@@ -22,9 +14,9 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
-# The traits module imports cutlass at module scope, so the guard has to precede the import rather
-# than decorate the class: on an image without the runtime, importing at collection time fails the
-# whole file instead of skipping it. sys.exit keeps a direct `python test_traits.py` a success.
+# The module imports cutlass at module scope, so the guard must precede the import rather than
+# decorate the class -- otherwise an image without the runtime fails collection for the whole
+# file instead of skipping. sys.exit keeps a direct run a success.
 if not TEST_CUTEDSL:
     sys.stderr.write("CuTeDSL not available\n")
     if __name__ == "__main__":
@@ -56,11 +48,9 @@ class TestTraitProtocol(TestCase):
         return trait(**kwargs)
 
     def test_every_trait_implements_the_protocol(self):
-        # THREE value methods, and the split between them is what lets any trait ride any fold
-        # order: leaf turns one element into an accumulator, combine merges two accumulators,
-        # reduce is the serial update. A tree fold calls leaf then combine, so a trait carrying
-        # its per-element transform (|x|**p for a norm, a 0/1 flag for all/any) only in reduce
-        # would fold RAW values -- a wrong answer, not an error.
+        # THREE value methods, and the split is what lets any trait ride any fold order. A tree calls
+        # leaf then combine, so a trait carrying its per-element transform only in `reduce` folds RAW
+        # values -- a wrong answer, not an error.
         for name, trait in sorted(self._traits().items()):
             with self.subTest(trait=name):
                 for method in ("init", "leaf", "combine", "reduce", "project"):
@@ -92,10 +82,9 @@ class TestTraitProtocol(TestCase):
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
     def test_welford_divisor_clamps_at_zero(self):
-        # `correction >= n` must divide by ZERO -- +inf, which is what aten returns -- never by a
-        # negative number, which returned a NEGATIVE variance. _welford_denom is @cute.jit and so
-        # rejects host-side values, but it needs no reduction kernel either: a one-thread probe
-        # evaluates it directly, which keeps the claim asserted where the clamp is defined.
+        # `correction >= n` must divide by ZERO -- the +inf ATen returns -- never by a negative
+        # number, which returned a NEGATIVE variance. _welford_denom is @cute.jit and rejects
+        # host-side values, but needs no reduction kernel: a one-thread probe evaluates it directly.
         @cute.kernel
         def probe(dst: cute.Tensor, nf: cutlass.Float32, correction: cutlass.Constexpr):
             tidx, _, _ = cute.arch.thread_idx()

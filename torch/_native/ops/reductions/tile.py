@@ -1,19 +1,12 @@
 # The shared reduction DATAPATH: where a row's load width, alignment and thread mapping are
-# derived, plus the folds that walk them.
+# derived, plus the folds that walk them. It exists because the load stage is where the bugs
+# were, twice, in two hand-rolled copies -- one lost 3.7x to un-widened reads and another 3x to
+# a missing assumed_align, both invisible in the source.
 #
-# Why this module exists. The load stage is where the bugs were, twice, in two hand-rolled
-# copies: one kernel lost 3.7x to per-element (un-widened) reads, and another then lost 3x to
-# a missing `assumed_align` -- both invisible in the source. One load stage means one place to
-# get width and alignment right, and one place to record WHY (see vec_size / align_bytes).
-#
-# A tile is described by TileMap: `vec` elements per load, `tpr` threads per row. `tpr == 1`
-# is the degenerate multirow shape -- one thread owns a whole row and there is no lane merge
-# at all -- and any tpr > 1 shape finishes by folding across its lanes (merge_lanes).
-#
-# The folds here are ROLLED: the trip count is a RUNTIME value, so ONE compiled kernel serves
-# every row length in a vec class. That is a requirement, not a preference -- a static
-# per-thread loop makes compile time scale with the shape (see MAX_UNROLL) and the kernel
-# count scale with the number of distinct shapes seen.
+# A tile is `vec` elements per load and `tpr` threads per row; tpr == 1 is the degenerate shape
+# with no lane merge at all. The folds are ROLLED, which is a requirement rather than a
+# preference: a static per-thread loop makes compile time scale with the shape and the kernel
+# count with the number of distinct shapes seen.
 
 import math
 
@@ -24,31 +17,28 @@ from cutlass import const_expr, Int32, Int64
 
 WARP = 32
 
-# SAFETY bound on the per-thread unroll (vec * loads), enforced in TileMap: a static trip count is
-# emitted at trace time, so compile time scales with it, superlinearly past ~1300 ops.
-#   unrolled ops   12    80   320   640  1280  2560
-#   compile (s)  0.14  0.17  0.35  0.60  1.17  4.54
+# SAFETY bound on the per-thread unroll, enforced in TileMap: a static trip count is emitted
+# at trace time, so compile time scales with it and turns superlinear past ~1300 ops.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged tail
-    in a chunk, and every chunk base and row start carries the base pointer's alignment.
+    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged
+    tail in a chunk, and every chunk base carries the base pointer's alignment.
     """
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap. Not optional: `from_dlpack` otherwise assumes the
+    """Alignment to DECLARE on the input wrap. Not optional: from_dlpack otherwise assumes the
     element width and silently emits narrow loads, measured 3x on the multirow shape.
     """
     return vec_size(N, itemsize) * itemsize
 
 
 class TileMap:
-    """How one row is spread over threads and loads.
-
-    tpr == 1 -> one thread owns a whole row, and there is no lane merge.
+    """How one row is spread over threads and loads. tpr == 1 means one thread owns a whole row,
+    with no lane merge.
     """
 
     def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
@@ -65,9 +55,8 @@ class TileMap:
         self.vec = vec_size(N, itemsize)
         self.tpr = tpr
         self.loads = loads
-        # A wide load needs vec to divide N, which is what makes every row start (row stride
-        # N*itemsize) and every chunk base carry the base pointer's alignment. When it does
-        # not, the load falls back to per-element reads.
+        # A wide load needs vec to divide N, which is what makes every row start and chunk base carry
+        # the base pointer's alignment. Otherwise the load falls back to per-element reads.
         self.wide_ok = N % self.vec == 0
 
     @property
@@ -81,10 +70,10 @@ class TileMap:
 
 @cute.jit
 def merge_lanes(trait, acc, tm: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Reduce across the `tpr` lanes covering one row. A no-op at tpr == 1.
+    """Reduce across the `tpr` lanes covering one row; a no-op at tpr == 1.
 
-    `asc` selects the ASCENDING butterfly over the descending one. The folds below hand
-    columns out in that direction, and an index trait's ties depend on which it is.
+    `asc` selects the ASCENDING butterfly, which the folds' column order depends on and an
+    index trait's ties depend on.
     """
     if const_expr(tm.tpr == 1):
         return acc
@@ -109,9 +98,8 @@ def fold_row_rolled(
 ):
     """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
 
-    Each wave covers tpr*vec contiguous elements and this thread takes chunk (c*tpr + lane). A wave
-    past the row's last chunk CLAMPS the index and passes valid=False rather than branching, which
-    the DSL rejects for a dynamic bind.
+    A wave past the row's last chunk CLAMPS its index and passes valid=False rather than
+    branching, which the DSL rejects for a dynamic bind.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
