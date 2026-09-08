@@ -55,7 +55,6 @@ __all__ = [
     "Adafactor",
     "Adadelta",
     "Adagrad",
-    "Adagrad",
     "Adam",
     "Adamax",
     "AdamW",
