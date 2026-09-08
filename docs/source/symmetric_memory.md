@@ -408,6 +408,47 @@ device kernel names should resemble `ncclSymkDevKernel_*`.
 For example, `ncclSymkDevKernel_AllReduce_AGxLLMC_R_sum_bf16`, as opposed to
 `ncclDevKernel_*` for the generic NCCL path.
 
+### CFT logical-endpoint handles
+
+:::{note}
+Requires NCCL 2.31.2+, a Blackwell-class GPU (sm_100 or newer), and a driver
+reporting CUDA 13.3 or later (an r610-or-newer driver). NCCL itself must also
+be built with CUDA 13.3+.
+:::
+
+CFT (Compute Fabric Transport) exposes a peer's window-registered memory as a
+*logical endpoint*: an opaque `(le_id, le_offset)` pair that a custom device
+kernel can hand to the `ncclCft` put/get/reduce device API to reach that
+peer's copy of a symmetric buffer — without constructing a `ncclDevComm`.
+When the symmetric-memory backend is `NCCL`, the rendezvous handle exposes
+the coordinates:
+
+- `hdl.get_peer_cft_handle(peer)` returns the `(le_id, le_offset)` pair
+  addressing `peer`'s copy of the buffer.
+- `hdl.get_multimem_cft_handle()` returns the multicast endpoint (requires
+  NVLS; the first call may be collective, so all ranks must reach it).
+
+Handles are only meaningful for the group the tensor was rendezvoused with —
+each group owns a separate set of logical endpoints over the same allocation.
+
+Two knobs control availability:
+
+- `host_cft_mode` on the communicator config
+  (`ProcessGroupNCCL.Options().config.host_cft_mode`) decides whether the
+  endpoints are created and what happens when the stack cannot support them:
+  `1` (enable — fail communicator init if unsupported), `2` (disable), `3`
+  (fallback — create them if possible, silently proceed without otherwise).
+  The default is **disable**: host-side CFT is opt-in per communicator, since
+  endpoints are a limited per-device resource. The mode must be identical on
+  every rank and must be set before the communicator is created — the
+  endpoints are made during window registration.
+- The `NCCL_CFT_ENABLE` environment variable (default `1`) is NCCL's global
+  kill switch; `NCCL_CFT_ENABLE=0` makes NCCL report no CFT support
+  regardless of `host_cft_mode`.
+
+Under `host_cft_mode=3` (fallback), an unsupported GPU, driver, or NCCL build
+is not an error at init — the handle queries simply raise `RuntimeError`.
+
 (copy-engine-collectives)=
 
 ## Copy Engine Collectives
