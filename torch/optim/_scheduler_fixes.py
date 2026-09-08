@@ -23,6 +23,7 @@ def _linear_lr_init(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total
 
 def _composite_initial_step(self):
     self._step_count = 0
+    self._last_lr = lr_scheduler._param_groups_val_list(self.optimizer, "lr")
 
 
 def install() -> None:
