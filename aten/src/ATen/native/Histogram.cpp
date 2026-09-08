@@ -31,7 +31,7 @@
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
 
-/* Implements a numpy-like histogramdd function running on cpu
+/* Implements a numpy-like histogramdd function
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
  *
  * See the docstr for torch.histogramdd in torch/functional.py for further explanation.
