@@ -2180,7 +2180,12 @@ def get_input_idxs_to_check(
     This function runs at compile time, and generates a list of indices for which we
     might need to do a copy to preserve alignment requirements.
     """
-    ids_to_check = []
+    ids_to_check: list[int] = []
+
+    # Strict mode: the generated wrapper asserts that inputs assumed aligned
+    # actually are, instead of the runtime realigning them with a clone.
+    if config.alignment_asserts_inputs:
+        return ids_to_check
 
     for i, input in enumerate(inputs):
         if not isinstance(input, torch.Tensor):
