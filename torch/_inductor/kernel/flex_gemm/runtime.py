@@ -515,9 +515,9 @@ def gemm_epimod(
     ``config`` pins the exact GemmConfig Inductor selected; ``None`` takes
     QuACK's untuned default for the remaining ``config_constraints``.
     ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
-    ``a`` is ``[total_m, K]``, ``b`` is per-group ``[E, K, N]``, and captured
-    row/col vectors are passed rank-1 (a row is shared by every group, a column
-    is the concatenated ``[total_m]`` vector QuACK offsets per group).
+    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
+    row/col vectors are always passed rank-1; QuACK shares a row across groups
+    and offsets a ``[total_m]`` column per group.
     """
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
@@ -560,10 +560,8 @@ def gemm_epimod(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        if cu_seqlens_m is not None and kind in ("row", "col"):
+        if kind in ("row", "col"):
             arg = arg.squeeze(0 if kind == "row" else -1)
-        elif kind == "col":
-            arg = arg.squeeze(-1).unsqueeze(0)
         operands[f"operand{index}"] = arg
     if indexed_out is not None:
         operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_indices
