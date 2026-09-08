@@ -10,7 +10,11 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
@@ -23,6 +27,8 @@ if gpu := torch.accelerator.current_accelerator(check_available=True):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGpuTraceDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._C._activate_gpu_trace()
