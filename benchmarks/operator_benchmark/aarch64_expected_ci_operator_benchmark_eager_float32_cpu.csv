@@ -315,7 +315,7 @@ PyTorch,GroupNormBenchmark,"GroupNormBenchmark_dims(32,8,16)_num_groups4",short,
 PyTorch,GroupNormBenchmark,"GroupNormBenchmark_dims(32,8,56,56)_num_groups2",short,False,81.894281,0.0,49.859445
 PyTorch,GroupNormBenchmark,"GroupNormBenchmark_dims(32,8,56,56)_num_groups4",short,False,78.881539,0.0,49.304043
 PyTorch,Hardsigmoid,Hardsigmoid_N1_C3_H256_W256_cpu,short,False,59.161071,0.0,14.721078
-PyTorch,Hardsigmoid,Hardsigmoid_N4_C3_H256_W256_cpu,short,False,111.735707,0.0,56.306584
+PyTorch,Hardsigmoid,Hardsigmoid_N4_C3_H256_W256_cpu,short,False,72.948845,0.0,56.306584
 PyTorch,Hardswish,Hardswish_N1_C3_H256_W256_cpu,short,False,59.945293,0.0,14.655303
 PyTorch,Hardswish,Hardswish_N4_C3_H256_W256_cpu,short,False,111.874329,0.0,56.236815
 PyTorch,index_add_,index_add__M8_N32_K1_dim0_cpu_dtypetorch.float32,short,False,302.644087,0.0,0.003979
@@ -335,7 +335,7 @@ PyTorch,interpolate,"interpolate_input_size(1,3,60,40)_output_size(24,24)_channe
 PyTorch,interpolate,"interpolate_input_size(1,3,60,40)_output_size(24,24)_channels_lastFalse_modenearest",short,False,16.254438,0.0,3.543648
 PyTorch,interpolate,"interpolate_input_size(1,3,60,40)_output_size(24,24)_channels_lastFalse_modelinear",short,False,19.355253,0.0,2.975936
 PyTorch,interpolate,"interpolate_input_size(1,3,60,40)_output_size(24,24)_channels_lastFalse_modebicubic",short,False,28.466433,0.0,2.023436
-PyTorch,interpolate,"interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastTrue_modenearest",short,False,169.476919,0.0,33.986929
+PyTorch,interpolate,"interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastTrue_modenearest",short,False,111.874916,0.0,33.986929
 PyTorch,interpolate,"interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastTrue_modelinear",short,False,246.768795,0.0,23.341687
 PyTorch,interpolate,"interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastTrue_modebicubic",short,False,541.178029,0.0,10.643448
 PyTorch,interpolate,"interpolate_input_size(1,3,600,400)_output_size(240,240)_channels_lastFalse_modenearest",short,False,71.072707,0.0,45.972673
@@ -443,7 +443,7 @@ PyTorch,LogSoftmax,LogSoftmax_N4_C3_H256_W256_cpu,short,False,340.701675,0.0,18.
 PyTorch,split,split_M8_N8_parts2_cpu,short,False,3.183157,0.0,0.160847
 PyTorch,split,split_M256_N512_parts2_cpu,short,False,3.207493,0.0,326.914542
 PyTorch,split,split_M512_N512_parts2_cpu,short,False,3.167241,0.0,662.138383
-PyTorch,stack,"stack_sizes(1,1,1)_N2_cpu_dim0",short,False,4.43196,0.0,0.00361
+PyTorch,stack,"stack_sizes(1,1,1)_N2_cpu_dim0",short,False,1.707927,0.0,0.00361
 PyTorch,stack,"stack_sizes(1,1,1)_N2_cpu_dim1",short,False,4.940935,0.0,0.003238
 PyTorch,stack,"stack_sizes(1,1,1)_N2_cpu_dim2",short,False,5.012393,0.0,0.003192
 PyTorch,stack,"stack_sizes(1,1,1)_N2_cpu_dim3",short,False,4.698735,0.0,0.003405

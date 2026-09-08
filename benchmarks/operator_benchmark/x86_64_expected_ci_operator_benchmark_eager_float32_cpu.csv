@@ -917,7 +917,7 @@ PyTorch,qcat,qcat_M512_N512_K2_L1_dim1_contignone_dtypetorch.quint8,short,False,
 PyTorch,qcat,qcat_M512_N512_K2_L1_dim1_contignone_dtypetorch.qint8,short,False,624.031928,0.0,
 PyTorch,qcat,qcat_M512_N512_K2_L1_dim1_contignone_dtypetorch.qint32,short,False,903.843891,0.0,
 PyTorch,eq,eq_N8_dtypetorch.quint8_contigFalse_other_scalarFalse_out_variantFalse,short,False,16.652973,0.0,0.00765
-PyTorch,eq,eq_N8_dtypetorch.quint8_contigFalse_other_scalarFalse_out_variantTrue,short,False,31.457977,0.0,0.006103
+PyTorch,eq,eq_N8_dtypetorch.quint8_contigFalse_other_scalarFalse_out_variantTrue,short,False,20.866917,0.0,0.006103
 PyTorch,eq,eq_N8_dtypetorch.quint8_contigFalse_other_scalarTrue_out_variantFalse,short,False,17.247485,0.0,0.011132
 PyTorch,eq,eq_N8_dtypetorch.quint8_contigFalse_other_scalarTrue_out_variantTrue,short,False,16.91344,0.0,0.011352
 PyTorch,eq,eq_N8_dtypetorch.quint8_contigTrue_other_scalarFalse_out_variantFalse,short,False,16.124148,0.0,0.011908
@@ -1442,7 +1442,7 @@ PyTorch,rsqrt,rsqrt_M512_N512_cpu,short,False,17.513844,0.0,72.374227
 PyTorch,rsqrt_,rsqrt__M512_N512_cpu,short,False,16.734491,0.0,67.729692
 PyTorch,sigmoid,sigmoid_M512_N512_cpu,short,False,20.994658,0.0,61.370427
 PyTorch,sigmoid_,sigmoid__M512_N512_cpu,short,False,24.092592,0.0,87.045513
-PyTorch,sign,sign_M512_N512_cpu,short,False,17.544426,0.0,119.533809
+PyTorch,sign,sign_M512_N512_cpu,short,False,11.589542,0.0,119.533809
 PyTorch,sgn,sgn_M512_N512_cpu,short,False,15.168795,0.0,138.254358
 PyTorch,sin,sin_M512_N512_cpu,short,False,34.29397,0.0,61.152208
 PyTorch,sin_,sin__M512_N512_cpu,short,False,32.164874,0.0,65.200069
