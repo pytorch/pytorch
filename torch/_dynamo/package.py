@@ -901,7 +901,7 @@ _CpuCodegenTarget = tuple[str, str, int, tuple[str, ...], int | None, str | None
 
 
 def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
-    """(machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march): what inductor bakes into CPU code.
+    """(machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march): the CPU codegen context.
 
     ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
     only when the artifact can hold native CPU code. None means the host has no
@@ -942,11 +942,14 @@ def _cpu_codegen_target_problem(
     The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
     codegen, and the loading host compiles that source with the flags of its
     own pick_vec_isa(). The gate is the *resolved* target -- (machine, vec_isa,
-    vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds the
-    raw config knobs (simdlen, march, ATEN_CPU_CAPABILITY) into the ISA it
-    returns: a simdlen that caps the width picks a narrower ISA, so the width
-    and macro already reflect it. Comparing the resolved triple is therefore
-    complete, and comparing the raw simdlen/march knobs on top of it is not just
+    vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds
+    cpp.simdlen and ATEN_CPU_CAPABILITY into the ISA it returns: a simdlen that
+    caps the width picks a narrower ISA, so the width and macro already reflect
+    it. march does not gate for a different reason: the resolved ISA appends its
+    own arch flags after cpp.march on the compile line, and the later flag wins,
+    so kernels built for a given resolved ISA rebuild identically here whatever
+    cpp.march is set to. Comparing the resolved triple is therefore complete,
+    and comparing the raw simdlen/march knobs on top of it is not just
     redundant, it is wrong -- it rejects an artifact whose kernels this host can
     reproduce merely because the knob that got there differs (an artifact built
     under cpp.simdlen=256 is loadable on any host that resolves to the same
