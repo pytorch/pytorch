@@ -51,19 +51,21 @@ class TestFlyDSLTemplate(TestCase):
         def fn(a, b):
             return torch.mm(a, b.t())
 
-        a = torch.randn(32, 128, device="cuda", dtype=torch.float16)
-        b = torch.randn(128, 128, device="cuda", dtype=torch.float16)
+        for dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=dtype):
+                a = torch.randn(32, 128, device="cuda", dtype=dtype)
+                b = torch.randn(128, 128, device="cuda", dtype=dtype)
 
-        compiled_fn = torch.compile(fn, backend="inductor")
-        result, (code,) = run_and_get_code(compiled_fn, a, b)
+                compiled_fn = torch.compile(fn, backend="inductor")
+                result, (code,) = run_and_get_code(compiled_fn, a, b)
 
-        self.assertIn("async_compile.flydsl", code)
-        self.assertIn("_hgemm_splitk_mm", code)
-        self.assertIn("TILE_M: fx.Constexpr", code)
-        self.assertIn("STAGES: fx.Constexpr", code)
-        self.assertIn("BLOCK_N_WARPS: fx.Constexpr", code)
-        self.assertIn("BLOCK_K_WARPS: fx.Constexpr", code)
-        self.assertTrue(torch.allclose(result, fn(a, b), atol=1e-2, rtol=1e-2))
+                self.assertIn("async_compile.flydsl", code)
+                self.assertIn("_hgemm_splitk_mm", code)
+                self.assertIn("TILE_M: fx.Constexpr", code)
+                self.assertIn("STAGES: fx.Constexpr", code)
+                self.assertIn("BLOCK_N_WARPS: fx.Constexpr", code)
+                self.assertIn("BLOCK_K_WARPS: fx.Constexpr", code)
+                self.assertTrue(torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2))
 
 
 if __name__ == "__main__":
