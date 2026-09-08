@@ -47,9 +47,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
     def kernel_header(self) -> str:
         source_codes = """
-        #include <c10/cuda/CUDAGuard.h>
-        #include <c10/cuda/CUDAStream.h>
-        #include <ATen/cuda/EmptyTensor.h>
+        #include <c10/hip/HIPGuard.h>
+        #include <c10/hip/HIPStream.h>
+        #include <ATen/hip/EmptyTensor.h>
         """
         return source_codes
 
@@ -61,66 +61,66 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
-                CUresult code = EXPR;                          \\
+                hipError_t code = EXPR;                          \\
                 const char *msg;                               \\
-                CUresult code_get_error = cuGetErrorString(code, &msg); \\
-                if (code_get_error != CUDA_SUCCESS) {          \\
+                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \\
+                if (code_get_error != hipSuccess) {          \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\
                         std::string("invalid error code!"));   \\
                 }                                              \\
-                if (code != CUDA_SUCCESS) {                    \\
+                if (code != hipSuccess) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\
                         std::string(msg));                     \\
                 }                                              \\
             } while (0);
 
-            static inline CUfunction loadKernel(
+            static inline hipFunction_t loadKernel(
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
                     const std::optional<std::string> &cubinDir = std::nullopt,
-                    std::vector<CUmodule>* loaded_modules = nullptr) {
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
                     filePath = (p1 / p2.filename()).string();
                 }
 
-                CUmodule mod;
-                CUfunction func;
-                CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                hipModule_t mod;
+                hipFunction_t func;
+                CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
                 if (loaded_modules) {
                     loaded_modules->push_back(mod);
                 }
-                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
                         func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        hipFuncAttributeMaxDynamicSharedMemorySize,
                         sharedMemBytes
                     ))
                 }
                 return func;
             }
 
-            static inline CUfunction loadKernel(
+            static inline hipFunction_t loadKernel(
                     const void* start,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    std::vector<CUmodule>* loaded_modules = nullptr) {
-                CUmodule mod;
-                CUfunction func;
-                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
+                hipModule_t mod;
+                hipFunction_t func;
+                CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, start));
                 if (loaded_modules) {
                     loaded_modules->push_back(mod);
                 }
-                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
                         func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        hipFuncAttributeMaxDynamicSharedMemorySize,
                         sharedMemBytes
                     ))
                 }
@@ -128,15 +128,15 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             }
 
             static inline void launchKernel(
-                    CUfunction func,
+                    hipFunction_t func,
                     uint32_t gridX,
                     uint32_t gridY,
                     uint32_t gridZ,
                     uint32_t numWarps,
                     uint32_t sharedMemBytes,
                     void* args[],
-                    cudaStream_t stream) {
-                CUDA_DRIVER_CHECK(cuLaunchKernel(
+                    hipStream_t stream) {
+                CUDA_DRIVER_CHECK(hipModuleLaunchKernel(
                     func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
             }
@@ -161,7 +161,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         # New APIs (fillTMADescriptor):
         # https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.c#L283
         return """
-            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+            #if !defined(USE_ROCM) && defined(TORCH_HIP_VERSION) && TORCH_HIP_VERSION >= 12000
             [[maybe_unused]] static void init1DTMADescriptor(
                     CUtensorMap* m,
                     void* globalAddress,
@@ -337,16 +337,16 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
 
     def cpp_stream_type(self) -> str:
-        return "cudaStream_t"
+        return "hipStream_t"
 
     def aoti_get_stream(self) -> str:
         return "aoti_torch_get_current_cuda_stream"
 
     def cpp_kernel_type(self) -> str:
-        return "CUfunction"
+        return "hipFunction_t"
 
     def cpp_device_ptr(self) -> str:
-        return "CUdeviceptr"
+        return "hipDeviceptr_t"
 
     def cpp_scratch(
         self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
@@ -372,12 +372,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         f"{workspace.generate_dtype_str()}, {device_type}, {device_idx}, &{var_name}_handle));"
                     ),
                     f"RAIIAtenTensorHandle {var_name}_tensor({var_name}_handle);",
-                    f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({var_name}_tensor.data_ptr());",
+                    f"hipDeviceptr_t {var_name} = reinterpret_cast<hipDeviceptr_t>({var_name}_tensor.data_ptr());",
                 ],
                 var_name,
             )
         else:
-            return [f"CUdeviceptr {var_name} = 0;"], var_name
+            return [f"hipDeviceptr_t {var_name} = 0;"], var_name
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())
