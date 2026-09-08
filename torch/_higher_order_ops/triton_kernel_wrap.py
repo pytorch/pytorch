@@ -11,7 +11,7 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
@@ -73,8 +73,6 @@ if TYPE_CHECKING:
     TritonAutotunerType = Union[Autotuner]  # noqa: UP007
 
 log = logging.getLogger("torch._dynamo")
-
-_T = TypeVar("_T")
 
 # e.g. for a host-side Triton TMA API call ``create_2d_tma_descriptor(ptr, 50, 60, 32, 15, 4)``,
 # the metadata will look like ``("experimental", ([50, 60], [32, 15], 4))``
@@ -151,7 +149,7 @@ def maybe_unpack_host_tma_descriptor(
 
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    def matches(actual: Sequence[object], expected: Sequence[object]) -> bool:
+    def matches(actual: Sequence[IntLikeType], expected: Sequence[IntLikeType]) -> bool:
         # Sizes may be symbolic, so compare without installing guards.
         return len(actual) == len(expected) and all(
             a is b or statically_known_true(a == b) for a, b in zip(actual, expected)
@@ -2644,7 +2642,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     def is_callable(self, maybe_callable: object) -> bool:
         return callable(maybe_callable)
 
-    def get_value(self, val: _T) -> _T:
+    def get_value(self, val: Any) -> Any:
         return val
 
     def call_grid(
@@ -2663,11 +2661,11 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def wrap_user_defined_obj(
         self,
-        user_obj: _T,
+        user_obj: Any,
         tx: Optional["InstructionTranslatorBase"],
         variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"] | None,
         name: str,
-    ) -> _T:
+    ) -> Any:
         if tx is not None:
             raise AssertionError("tx must be None for TracingTritonHOPifier")
         return user_obj
@@ -2695,7 +2693,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             raise AssertionError(f"configs must be a list, got {type(configs)}")
         return configs
 
-    def maybe_unpack_heuristic_result(self, result: _T) -> _T:
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
         return result
 
     def check_grid(
