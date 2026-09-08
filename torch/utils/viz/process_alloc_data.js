@@ -195,13 +195,13 @@ function frameFilter({name, filename}) {
     'cpython/abstract.h',
   ];
 
-  for (const fn of omitFunctions) {
+  for (const of of omitFunctions) {
     if (name.includes(of)) {
       return false;
     }
   }
 
-  for (const fn of omitFilenames) {
+  for (const of of omitFilenames) {
     if (filename.includes(of)) {
       return false;
     }
