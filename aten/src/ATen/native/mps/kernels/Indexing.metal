@@ -287,8 +287,11 @@ struct IndexReduceOp {
     return a + b;
   }
 
-  // Qualified so these resolve to the NaN-propagating c10 helpers rather than
-  // metal::min/max, which drop NaN and would disagree with CPU.
+  // Qualified so these resolve to the NaN-propagating c10 helpers. Unqualified,
+  // both `using namespace metal` and `using namespace c10::metal` are in scope
+  // and the Metal shader builtins win; those follow fmin/fmax and return the
+  // non-NaN operand, so index_reduce_ would answer -inf or inf where CPU
+  // answers nan.
   template <typename T>
   static T amin(T a, T b) {
     return ::c10::metal::min(a, b);
