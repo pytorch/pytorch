@@ -31,11 +31,19 @@ class TestGenBackendStubs(expecttest.TestCase):
         global _GLOBAL_PARSE_NATIVE_YAML_CACHE
         _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
 
-    def assert_success_from_gen_backend_stubs(self, yaml_str: str) -> None:
+    def assert_success_from_gen_backend_stubs(
+        self, yaml_str: str, *, kernels_str: str | None = None
+    ) -> None:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)
             fp.flush()
-            run(fp.name, "", True)
+            if kernels_str is None:
+                run(fp.name, "", True)
+            else:
+                with tempfile.NamedTemporaryFile(mode="w") as kernel_file:
+                    kernel_file.write(kernels_str)
+                    kernel_file.flush()
+                    run(fp.name, "", True, impl_path=kernel_file.name)
 
     def get_errors_from_gen_backend_stubs(
         self, yaml_str: str, *, kernels_str: str | None = None
@@ -456,11 +464,9 @@ supported:
             """Operator 'div.out' sets 'device_guard: True' but the backend sets 'device_guard: False'. A per-op device_guard can only disable the backend-level guard, not enable it; set the backend-level device_guard: True and disable it per-op where unwanted.""",
         )
 
-    # Deriving the functional from a multi-output op's '.out' would type every output as the input
-    # dtype, but multi-output ops mix dtypes (a Long index). Reject it for both a structured op
-    # (sort) and a non-structured one (_ctc_loss); a single-output op like div still derives.
-    # A structured kernel is defined as Class::structured_<kernel>::impl(...); the
-    # missing-kernel scan must attribute that to <kernel> rather than report it missing.
+    # A structured kernel is defined as Class::structured_<kernel>::impl(...), or through the
+    # TORCH_PRIVATEUSE1_IMPL_FUNC / TORCH_PRIVATEUSE1_FUNC helper macros; the missing-kernel
+    # scan must attribute each to <kernel> rather than report it missing.
     def test_missing_kernels_counts_structured_impl(self) -> None:
         yaml_str = """\
 backend: PrivateUse1
@@ -468,29 +474,29 @@ cpp_namespace: at::priv1::native
 use_out_as_primary: true
 supported:
 - maximum.out:
-    structured: true"""
+    structured: true
+- minimum.out:
+    structured: true
+- div.out"""
         impl = (
             "void PrivateUse1NativeFunctions::structured_maximum_out::impl("
-            "const at::Tensor& a, const at::Tensor& b, const at::Tensor& out) {}"
+            "const at::Tensor& a, const at::Tensor& b, const at::Tensor& out) {}\n"
+            "TORCH_PRIVATEUSE1_IMPL_FUNC(minimum_out)"
+            "(const at::Tensor& a, const at::Tensor& b, const at::Tensor& out) {}\n"
+            "at::Tensor& TORCH_PRIVATEUSE1_FUNC(div_out)"
+            "(const at::Tensor& a, const at::Tensor& b, at::Tensor& out) { return out; }"
         )
-        with (
-            tempfile.NamedTemporaryFile(mode="w") as fp,
-            tempfile.NamedTemporaryFile(mode="w") as kernel_file,
-        ):
-            fp.write(yaml_str)
-            fp.flush()
-            kernel_file.write(impl)
-            kernel_file.flush()
-            run(fp.name, "", True, impl_path=kernel_file.name)
+        self.assert_success_from_gen_backend_stubs(yaml_str, kernels_str=impl)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str, kernels_str="")
-        self.assertIn("missing a kernel definition for maximum_out", output_error)
+        for kernel in ("maximum_out", "minimum_out", "div_out"):
+            self.assertIn(f"missing a kernel definition for {kernel}", output_error)
 
-    # A factory op resolves dtype/layout/device inside its functional body (arange from the
-    # scalar values, zeros_like from self) and its .out schema has no options argument, so
-    # the functional is refused even though it is single-output.
+    # A factory op with no in-tree functional resolves dtype/layout/device in a body aten
+    # does not provide, and its .out schema has no options argument, so it is refused.
+    # (arange, full, zeros_like have composite functionals and defer to them instead.)
     def test_factory_out_as_primary_rejected(self) -> None:
-        for out in ("arange.start_out", "zeros_like.out", "randint.low_out"):
+        for out in ("empty_strided.out", "tril_indices.out"):
             with self.subTest(op=out):
                 _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
                 output_error = self.get_errors_from_gen_backend_stubs(
@@ -498,14 +504,6 @@ supported:
                     f"use_out_as_primary: true\nsupported:\n- {out}"
                 )
                 self.assertIn("a factory op resolves dtype/layout/device", output_error)
-
-    # Returns must map one-to-one onto out arguments for a functional to be derived.
-    def test_return_out_arity_mismatch_rejected(self) -> None:
-        output_error = self.get_errors_from_gen_backend_stubs(
-            "backend: PrivateUse1\ncpp_namespace: at::priv1::native\n"
-            "use_out_as_primary: true\nsupported:\n- _amp_update_scale.out"
-        )
-        self.assertIn("do not map one-to-one onto out arguments", output_error)
 
     # Codegen-outcome matrix for out-as-primary across op classes: which registration generates
     # vs raises. Runtime dtype correctness (whether the generated code produces the right dtype) is
@@ -669,10 +667,7 @@ supported:
             g
             for g in grouped
             if isinstance(g, NativeFunctionsGroup)
-            and (
-                backend_index.has_kernel(g.out)
-                or backend_index.has_kernel(g.functional)
-            )
+            and any(backend_index.has_kernel(f) for f in g.functions())
         ]
         return groups, backend_index, class_name
 
@@ -757,10 +752,10 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         self.assertNotIn("create_out", plain)
         self.assertNotIn("maybe_create_proxy", plain)
 
-        _, optin_index, _ = self._parse("- mul.out:\n    structured: true")
-        optin = "\n".join(gen_registration_helpers(optin_index))
-        self.assertIn("create_out", optin)
-        self.assertIn("maybe_create_proxy", optin)
+        _, opt_in_index, _ = self._parse("- mul.out:\n    structured: true")
+        opt_in = "\n".join(gen_registration_helpers(opt_in_index))
+        self.assertIn("create_out", opt_in)
+        self.assertIn("maybe_create_proxy", opt_in)
 
     # structured: true reuses the native meta -- the backend struct inherits the
     # native meta parent and declares only impl().
@@ -832,6 +827,15 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         self.assertIn("wrapper_PrivateUse1_values_stable_sort_out", anon)
         self.assertNotIn("wrapper_PrivateUse1_stable_sort(", anon)
 
+    # A functional aten already provides -- CompositeExplicitAutograd (abs: at::empty +
+    # abs_out) or CompositeImplicitAutograd (adaptive_avg_pool2d, which carries the autograd
+    # decomposition) -- is left to it; registering a PrivateUse1 functional would shadow it.
+    def test_composite_functional_out_as_primary_defers(self) -> None:
+        anon = self.anonymous_definitions("- abs.out\n- adaptive_avg_pool2d.out")
+        self.assertIn("wrapper_PrivateUse1_out_abs_out", anon)
+        self.assertIn("wrapper_PrivateUse1_out_adaptive_avg_pool2d_out", anon)
+        self.assertNotIn("wrapper_PrivateUse1__abs(", anon)
+        self.assertNotIn("wrapper_PrivateUse1__adaptive_avg_pool2d(", anon)
 
     # A non-structured op has no native meta, so its functional is delegated to the kernel:
     # the wrapper passes undefined outs (one per return) for the kernel to allocate and checks
@@ -864,6 +868,13 @@ at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
 """,
             anon,
         )
+        # self takes precedence over an earlier positional tensor (where.self: condition, self, other)
+        anon = self.anonymous_definitions("- where.self_out")
+        self.assertIn(
+            "wrapper_PrivateUse1_self_where(const at::Tensor & condition, const at::Tensor & self, "
+            "const at::Tensor & other) {\n  const OptionalDeviceGuard device_guard(device_of(self));",
+            anon,
+        )
 
     # A mutable variant (writes some arguments, returns the rest) is not derivable from the
     # .out; neither codegen pass may emit anything for it, or the registration pass would
@@ -894,11 +905,9 @@ at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
         # no derived functional: a Tensor[] output is never allocated as a single empty Tensor
         self.assertNotIn("at::empty", out)
 
-    # Primacy follows the variant the backend registers, so use_out_as_primary is a default
-    # rather than a backend-wide mode: an op registered by its functional derives its out and
-    # inplace from that functional (the _copy_from_and_resize path) instead of going
-    # unregistered. angle is non-structured, so registering it out-as-primary would be rejected
-    # -- registering the functional is the escape that error tells the backend to take.
+    # Primacy follows the variant the backend registers: under a backend-level
+    # use_out_as_primary, an op registered by its functional still derives its out and inplace
+    # from that functional (the _copy_from_and_resize path) instead of going unregistered.
     def test_functional_registration_opts_the_op_out_of_out_as_primary(self) -> None:
         out = self.anonymous_definitions("- angle")
         # the functional is the backend kernel, and .out is derived from it

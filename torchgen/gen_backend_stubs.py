@@ -410,6 +410,8 @@ def error_on_missing_kernels(
     kernel_defn_regex = (
         rf"(.*){class_name}::\s*(?:structured_([\w\d]+)::impl|([\w\d]*))\("
     )
+    # The PrivateUse1 helper macros define kernels without spelling the class.
+    macro_defn_regex = r"TORCH_PRIVATEUSE1(?:_IMPL)?_FUNC\((\w+)\)\s*\("
     actual_backend_kernel_name_counts = Counter(
         # A bit unwieldy (this could probably be moved into regex),
         # but we don't want to include kernel names that come from function calls,
@@ -420,6 +422,7 @@ def error_on_missing_kernels(
             for (x, structured, plain) in re.findall(kernel_defn_regex, backend_defns)
             if not x.endswith(":")
         ]
+        + re.findall(macro_defn_regex, backend_defns)
     )
 
     missing_kernels_err_msg = ""

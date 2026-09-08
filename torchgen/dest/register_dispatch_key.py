@@ -118,13 +118,11 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-    ):
-        empty_impl = "at::empty"
-        empty_strided_impl = "at::empty_strided"
-    elif backend_index.dispatch_key == DispatchKey.PrivateUse1 and any(
-        m.structured for m in backend_index.index.values()
-    ):
+    ) or (
         # Only the structured set_output path uses create_out; don't emit it unused.
+        backend_index.dispatch_key == DispatchKey.PrivateUse1
+        and any(m.structured for m in backend_index.index.values())
+    ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
 
@@ -411,34 +409,29 @@ class RegisterDispatchKey:
         )
 
         call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
-        prologue = ""
-        epilogue = ""
-        if k is SchemaKind.inplace:
-            # Inplace passes 'self' into the 'out' argument slot.
-            self_name = f.func.arguments.self_arg.argument.name
-            call_args.append(self_name)
-            return_statement = f"return {self_name};"
-        elif k is SchemaKind.functional:
-            # No native meta exists for these ops, so the kernel is the only authority on the
-            # output dtype: pass undefined outs for it to allocate, and check that it did.
-            outs = [
-                f"out{i}" if len(f.func.returns) > 1 else "out"
-                for i in range(len(f.func.returns))
-            ]
-            prologue = "".join(f"  at::Tensor {o};\n" for o in outs)
+        decls: list[str] = []
+        checks: list[str] = []
+        if k is SchemaKind.functional:
+            # No in-tree functional exists for this op, so the kernel is the only authority
+            # on the output dtype: pass undefined outs for it to allocate, and check that it did.
+            outs = [a.name for a in g.out.func.arguments.out]
+            decls = [f"at::Tensor {o};" for o in outs]
             call_args.extend(outs)
-            epilogue = "".join(
-                f'  TORCH_CHECK({o}.defined(), "{f.func.name}: out-as-primary kernel must '
-                f'allocate an undefined out");\n'
+            checks = [
+                f'TORCH_CHECK({o}.defined(), "{f.func.name}: out-as-primary kernel must '
+                f'allocate an undefined out");'
                 for o in outs
-            )
+            ]
             return_statement = (
                 f"return {outs[0]};"
                 if len(outs) == 1
                 else f"return std::make_tuple({', '.join(outs)});"
             )
         else:
-            return None
+            # Inplace passes 'self' into the 'out' argument slot.
+            self_name = f.func.arguments.self_arg.argument.name
+            call_args.append(self_name)
+            return_statement = f"return {self_name};"
 
         # Determine the kernel name for the 'out' variant
         out_meta = self.backend_index.get_kernel(g.out)
@@ -452,12 +445,15 @@ class RegisterDispatchKey:
                 f"{out_meta.cpp_namespace}::{self.class_method_name}::{out_meta.kernel}"
             )
 
-        # Guard like gen_unstructured: pick the device from the first tensor-like arg,
-        # out -> flat_positional (self is already part of flat_positional).
+        # Guard like gen_unstructured: the device of the first tensor-like arg,
+        # self -> out -> flat_positional.
         device_guard = "// DeviceGuard omitted"
         if f.device_guard and self.backend_index.device_guard and out_meta.device_guard:
+            self_arg = f.func.arguments.self_arg
             candidate_args = itertools.chain(
-                f.func.arguments.out, f.func.arguments.flat_positional
+                [self_arg.argument] if self_arg is not None else [],
+                f.func.arguments.out,
+                f.func.arguments.flat_positional,
             )
             device_of = next(
                 (a.name for a in candidate_args if a.type.is_tensor_like()), None
@@ -467,11 +463,16 @@ class RegisterDispatchKey:
                     f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
                 )
 
+        body = [
+            device_guard,
+            *decls,
+            f"{impl_name}({', '.join(call_args)});",
+            *checks,
+            return_statement,
+        ]
         return f"""\
 {sig.defn()} {{
-  {device_guard}
-{prologue}  {impl_name}({", ".join(call_args)});
-{epilogue}  {return_statement}
+  {chr(10).join("  " + line if i else line for i, line in enumerate(body))}
 }}
 """
 
@@ -539,15 +540,14 @@ class RegisterDispatchKey:
                     # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
                     and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
-                    # The inplace passes self as the out, so its dtype is right by construction.
-                    # A natively structured functional is left to the in-tree
-                    # CompositeExplicitAutogradNonFunctional kernel: it runs op.meta() for the
-                    # output dtype and redispatches to this backend's .out (PrivateUse1 is in
-                    # non_functional_backend_dispatch_keyset), which also keeps eager and
-                    # FakeTensor dtypes in agreement. Any other functional is delegated to the
-                    # kernel by gen_func_inplace_wrapper, unless its .out cannot carry it.
+                    # A functional that aten already provides -- the structured composite
+                    # (op.meta() + redispatch to this .out) or any other composite kernel --
+                    # is left to it: it computes the output metadata and reaches this .out
+                    # with a defined out, and registering a PrivateUse1 functional would
+                    # shadow it (and, for CompositeImplicitAutograd, bypass autograd).
+                    # Everything else is delegated to the kernel by gen_func_inplace_wrapper.
                     if f.func.kind() is SchemaKind.functional:
-                        if g.structured:
+                        if g.structured or f.has_composite_kernel:
                             return None
                         reason = None
                         if f.func.arguments.tensor_options is not None:
@@ -568,16 +568,13 @@ class RegisterDispatchKey:
                             )
                     gets_func_inplace_wrapper = True
                 elif (
-                    # Out-of-tree only: in-tree keys reach their out/inplace variants through
-                    # the structured path or an explicit registration, never through here.
+                    # Out-of-tree only; in-tree keys register their out/inplace explicitly.
                     self.backend_index.external
                     and g is not None
                     and gets_generated_out_inplace_wrapper(f, g, self.backend_index)
                 ):
                     # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
-                    # Reached under use_out_as_primary too: primacy follows the variant the backend
-                    # actually registered, so an op registered by its functional derives its
-                    # out/inplace from that functional instead of going unregistered.
+                    # Also under use_out_as_primary: primacy follows the variant the backend registered.
                     gets_out_inplace_wrapper = True
                 else:
                     return None
