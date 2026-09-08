@@ -3175,7 +3175,7 @@ def destroy_process_group(
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
-            _release_nvshmem_team_pool(pg_to_shutdown.group_name)
+            _release_nvshmem_team_pool(_world.pg_names[pg_to_shutdown])
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
@@ -3217,7 +3217,7 @@ def destroy_process_group(
                 _world.comms[:] = [
                     comm for comm in _world.comms if id(comm) not in finalized_comm_ids
                 ]
-        _release_nvshmem_team_pool(pg.group_name)
+        _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
