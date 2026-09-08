@@ -15,7 +15,6 @@
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/atan_native.h>
-#include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
@@ -341,15 +340,6 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   };
 
   mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
-}
-
-Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(self.is_complex());
-  TORCH_CHECK(self.dtype() != at::kComplexDouble);
-  mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph conjugateWithTensor:inputTensor name:nil];
-  });
-  return result;
 }
 
 } // namespace at::native
