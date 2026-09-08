@@ -15,11 +15,10 @@ from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 _gemm_call_entry = None
 
 
-def _static_tensor_arg(tensor):
-    # Inductor only emits this template for static GEMM shapes with explicit
-    # size/stride guards, so FlyDSL can compile against static memref layouts and
-    # avoid per-launch dynamic-layout ABI slots.
-    return flydsl_jit_argument.from_torch_tensor(tensor)
+def _dynamic_tensor_arg(tensor):
+    # Keep concrete tensor shapes out of FlyDSL's JIT cache key so the same tile
+    # config can be reused across GEMM shapes.
+    return flydsl_jit_argument.TorchTensorJitArg(tensor)
 
 
 def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
@@ -28,11 +27,14 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
     entry = _gemm_call_entry
     if entry is None:
         has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
+        if USE_HALF_TILE_INTERLEAVED:
+            has_k_tail = has_k_tail or (((k + TILE_K - 1) // TILE_K) % 2 != 0)
         param = make_gemm_param_and_validate(
             m,
             n,
             k,
             {
+                "dtype_id": GEMM_DTYPE_ID,
                 "block_m": TILE_M,
                 "block_n": TILE_N,
                 "block_k": TILE_K,
@@ -40,6 +42,7 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
                 "m_waves": BLOCK_M_WARPS,
                 "n_waves": BLOCK_N_WARPS,
                 "group_m": GROUP_M,
+                "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
                 "has_bias": False,
                 "has_k_tail": has_k_tail,
             },
@@ -54,9 +57,9 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
         ensure_flydsl_cache_dir()
         executor = flyc.compile(
             launch_gemm_gfx950,
-            _static_tensor_arg(output_mn),
-            _static_tensor_arg(mat1_mk),
-            _static_tensor_arg(mat2_nk),
+            _dynamic_tensor_arg(output_mn),
+            _dynamic_tensor_arg(mat1_mk),
+            _dynamic_tensor_arg(mat2_nk),
             m,
             n,
             k,

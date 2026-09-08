@@ -2476,7 +2476,7 @@ def use_flydsl_template(layout: Layout) -> bool:
         return False
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
-    if not _use_template_for_gpu(layout, [torch.bfloat16]):
+    if not _use_template_for_gpu(layout, [torch.float16, torch.bfloat16]):
         return False
     # The vendored FlyDSL GEMM kernel targets the gfx950 (MI350) layout; its LDS
     # capacity and MFMA assumptions do not hold on other archs, so gate strictly
