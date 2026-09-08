@@ -3024,6 +3024,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
