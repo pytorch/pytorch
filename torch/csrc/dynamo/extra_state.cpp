@@ -277,8 +277,14 @@ void ExtraState::apply_pending_evictions(
     }
   }
   // The drained evictions carry py::object owners; hand them to the
-  // caller to destroy after cache_mutex releases, never here.
-  dead_evictions.swap(evictions);
+  // caller to destroy after cache_mutex releases, never here. Append rather
+  // than swap: a caller may reuse the out-param across two drains in one
+  // scope, and clobbering it would destroy the earlier drain's owners here
+  // under the lock -- the very thing the out-param exists to avoid.
+  dead_evictions.insert(
+      dead_evictions.end(),
+      std::make_move_iterator(evictions.begin()),
+      std::make_move_iterator(evictions.end()));
 }
 
 void ExtraState::invalidate(
@@ -1160,9 +1166,13 @@ void _clear_cache_entries_for_region(
     extra->region_strategy_map.erase(isolate_recompiles_id);
   }
   {
-    // Frame state is reset unconditionally: with the strategy reset deferred on
-    // the parked path, the region stays RUN_ONLY until its eviction drains, so
-    // no compile repopulates this map before then.
+    // Frame state is reset unconditionally. On the parked path the strategy
+    // reset is deferred, so a region that was RUN_ONLY on entry (a
+    // recompile-limit hit) stays RUN_ONLY until its eviction drains and no
+    // compile repopulates this map before then. A region still at DEFAULT can
+    // recompile and repopulate the map before the drain, but that is benign:
+    // the map holds only per-region frame-id counters, and a fresh compile
+    // re-seeds them exactly as it would for any new region.
     // Same rule as extract_frame_state: the dict's decref can free arbitrary
     // Python objects, so it must not happen under the plain mutex. Move it out
     // and let it die after the lock is released.
