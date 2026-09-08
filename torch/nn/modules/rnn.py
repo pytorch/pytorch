@@ -1105,9 +1105,11 @@ class LSTM(RNNBase):
                     device=input.device,
                 )
                 hx = (h_zeros, c_zeros)
+                self.check_forward_args(input, hx, batch_sizes)
             else:
                 # Each batch of the hidden state should match the input sequence that
                 # the user believes he/she is passing in.
+                self.check_forward_args(input, hx, batch_sizes)
                 hx = self.permute_hidden(hx, sorted_indices)
         else:
             if input.dim() not in (2, 3):
