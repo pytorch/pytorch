@@ -497,22 +497,16 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             reference = f(out.double(), idx, vals.double())
 
-        def rel_error(fp32_acc):
-            counters.clear()
-            torch._dynamo.reset()
-            with (
-                config.patch(partitioned_scatter_fp32_accumulation=fp32_acc),
-                torch.no_grad(),
-            ):
-                actual = torch.compile(f, backend="inductor", fullgraph=True)(
-                    out.bfloat16(), idx, vals.bfloat16()
-                )
-            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
-            self.assertEqual(actual.dtype, torch.bfloat16)
-            return ((actual.double() - reference).norm() / reference.norm()).item()
-
-        # Measured 6.2e-1 native against 2.1e-3 promoted on MI308X.
-        self.assertLess(rel_error(True), rel_error(False) / 10)
+        counters.clear()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out.bfloat16(), idx, vals.bfloat16()
+            )
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertEqual(actual.dtype, torch.bfloat16)
+        rel_error = ((actual.double() - reference).norm() / reference.norm()).item()
+        self.assertLess(rel_error, 1e-2)
 
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
