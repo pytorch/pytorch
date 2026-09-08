@@ -1,3 +1,5 @@
+import threading
+
 import torch
 
 from .optimizer import Optimizer
@@ -5,6 +7,7 @@ from .optimizer import Optimizer
 
 _original_state_dict = Optimizer.state_dict
 _original_process_value = Optimizer._process_value_according_to_param_policy
+_install_lock = threading.Lock()
 
 
 def _copy_state_value(
@@ -42,11 +45,14 @@ def _state_dict(self):
 def install() -> None:
     if getattr(Optimizer, "_native_neo_state_copy_installed", False):
         return
-    Optimizer.state_dict = _state_dict
-    Optimizer._process_value_according_to_param_policy = staticmethod(
-        _copy_state_value
-    )
-    Optimizer._native_neo_state_copy_installed = True
+    with _install_lock:
+        if getattr(Optimizer, "_native_neo_state_copy_installed", False):
+            return
+        Optimizer.state_dict = _state_dict
+        Optimizer._process_value_according_to_param_policy = staticmethod(
+            _copy_state_value
+        )
+        Optimizer._native_neo_state_copy_installed = True
 
 
 __all__ = ["install"]
