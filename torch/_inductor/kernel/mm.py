@@ -226,7 +226,7 @@ def _static_int_or_none(x) -> int | None:
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
-    from ..template_heuristics.flydsl import get_hgemm_configs
+    from ..template_heuristics.flydsl import get_gemm_configs
 
     if not (
         static_shape
@@ -271,7 +271,7 @@ def get_flydsl_mm_template_kwargs(
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
-    return get_hgemm_configs()
+    return get_gemm_configs()
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)

@@ -5,7 +5,7 @@ import torch._inductor.config as config
 
 
 @dataclass(frozen=True)
-class FlyDSLHGemmConfig:
+class FlyDSLGemmConfig:
     TILE_M: int = 128
     TILE_N: int = 128
     TILE_K: int = 64
@@ -67,7 +67,7 @@ def _is_valid_hgemm_config(hgemm_config: dict[str, int | bool]) -> bool:
     return True
 
 
-def get_exhaustive_hgemm_configs() -> list[FlyDSLHGemmConfig]:
+def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the exhaustive configuration set for the gfx950 FlyDSL HGEMM kernel.
     """
@@ -86,7 +86,7 @@ def get_exhaustive_hgemm_configs() -> list[FlyDSLHGemmConfig]:
     keys = selections.keys()
     values = selections.values()
     configs = [dict(zip(keys, combo)) for combo in product(*values)]
-    valid_configs: list[FlyDSLHGemmConfig] = []
+    valid_configs: list[FlyDSLGemmConfig] = []
     for hgemm_config in configs:
         mma_m_iters = hgemm_config["TILE_M"] // hgemm_config["BLOCK_M_WARPS"] // 16
         mma_n_iters = hgemm_config["TILE_N"] // hgemm_config["BLOCK_N_WARPS"] // 16
@@ -95,13 +95,13 @@ def get_exhaustive_hgemm_configs() -> list[FlyDSLHGemmConfig]:
         if not _is_valid_hgemm_config(hgemm_config):
             continue
         try:
-            valid_configs.append(FlyDSLHGemmConfig(**hgemm_config))
+            valid_configs.append(FlyDSLGemmConfig(**hgemm_config))
         except Exception:
             pass
     return valid_configs
 
 
-def get_default_hgemm_configs() -> list[FlyDSLHGemmConfig]:
+def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
     Returns the default configuration set for the gfx950 FlyDSL HGEMM kernel.
     """
@@ -133,7 +133,7 @@ def get_default_hgemm_configs() -> list[FlyDSLHGemmConfig]:
         (128, 128, 64, 4, 1, 4, 4, 1, 4, True),
         (256, 256, 64, 2, 1, 4, 4, 1, 4, True),
     ]
-    configs = [FlyDSLHGemmConfig(*args) for args in config_tuples]
+    configs = [FlyDSLGemmConfig(*args) for args in config_tuples]
     return [
         hgemm_config
         for hgemm_config in configs
@@ -141,7 +141,7 @@ def get_default_hgemm_configs() -> list[FlyDSLHGemmConfig]:
     ]
 
 
-def get_hgemm_configs() -> list[dict[str, object]]:
+def get_gemm_configs() -> list[dict[str, object]]:
     """
     Returns the configuration set for the gfx950 FlyDSL HGEMM kernel.
 
@@ -152,9 +152,9 @@ def get_hgemm_configs() -> list[dict[str, object]]:
         config.flydsl_enable_autotuning
         and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
     ):
-        configs = get_exhaustive_hgemm_configs()
+        configs = get_exhaustive_gemm_configs()
     elif config.flydsl_enable_autotuning:
-        configs = get_default_hgemm_configs()
+        configs = get_default_gemm_configs()
     else:
-        configs = [get_default_hgemm_configs()[0]]
+        configs = [get_default_gemm_configs()[0]]
     return [asdict(hgemm_config) for hgemm_config in configs]
