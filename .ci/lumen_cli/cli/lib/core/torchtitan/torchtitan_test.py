@@ -1,5 +1,6 @@
 import logging
 import sys
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,15 @@ class TorchtitanTestRunner(BaseRunner):
         with working_directory(self.work_directory):
             pip_install_packages(packages=["-e", "."])
             pip_install_packages(packages=["pytest", "pytest-cov"])
+            torch_constraint = Path("torch-constraint.txt")
+            torch_constraint.write_text(
+                f"torch=={version('torch')}\n", encoding="utf-8"
+            )
+            # This path is relative to the cloned TorchTitan checkout.
+            pip_install_packages(
+                requirements=".ci/docker/requirements-vlm.txt",
+                constraints=str(torch_constraint),
+            )
 
     def run(self):
         self.prepare()
