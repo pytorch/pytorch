@@ -1087,12 +1087,16 @@ def add(x, y):
         compiled_b = torch._dynamo.optimize(package=pkg_b)(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_b(x), expected)
-        # a's unload takes only a's entries and a's resume functions. Names
-        # both loads share go with the FIRST unload: an import alias, whose
-        # loss is a failed guard and a silent cache miss, and the capture-time
-        # __compiled_fn, whose loss is a NameError in live user code -- so b is
-        # NOT served after this. Teardown by owner count for shared names is
-        # #195915, a separate change.
+        # a's unload takes a's entries and a's renamed resume functions. It
+        # also strips the one name both loads share by IDENTITY: the __import_*
+        # aliases, since importlib hands both loads the same module object. That
+        # loss is not silent -- installed bytecode LOAD_GLOBALs an alias rather
+        # than guarding it, so serving pkg_b after this raises NameError in live
+        # user code. The capture-time __compiled_fn is NOT identity-shared (each
+        # install binds a fresh torch._dynamo.disable wrapper), so a's unload
+        # leaves b's alone; that name only bites in the reverse order, where the
+        # later install's binding is the one an earlier reader still needs.
+        # Teardown by owner count for shared names is #195915, a separate change.
         pkg_a.uninstall()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), count)
         self.assertFalse(resume_a & set(module_dict))
