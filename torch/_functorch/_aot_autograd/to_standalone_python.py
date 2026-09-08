@@ -1191,7 +1191,14 @@ def _compose_training_module(
         for name, obj in gen.globals_dict.items():
             if name == "__builtins__":
                 continue
-            expr = _resolve_global(obj, helper_table, None, fn_id_to_name, imports)
+            # Mirror the inference path (_resolve_globals): the runtime wrapper's
+            # warn-once set is live compile-time state, not a value to bake into
+            # the artifact. Emit a fresh empty set so the composed module starts
+            # its own warn-once cycle instead of inheriting set([]) verbatim.
+            if name == "_warned_inputs":
+                expr = "set()"
+            else:
+                expr = _resolve_global(obj, helper_table, None, fn_id_to_name, imports)
             if name == expr:
                 continue
             if hoisted.setdefault(name, expr) != expr:
