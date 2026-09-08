@@ -13,14 +13,16 @@ class TestMetadataWarning(TestCase):
             reader = FileSystemReader(path)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                try:
-                    reader.read_metadata()
-                except FileNotFoundError:
-                    pass
+                for _ in range(2):
+                    try:
+                        reader.read_metadata()
+                    except FileNotFoundError:
+                        pass
 
-        self.assertTrue(
-            any("deserialized with pickle" in str(w.message) for w in caught)
-        )
+        pickle_warnings = [
+            w for w in caught if "deserialized with pickle" in str(w.message)
+        ]
+        self.assertEqual(len(pickle_warnings), 1)
 
 
 if __name__ == "__main__":
