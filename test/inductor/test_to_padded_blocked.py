@@ -144,4 +144,5 @@ class ToPaddedBlockedTest(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_GPU:
+        run_tests()

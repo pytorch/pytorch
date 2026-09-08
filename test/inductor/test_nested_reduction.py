@@ -435,9 +435,9 @@ class _NestedReductionBase:
         B, D, G = 256, 4096, 32
 
         def f(x):
-            block_amax = _rmsnorm(x).reshape(B, D // G, G).abs().amax(dim=-1)
-            size = block_amax.shape[masked_dim]
+            size = (B, D // G)[masked_dim]
             iota = torch.arange(size, device=x.device)
+            block_amax = _rmsnorm(x).reshape(B, D // G, G).abs().amax(dim=-1)
             keep = (iota < size - 7).unsqueeze(1 - masked_dim)
             return torch.where(keep, block_amax, torch.zeros_like(block_amax))
 

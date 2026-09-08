@@ -1993,16 +1993,16 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_zero(expr)
             self.assertEqual(result, expected)
 
-    def test_solve_for_zero_floordiv_does_not_sample(self):
+    def test_solve_for_zero_floordiv_does_not_query_constant(self):
         from torch._inductor import tiling_utils
 
-        # sympy's is_constant() evaluates by substituting a random rational.
-        # A negative sample reaches Mod.eval, which asserts p >= 0, so this
-        # raises on roughly half of all calls unless FloorDiv short-circuits
-        # before is_constant() is ever reached.
         x = sympy.Symbol("x", integer=True, nonnegative=True)
         expr = FloorDiv(Mod(x, 4), 2)
-        for _ in range(30):
+        with mock.patch.object(
+            FloorDiv,
+            "is_constant",
+            side_effect=AssertionError("FloorDiv.is_constant is unsafe"),
+        ):
             self.assertIsNone(tiling_utils.solve_for_zero(expr))
 
     def test_solve_for_tiling(self):
