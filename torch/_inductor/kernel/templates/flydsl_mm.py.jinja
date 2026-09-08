@@ -1,0 +1,155 @@
+import contextlib
+import os
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    SPLIT_K_SEMAPHORE_MAX_LEN,
+    compile_hgemm_kernel,
+)
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.tensor_shim import (
+    _run_compiled,
+)
+
+{{gen_defines()}}
+
+
+_hgemm_semaphore_cache = {}
+
+
+def _get_hgemm_semaphore(stream, device):
+    cache_key = (stream, device)
+    cached = _hgemm_semaphore_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    semaphore = torch.zeros(
+        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
+    )
+    signal = torch.zeros(
+        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
+    )
+    _hgemm_semaphore_cache[cache_key] = (semaphore, signal)
+    return semaphore, signal
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _hgemm_splitk_mm(output, mat1, mat2, stream):
+    k = mat1.shape[-1]
+    if mat2.shape[-1] == k:
+        mat2_nk = mat2
+    elif mat2.shape[0] == k:
+        mat2_nk = mat2.transpose(0, 1)
+    else:
+        raise AssertionError(
+            f"Expected RHS shape [N, {k}] or [{k}, N], got {tuple(mat2.shape)}"
+        )
+
+    hgemm_kwargs = {
+        "TILE_M": TILE_M,
+        "TILE_N": TILE_N,
+        "TILE_K": TILE_K,
+        "STAGES": STAGES,
+        "SPLIT_K": SPLIT_K,
+        "BLOCK_M_WARPS": BLOCK_M_WARPS,
+        "BLOCK_N_WARPS": BLOCK_N_WARPS,
+        "BLOCK_K_WARPS": BLOCK_K_WARPS,
+        "B_TO_LDS": B_TO_LDS,
+        "HAS_BIAS": False,
+    }
+
+    semaphore, signal = _get_hgemm_semaphore(stream, mat1.device)
+    mat1_mk = mat1.view(-1, k)
+    m = mat1_mk.shape[0]
+    n = mat2_nk.shape[0]
+    output_mn = output.view(-1, n)
+    bias_tensor = mat1_mk
+
+    if mat2_nk.shape[1] != k:
+        raise AssertionError(f"Expected mat2_nk.shape[1] == k, got {mat2_nk.shape[1]} and {k}")
+    if output_mn.shape[0] != m:
+        raise AssertionError(f"Expected output_mn.shape[0] == m, got {output_mn.shape[0]} and {m}")
+
+    if mat1_mk.dtype == torch.half:
+        exe = compile_hgemm_kernel("f16", n, k, **hgemm_kwargs)
+    elif mat1_mk.dtype == torch.bfloat16:
+        exe = compile_hgemm_kernel("bf16", n, k, **hgemm_kwargs)
+    else:
+        raise NotImplementedError(f"Unsupported dtype for FlyDSL hgemm: {mat1_mk.dtype}")
+
+    _run_compiled(
+        exe,
+        output_mn,
+        mat1_mk,
+        mat2_nk,
+        bias_tensor,
+        m,
+        semaphore,
+        signal,
+        stream,
+    )
+    return output
+
+
+{{def_kernel("mat1", "mat2")}}
+    output = {{get_output()}}
+    return _hgemm_splitk_mm(output, mat1, mat2, stream)
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    dtype_mat1 = getattr(torch, precompile_dtypes["mat1"])
+    dtype_mat2 = getattr(torch, precompile_dtypes["mat2"])
+    dtype_output = getattr(torch, precompile_dtypes["output"])
+
+    shape_mat1 = tuple(precompile_shapes["mat1"])
+    shape_mat2 = tuple(precompile_shapes["mat2"])
+    shape_output = tuple(precompile_shapes["output"])
+
+    stride_mat1 = tuple(precompile_strides["mat1"])
+    stride_mat2 = tuple(precompile_strides["mat2"])
+    stride_output = tuple(precompile_strides["output"])
+
+    env_updates = {"COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        # FlyDSL's hgemm factory and backend read different arch env names.
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+        env_updates["ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+
+            def _fake_proxy(shape, stride, dtype):
+                return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+
+            mat1 = _fake_proxy(shape_mat1, stride_mat1, dtype_mat1)
+            mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
+            output = _fake_proxy(shape_output, stride_output, dtype_output)
+
+            try:
+                _hgemm_splitk_mm(output, mat1, mat2, stream=0)
+            finally:
+                compile_hgemm_kernel.cache_clear()
+                _hgemm_semaphore_cache.clear()
