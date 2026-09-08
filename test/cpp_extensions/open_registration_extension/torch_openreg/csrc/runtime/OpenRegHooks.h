@@ -5,6 +5,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
+#include <c10/core/Stream.h>
 
 #include <include/openreg.h>
 
@@ -90,6 +91,33 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
   at::Generator getNewGenerator(DeviceIndex device_index) const override {
     return at::make_generator<OpenRegGeneratorImpl>(device_index);
   }
+
+  bool supportsIpc() const override {
+    return true;
+  }
+
+  // OpenReg syncs inside getIpcMemHandle; no separate event wait needed.
+  bool requiresEventSync() const override {
+    return false;
+  }
+
+  // Copies the allocation containing ptr into a POSIX shm object and
+  // returns the shm name and byte offset (see OpenRegHooks.cpp).
+  at::IpcMemHandle getIpcMemHandle(void* ptr) const override;
+
+  // Not invoked by the framework when requiresEventSync() returns false.
+  std::string getIpcEventHandle() const override {
+    return {};
+  }
+
+  // Opens the POSIX shm named by handle, mmaps it, and returns a DataPtr
+  // whose deleter calls orCloseIpcMemHandle (munmap) when storage is freed.
+  c10::DataPtr openIpcMemHandle(const std::string& handle) const override;
+
+  // No-op: requiresEventSync() == false, so this is never called.
+  void waitIpcEvent(
+      [[maybe_unused]] const std::string& event_bytes,
+      [[maybe_unused]] const c10::Stream& stream) const override {}
 };
 
 } // namespace c10::openreg
