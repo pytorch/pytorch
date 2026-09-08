@@ -75,6 +75,7 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import compile_time_strobelight_meta, log_export_usage
 from torch.export._leakage_detection_utils import find_legit_leaks_from_referrers
@@ -1554,6 +1555,24 @@ def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
     non_persistent_buffers = _get_non_persistent_buffers(mod)
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
+
+    for name, tensor in original_state_dict.items():
+        if not isinstance(tensor, torch.Tensor):
+            continue
+        storage_size = tensor.untyped_storage().nbytes() // tensor.element_size()
+        required_size = compute_required_storage_length(
+            tensor.shape, tensor.stride(), int(tensor.storage_offset())
+        )
+        if required_size > 0 and storage_size < required_size:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"Parameter/buffer '{name}': sizes {list(tensor.shape)}, "
+                f"strides {list(tensor.stride())}, storage offset "
+                f"{tensor.storage_offset()}, and itemsize "
+                f"{tensor.element_size()} requiring a storage size of "
+                f"{required_size * tensor.element_size()} are out of bounds "
+                f"for storage of size {tensor.untyped_storage().nbytes()}",
+            )
 
     return original_state_dict
 
