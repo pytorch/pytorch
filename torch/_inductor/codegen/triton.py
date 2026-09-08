@@ -3356,9 +3356,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
-        # Top-k selection wants few warps per row; see the reduction heuristic.
-        self.topk_sort: bool = False
-        self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
+        # Largest top-k selected in this kernel; drives its launch config in
+        # the reduction heuristic.
+        self.topk_sort_k: int = 0
+        # TensorDescriptorOptions for pointwise/reduction kernels; template
+        # kernels set a resolved {block_shape, shape, strides} dict directly
+        # (see TritonTemplateKernel.tma_descriptor).
+        self.host_tma_descriptor_args: dict[
+            str, TensorDescriptorOptions | dict[str, Any]
+        ] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
         self._emitted_device_tma = False
@@ -3583,6 +3589,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
 
         return any(stride == 1 for stride in stride_vars)
+
+    def _reject_if_template_host_tma(self, var: str) -> None:
+        """Bail out if `var` can no longer be host-side TMA but the template
+        already committed to a host descriptor for it.
+
+        A buffer used as both a template operand and an epilogue operand is one
+        kernel arg, and the two uses need different descriptors. The template has
+        already emitted its descriptor access, so the kernel cannot compile; raise
+        so this choice is dropped and a non-host-side one is used instead.
+        """
+        # Template registrations are plain dicts; epilogue ones are
+        # TensorDescriptorOptions and are free to fall back.
+        if isinstance(self.host_tma_descriptor_args.get(var), dict):
+            log.warning(
+                "host-side TMA disabled for this kernel: %s is both a template "
+                "operand and an epilogue operand, which need different descriptors",
+                var,
+            )
+            raise NotImplementedError(
+                f"host-side TMA cannot share arg {var} between a template operand "
+                "and an epilogue operand"
+            )
 
     @staticmethod
     def _is_host_tma_materializable(
@@ -4407,6 +4435,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Device-side TMA: reached for every case except the host-TMA branch
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
+            self._reject_if_template_host_tma(var)
             self._emitted_device_tma = True
 
         else:
@@ -5062,12 +5091,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for_store=False,
                 )
             elif is_sympy_integer_like(original_index):
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
@@ -5231,6 +5262,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
+            self._reject_if_template_host_tma(var)
             self._host_tma_non_materializable.add(var)
             self.host_tma_descriptor_args.pop(var, None)
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
@@ -6774,7 +6806,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 if stable:
                     raise AssertionError("top-k selection is unstable")
-                self.topk_sort = True
+                self.topk_sort_k = max(self.topk_sort_k, top_k)
                 line = (
                     f"triton_helpers.topk_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
                     f" {rnumel}, {top_k}, {dim}, descending={descending},"
@@ -7287,8 +7319,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
-        if self.topk_sort:
-            out["topk_sort"] = True
+        if self.topk_sort_k:
+            out["topk_sort_k"] = self.topk_sort_k
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -7364,6 +7396,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             resolved = {}
             for inner, opts in self.host_tma_descriptor_args.items():
+                if isinstance(opts, dict):
+                    resolved[inner] = opts
+                    continue
                 dims = [_resolve_block_dim(s) for s in opts.block_shape]
                 resolved[inner] = {
                     "block_shape": dims,
