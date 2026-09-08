@@ -1603,10 +1603,10 @@ class EpiMod:
                 else tuple(sorted((kk, tensor_key(v)) for kk, v in out.items())),
                 out_dtype,
                 store_d,
-                # Pinned configs key by identity: they are module-level
-                # constants in practice; a recreated equal config just
-                # re-records (correct, one extra cold pass).
-                None if config is None else id(config),
+                # GemmConfig is a frozen dataclass; key by value so callers
+                # may rebuild an equal config per call (identity keys can
+                # alias a freed config's address and replay its plan).
+                config,
                 constraints,
                 tuned,
                 dynamic_scheduler,
