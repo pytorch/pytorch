@@ -713,7 +713,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         ctx = DiskDynamoStore()
 
