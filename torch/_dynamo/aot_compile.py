@@ -157,6 +157,12 @@ class AOTCompilePickler(FunctionPicklerBase):
         # exponential in nesting depth. The probed values stay alive for the
         # whole dump, so id reuse within a pass is not a concern.
         probe._dumps_cleanly_cache = self._dumps_cleanly_cache
+        # Seed optimistically so a value whose annotations reach back to itself
+        # (mutually-referencing <locals> annotation classes) short-circuits the
+        # re-entrant probe instead of recursing forever; pickle's own memo
+        # handles the actual reference cycle. Overwritten with the real result
+        # below.
+        self._dumps_cleanly_cache[id(value)] = True
         try:
             probe.dump(value)
         except RecursionError:
@@ -357,8 +363,12 @@ class AOTCompiledFunction:
         try:
             pickler.dump(state)
         except (pickle.PicklingError, TypeError) as e:
-            raise RuntimeError(
-                f"Failed to serialize the AOT compiled function: {e}\n"
+            # Preserve the original exception type and message -- callers and
+            # tests match on it (e.g. "cannot pickle '_thread.lock' object") --
+            # and append guidance: a nested function's __dict__ rides verbatim,
+            # a common source of an unpicklable value reaching the artifact.
+            raise type(e)(
+                f"{e}\n"
                 "Some value reached by the artifact is not picklable (a nested "
                 "function's __dict__ rides verbatim, a common source). Mark it "
                 "as external data by using `external_data={'key': ...}`."
