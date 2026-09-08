@@ -105,6 +105,7 @@ def _blackwell_decompose_k_partial_kwargs(
     k_part: int,
     config: BlackwellBMMConfig,
 ) -> dict[str, Any]:
+    """Build launch kwargs for the partial-BMM template, not the outer graph."""
     m, k = map(int, mat1.get_size())
     k_b, n = map(int, mat2.get_size())
     if k != k_b:
