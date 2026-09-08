@@ -118,7 +118,7 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_args(arg: object) -> object | None:
+def _extract_args(arg: object) -> object:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
     elif isinstance(arg, (torch.Tensor, int)):
@@ -129,7 +129,7 @@ def _extract_args(arg: object) -> object | None:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[object | None, ...]]:
+) -> tuple[tuple[str, ...], tuple[object, ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))

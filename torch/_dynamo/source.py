@@ -758,11 +758,14 @@ class GetItemSource(ChainedSource):
     def unpack_slice(self) -> slice:
         if not self.index_is_slice:
             raise AssertionError("unpack_slice called but index is not a slice")
-        if not isinstance(self.index, tuple) or len(self.index) != 2:
-            raise AssertionError("GetItemSource slice index must be an encoded slice")
+        if not (
+            isinstance(self.index, tuple)
+            and len(self.index) == 2
+            and self.index[0] is slice
+            and isinstance(self.index[1], tuple)
+        ):
+            raise AssertionError(f"Expected an encoded slice, got {self.index!r}")
         slice_class, slice_args = self.index
-        if slice_class is not slice or not isinstance(slice_args, tuple):
-            raise AssertionError("GetItemSource slice index must be an encoded slice")
         return slice_class(*slice_args)
 
     @functools.cached_property

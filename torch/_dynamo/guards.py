@@ -3104,11 +3104,9 @@ class GuardBuilder(GuardBuilderBase):
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
             # Record which builtin variables are used for pruning later.
-            if isinstance(guard.originating_source, DictGetItemSource):
-                index = guard.originating_source.index
-                if not isinstance(index, str):
-                    raise AssertionError(f"Expected a builtin name, got {index!r}")
-                self.check_fn_manager.used_builtin_vars.add(index)
+            source = guard.originating_source
+            if isinstance(source, DictGetItemSource) and isinstance(source.index, str):
+                self.check_fn_manager.used_builtin_vars.add(source.index)
         return self.id_match_unchecked(guard)
 
     @register_guard_check_spec(

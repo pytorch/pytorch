@@ -395,11 +395,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if output_type == "graph_out":
                 new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_idx = cast(GetItemSource, val).index
-                if type(input_idx) is not int:
-                    raise AssertionError(
-                        f"Expected an integer input index, got {input_idx!r}"
-                    )
+                input_idx = cast(int, cast(GetItemSource, val).index)
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
@@ -1070,11 +1066,9 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                if isinstance(source, torch._dynamo.source.GetItemSource):
-                    if type(source.index) is not int:
-                        raise AssertionError(
-                            f"Expected an integer input index, got {source.index!r}"
-                        )
+                if isinstance(
+                    source, torch._dynamo.source.GetItemSource
+                ) and isinstance(source.index, int):
                     graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():
