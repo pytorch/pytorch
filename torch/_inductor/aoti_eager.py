@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 import torch
@@ -54,6 +54,7 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
 def load_aoti_eager_cache(
     ns: str, op_func_name_with_overload: str, device_type: str
 ) -> list[dict[str, Any] | None]:
+    """Load and deserialize persistent AOTI eager kernel metadata."""
     backend = _aoti_compile_backends.get(device_type)
     if backend:
         return backend.load_fn(ns, op_func_name_with_overload, device_type)
@@ -66,17 +67,45 @@ def load_aoti_eager_cache(
     try:
         with aoti_eager_op_conf_lock(op_func_name_with_overload):
             with open(op_conf) as f:
-                json_data = json.load(f)
-                for item in json_data:
+                loaded_data: object = json.load(f)
+                if not isinstance(loaded_data, list):
+                    raise AssertionError(
+                        f"expected loaded_data to be list, got {type(loaded_data)}"
+                    )
+
+                json_data: list[dict[str, object] | None] = []
+                for loaded_item in loaded_data:
+                    if not isinstance(loaded_item, dict):
+                        raise AssertionError(
+                            f"expected loaded_item to be dict, got {type(loaded_item)}"
+                        )
+                    item = cast(dict[str, object], loaded_item)
+
                     # Get absolute path for kernel library
-                    kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
+                    kernel_path = item.get("kernel_path")
+                    if not isinstance(kernel_path, str):
+                        raise AssertionError(
+                            f"expected kernel_path to be str, got {type(kernel_path)}"
+                        )
+                    kernel_lib_abs_path = device_kernel_cache / kernel_path
                     item["kernel_path"] = kernel_lib_abs_path.as_posix()
 
                     # Check if the kernel library exists
                     if not kernel_lib_abs_path.exists():
                         return []
 
-                    for metadata in item["meta_info"]:
+                    meta_info = item.get("meta_info")
+                    if not isinstance(meta_info, list):
+                        raise AssertionError(
+                            f"expected meta_info to be list, got {type(meta_info)}"
+                        )
+                    for loaded_metadata in meta_info:
+                        if not isinstance(loaded_metadata, dict):
+                            raise AssertionError(
+                                "expected metadata to be dict, got "
+                                f"{type(loaded_metadata)}"
+                            )
+                        metadata = cast(dict[str, object], loaded_metadata)
                         if metadata.get("is_dynamic"):
                             raise NotImplementedError(
                                 "Only support static shape for now"
@@ -86,19 +115,25 @@ def load_aoti_eager_cache(
                             and metadata["device_type"] == "cpu"
                         ):
                             metadata["device_index"] = -1
-                        for dtype_key in ["dtype", "dtype_value"]:
-                            if dtype_key in metadata:
-                                metadata[dtype_key] = getattr(
-                                    torch, metadata[dtype_key].split(".")[-1]
+                        for torch_value_key in [
+                            "dtype",
+                            "dtype_value",
+                            "layout_value",
+                            "memory_format_value",
+                        ]:
+                            if torch_value_key not in metadata:
+                                continue
+                            torch_value = metadata[torch_value_key]
+                            if not isinstance(torch_value, str):
+                                raise AssertionError(
+                                    f"expected {torch_value_key} to be str, got "
+                                    f"{type(torch_value)}"
                                 )
-                        if "layout_value" in metadata:
-                            metadata["layout_value"] = getattr(
-                                torch, metadata["layout_value"].split(".")[-1]
+                            metadata[torch_value_key] = getattr(
+                                torch, torch_value.split(".")[-1]
                             )
-                        if "memory_format_value" in metadata:
-                            metadata["memory_format_value"] = getattr(
-                                torch, metadata["memory_format_value"].split(".")[-1]
-                            )
+
+                    json_data.append(item)
 
                 return json_data
     except Exception as e:
@@ -116,8 +151,8 @@ def supported_scalar_types() -> tuple[type, ...]:
     return tuple(type_to_torch_dtype.keys())
 
 
-def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> dict[str, Any]:
-    metadata: dict[str, Any] = {}
+def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> dict[str, object]:
+    metadata: dict[str, object] = {}
     metadata["is_dynamic"] = dynamic
 
     if not isinstance(input, torch.Tensor):
@@ -138,22 +173,22 @@ def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> dict[str, Any
 def extract_tensor_list_metadata(
     dynamic: bool,
     input: list[torch.Tensor],
-) -> dict[str, Any]:
+) -> dict[str, object]:
     metadata_list = []
     for item in input:
         if not isinstance(item, torch.Tensor):
             raise AssertionError(f"expected torch.Tensor, got {type(item)}")
         metadata_list.append(extract_tensor_metadata(dynamic, item))
 
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["tensor_list"] = metadata_list
     return metadata
 
 
-def extract_scalar_metadata(device_type: str, input: Any) -> dict[str, Any]:
+def extract_scalar_metadata(device_type: str, input: object) -> dict[str, object]:
     if not isinstance(input, supported_scalar_types()):
         raise AssertionError(f"expected a supported scalar type, got {type(input)}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["is_dynamic"] = False
     # Scalar tensor
     metadata["device_type"] = device_type
@@ -164,46 +199,46 @@ def extract_scalar_metadata(device_type: str, input: Any) -> dict[str, Any]:
     return metadata
 
 
-def extract_string_metadata(input: str) -> dict[str, Any]:
+def extract_string_metadata(input: str) -> dict[str, object]:
     if not isinstance(input, str):
         raise AssertionError(f"expected str, got {type(input)}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["string_value"] = input
     return metadata
 
 
-def extract_dtype_metadata(input: torch.dtype) -> dict[str, Any]:
+def extract_dtype_metadata(input: torch.dtype) -> dict[str, object]:
     if not isinstance(input, torch.dtype):
         raise AssertionError(f"expected torch.dtype, got {type(input)}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["dtype_value"] = f"{input}"
     return metadata
 
 
-def extract_device_metadata(input: torch.device) -> dict[str, Any]:
+def extract_device_metadata(input: torch.device) -> dict[str, object]:
     if not isinstance(input, torch.device):
         raise AssertionError(f"expected torch.device, got {type(input)}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["device_type_value"] = f"{input.type}"
     metadata["device_index_value"] = input.index
     return metadata
 
 
-def extract_layout_metadata(input: torch.layout) -> dict[str, Any]:
+def extract_layout_metadata(input: torch.layout) -> dict[str, object]:
     if not isinstance(input, torch.layout):
         raise AssertionError(f"expected torch.layout, got {type(input)}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["layout_value"] = f"{input}"
     return metadata
 
 
-def extract_int_list_metadata(input: list[int]) -> dict[str, Any]:
+def extract_int_list_metadata(input: list[int]) -> dict[str, object]:
     if not (
         isinstance(input, (list, tuple))
         and all(isinstance(item, int) and not isinstance(item, bool) for item in input)
     ):
         raise AssertionError(f"expected a list/tuple of int, got {input!r}")
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, object] = {}
     metadata["int_list_value"] = list(input)
     return metadata
 
@@ -345,32 +380,34 @@ def aoti_compile_with_persistent_cache(
                 metadata["arg_order"] = idx
                 kernel_metadata_items.append(metadata)
 
-            kernel_meta_info: dict[str, Any] = {}
+            kernel_meta_info: dict[str, object] = {}
             kernel_meta_info["meta_info"] = kernel_metadata_items
             kernel_meta_info["kernel_path"] = (
                 Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
             )
 
-            json_data = []
+            json_data: list[object] = []
             update_json = True
             op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
             mode = "r" if op_conf.exists() else "w"
             with aoti_eager_op_conf_lock(op_func_name_with_overload):
                 with open(op_conf, mode) as op_conf_file:
                     try:
-                        json_data = json.load(op_conf_file)
+                        loaded_data: object = json.load(op_conf_file)
                     except Exception:
-                        json_data = []
+                        loaded_data = []
 
-                    if not isinstance(json_data, list):
+                    if not isinstance(loaded_data, list):
                         raise AssertionError(
-                            f"expected json_data to be list, got {type(json_data)}"
+                            f"expected loaded_data to be list, got {type(loaded_data)}"
                         )
+                    json_data = cast(list[object], loaded_data)
                     for item in json_data:
                         if not isinstance(item, dict):
                             raise AssertionError(
                                 f"expected item to be dict, got {type(item)}"
                             )
+                        item = cast(dict[str, object], item)
                         # Same kernel meta info already exists in the json file
                         if item["meta_info"] == kernel_metadata_items:
                             update_json = False
