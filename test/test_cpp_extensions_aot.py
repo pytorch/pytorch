@@ -11,8 +11,8 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_device_type import onlyCUDA
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     skipIfTorchDynamo,
     TEST_XPU,
@@ -55,6 +55,8 @@ class TestCppExtensionAOT(common.TestCase):
     (test_cpp_extensions_aot_no_ninja vs test_cpp_extensions_aot_ninja)
     failed.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_extension_function(self):
         x = torch.randn(4, 4)
@@ -110,6 +112,8 @@ class TestCppExtensionAOT(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 @onlyCUDA
 class TestCppExtensionAOTCUDA(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
 
@@ -158,6 +162,8 @@ class TestCppExtensionAOTCUDA(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
 class TestCppExtensionAOTMPS(common.TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def test_mps_extension(self):
         import torch_test_cpp_extension.mps as mps_extension
 
@@ -178,6 +184,8 @@ class TestCppExtensionAOTMPS(common.TestCase):
     "sycl extension requires ninja to build",
 )
 class TestCppExtensionAOTXPU(common.TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def test_sycl_extension(self):
         import torch_test_cpp_extension.sycl as sycl_extension
 
@@ -203,6 +211,8 @@ class TestPybindTypeCasters(common.TestCase):
     second argument to `PYBIND11_TYPE_CASTER` should be the type we expect to
     receive in python, in these tests we verify this at run-time.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def expected_return_type(func):
@@ -305,6 +315,8 @@ class TestPybindTypeCasters(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_unregistered(self):
         torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -389,6 +401,8 @@ class TestMAIATensor(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -424,8 +438,9 @@ class TestRNGExtension(common.TestCase):
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
-@unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_torch_library(self):
         import torch_test_cpp_extension.torch_library  # noqa: F401
 
