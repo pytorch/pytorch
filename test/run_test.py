@@ -314,7 +314,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
-    "test_cuda_trace",
+    "test_gpu_trace",
     "inductor/test_benchmark_fusion",
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
@@ -1407,7 +1407,7 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
-    "test_cuda_trace": run_test_with_subprocess,
+    "test_gpu_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
