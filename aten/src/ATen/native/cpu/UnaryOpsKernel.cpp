@@ -542,20 +542,58 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
   });
 }
 
+// -x * log(x) is already NaN for a NaN x, so keying the first blend on x < 0
+// (not x > 0) leaves those lanes alone and saves a third blend. This flips
+// a NaN input's sign bit, unlike the scalar tail; entr(nan)'s sign is unpinned.
+template <typename scalar_t>
+inline Vectorized<scalar_t> entr_vec(const Vectorized<scalar_t>& x) {
+  using vec_t = Vectorized<scalar_t>;
+  const vec_t zero(0);
+  vec_t r = -x * x.log();
+  r = vec_t::blendv(r, vec_t(-INFINITY), x < zero);
+  return vec_t::blendv(r, zero, x == zero);
+}
+
 static void entr_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "entr_cpu", [&] {
-        cpu_kernel(iter, [](scalar_t x) -> scalar_t {
-          if (at::_isnan(x)) {
-            return x;
-          } else if (x > 0) {
-            return -x * std::log(x);
-          } else if (x == 0) {
-            return static_cast<scalar_t>(0);
-          }
-          return static_cast<scalar_t>(-INFINITY);
-        });
-      });
+  const auto dtype = iter.common_dtype();
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "entr_cpu", [&] {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x) -> scalar_t {
+            float x0 = float(x);
+            if (at::_isnan(x0)) {
+              return x;
+            } else if (x0 > 0) {
+              return -x0 * std::log(x0);
+            } else if (x0 == 0) {
+              return static_cast<scalar_t>(0);
+            }
+            return static_cast<scalar_t>(-INFINITY);
+          },
+          [](Vectorized<scalar_t> x) {
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
+            auto [x0, x1] = convert_to_float<scalar_t>(x);
+            return convert_from_float<scalar_t>(entr_vec(x0), entr_vec(x1));
+          });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(dtype, "entr_cpu", [&] {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t x) -> scalar_t {
+            if (at::_isnan(x)) {
+              return x;
+            } else if (x > 0) {
+              return -x * std::log(x);
+            } else if (x == 0) {
+              return static_cast<scalar_t>(0);
+            }
+            return static_cast<scalar_t>(-INFINITY);
+          },
+          [](Vectorized<scalar_t> x) { return entr_vec(x); });
+    });
+  }
 }
 
 static void frexp_kernel(TensorIteratorBase& iter) {
