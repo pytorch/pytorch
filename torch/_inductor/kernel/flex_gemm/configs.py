@@ -120,5 +120,6 @@ def flex_gemm_default_config(
     Dense calls keep QuACK's untuned default (``legal_configs[0]``); varlen-M
     calls take the best-ranked legal grouped_mm config instead.
     """
-    prioritized = _prioritized(legal_configs, varlen=True) if varlen else []
-    return prioritized[0] if prioritized else legal_configs[0]
+    if varlen and (prioritized := _prioritized(legal_configs, varlen=True)):
+        return prioritized[0]
+    return legal_configs[0]
