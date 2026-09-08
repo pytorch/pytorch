@@ -2,33 +2,54 @@ import contextlib
 import os
 
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-    SPLIT_K_SEMAPHORE_MAX_LEN,
-    compile_hgemm_kernel,
+    infer_has_k_tail,
+    launch_hgemm_gfx950,
+    make_hgemm_param_and_validate,
 )
-from torch._inductor.kernel.vendored_templates.flydsl.kernels.tensor_shim import (
-    _run_compiled,
-)
+from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 
 {{gen_defines()}}
 
 
-_hgemm_semaphore_cache = {}
+_hgemm_fn_cache = {}
 
 
-def _get_hgemm_semaphore(stream, device):
-    cache_key = (stream, device)
-    cached = _hgemm_semaphore_cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    semaphore = torch.zeros(
-        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
+def _hgemm_param_cache_key(param):
+    return (
+        param.block_m,
+        param.block_n,
+        param.block_k,
+        param.stages,
+        param.m_waves,
+        param.n_waves,
+        param.group_m,
+        int(param.has_bias),
+        int(param.has_k_tail),
+        param.async_load_bytes,
+        param.in_data_bytes,
+        param.out_data_bytes,
+        param.ldg_x_threads,
+        param.block_threads,
+        param.ldg_a_iters,
+        param.ldg_b_iters,
+        param.mma_m,
+        param.mma_n,
+        param.mma_k,
     )
-    signal = torch.zeros(
-        (SPLIT_K_SEMAPHORE_MAX_LEN,), dtype=torch.int32, device=device
-    )
-    _hgemm_semaphore_cache[cache_key] = (semaphore, signal)
-    return semaphore, signal
+
+
+def _run_hgemm_gfx950(param, *runtime_args):
+    """First call compiles and executes; subsequent calls dispatch the cached executor."""
+    cache_key = _hgemm_param_cache_key(param)
+    args = runtime_args[:-1] + (param, runtime_args[-1])
+    executor = _hgemm_fn_cache.get(cache_key)
+    if executor is None:
+        ensure_flydsl_cache_dir()
+        executor = flyc.compile(launch_hgemm_gfx950, *args)
+        if not os.environ.get("COMPILE_ONLY"):
+            _hgemm_fn_cache[cache_key] = executor
+    else:
+        executor(*args)
 
 
 @contextlib.contextmanager
@@ -47,58 +68,43 @@ def _temporary_env(updates):
                 os.environ[key] = old_value
 
 
-def _hgemm_splitk_mm(output, mat1, mat2, stream):
+def _flydsl_mm(output, mat1, mat2, stream):
     k = mat1.shape[-1]
-    if mat2.shape[-1] == k:
-        mat2_nk = mat2
-    elif mat2.shape[0] == k:
-        mat2_nk = mat2.transpose(0, 1)
-    else:
-        raise AssertionError(
-            f"Expected RHS shape [N, {k}] or [{k}, N], got {tuple(mat2.shape)}"
-        )
+    mat2_nk = mat2.transpose(0, 1)
 
-    hgemm_kwargs = {
-        "TILE_M": TILE_M,
-        "TILE_N": TILE_N,
-        "TILE_K": TILE_K,
-        "STAGES": STAGES,
-        "SPLIT_K": SPLIT_K,
-        "BLOCK_M_WARPS": BLOCK_M_WARPS,
-        "BLOCK_N_WARPS": BLOCK_N_WARPS,
-        "BLOCK_K_WARPS": BLOCK_K_WARPS,
-        "B_TO_LDS": B_TO_LDS,
-        "HAS_BIAS": False,
-    }
-
-    semaphore, signal = _get_hgemm_semaphore(stream, mat1.device)
     mat1_mk = mat1.view(-1, k)
     m = mat1_mk.shape[0]
     n = mat2_nk.shape[0]
     output_mn = output.view(-1, n)
     bias_tensor = mat1_mk
 
-    if mat2_nk.shape[1] != k:
-        raise AssertionError(f"Expected mat2_nk.shape[1] == k, got {mat2_nk.shape[1]} and {k}")
-    if output_mn.shape[0] != m:
-        raise AssertionError(f"Expected output_mn.shape[0] == m, got {output_mn.shape[0]} and {m}")
+    has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
 
-    if mat1_mk.dtype == torch.half:
-        exe = compile_hgemm_kernel("f16", n, k, **hgemm_kwargs)
-    elif mat1_mk.dtype == torch.bfloat16:
-        exe = compile_hgemm_kernel("bf16", n, k, **hgemm_kwargs)
-    else:
-        raise NotImplementedError(f"Unsupported dtype for FlyDSL hgemm: {mat1_mk.dtype}")
-
-    _run_compiled(
-        exe,
+    param = make_hgemm_param_and_validate(
+        m,
+        n,
+        k,
+        {
+            "block_m": TILE_M,
+            "block_n": TILE_N,
+            "block_k": TILE_K,
+            "stages": STAGES,
+            "m_waves": BLOCK_M_WARPS,
+            "n_waves": BLOCK_N_WARPS,
+            "group_m": GROUP_M,
+            "has_bias": False,
+            "has_k_tail": has_k_tail,
+        },
+    )
+    _run_hgemm_gfx950(
+        param,
         output_mn,
         mat1_mk,
         mat2_nk,
         bias_tensor,
         m,
-        semaphore,
-        signal,
+        n,
+        k,
         stream,
     )
     return output
@@ -106,7 +112,7 @@ def _hgemm_splitk_mm(output, mat1, mat2, stream):
 
 {{def_kernel("mat1", "mat2")}}
     output = {{get_output()}}
-    return _hgemm_splitk_mm(output, mat1, mat2, stream)
+    return _flydsl_mm(output, mat1, mat2, stream)
 
 
 def {{kernel_name}}_precompile(
@@ -149,7 +155,6 @@ def {{kernel_name}}_precompile(
             output = _fake_proxy(shape_output, stride_output, dtype_output)
 
             try:
-                _hgemm_splitk_mm(output, mat1, mat2, stream=0)
+                _flydsl_mm(output, mat1, mat2, stream=0)
             finally:
-                compile_hgemm_kernel.cache_clear()
-                _hgemm_semaphore_cache.clear()
+                _hgemm_fn_cache.clear()

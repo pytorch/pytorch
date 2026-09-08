@@ -2,6 +2,7 @@ import functools
 import importlib.machinery
 import importlib.util
 import logging
+import platform
 import subprocess
 from pathlib import Path
 
@@ -34,34 +35,37 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
     if not runtime_so.exists():
         return f"missing FlyDSL runtime shared library `{runtime_so}`"
 
-    try:
-        ldd = subprocess.run(
-            ["ldd", str(runtime_so)],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-    except OSError as e:
-        return f"could not inspect FlyDSL runtime shared library dependencies: {e}"
+    if platform.system() == "Linux":
+        try:
+            ldd = subprocess.run(
+                ["ldd", str(runtime_so)],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+        except OSError as e:
+            return f"could not inspect FlyDSL runtime shared library dependencies: {e}"
 
-    ldd_output = f"{ldd.stdout}\n{ldd.stderr}"
-    if ldd.returncode != 0 or "not found" in ldd_output:
-        return (
-            "unresolved FlyDSL runtime shared library dependencies: "
-            + "; ".join(line.strip() for line in ldd_output.splitlines() if "not found" in line)
-        )
+        ldd_output = f"{ldd.stdout}\n{ldd.stderr}"
+        if ldd.returncode != 0 or "not found" in ldd_output:
+            return (
+                "unresolved FlyDSL runtime shared library dependencies: "
+                + "; ".join(
+                    line.strip() for line in ldd_output.splitlines() if "not found" in line
+                )
+            )
 
     return None
 
 
 @functools.cache
 def runtime_available() -> bool:
-    if not _cuda.is_built():
-        return False
-
     import torch
 
     if torch.version.hip is None:
+        return False
+
+    if not _cuda.is_built():
         return False
 
     reason = _flydsl_runtime_unavailable_reason()

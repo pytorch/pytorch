@@ -2469,6 +2469,23 @@ def use_blackwell_cutedsl_grouped_mm(
     return True
 
 
+def use_flydsl_template(layout: Layout) -> bool:
+    if not _use_autotune_backend("FLYDSL"):
+        return False
+    if not torch.version.hip:
+        return False
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    if not _use_template_for_gpu(layout, [torch.bfloat16]):
+        return False
+    try:
+        from .codegen.flydsl import flydsl_utils
+    except Exception:
+        log.debug("Could not import flydsl_utils for Inductor FlyDSL gate", exc_info=True)
+        return False
+    return flydsl_utils.runtime_available()
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 

@@ -52,6 +52,7 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
+    use_flydsl_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
@@ -225,24 +226,13 @@ def _static_int_or_none(x) -> int | None:
 def get_flydsl_mm_template_kwargs(
     layout, mat1, mat2, static_shape, is_nonzero
 ) -> list[dict[str, Any]]:
-    from ..template_heuristics.flydsl_gemm import get_hgemm_configs
+    from ..template_heuristics.flydsl import get_hgemm_configs
 
     if not (
         static_shape
         and is_nonzero
-        and (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
-        and "FLYDSL"
-        in [
-            x.strip().upper()
-            for x in inductor_config.max_autotune_gemm_backends.split(",")
-        ]
+        and use_flydsl_template(layout)
     ):
-        return []
-
-    if torch.version.hip is None:
-        return []
-
-    if layout.device.type != "cuda":
         return []
 
     if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
@@ -258,23 +248,14 @@ def get_flydsl_mm_template_kwargs(
     if not sizevars.statically_known_equals(out_stride[1], 1):
         return []
 
-    try:
-        from ..codegen.flydsl import flydsl_utils
-    except Exception:
-        log.debug("Could not import flydsl_utils for Inductor FlyDSL gate", exc_info=True)
-        return []
-
-    if not flydsl_utils.runtime_available():
-        return []
-
     dtype = mat1.get_dtype()
     if mat2.get_dtype() != dtype or layout.dtype != dtype:
         return []
 
-    if dtype not in (torch.float16, torch.bfloat16):
+    if dtype != torch.bfloat16:
         return []
 
-    # hgemm_splitk consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
+    # FlyDSL hgemm consumes B as [N, K]. In aten.mm(A, B.T), Inductor sees
     # the RHS as a [K, N] transpose view with stride[0] == 1.
     if not sizevars.statically_known_equals(mat2_stride[0], 1):
         return []
@@ -287,10 +268,10 @@ def get_flydsl_mm_template_kwargs(
     k_static = _static_int_or_none(k)
     if m_static is None or n_static is None or k_static is None:
         return []
-    if n_static % 128 != 0 or k_static % 64 != 0:
+    if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
-    return get_hgemm_configs(m_static, n_static, k_static)
+    return get_hgemm_configs()
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)

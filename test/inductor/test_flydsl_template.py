@@ -51,21 +51,29 @@ class TestFlyDSLTemplate(TestCase):
         def fn(a, b):
             return torch.mm(a, b.t())
 
-        for dtype in (torch.float16, torch.bfloat16):
-            with self.subTest(dtype=dtype):
-                a = torch.randn(32, 128, device="cuda", dtype=dtype)
-                b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        cases = [
+            (32, 128, 128),
+            (32, 256, 128),
+            (48, 96, 96),
+        ]
+        for dtype in (torch.bfloat16,):
+            for m, n, k in cases:
+                with self.subTest(dtype=dtype, m=m, n=n, k=k):
+                    a = torch.randn(m, k, device="cuda", dtype=dtype)
+                    b = torch.randn(n, k, device="cuda", dtype=dtype)
 
-                compiled_fn = torch.compile(fn, backend="inductor")
-                result, (code,) = run_and_get_code(compiled_fn, a, b)
+                    compiled_fn = torch.compile(fn, backend="inductor")
+                    result, (code,) = run_and_get_code(compiled_fn, a, b)
 
-                self.assertIn("async_compile.flydsl", code)
-                self.assertIn("_hgemm_splitk_mm", code)
-                self.assertIn("TILE_M: fx.Constexpr", code)
-                self.assertIn("STAGES: fx.Constexpr", code)
-                self.assertIn("BLOCK_N_WARPS: fx.Constexpr", code)
-                self.assertIn("BLOCK_K_WARPS: fx.Constexpr", code)
-                self.assertTrue(torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2))
+                    self.assertIn("async_compile.flydsl", code)
+                    self.assertIn("_flydsl_mm", code)
+                    self.assertIn("TILE_M: fx.Constexpr", code)
+                    self.assertIn("STAGES: fx.Constexpr", code)
+                    self.assertIn("BLOCK_N_WARPS: fx.Constexpr", code)
+                    self.assertIn("BLOCK_K_WARPS: fx.Constexpr", code)
+                    self.assertTrue(
+                        torch.allclose(result, fn(a, b), atol=3e-2, rtol=3e-2)
+                    )
 
 
 if __name__ == "__main__":
