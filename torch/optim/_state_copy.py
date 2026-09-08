@@ -13,9 +13,9 @@ def _copy_state_value(
     param_id: int,
     param_groups: list[dict[str, object]],
     key: str | None = None,
-) -> torch.Tensor:
+):
     result = _original_process_value(param, value, param_id, param_groups, key)
-    return result.clone()
+    return result.clone() if isinstance(result, torch.Tensor) else result
 
 
 def _clone_tensors(value, memo=None):
