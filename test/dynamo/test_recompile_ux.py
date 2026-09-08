@@ -516,13 +516,16 @@ def _reraise_worker_error(raised):
 
 
 class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
-    """Tests for isolate_recompiles=True on torch.compile().
+    """ExtraState: isolated cache regions, the cache lock, and the
+    exec-strategy/precompile APIs.
 
     Each torch.compile() call with isolate_recompiles=True gets its own
     isolated cache bucket via the per-compile cache map in ExtraState.
     Without isolation, all compile calls on the same code object share a
-    single cache — entries from one call interfere with another's lookup,
-    recompile limit, and FrameExecStrategy.
+    single cache -- entries from one call interfere with another's lookup,
+    recompile limit, and FrameExecStrategy. The concurrency, lifetime, and
+    exec-strategy tests below exercise the ExtraState lock and the
+    region/owner APIs, which are not specific to isolate_recompiles.
     """
 
     @staticmethod
@@ -595,10 +598,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return x.sin() + x.cos()
 
-        opt = torch.compile(f, backend="eager", dynamic=False)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(f, backend=cnt, dynamic=False)
         args = [torch.randn(n) for n in (3, 4)]
         for arg in args:
             opt(arg)
+        warmup_frames = cnt.frame_count
 
         errors = queue.SimpleQueue()
         stop = threading.Event()
@@ -642,6 +647,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         _reraise_worker_error(raised)
         self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         self.assertEqual(opt(args[0]), f(args[0]))
+        # Pin that the resets actually forced recompiles the callers drove --
+        # without this the test can pass while no reset ever interleaved with a
+        # lookup (every other assertion holds whether or not the race happened).
+        self.assertGreater(cnt.frame_count, warmup_frames, "resets forced no recompile")
 
     def test_concurrent_install_and_reset_against_lookups(self):
         """Eight threads look f up while two install and reset precompile
@@ -943,11 +952,19 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # (or the invalidator, whose blocking is what this test asserts on)
             # running into the next test holding a Dynamo-internal lock.
             release_eq.set()
+            # The polls above assert against `deadline`, so arriving here via a
+            # tripped deadline leaves no budget and the joins below become
+            # join(timeout=0) -- exactly the leak this finally exists to prevent.
+            # Grant a fresh window so the threads get a real chance to unwind.
+            deadline = max(deadline, time.monotonic() + 30)
             thread.join(timeout=max(0.0, deadline - time.monotonic()))
             if inv_thread is not None:
                 inv_thread.join(timeout=max(0.0, deadline - time.monotonic()))
         _reraise_worker_errors()
         self.assertFalse(thread.is_alive())
+        # The invalidator's prompt return is half of what this test asserts, so
+        # pin that it unwound rather than merely joining it above.
+        self.assertFalse(inv_thread.is_alive(), "invalidator wedged")
         # A later lock holder drains the parked request: the entry reports
         # itself invalidated and a fresh compile serves the next call.
         self.assertEqual(opt1(x), f(x))
@@ -1126,19 +1143,26 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         seen = []
         strategy_seen = []
+        hook_errors = []
 
         def clear():
-            for _ in range(3):
-                _clear_cache_entries_for_region(code, region)
-            # Recorded, not asserted: an exception raised inside a backend
-            # __eq__ is swallowed by the lookup as a mismatch.
-            seen.append(len(_get_cache_entries_for_region(code, region)))
-            strategy_seen.append(
-                get_code_region_exec_strategy(code, region).recursive_action
-            )
+            # An exception raised inside a backend __eq__ is swallowed by the
+            # lookup as a mismatch, so a failure here would otherwise surface as
+            # a contentless seen != [1]. Capture it to re-raise attributably.
+            try:
+                for _ in range(3):
+                    _clear_cache_entries_for_region(code, region)
+                seen.append(len(_get_cache_entries_for_region(code, region)))
+                strategy_seen.append(
+                    get_code_region_exec_strategy(code, region).recursive_action
+                )
+            except Exception as e:
+                hook_errors.append(e)
 
         hook.append(clear)
         self.assertEqual(ctx(f)(x), f(x))
+        if hook_errors:
+            raise hook_errors[0]
         # Still walked by the interrupted lookup, so the cache entry was not
         # gone yet -- but the strategy erasure does not park, so it was already
         # back to the inherited DEFAULT mid-lookup.
