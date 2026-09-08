@@ -4187,16 +4187,10 @@ class SIMDScheduling(BaseScheduling):
         free_buffers: bool = True,
     ) -> None:
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_begin()
-        if config.cpp.enable_kernel_profile and config.cpp.enable_kernel_context_guard:
-            V.graph.wrapper_code.write_kernel_context_guard(
-                kernel.kernel_name,
-                base_scheduler_nodes,
-            )
-        kernel.call_kernel(kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_end()
+        with V.graph.wrapper_code.kernel_profile_scope(
+            kernel.kernel_name, base_scheduler_nodes
+        ):
+            kernel.call_kernel(kernel.kernel_name)
 
         if config.nan_asserts:
             kernel.codegen_nan_check()
