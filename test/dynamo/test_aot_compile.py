@@ -2809,6 +2809,32 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__annotations__, {})
         self.assertEqual(out([1, 2]), [1, 2])
 
+    def test_pickler_handles_mutually_referencing_annotations(self):
+        # Two <locals> functions annotated with each other form an annotation
+        # cycle: probing whether one dumps cleanly re-probes the other, which
+        # re-probes the first. The dumps-cleanly cache is seeded optimistically
+        # so the re-entrant probe short-circuits instead of recursing forever;
+        # pickle's own memo then serializes the actual cycle.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def a(x):
+                return x
+
+            def b(x):
+                return x
+
+            a.__annotations__ = {"x": b}
+            b.__annotations__ = {"x": a}
+            return a
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertEqual(out(5), 5)
+        self.assertEqual(out.__annotations__["x"].__annotations__["x"], out)
+
 
 class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
     """Tests for triton kernel side table serialization."""
