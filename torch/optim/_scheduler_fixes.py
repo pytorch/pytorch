@@ -1,3 +1,5 @@
+import threading
+
 import torch
 
 from . import lr_scheduler
@@ -11,6 +13,7 @@ _original_polynomial_lr_init = lr_scheduler.PolynomialLR.__init__
 _original_cosine_lr_init = lr_scheduler.CosineAnnealingLR.__init__
 _original_cyclic_lr_init = lr_scheduler.CyclicLR.__init__
 _original_one_cycle_lr_init = lr_scheduler.OneCycleLR.__init__
+_install_lock = threading.Lock()
 
 
 def _lrscheduler_init(self, optimizer, last_epoch=-1):
@@ -180,15 +183,18 @@ def _composite_initial_step(self):
 def install() -> None:
     if getattr(lr_scheduler.LRScheduler, "_native_neo_fixes_installed", False):
         return
-    lr_scheduler.LRScheduler.__init__ = _lrscheduler_init
-    lr_scheduler.ConstantLR.__init__ = _constant_lr_init
-    lr_scheduler.LinearLR.__init__ = _linear_lr_init
-    lr_scheduler.StepLR.__init__ = _step_lr_init
-    lr_scheduler.PolynomialLR.__init__ = _polynomial_lr_init
-    lr_scheduler.CosineAnnealingLR.__init__ = _cosine_lr_init
-    lr_scheduler.CyclicLR.__init__ = _cyclic_lr_init
-    lr_scheduler.OneCycleLR.__init__ = _one_cycle_lr_init
-    lr_scheduler.ReduceLROnPlateau._reduce_lr = _reduce_lr
-    lr_scheduler.SequentialLR._initial_step = _composite_initial_step
-    lr_scheduler.ChainedScheduler._initial_step = _composite_initial_step
-    lr_scheduler.LRScheduler._native_neo_fixes_installed = True
+    with _install_lock:
+        if getattr(lr_scheduler.LRScheduler, "_native_neo_fixes_installed", False):
+            return
+        lr_scheduler.LRScheduler.__init__ = _lrscheduler_init
+        lr_scheduler.ConstantLR.__init__ = _constant_lr_init
+        lr_scheduler.LinearLR.__init__ = _linear_lr_init
+        lr_scheduler.StepLR.__init__ = _step_lr_init
+        lr_scheduler.PolynomialLR.__init__ = _polynomial_lr_init
+        lr_scheduler.CosineAnnealingLR.__init__ = _cosine_lr_init
+        lr_scheduler.CyclicLR.__init__ = _cyclic_lr_init
+        lr_scheduler.OneCycleLR.__init__ = _one_cycle_lr_init
+        lr_scheduler.ReduceLROnPlateau._reduce_lr = _reduce_lr
+        lr_scheduler.SequentialLR._initial_step = _composite_initial_step
+        lr_scheduler.ChainedScheduler._initial_step = _composite_initial_step
+        lr_scheduler.LRScheduler._native_neo_fixes_installed = True
