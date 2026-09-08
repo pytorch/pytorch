@@ -388,7 +388,7 @@ class AOTCompiledFunction:
                 "own signature annotations, which ride unpruned, are the common "
                 "sources). Mark it as external data by using "
                 "`external_data={'key': ...}`.",
-            )
+            ) + e.args[1:]
             raise
         if pickler.errors:
             raise RuntimeError(
