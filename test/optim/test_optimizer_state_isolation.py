@@ -3,6 +3,20 @@ from torch.testing._internal.common_utils import TestCase
 
 
 class TestOptimizerStateIsolation(TestCase):
+    def test_state_dict_clones_tensor_state(self):
+        p = torch.nn.Parameter(torch.ones(2))
+        opt = torch.optim.SGD([p], lr=0.1, momentum=0.9)
+        p.grad = torch.ones_like(p)
+        opt.step()
+
+        state = opt.state_dict()
+        saved = state["state"][0]["momentum_buffer"]
+        internal = opt.state[p]["momentum_buffer"]
+        self.assertNotEqual(saved.data_ptr(), internal.data_ptr())
+
+        saved.add_(10)
+        torch.testing.assert_close(internal, torch.ones(2))
+
     def test_load_state_dict_clones_tensor_state(self):
         p1 = torch.nn.Parameter(torch.ones(2))
         p2 = torch.nn.Parameter(torch.ones(2))
