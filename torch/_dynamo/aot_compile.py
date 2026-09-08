@@ -123,8 +123,8 @@ class AOTCompilePickler(FunctionPicklerBase):
     def _dumps_cleanly(self, value: Any) -> bool:
         # "does it pickle?" has no cheaper predicate than trying. A throwaway
         # pickler of this exact class keeps external_data/persistent_id behaviour
-        # identical to the real dump. RecursionError is re-raised, not treated as
-        # unpicklable, to match the guard side's deliberate carve-out.
+        # identical to the real dump. A recursion overflow counts as unpicklable
+        # (the value is pruned) rather than re-raising, matching the guard side.
         cached = self._dumps_cleanly_cache.get(id(value))
         if cached is not None:
             return cached
@@ -142,8 +142,6 @@ class AOTCompilePickler(FunctionPicklerBase):
         self._dumps_cleanly_cache[id(value)] = True
         try:
             probe.dump(value)
-        except RecursionError:
-            raise
         except Exception:
             result = False
         else:
@@ -308,9 +306,11 @@ class AOTCompiledFunction:
             # constructor failure.
             e.args = (
                 f"{e}\n"
-                "Some value reached by the artifact is not picklable (a nested "
-                "function's __dict__ rides verbatim, a common source). Mark it "
-                "as external data by using `external_data={'key': ...}`.",
+                "Some value reached by the artifact is not picklable (a "
+                "closure cell, a default/kwdefault, or the top-level function's "
+                "own signature annotations, which ride unpruned, are the common "
+                "sources). Mark it as external data by using "
+                "`external_data={'key': ...}`.",
             )
             raise
         if pickler.errors:

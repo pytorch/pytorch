@@ -1390,11 +1390,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
-    def test_recursing_guarded_value_is_not_a_package_error(self):
-        # A reducer that never bottoms out is a pickler bug, not a value that
-        # cannot be serialized, so dump lets RecursionError through.
+    @torch._dynamo.config.patch(strict_precompile=True)
+    def test_recursing_guarded_value_overflow_is_a_package_error(self):
+        # A recursion overflow while pickling a guarded value -- here a
+        # pathological __reduce__ that never memoizes -- is a serialization
+        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
+        # without strict_precompile), never a raw RecursionError that hard-fails
+        # a program that compiled fine before.
         mod = DecoratedRecursingGuardedDefaultForwardModule()
-        with self.assertRaises(RecursionError):
+        with self.assertRaises(torch._dynamo.exc.PackageError):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
