@@ -678,7 +678,7 @@ class DeferredTritonCallWrapper:
             wrapper.device_codegen.cpp_kernel_type()
         )
 
-        # JIT-only: static hipFunction_t and embedded Triton source
+        # JIT-only: static CUfunction and embedded Triton source
         prefix.writeline_jit(f"static {kernel_type} {kernel_name} = nullptr;")
         kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
         kernel_body = f'R"TRITON(\n{kernel_source_str}\n)TRITON"'
@@ -853,7 +853,7 @@ class DeferredTritonCallWrapper:
                 ]
 
             # In AOTI mode on CUDA/HIP, pass the loaded_modules_ vector so
-            # hipModule_t handles are tracked and can be unloaded on destruction,
+            # CUmodule handles are tracked and can be unloaded on destruction,
             # preventing GPU code object leaks. XPU is excluded because its
             # loadKernel returns std::unique_ptr<sycl::kernel> and manages
             # cleanup via RAII.
@@ -1090,7 +1090,7 @@ class CppWrapperGpu(CppWrapperCpu):
         if self.device == "cuda":
             buffer.writeline(
                 maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(hipDeviceSynchronize());"
+                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
                 )
             )
             return
@@ -1322,7 +1322,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self.writeline(f"alignas(64) CUtensorMap {desc_name};")
 
         # `source` is in the form of `&var_x`, where `var_x` is the data pointer
-        # (hipDeviceptr_t); we dereference `source` and cast to `void*` to pass to
+        # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
         # the data pointer of the source tensor to the helper function
         # `init{1,2}DTMADescriptor`
         ptr = f"reinterpret_cast<void*>(*({source}))"
