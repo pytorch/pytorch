@@ -2682,9 +2682,21 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  const auto dim_size = self_broadcasted.size(dim);
+  TORCH_CHECK_INDEX(
+      dim_size > 0,
+      "torch.take_along_dim(): cannot index dimension with size 0");
+  auto valid_indices =
+      (indices_broadcasted >= -dim_size) & (indices_broadcasted < dim_size);
+  TORCH_CHECK_INDEX(
+      valid_indices.all().item<bool>(),
+      "torch.take_along_dim(): index is out of bounds for dimension ",
+      dim,
+      " with size ",
+      dim_size);
+
   // Wrap negative indices to positive (Python-style)
-  indices_broadcasted =
-      indices_broadcasted.remainder(self_broadcasted.size(dim));
+  indices_broadcasted = indices_broadcasted.remainder(dim_size);
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),
