@@ -816,11 +816,23 @@ class CUDAGraph(_CUDAGraph):
                         "graph_id": int,
                         "node_id": int,
                         "kernel_name": str or None,
+                        "grid_dim": tuple(int, int, int) or None,
+                        "block_dim": tuple(int, int, int) or None,
                         "event_ptr": int,
                         "host_fn_addr": int,
                         "host_fn_name": str or None,
                         "dependencies": [int, ...],
                         "dependents": [int, ...],
+                    },
+                    ...,
+                ],
+                "edges": [
+                    {
+                        "from": int,
+                        "to": int,
+                        "from_port": int,
+                        "to_port": int,
+                        "type": int,
                     },
                     ...,
                 ],
@@ -837,10 +849,24 @@ class CUDAGraph(_CUDAGraph):
         demangled symbol name for it (``None`` when it resolves to no exported
         symbol). They are ``0`` / ``None`` for other node types.
 
+        ``grid_dim`` / ``block_dim`` are the kernel launch dimensions
+        ``(x, y, z)`` read from the kernel node's params, populated for kernel
+        nodes (``None`` when the params query fails). They are ``None`` for
+        other node types.
+
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
         ``dependencies`` and ``dependents`` are lists of node indices within
         the ``nodes`` list.
+
+        ``edges`` lists every dependency once, with ``from`` / ``to`` naming
+        node indices into ``nodes`` (the same relation ``dependencies`` /
+        ``dependents`` encode per node) plus the raw ``cudaGraphEdgeData``
+        annotation: ``from_port`` / ``to_port`` / ``type`` as ints. All zero
+        is an ordinary full-serialization edge. A nonzero ``from_port`` or a
+        ``type`` of 1 (``cudaGraphDependencyTypeProgrammatic``) marks a
+        programmatic edge whose semantics reachability alone cannot express,
+        so passes that rewrite the graph must leave such edges alone.
 
         This structure is useful for inspecting a profiler trace and
         establishing whether a particular dependency observed in the profile
@@ -920,14 +946,27 @@ class CUDAGraph(_CUDAGraph):
             node_id = tools_id & 0xFFFFFFFF
 
             kernel_name = None
+            grid_dim = None
+            block_dim = None
             if ntype == node_types.CU_GRAPH_NODE_TYPE_KERNEL:
-                cu_node = _cuda_driver.CUgraphNode(init_value=int(node))
-                err, params = _cuda_driver.cuGraphKernelNodeGetParams(cu_node)
-                if err == _cuda_driver.CUresult.CUDA_SUCCESS and int(params.func):
-                    cu_func = _cuda_driver.CUfunction(init_value=int(params.func))
-                    err, name = _cuda_driver.cuFuncGetName(cu_func)
-                    if err == _cuda_driver.CUresult.CUDA_SUCCESS:
-                        kernel_name = name.decode() if isinstance(name, bytes) else name
+                err, params = _cuda_driver.cuGraphKernelNodeGetParams(node)
+                if err == _cuda_driver.CUresult.CUDA_SUCCESS:
+                    grid_dim = (
+                        int(params.gridDimX),
+                        int(params.gridDimY),
+                        int(params.gridDimZ),
+                    )
+                    block_dim = (
+                        int(params.blockDimX),
+                        int(params.blockDimY),
+                        int(params.blockDimZ),
+                    )
+                    if params.func:
+                        err, name = _cuda_driver.cuFuncGetName(params.func)
+                        if err == _cuda_driver.CUresult.CUDA_SUCCESS:
+                            kernel_name = (
+                                name.decode() if isinstance(name, bytes) else name
+                            )
 
             # Event record/wait nodes carry a cudaEvent_t but emit no timed CUPTI record;
             # capture the handle so a wait node can be matched to the record that signals it.
@@ -968,6 +1007,8 @@ class CUDAGraph(_CUDAGraph):
                     "graph_id": graph_id,
                     "node_id": node_id,
                     "kernel_name": kernel_name,
+                    "grid_dim": grid_dim,
+                    "block_dim": block_dim,
                     "event_ptr": event_ptr,
                     "host_fn_addr": host_fn_addr,
                     "host_fn_name": host_fn_name,
@@ -979,8 +1020,9 @@ class CUDAGraph(_CUDAGraph):
         _, _, _, num_edges = _check_cuda_bindings(
             _cuda_runtime.cudaGraphGetEdges(raw, numEdges=0)
         )
+        edge_infos: list[dict] = []
         if num_edges > 0:
-            from_nodes, to_nodes, _edge_data, num_edges = _check_cuda_bindings(
+            from_nodes, to_nodes, edge_data, num_edges = _check_cuda_bindings(
                 _cuda_runtime.cudaGraphGetEdges(raw, numEdges=num_edges)
             )
             for i in range(num_edges):
@@ -989,12 +1031,19 @@ class CUDAGraph(_CUDAGraph):
                 if src is not None and dst is not None:
                     node_infos[src]["dependents"].append(dst)
                     node_infos[dst]["dependencies"].append(src)
+                    annotation = edge_data[i]
+                    edge_infos.append(
+                        {
+                            "from": src,
+                            "to": dst,
+                            "from_port": int(annotation.from_port),
+                            "to_port": int(annotation.to_port),
+                            "type": int(annotation.type),
+                        }
+                    )
 
-        exec_handle = _cuda_runtime.cudaGraphExec_t(
-            init_value=self.raw_cuda_graph_exec()
-        )
         exec_graph_id = _check_cuda_bindings(
-            _cuda_runtime.cudaGraphExecGetId(exec_handle)
+            _cuda_runtime.cudaGraphExecGetId(self.raw_cuda_graph_exec())
         )
         for info in node_infos:
             info["tools_id"] = (exec_graph_id << 32) | info["node_id"]
@@ -1015,6 +1064,7 @@ class CUDAGraph(_CUDAGraph):
         data = {
             "exec_graph_id": exec_graph_id,
             "nodes": node_infos,
+            "edges": edge_infos,
         }
         if self._caching_graph_data:
             self._instantiate_graph_data = data
