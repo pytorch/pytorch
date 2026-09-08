@@ -263,7 +263,8 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(len(captured), 1)
         calls = re.findall(r"else: _replay_input_mutation\((.*)\)", captured[0])
         expected = (
-            "orig_inputs[0], updated_inputs[0], 0, None, _warned_inputs, False, False"
+            "orig_inputs[0], updated_inputs[0], idx=0, compile_id=None, "
+            "warned=_warned_inputs, hidden=False, under_no_grad=False"
         )
         self.assertEqual(calls, [expected])
 
