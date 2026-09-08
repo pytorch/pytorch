@@ -4418,6 +4418,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         closure = obj.__closure__
         if closure is not None:
+            # No _keep_container_verbatim gate like the other containers: a cell
+            # is never a literal a value guard could keep whole, and _prune_cell
+            # is length-preserving, so pruning every cell is always safe.
             closure = tuple(self._prune_cell(cell) for cell in closure)
         if self._keep_container_verbatim(obj.__dict__, obj.__dict__.values()):
             attributes = obj.__dict__
