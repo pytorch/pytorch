@@ -1,4 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/Device.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -33,6 +35,42 @@ void initModule(PyObject* module) {
     torch::utils::maybe_initialize_device(device_type);
     return at::accelerator::getDeviceIndex();
   });
+
+  m.def(
+      "_accelerator__utils_getDeviceIndex",
+      [](py::object device_obj, bool optional) {
+        if (py::isinstance<py::int_>(device_obj)) {
+          return device_obj.cast<c10::DeviceIndex>();
+        }
+
+        if (py::isinstance<py::str>(device_obj)) {
+          device_obj = py::cast(at::Device(device_obj.cast<std::string>()));
+        }
+
+        if (THPDevice_Check(device_obj.ptr())) {
+          at::Device acc{at::accelerator::getAccelerator(true).value()};
+          auto device{device_obj.cast<at::Device>()};
+
+          TORCH_CHECK_VALUE(
+              acc.type() == device.type(),
+              device.type(),
+              " doesn't match the current accelerator ",
+              acc.type());
+
+          if (device.has_index()) {
+            return device.index();
+          }
+        }
+
+        TORCH_CHECK_VALUE(
+            optional,
+            "Expected a torch.device with a specified index or an integer, but got: ",
+            device_obj);
+
+        auto device_type = at::accelerator::getAccelerator(true).value();
+        torch::utils::maybe_initialize_device(device_type);
+        return at::accelerator::getDeviceIndex();
+      });
 
   m.def("_accelerator_getDeviceCapability", [](c10::DeviceIndex device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
@@ -178,7 +216,7 @@ void initModule(PyObject* module) {
     return c10::CachingAllocator::getAllocatorSettings();
   });
 
-  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
+  m.def("_accelerator_setAllocatorSettings", [](const std::string& env) {
     c10::CachingAllocator::setAllocatorSettings(env);
   });
 
