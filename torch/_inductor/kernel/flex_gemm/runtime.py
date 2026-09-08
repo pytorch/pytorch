@@ -161,6 +161,7 @@ def flex_gemm_candidate_configs(
     operands: dict[str, Any],
     config_constraints: tuple[tuple[str, Any], ...],
     concat_layout: Any,
+    cu_seqlens_m: torch.Tensor | None,
 ) -> list[Any]:
     """Return QuACK's legal configs for this call, its untuned default first.
 
@@ -186,6 +187,7 @@ def flex_gemm_candidate_configs(
         A=a,
         B=b if b_kn else b.mT,
         b_kn=b_kn,
+        cu_seqlens_m=cu_seqlens_m,
         SFA=sfa,
         concat_layout=concat_layout,
     )
@@ -503,14 +505,19 @@ def gemm_epimod(
     indexed_indices: torch.Tensor | None = None,
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
+    cu_seqlens_m: torch.Tensor | None = None,
     config: tuple[tuple[str, Any], ...] | None = None,
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected; ``None`` takes
     QuACK's untuned default for the remaining ``config_constraints``.
+    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
+    ``a`` is ``[total_m, K]``, ``b`` is per-group ``[E, K, N]``, and captured
+    row/col vectors are passed rank-1 (a row is shared by every group, a column
+    is the concatenated ``[total_m]`` vector QuACK offsets per group).
     """
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
@@ -553,9 +560,11 @@ def gemm_epimod(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        operands[f"operand{index}"] = (
-            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
-        )
+        if cu_seqlens_m is not None and kind in ("row", "col"):
+            arg = arg.squeeze(0 if kind == "row" else -1)
+        elif kind == "col":
+            arg = arg.squeeze(-1).unsqueeze(0)
+        operands[f"operand{index}"] = arg
     if indexed_out is not None:
         operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_indices
         operands[INDEXED_OUTPUT_STORE_ARG_NAME] = indexed_out
@@ -630,6 +639,7 @@ def gemm_epimod(
                 operands,
                 config_constraints,
                 concat_layout,
+                cu_seqlens_m,
             )
         )
         return output_buffers[main_name]
@@ -669,6 +679,7 @@ def gemm_epimod(
             config_constraints=config_constraints,
             tuned=False,
             concat_layout=concat_layout,
+            cu_seqlens_m=cu_seqlens_m,
             compile_dispatch=False,
             **blockscaled_kwargs,
             **operands,
