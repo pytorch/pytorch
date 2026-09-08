@@ -531,15 +531,13 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if out_dtype is None and is_nonzero:
-        if use_decompose_k_choice(m, n, k):
-            templates_to_use.append(decompose_k_subgraph_template)
-
     if (
         out_dtype is None
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
+        if use_decompose_k_choice(m, n, k):
+            templates_to_use.append(decompose_k_subgraph_template)
         # Triton Templates typically perform very poorly for large K.
         # Its highly unlikely that if we want to use decompose_k, then
         # Triton will ever win.
