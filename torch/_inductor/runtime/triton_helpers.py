@@ -1117,63 +1117,55 @@ def topk_with_index(
     idxs,
     rnumel,
     k: tl.constexpr,
-    dim: tl.constexpr = None,
-    descending: tl.constexpr = True,
-    key_dtype: tl.constexpr = None,
+    dim: tl.constexpr,
+    descending: tl.constexpr,
+    key_dtype: tl.constexpr,
 ):
     """Top-k of x with source indices, repeated across the reduction dim.
 
     Lane r of the result holds rank r % k, so the first k lanes are the answer.
-    key_dtype is the tensor's dtype (None means fp32); 16-bit floats select on
-    32-bit keys.
+    key_dtype is the tensor's dtype; 16-bit floats select on 32-bit keys.
     """
     x, idxs = tl.broadcast(x, idxs)
-    _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
     tl.static_assert(
-        _dim == len(x.shape) - 1, "only minor dimension is currently supported"
+        dim == len(x.shape) - 1, "only minor dimension is currently supported"
     )
     tl.static_assert(x.dtype == tl.float32, "topk_with_index expects fp32 values")
-    n: tl.constexpr = x.shape[_dim]
-    if key_dtype is None:
-        fp32_keys: tl.constexpr = True
-    else:
-        fp32_keys: tl.constexpr = key_dtype == tl.float32
+    n: tl.constexpr = x.shape[dim]
+    fp32_keys: tl.constexpr = key_dtype == tl.float32
 
     if n >= 64 * k and fp32_keys:
         # Few ranks over many lanes: rounds of "take the extreme key, then
         # retire that lane" are tree reductions, which Triton lowers far
         # better than the bitonic network's per-stage shuffles. fp32 keeps
         # 32-bit keys and recovers the lane with a second reduction.
-        values, lanes = _topk_extract_fp32(x, idxs, rnumel, k, _dim, descending)
+        values, lanes = _topk_extract_fp32(x, idxs, rnumel, k, dim, descending)
         return values, lanes.to(idxs.dtype)
 
     if fp32_keys:
         packed = _topk_pack64(x, idxs, rnumel, descending)
-        sentinel: tl.constexpr = (
-            -9223372036854775808 if descending else 9223372036854775807
-        )
     else:
         packed = _topk_pack32(x, idxs, rnumel, descending, key_dtype)
-        sentinel: tl.constexpr = -2147483648 if descending else 2147483647
 
     if n >= 64 * k:
         # 16-bit keys already share an int32 with the lane, so one reduction
         # per rank finds both.
+        sentinel: tl.constexpr = -2147483648 if descending else 2147483647
         top = packed
         for rank in tl.static_range(k):
             if descending:
-                best = tl.max(packed, axis=_dim, keep_dims=True)
+                best = tl.max(packed, axis=dim, keep_dims=True)
             else:
-                best = tl.min(packed, axis=_dim, keep_dims=True)
+                best = tl.min(packed, axis=dim, keep_dims=True)
             top = tl.where(idxs % k == rank, best, top)
             packed = tl.where(packed == best, sentinel, packed)
     else:
         k2: tl.constexpr = constexpr_next_power_of_2(k)
-        top = tl.topk(packed, k2, dim=_dim, descending=descending)
+        top = tl.topk(packed, k2, dim=dim, descending=descending)
         if n != k2:
             top = tl.reshape(
                 tl.broadcast_to(
-                    tl.expand_dims(top, _dim), x.shape[:_dim] + [n // k2, k2]
+                    tl.expand_dims(top, dim), x.shape[:dim] + [n // k2, k2]
                 ),
                 x.shape,
             )
