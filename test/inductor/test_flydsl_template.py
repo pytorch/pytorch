@@ -1131,11 +1131,11 @@ class TestFlyDSLTemplate(TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize(
-        "dtype,use_half_tile_interleaved",
+        "dtype,use_half_tile_interleaved,m,n",
         (
-            (torch.float16, False),
-            (torch.bfloat16, False),
-            (torch.bfloat16, True),
+            (torch.float16, False, 32, 128),
+            (torch.bfloat16, False, 256, 136),
+            (torch.bfloat16, True, 256, 136),
         ),
     )
     @torch._inductor.config.patch(
@@ -1144,7 +1144,7 @@ class TestFlyDSLTemplate(TestCase):
         epilogue_fusion=True,
     )
     def test_flydsl_gemm_accumulator_epilogue_fusion(
-        self, dtype, use_half_tile_interleaved
+        self, dtype, use_half_tile_interleaved, m, n
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
         from torch._inductor.utils import run_and_get_code
@@ -1166,8 +1166,8 @@ class TestFlyDSLTemplate(TestCase):
                 USE_HALF_TILE_INTERLEAVED=use_half_tile_interleaved,
             )
         )
-        a = torch.randn(32, 128, device="cuda", dtype=dtype)
-        b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        a = torch.randn(m, 128, device="cuda", dtype=dtype)
+        b = torch.randn(n, 128, device="cuda", dtype=dtype)
         with mock.patch.object(
             flydsl_heuristics,
             "get_gemm_configs",
