@@ -723,8 +723,9 @@ PyObject* dynamo__custom_eval_frame(
     // set_extra_state is called. The entry's code (owned) and annotation come
     // back filled under the cache lock: eval_custom() can run Python
     // (fullgraph nested-compile handling, the bytecode debugger), and once the
-    // lock released a concurrent clear can destroy the entry, so nothing here
-    // dereferences the returned pointer.
+    // lock released a concurrent clear can destroy the entry, so the entry
+    // itself is never handed back here -- only the copied-out code and
+    // annotation are used below.
     create_cache_entry(
         extra, guarded_code, backend, &cached_code_owner, &trace_annotation);
     cached_code = (PyCodeObject*)cached_code_owner.ptr();
