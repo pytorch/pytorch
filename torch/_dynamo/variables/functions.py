@@ -34,6 +34,7 @@ import operator
 import os
 import re
 import sys
+import time
 import traceback
 import types
 import typing
@@ -137,6 +138,21 @@ CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
+
+_TIME_FUNCTION_NAMES = (
+    "clock_gettime",
+    "clock_gettime_ns",
+    "monotonic",
+    "monotonic_ns",
+    "perf_counter",
+    "perf_counter_ns",
+    "process_time",
+    "process_time_ns",
+    "thread_time",
+    "thread_time_ns",
+    "time",
+    "time_ns",
+)
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -2533,6 +2549,27 @@ class SkipFunctionVariable(VariableTracker):
                 f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
+                ],
+            )
+        # Module-level C functions keep their defining module in read-only
+        # __self__, so this is unaffected by monkey-patched time attributes.
+        elif (
+            type(self.value) is types.BuiltinFunctionType
+            and self.value.__self__ is time
+            and self.value.__name__ in _TIME_FUNCTION_NAMES
+        ):
+            time_fn = cast(Callable[..., Any], self.value)
+            fn_name = f"time.{time_fn.__name__}"
+            unimplemented(
+                gb_type="Call to a time function",
+                context=f"Called `{fn_name}()` inside a compiled region",
+                explanation=(
+                    f"Dynamo graph breaks on `{fn_name}()` so that the clock read "
+                    "occurs at the correct point relative to compiled operations."
+                ),
+                hints=[
+                    f"Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         elif self.value is torch._dynamo.graph_break:
