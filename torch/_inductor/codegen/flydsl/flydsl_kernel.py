@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
@@ -9,6 +8,7 @@ import torch
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
 from torch._inductor.ir import BaseView, Buffer, ExternKernel, MutableBox, ReinterpretView
+from torch._inductor.stream_constants import DEFAULT_STREAM_IDX
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
@@ -17,18 +17,6 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
-
-
-class FlyDSLKernelWrapper:
-    """Wrapper to provide the `.run()` interface expected by Inductor."""
-
-    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
-        self.kernel_fn = kernel_fn
-        self.kernel_path = kernel_path
-        kernel_code_log.info("FlyDSL kernel path: %s", kernel_path)
-
-    def run(self, *args, stream=None, **kwargs):
-        return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
 class FlyDSLTemplateKernel(Kernel):
@@ -183,4 +171,14 @@ class FlyDSLTemplateKernel(Kernel):
             call_args.append(call_arg)
             arg_types.append(arg_type)
 
-        wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
+        device = V.graph.get_current_device_or_throw()
+        call_args_str = ", ".join(wrapper.prepare_triton_kernel_call(call_args))
+        current_stream_idx = V.graph.scheduler.current_stream_idx
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            wrapper.write_get_raw_stream_header()
+            stream_name = "raw_stream"
+            wrapper.writeline(f"{stream_name} = get_raw_stream({device.index})")
+        else:
+            stream_name = wrapper.write_get_raw_stream(device.index, V.graph.name)
+
+        wrapper.writeline(f"{name}({call_args_str}, {stream_name})")

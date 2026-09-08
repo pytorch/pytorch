@@ -10,7 +10,15 @@ from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import FlyDSLBenchmarkRequest, TensorMeta
-from ...ir import Buffer, ChoiceCaller, FlyDSLTemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    FlyDSLTemplateBuffer,
+    IRNode,
+    Layout,
+    ReinterpretView,
+    TensorBox,
+)
 from ..common import KernelTemplate
 from .flydsl_kernel import FlyDSLTemplateKernel
 
@@ -57,6 +65,11 @@ class FlyDSLTemplate(KernelTemplate):
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
+        if kwargs.get("MAT2_IS_NK") and len(input_nodes) >= 2:
+            mat2 = input_nodes[1]
+            if isinstance(mat2, ReinterpretView):
+                input_nodes = [*input_nodes]
+                input_nodes[1] = mat2.data
         template_kwargs = dict(kwargs)
         kernel_name = f"flydsl_{self.name}_{next(self.index_counter)}"
 

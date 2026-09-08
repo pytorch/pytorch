@@ -175,6 +175,10 @@ class BlockSwizzle:
         swizzled_n = intra_group // group_size_m
         swizzled_m = first_pid_m + (intra_group % group_size_m)
         use_simple = (num_wg < swizzle_threshold) | ((num_wg % num_xcds) != 0)
+        if const_expr(isinstance(use_simple, bool)):
+            if const_expr(use_simple):
+                return simple_m, simple_n
+            return swizzled_m, swizzled_n
         return (
             use_simple.select(simple_m, swizzled_m),
             use_simple.select(simple_n, swizzled_n),
@@ -219,9 +223,9 @@ def gemm_gfx950_kernel(
     a: fx.Tensor,
     b: fx.Tensor,
     bias: fx.Tensor,
-    m: fx.Int32,
-    n: fx.Int32,
-    k: fx.Int32,
+    m: fx.Constexpr[int],
+    n: fx.Constexpr[int],
+    k: fx.Constexpr[int],
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
 ):
@@ -435,7 +439,11 @@ def gemm_gfx950_kernel(
     rocdl.sched_barrier(0)
 
     if const_expr(has_k_tail):
-        main_loop_end = (k_tiles > stages - 1).select(k_tiles - (stages - 1), 0)
+        has_main_loop = k_tiles > stages - 1
+        if const_expr(isinstance(has_main_loop, bool)):
+            main_loop_end = k_tiles - (stages - 1) if has_main_loop else 0
+        else:
+            main_loop_end = has_main_loop.select(k_tiles - (stages - 1), 0)
     else:
         main_loop_end = k_tiles - (stages - 1)
     for k_tile in range(0, main_loop_end, 1):
@@ -462,9 +470,9 @@ def launch_gemm_gfx950(
     a: fx.Tensor,
     b: fx.Tensor,
     bias: fx.Tensor,
-    m: fx.Int32,
-    n: fx.Int32,
-    k: fx.Int32,
+    m: fx.Constexpr[int],
+    n: fx.Constexpr[int],
+    k: fx.Constexpr[int],
     param: GemmGfx950Param,
     stream: fx.Stream = fx.Stream(None),
 ):
@@ -492,6 +500,49 @@ def launch_gemm_gfx950(
     gemm_gfx950_kernel._known_block_size = [param.block_threads, 1, 1]
     gemm_gfx950_kernel._func.__name__ = make_gemm_gfx950_kernel_name(param)
     gemm_gfx950_kernel(out, a, b, bias, m, n, k, tiled_mma, param).launch(
+        grid=(num_pid_m * num_pid_n, 1, 1),
+        block=(param.block_threads, 1, 1),
+        stream=stream,
+    )
+
+
+@flyc.jit
+def launch_gemm_gfx950_no_bias(
+    out: fx.Tensor,
+    a: fx.Tensor,
+    b: fx.Tensor,
+    m: fx.Constexpr[int],
+    n: fx.Constexpr[int],
+    k: fx.Constexpr[int],
+    param: GemmGfx950Param,
+    stream: fx.Stream = fx.Stream(None),
+):
+    mma_atom = fx.make_mma_atom(
+        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, fx.BFloat16)
+    )
+    k_per_mfma_group = param.mma_k // 4
+    tiled_mma = fx.make_tiled_mma(
+        mma_atom,
+        fx.make_layout(
+            (param.m_waves, param.n_waves, 1),
+            (param.n_waves, 1, 0),
+        ),
+        fx.make_tile(
+            None,
+            None,
+            fx.make_layout(
+                (k_per_mfma_group, 4),
+                (1, k_per_mfma_group),
+            ),
+        ),
+    )
+    num_pid_m = (m + param.block_m - 1) // param.block_m
+    num_pid_n = (n + param.block_n - 1) // param.block_n
+    gemm_gfx950_kernel._known_block_size = [param.block_threads, 1, 1]
+    gemm_gfx950_kernel._func.__name__ = make_gemm_gfx950_kernel_name(param)
+    # The kernel ignores the bias operand when param.has_bias is false. Reuse
+    # out so the JIT host signature does not need a separate dummy bias tensor.
+    gemm_gfx950_kernel(out, a, b, out, m, n, k, tiled_mma, param).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,
