@@ -515,6 +515,9 @@ void initDynamoBindings(PyObject* torch) {
       "get_code_region_exec_strategy",
       [](py::handle code, int64_t isolate_recompiles_id) {
         TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_VALUE(
+            isolate_recompiles_id >= -1,
+            "isolate_recompiles_id must be >= -1 (-1 is the default region)");
         ExtraState* extra =
             get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
         return extra == nullptr
@@ -529,6 +532,9 @@ void initDynamoBindings(PyObject* torch) {
          int64_t isolate_recompiles_id,
          FrameExecStrategy strategy) {
         TORCH_CHECK_TYPE(PyCode_Check(code.ptr()), "expected a code object");
+        TORCH_CHECK_VALUE(
+            isolate_recompiles_id >= -1,
+            "isolate_recompiles_id must be >= -1 (-1 is the default region)");
         PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
         ExtraState* extra = get_extra_state(code_obj);
         if (extra == nullptr) {
