@@ -356,18 +356,18 @@ void ExtraState::clear_in_place() {
       dead_precompile_entries.swap(this->precompile_entries);
       dead_cache_entries.swap(this->cache_entry_map);
       this->total_cache_entry_count = 0;
-      // Nothing a parked eviction could still remove survives this clear.
-      // Swapped out, destroyed after the locks release like everything else
-      // here: an owner's decref may run Python.
+      // Nothing a parked eviction OR invalidation could still remove survives
+      // this clear, so both drain here. On the park branch above the entries
+      // stay live, so their pending invalidations must stay parked too --
+      // draining them there would resurrect an entry whose guarded object was
+      // freed. Swapped out, destroyed after the locks release like everything
+      // else here: an owner's decref may run Python.
       std::lock_guard<std::mutex> pending(this->pending_invalidation_mutex);
       dead_evictions.swap(this->pending_evictions);
       this->has_pending_evictions.store(false, std::memory_order_release);
+      dead_pending.swap(this->pending_invalidations);
+      this->has_pending_invalidations.store(false, std::memory_order_release);
     }
-  }
-  {
-    std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
-    dead_pending.swap(this->pending_invalidations);
-    this->has_pending_invalidations.store(false, std::memory_order_release);
   }
   // The fresh dict is built BEFORE the lock and BEFORE the member moves:
   // PyDict_New can trigger a gen-0 collection whose finalizers run arbitrary
