@@ -82,7 +82,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "TILE_M": [16, 32, 48, 64, 96, 128, 256],
         "TILE_N": [64, 96, 128, 256],
         "TILE_K": [64, 128, 256],
-        "STAGES": [i for i in range(2, 7)],
+        "STAGES": [i for i in range(2, 10)],
         "BLOCK_M_WARPS": [1, 2, 4],
         "BLOCK_N_WARPS": [1, 2, 4],
         "SPLIT_K": [1],
