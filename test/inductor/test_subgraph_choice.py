@@ -217,16 +217,19 @@ class TestSubgraphChoice(TestCase):
     "requires NVIDIA SM100+",
 )
 class TestBlackwellDecomposeKSubgraphChoice(TestCase):
-    def _run_forced_triton_plan(self, two_ctas: bool) -> None:
+    def _run_forced_triton_plan(
+        self, two_ctas: bool, *, use_meta_ws: bool = True, m: int = 256
+    ) -> None:
         config_index = 1 if two_ctas else 0
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+        effective_two_ctas = use_meta_ws and two_ctas
 
         def lowering(a, b, two_ctas_arg):
             if bool(two_ctas_arg) != two_ctas:
                 raise AssertionError("unexpected 2CTA specialization")
             m, k = map(int, a.get_size())
             m_tiles = math.ceil(m / partial_config.block_m)
-            if partial_config.two_ctas:
+            if effective_two_ctas:
                 m_tiles = math.ceil(m_tiles / 2) * 2
             m_pad = m_tiles * partial_config.block_m
             k_part = (
@@ -242,7 +245,7 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
                 k_part,
             )
 
-        m, k, n = 256, 8193, 128
+        k, n = 8193, 128
         a = torch.randn(k, m, device="cuda", dtype=torch.bfloat16).T
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
 
@@ -257,6 +260,11 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
                     torch.ops.inductor_test.blackwell_decompose_k_partial.default: lowering
                 },
             ),
+            mock.patch(
+                "torch._inductor.kernel.decompose_k.meta_ws_enabled",
+                return_value=use_meta_ws,
+            ),
+            mock.patch("torch._inductor.kernel.decompose_k.USE_META_WS", use_meta_ws),
             config.patch(
                 compile_threads=1,
                 **{"triton.enable_template_tma_store": True},
@@ -268,13 +276,20 @@ class TestBlackwellDecomposeKSubgraphChoice(TestCase):
         source = "\n".join(codes)
         self.assertIn("make_tensor_descriptor", source)
         self.assertIn(f"BATCH_SIZE : tl.constexpr = {BLACKWELL_K_SPLIT}", source)
-        self.assertEqual("TWO_CTAS : tl.constexpr = True" in source, two_ctas)
+        self.assertEqual("USE_META_WS : tl.constexpr = True" in source, use_meta_ws)
+        self.assertEqual("FLATTEN : tl.constexpr = True" in source, not use_meta_ws)
+        self.assertEqual("TWO_CTAS : tl.constexpr = True" in source, effective_two_ctas)
 
     def test_forced_triton_1cta(self):
         self._run_forced_triton_plan(False)
 
     def test_forced_triton_2cta(self):
         self._run_forced_triton_plan(True)
+
+    def test_forced_triton_2cta_config_without_meta_ws(self):
+        # One M tile distinguishes the effective 1CTA geometry (M_PAD=128)
+        # from the 2CTA cluster geometry (M_PAD=256).
+        self._run_forced_triton_plan(True, use_meta_ws=False, m=128)
 
     def test_mixed_backend_plan_enumeration(self):
         m, k, n = 256, 131072, 128
