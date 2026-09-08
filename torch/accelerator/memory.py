@@ -22,7 +22,7 @@ __all__ = [
 
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other application.
+    allocator so that those can be used in other applications.
 
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
@@ -40,6 +40,15 @@ def empty_host_cache() -> None:
         :ref:`accelerator <accelerators>` has not been initialized.
     """
     torch._C._accelerator_emptyHostCache()
+
+
+def _flatten_stats(result: list[tuple[str, Any]], prefix: str, value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            nested_prefix = f"{prefix}.{key}" if prefix else key
+            _flatten_stats(result, nested_prefix, nested_value)
+    else:
+        result.append((prefix, value))
 
 
 def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
@@ -109,15 +118,7 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     stats = torch._C._accelerator_getDeviceStats(device_index)
     flat_stats = []
 
-    def flatten(prefix: str, value: Any) -> None:
-        if isinstance(value, dict):
-            for k, v in value.items():
-                nested_prefix = f"{prefix}.{k}" if prefix else k
-                flatten(nested_prefix, v)
-        else:
-            flat_stats.append((prefix, value))
-
-    flatten("", stats)
+    _flatten_stats(flat_stats, "", stats)
     flat_stats.sort()
     # pyrefly: ignore [no-matching-overload]
     return OrderedDict(flat_stats)

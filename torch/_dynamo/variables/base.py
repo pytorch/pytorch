@@ -24,7 +24,7 @@ import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum, IntFlag
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import (
     get_type_slots,
@@ -39,6 +39,7 @@ from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -46,7 +47,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype, raise_args_mismatch
+from ..utils import format_source_range, istype
 
 
 _RICHCOMPARE_OPS = frozenset(
@@ -263,6 +264,36 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
+class ValueAndAttributeMutationExisting(
+    ValueMutationExisting, AttributeMutationExisting
+):
+    """
+    Pre-existing objects whose class subclasses a builtin container: both the
+    builtin layout contents (value) and the instance __dict__ (attributes) can
+    mutate. Inherits both branches so isinstance-based dispatch engages the
+    value-axis machinery (is_modified) and the attribute-axis machinery
+    (store_attr_mutations) for the same object.
+    """
+
+    # The parents' cooperative __init__s conflict across the merged MRO, so
+    # initialize the base directly.
+    def __init__(self) -> None:
+        MutationType.__init__(self, SourceType.Existing)
+        self.is_modified = False
+
+
+class ValueAndAttributeMutationNew(ValueMutationNew, AttributeMutationNew):
+    """
+    Like ValueAndAttributeMutationExisting, for objects created during the
+    trace.
+    """
+
+    def __init__(self, cls_source: Source | None = None) -> None:
+        MutationType.__init__(self, SourceType.New)
+        self.is_modified = False
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id: int) -> bool:
     return scope_id == 1
 
@@ -319,7 +350,7 @@ def _check_method_arity(
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
-    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
+    # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -331,20 +362,57 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
+# CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
+# deliberately mirrors the low four so the mapping is near-identity.
+_METH_VARARGS, _METH_KEYWORDS, _METH_NOARGS, _METH_O, _METH_FASTCALL = 1, 2, 4, 8, 0x80
+
+
+@functools.cache
+def _flags_from_ml_flags(python_type: type, name: str) -> MethodFlags:
+    """Arity convention for `python_type.name`, read from its CPython
+    PyMethodDef.ml_flags. Falls back to VARARGS|KEYWORDS when python_type has no
+    such attribute or it carries no ml_flags (slot wrappers, pure-Python
+    functions)."""
+    import torch
+
+    default = MethodFlags.VARARGS | MethodFlags.KEYWORDS
+    fn = getattr(python_type, name, None)
+    ml = None if fn is None else torch._C._dynamo.eval_frame.get_method_ml_flags(fn)
+    if ml is None:
+        return default
+    flags = MethodFlags(0)
+    if ml & _METH_NOARGS:
+        flags |= MethodFlags.NOARGS
+    if ml & _METH_O:
+        flags |= MethodFlags.O
+    if ml & (_METH_VARARGS | _METH_FASTCALL):
+        flags |= MethodFlags.VARARGS
+    if ml & _METH_KEYWORDS:
+        flags |= MethodFlags.KEYWORDS
+    return flags or default
+
+
+def _derive_method_flags(vt: VariableTracker, name: str) -> MethodFlags:
+    """Resolve the arity flags for method `name` from the VT's arity-reference
+    type (see VariableTracker.method_flags_type)."""
+    return _flags_from_ml_flags(vt.method_flags_type(), name)
+
+
 @dataclasses.dataclass(slots=True)
 class Method:
     """Declarative entry in a VariableTracker's `tp_methods` table, analogous
-    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+    to CPython's PyMethodDef.
 
     Handlers have signature `(self, tx, args, kwargs)` and return the result
     VariableTracker, or None to decline the call (the equivalent of the old
     `super().call_method` fall-through) so `call_method` continues to the
-    object-protocol dispatch below."""
+    object-protocol dispatch below. The method name is the tp_methods key this
+    entry is stored under; its arity convention is derived
+    on demand from that method's ml_flags (see _derive_method_flags)."""
 
     handler: Callable[..., VariableTracker | None]
-    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
-    def invoke(
+    def __call__(
         self,
         vt: VariableTracker,
         tx: InstructionTranslatorBase,
@@ -352,41 +420,135 @@ class Method:
         args: Any,
         kwargs: Any,
     ) -> VariableTracker | None:
-        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        flags = _derive_method_flags(vt, name)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
+
+
+Getter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase"], "VariableTracker | None"
+]
+
+Setter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase", "VariableTracker | None"],
+    "VariableTracker | None",
+]
 
 
 @dataclasses.dataclass(slots=True)
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
     `(self, tx) -> VT | None` (None declines); `setter`
-    `(self, tx, value) -> VT | None`, None for read-only."""
+    `(self, tx, value) -> VT | None` (None declines). An attribute whose
+    PyGetSetDef has a NULL setter uses `readonly_setter`; one CPython lets you
+    write but Dynamo does not model uses `unmodeled_setter`."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    getter: Getter
+    setter: Setter
 
 
 @dataclasses.dataclass(slots=True)
 class Member:
     """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
-    GetSet; a distinct type so members and getsets never share a class."""
+    GetSet; a distinct type so members and getsets never share a class. A
+    PyMemberDef flagged READONLY uses `readonly_setter`."""
 
-    getter: Callable[..., VariableTracker | None]
-    setter: Callable[..., VariableTracker | None] | None = None
+    getter: Getter
+    setter: Setter
 
 
-def getset_read(
-    accessor: Callable[[Any], VariableTracker],
-) -> Callable[..., VariableTracker]:
-    """Getter for a GetSet/Member whose value is an already-built VT."""
-    return lambda self, tx: accessor(self)
+def readonly_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython declares read-only: a PyMemberDef flagged
+    READONLY, or a PyGetSetDef with a NULL setter.
+
+    Doubles as a marker. Dispatch sites that know the attribute name raise
+    CPython's more specific getset_set wording instead of calling this; the
+    message here is PyMember_SetOne's.
+    """
+    raise_attribute_error(tx, "readonly attribute")
+
+
+def unmodeled_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython lets you write but Dynamo does not model.
+
+    Eager accepts the write, so raising AttributeError would diverge; graph break
+    instead and let the write happen outside the graph.
+    """
+    unimplemented(
+        gb_type="Write to unmodeled getset/member attribute",
+        context=f"{self}",
+        explanation="Dynamo does not model writes to this attribute, which is "
+        "writable in eager.",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
 
 
 def getset_build(
     accessor: Callable[[Any], Any],
-) -> Callable[..., VariableTracker]:
+) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`."""
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
+
+
+def store_attr_mutation(
+    tx: InstructionTranslatorBase,
+    item: VariableTracker,
+    name: str,
+    value: VariableTracker | None,
+) -> None:
+    """Store an attribute mutation in the side effects tracker."""
+    se = tx.output.side_effects
+    if not se.is_attribute_mutation(item):
+        if item.source is not None:
+            raise AssertionError(
+                f"{item} has a source but was never registered via "
+                "track_object_existing (usually missing at its VariableBuilder "
+                "construction site) -- writes to its writable Member/GetSet "
+                "entries would otherwise be silently dropped instead of "
+                "raising here."
+            )
+        se.track_attribute_mutation_new(item)
+    value_to_store = variables.DeletedVariable() if value is None else value
+    se.store_attr(item, name, value_to_store)
+
+
+def load_pending_mutation(
+    tx: InstructionTranslatorBase, self: Any, name: str
+) -> VariableTracker | None:
+    """Returns the pending side-effect mutation of `self`'s attribute `name`,
+    or None if there isn't one. Shared by every writable getter that must
+    prefer an in-progress mutation over re-deriving the value from source."""
+    se = tx.output.side_effects
+    if se.has_pending_mutation_of_attr(self, name):
+        return se.load_attr(self, name)
+    return None
+
+
+def getset_load_or_build(
+    accessor: Callable[[Any], Any],
+    name: str,
+    source: Callable[[Any], Source | None] = lambda self: None,
+) -> Getter:
+    """Getter that builds a VT from the raw value returned by `accessor`,
+    attaching the Source returned by `source` (defaults to sourceless)."""
+
+    def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
+        pending = load_pending_mutation(tx, self, name)
+        if pending is not None:
+            return pending
+        return VariableTracker.build(tx, accessor(self), source(self))
+
+    return getter
+
+
+def getset_set(name: str) -> Callable[..., None]:
+    """Setter for a GetSet/Member whose value is an already-built VT."""
+
+    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -399,6 +561,390 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
         msg = f"{vt} is not a constant" if msg is None else msg
         super().__init__(msg)
         self.vt = vt
+
+
+# ---------------------------------------------------------------------------
+# SLOTDEFS: Dynamo's analog of CPython's static slotdefs[] table
+# (Objects/typeobject.c).  One global table, shared by every type, mapping a
+# dunder name to the VariableTracker method that implements it (``impl``, the
+# slotdefs "function" column) and a ``wrapper`` that adapts a generic call into
+# the right impl invocation (the slotdefs "wrapper" column: arity + operand
+# order).  CPython also stores a slot offset per entry; Dynamo does not need it
+# -- dispatch only cares which impl to call, and MRO lookup already tells us
+# whether a name resolves.  Per-VT variation is which impl method is overridden;
+# the table itself never varies.  Lives here alongside the ``*_impl`` methods it
+# names so mapping and implementations stay together; consumers (call_method
+# here, getattro in object_protocol) both read it without an import cycle.
+# ---------------------------------------------------------------------------
+
+
+def _wrap_unaryfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 0:
+        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    return func(self, tx)
+
+
+def _wrap_hashfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., tuple[int, bool]],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 0:
+        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+
+    h, is_fake = func(self, tx)
+    if is_fake:
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+    return ConstantVariable.create(h)
+
+
+def _wrap_binaryfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    other = args[0]
+    return func(self, tx, other)
+
+
+def _wrap_binaryfunc_r(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # Reflected binary op (``__radd__``): same impl, operands from the right.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    other = args[0]
+    return func(self, tx, other, reverse=True)
+
+
+def _wrap_ternaryfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # __pow__ is binary or ternary: ``x.__pow__(y)`` or ``x.__pow__(y, z)`` (mod).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) not in (1, 2):
+        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    z = args[1] if len(args) == 2 else None
+    return func(self, tx, args[0], z)
+
+
+def _wrap_ternaryfunc_r(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # Reflected __rpow__: operands from the right.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) not in (1, 2):
+        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    z = args[1] if len(args) == 2 else None
+    return func(self, tx, args[0], z, reverse=True)
+
+
+def _wrap_sq_setitem(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    from .object_protocol import getindex
+
+    if len(args) != 2:
+        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    [arg, value] = args
+    i = getindex(tx, self, arg)
+    return func(self, tx, i, value)
+
+
+def _wrap_sq_item(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    from .object_protocol import getindex
+
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+
+    [arg] = args
+    i = getindex(tx, self, arg)
+    return func(self, tx, i)
+
+
+def _wrap_indexargfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    from .object_protocol import pynumber_as_ssize_t
+
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+
+    [o] = args
+    i = pynumber_as_ssize_t(tx, o, err=OverflowError)
+    return func(self, tx, i)
+
+
+def _wrap_objobjargproc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 2:
+        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    [key, value] = args
+    return func(self, tx, key, value)
+
+
+def _wrap_delitem(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    [key] = args
+    return func(self, tx, key, None)
+
+
+def _wrap_sq_delitem(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    from .object_protocol import getindex
+
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    [arg] = args
+    i = getindex(tx, self, arg)
+    return func(self, tx, i, None)
+
+
+def _wrap_objobjproc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # sq_contains via __contains__: one arg, impl returns a bool.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    [other] = args
+    return func(self, tx, other)
+
+
+def _make_richcmp(
+    op: str,
+) -> Callable[
+    [
+        VariableTracker,
+        InstructionTranslatorBase,
+        Callable[..., VariableTracker],
+        list[VariableTracker],
+        dict[str, VariableTracker],
+    ],
+    VariableTracker,
+]:
+    # tp_richcompare via __lt__/.../__ge__: one impl, op baked per dunder.
+    def wrapper(
+        self: VariableTracker,
+        tx: InstructionTranslatorBase,
+        func: Callable[..., VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "this method takes no keyword arguments")
+        if len(args) != 1:
+            raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+        return func(self, tx, args[0], op)
+
+    return wrapper
+
+
+richcmp_lt = _make_richcmp("__lt__")
+richcmp_le = _make_richcmp("__le__")
+richcmp_eq = _make_richcmp("__eq__")
+richcmp_ne = _make_richcmp("__ne__")
+richcmp_gt = _make_richcmp("__gt__")
+richcmp_ge = _make_richcmp("__ge__")
+
+
+def wrap_call(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_call via __call__: variadic (kwargs handled by the call_method branch).
+    return func(self, tx, args, kwargs)
+
+
+def _wrap_init(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_init via __init__: variadic, forwards kwargs (e.g. dict(a=1),
+    # defaultdict(list, d, c=3)).
+    return func(self, tx, args, kwargs)
+
+
+def _wrap_setattr(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_setattro via __setattr__: (name, value).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 2:
+        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    return func(self, tx, args[0], args[1])
+
+
+def _wrap_delattr(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_setattro via __delattr__: (name,).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    return func(self, tx, args[0])
+
+
+def _wrap_getattro(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_getattro via __getattribute__: impl takes the attribute name as a str.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    return func(self, tx, args[0].as_python_constant())
+
+
+def _wrap_descr_get(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) not in (1, 2):
+        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    obj = args[0]
+    owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
+    return func(self, tx, obj, owner)
+
+
+def _wrap_descr_set(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_descr_set via __set__(obj, value): 2 args.
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 2:
+        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    return func(self, tx, args[0], args[1])
+
+
+def _wrap_descr_delete(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_descr_set via __delete__(obj): value=None signals delete (CPython
+    # passes value==NULL to the shared tp_descr_set slot).
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 1:
+        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    return func(self, tx, args[0], None)
 
 
 class SlotGroup(Enum):
@@ -414,11 +960,8 @@ class SlotGroup(Enum):
 @dataclasses.dataclass(frozen=True)
 class Slot:
     """A CPython type slot: the name of the VariableTracker method implementing
-    the slot function.  Distinct from SlotDef (a slotdefs[] dunder entry) -- e.g.
-    the mp_length slot fn is the raw ``mp_length`` getter, not ``__len__``'s
-    ``tp_len_impl`` wrapper.  Mirrors the function pointer in a type's Py*Methods
-    struct: unbound, so the receiving ``vt`` is passed at call time as CPython
-    passes ``self`` to ``Py_TYPE(vt)->...->slot(vt, ...)``."""
+    the slot function.
+    """
 
     impl: str
 
@@ -525,38 +1068,13 @@ _BIT_FIELD: dict[SlotGroup, dict[int, str]] = {
 
 # The actual slot function (a VariableTracker method) each struct field dispatches to
 _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
-    SlotGroup.NUMBER: {
-        **{f: f"{f}_impl" for f in PyNumberMethods._fields},
-        "nb_bool": "bool_impl",
-    },
-    SlotGroup.SEQUENCE: {
-        "sq_length": "sq_length",
-        "sq_concat": "sq_concat_impl",
-        "sq_repeat": "sq_repeat_impl",
-        "sq_item": "sq_item_impl",
-        "sq_ass_item": "sq_ass_item_impl",
-        "sq_contains": "sq_contains",
-        "sq_inplace_concat": "sq_inplace_concat_impl",
-        "sq_inplace_repeat": "sq_inplace_repeat_impl",
-    },
-    SlotGroup.MAPPING: {
-        "mp_length": "mp_length",
-        "mp_subscript": "mp_subscript_impl",
-        "mp_ass_subscript": "mp_ass_subscript_impl",
-    },
+    SlotGroup.NUMBER: {f: f"{f}_impl" for f in PyNumberMethods._fields},
+    SlotGroup.SEQUENCE: {f: f"{f}_impl" for f in PySequenceMethods._fields},
+    SlotGroup.MAPPING: {f: f"{f}_impl" for f in PyMappingMethods._fields},
     SlotGroup.TYPE: {
-        "tp_repr": "repr_impl",
-        "tp_hash": "tp_hash_impl",
+        **{f: f"{f}_impl" for f in _TYPE_FIELDS},
         "tp_call": "call_function",
-        "tp_str": "str_impl",
-        "tp_getattro": "getattro_impl",
-        "tp_setattro": "setattro_impl",
-        "tp_richcompare": "richcompare_impl",
-        "tp_iter": "tp_iter_impl",
-        "tp_iternext": "tp_iternext_impl",
-        "tp_descr_get": "tp_descr_get_impl",
-        "tp_descr_set": "tp_descr_set_impl",
-        "tp_init": "tp_init_impl",
+        "tp_hash": "hash_impl",
     },
 }
 
@@ -588,6 +1106,576 @@ def _tp_type(obj_type: type) -> PyTypeObject:
         tp_as_mapping=PyMappingMethods(**_fill(SlotGroup.MAPPING, masks)),
         **_fill(SlotGroup.TYPE, masks),
     )
+
+
+WrapperType: TypeAlias = Callable[
+    [
+        "VariableTracker",
+        "InstructionTranslatorBase",
+        Callable[..., "VariableTracker"],
+        list["VariableTracker"],
+        dict[str, "VariableTracker"],
+    ],
+    "VariableTracker",
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class SlotDef:
+    """One slotdefs entry: dunder name -> (impl method, call wrapper).
+
+    ``impl`` is the VariableTracker method implementing the behavior; ``wrapper``
+    adapts a generic ``(self, tx, args)`` call to it (arity + operand order).  A
+    reflected op reuses the forward impl with ``_wrap_binaryfunc_r``; an in-place
+    op is a plain binary call into its own ``nb_inplace_*`` impl -- so no
+    reverse/inplace flags are needed.
+
+    ``group`` is the CPython slot group (``SlotGroup``) the entry lives in and
+    ``slot`` is the bit within it; together they decide whether a real type
+    implements the slot.
+    """
+
+    name: str
+    impl: str
+    group: SlotGroup
+    slot: int
+    wrapper: WrapperType
+
+    def __call__(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """Call the impl via the wrapper, passing self, tx, and args."""
+        vt = vt.realize()
+        func = getattr(type(vt), self.impl)
+        return self.wrapper(vt, tx, func, args, kwargs)
+
+
+def SQSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
+    return SlotDef(name, impl, SlotGroup.SEQUENCE, slot, wrapper)
+
+
+def MPSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
+    return SlotDef(name, impl, SlotGroup.MAPPING, slot, wrapper)
+
+
+def NBSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
+    return SlotDef(name, impl, SlotGroup.NUMBER, slot, wrapper)
+
+
+def TPSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
+    return SlotDef(name, impl, SlotGroup.TYPE, slot, wrapper)
+
+
+# The declarative slot table (mirrors CPython's static slotdefs[] array).  Each
+# entry: dunder name, impl method, ``group`` + ``slot`` (which slot sub-struct
+# and bit -- reflected ops share the forward slot's group/slot), and wrapper
+# (call shape).
+_SLOTDEFS: list[SlotDef] = [
+    # SlotDef("__getattribute__", ),
+    # SlotDef("__getattr__", ),
+    # SlotDef("__setattr__", ),
+    # SlotDef("__delattr__", ),
+    TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
+    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    TPSLOT(
+        "__hash__",
+        "hash_impl",
+        PyTypeSlots.TP_HASH,
+        _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
+    ),
+    TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
+    TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
+    TPSLOT(
+        "__getattribute__",
+        "tp_getattro_impl",
+        PyTypeSlots.TP_GETATTRO,
+        _wrap_getattro,
+    ),
+    TPSLOT(
+        "__getattr__",
+        "tp_getattro_impl",
+        PyTypeSlots.TP_GETATTRO,
+        _wrap_getattro,
+    ),
+    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
+    # TPSLOT(
+    #     "__setattr__",
+    #     "setattro_impl",
+    #     PyTypeSlots.TP_SETATTRO,
+    #     _wrap_setattr,
+    # ),
+    # TPSLOT(
+    #     "__delattr__",
+    #     "delattro_impl",
+    #     PyTypeSlots.TP_SETATTRO,
+    #     _wrap_delattr,
+    # ),
+    TPSLOT(
+        "__lt__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_lt,
+    ),
+    TPSLOT(
+        "__le__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_le,
+    ),
+    TPSLOT(
+        "__eq__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_eq,
+    ),
+    TPSLOT(
+        "__ne__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_ne,
+    ),
+    TPSLOT(
+        "__gt__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_gt,
+    ),
+    TPSLOT(
+        "__ge__",
+        "tp_richcompare_impl",
+        PyTypeSlots.TP_RICHCOMPARE,
+        richcmp_ge,
+    ),
+    TPSLOT("__iter__", "tp_iter_impl", PyTypeSlots.TP_ITER, _wrap_unaryfunc),
+    TPSLOT(
+        "__next__",
+        "tp_iternext_impl",
+        PyTypeSlots.TP_ITERNEXT,
+        _wrap_unaryfunc,
+    ),
+    TPSLOT(
+        "__get__",
+        "tp_descr_get_impl",
+        PyTypeSlots.TP_DESCR_GET,
+        _wrap_descr_get,
+    ),
+    TPSLOT(
+        "__set__",
+        "tp_descr_set_impl",
+        PyTypeSlots.TP_DESCR_SET,
+        _wrap_descr_set,
+    ),
+    TPSLOT(
+        "__delete__",
+        "tp_descr_set_impl",
+        PyTypeSlots.TP_DESCR_SET,
+        _wrap_descr_delete,
+    ),
+    TPSLOT("__init__", "tp_init_impl", PyTypeSlots.TP_INIT, _wrap_init),
+    # SlotDef("__new__", ...), # missing
+    # SlotDef("__del__", ...), # missing
+    # SlotDef("__buffer__", ...), # missing
+    # SlotDef("__release_buffer__", ...), # missing
+    # SlotDef("__await__", ...), # missing
+    # SlotDef("__aiter__", ...), # missing
+    # SlotDef("__anext__", ...), # missing
+    NBSLOT(
+        "__add__",
+        "nb_add_impl",
+        PyNumberSlots.NB_ADD,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__radd__",
+        "nb_add_impl",
+        PyNumberSlots.NB_ADD,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__sub__",
+        "nb_subtract_impl",
+        PyNumberSlots.NB_SUBTRACT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rsub__",
+        "nb_subtract_impl",
+        PyNumberSlots.NB_SUBTRACT,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__mul__",
+        "nb_multiply_impl",
+        PyNumberSlots.NB_MULTIPLY,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rmul__",
+        "nb_multiply_impl",
+        PyNumberSlots.NB_MULTIPLY,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__mod__",
+        "nb_remainder_impl",
+        PyNumberSlots.NB_REMAINDER,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rmod__",
+        "nb_remainder_impl",
+        PyNumberSlots.NB_REMAINDER,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__divmod__",
+        "nb_divmod_impl",
+        PyNumberSlots.NB_DIVMOD,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rdivmod__",
+        "nb_divmod_impl",
+        PyNumberSlots.NB_DIVMOD,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__pow__",
+        "nb_power_impl",
+        PyNumberSlots.NB_POWER,
+        _wrap_ternaryfunc,
+    ),
+    NBSLOT(
+        "__rpow__",
+        "nb_power_impl",
+        PyNumberSlots.NB_POWER,
+        _wrap_ternaryfunc_r,
+    ),
+    NBSLOT(
+        "__neg__",
+        "nb_negative_impl",
+        PyNumberSlots.NB_NEGATIVE,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__pos__",
+        "nb_positive_impl",
+        PyNumberSlots.NB_POSITIVE,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__abs__",
+        "nb_absolute_impl",
+        PyNumberSlots.NB_ABSOLUTE,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__bool__",
+        "nb_bool_impl",
+        PyNumberSlots.NB_BOOL,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__invert__",
+        "nb_invert_impl",
+        PyNumberSlots.NB_INVERT,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__lshift__",
+        "nb_lshift_impl",
+        PyNumberSlots.NB_LSHIFT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rlshift__",
+        "nb_lshift_impl",
+        PyNumberSlots.NB_LSHIFT,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__rshift__",
+        "nb_rshift_impl",
+        PyNumberSlots.NB_RSHIFT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rrshift__",
+        "nb_rshift_impl",
+        PyNumberSlots.NB_RSHIFT,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__and__",
+        "nb_and_impl",
+        PyNumberSlots.NB_AND,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rand__",
+        "nb_and_impl",
+        PyNumberSlots.NB_AND,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__xor__",
+        "nb_xor_impl",
+        PyNumberSlots.NB_XOR,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rxor__",
+        "nb_xor_impl",
+        PyNumberSlots.NB_XOR,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__or__",
+        "nb_or_impl",
+        PyNumberSlots.NB_OR,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__ror__",
+        "nb_or_impl",
+        PyNumberSlots.NB_OR,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__int__",
+        "nb_int_impl",
+        PyNumberSlots.NB_INT,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__float__",
+        "nb_float_impl",
+        PyNumberSlots.NB_FLOAT,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__iadd__",
+        "nb_inplace_add_impl",
+        PyNumberSlots.NB_INPLACE_ADD,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__isub__",
+        "nb_inplace_subtract_impl",
+        PyNumberSlots.NB_INPLACE_SUBTRACT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__imul__",
+        "nb_inplace_multiply_impl",
+        PyNumberSlots.NB_INPLACE_MULTIPLY,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__imod__",
+        "nb_inplace_remainder_impl",
+        PyNumberSlots.NB_INPLACE_REMAINDER,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__ipow__",
+        "nb_inplace_power_impl",
+        PyNumberSlots.NB_INPLACE_POWER,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__ilshift__",
+        "nb_inplace_lshift_impl",
+        PyNumberSlots.NB_INPLACE_LSHIFT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__irshift__",
+        "nb_inplace_rshift_impl",
+        PyNumberSlots.NB_INPLACE_RSHIFT,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__iand__",
+        "nb_inplace_and_impl",
+        PyNumberSlots.NB_INPLACE_AND,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__ixor__",
+        "nb_inplace_xor_impl",
+        PyNumberSlots.NB_INPLACE_XOR,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__ior__",
+        "nb_inplace_or_impl",
+        PyNumberSlots.NB_INPLACE_OR,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__floordiv__",
+        "nb_floor_divide_impl",
+        PyNumberSlots.NB_FLOOR_DIVIDE,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rfloordiv__",
+        "nb_floor_divide_impl",
+        PyNumberSlots.NB_FLOOR_DIVIDE,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__truediv__",
+        "nb_true_divide_impl",
+        PyNumberSlots.NB_TRUE_DIVIDE,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rtruediv__",
+        "nb_true_divide_impl",
+        PyNumberSlots.NB_TRUE_DIVIDE,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__ifloordiv__",
+        "nb_inplace_floor_divide_impl",
+        PyNumberSlots.NB_INPLACE_FLOOR_DIVIDE,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__itruediv__",
+        "nb_inplace_true_divide_impl",
+        PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__index__",
+        "nb_index_impl",
+        PyNumberSlots.NB_INDEX,
+        _wrap_unaryfunc,
+    ),
+    NBSLOT(
+        "__matmul__",
+        "nb_matrix_multiply_impl",
+        PyNumberSlots.NB_MATRIX_MULTIPLY,
+        _wrap_binaryfunc,
+    ),
+    NBSLOT(
+        "__rmatmul__",
+        "nb_matrix_multiply_impl",
+        PyNumberSlots.NB_MATRIX_MULTIPLY,
+        _wrap_binaryfunc_r,
+    ),
+    NBSLOT(
+        "__imatmul__",
+        "nb_inplace_matrix_multiply_impl",
+        PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY,
+        _wrap_binaryfunc,
+    ),
+    # Mapping
+    MPSLOT(
+        "__len__",
+        "mp_length_impl",
+        PyMappingSlots.MP_LENGTH,
+        _wrap_unaryfunc,
+    ),
+    MPSLOT(
+        "__getitem__",
+        "mp_subscript_impl",
+        PyMappingSlots.MP_SUBSCRIPT,
+        _wrap_binaryfunc,
+    ),
+    MPSLOT(
+        "__setitem__",
+        "mp_ass_subscript_impl",
+        PyMappingSlots.MP_ASS_SUBSCRIPT,
+        _wrap_objobjargproc,
+    ),
+    MPSLOT(
+        "__delitem__",
+        "mp_ass_subscript_impl",
+        PyMappingSlots.MP_ASS_SUBSCRIPT,
+        _wrap_delitem,
+    ),
+    # Sequence
+    SQSLOT(
+        "__len__",
+        "sq_length_impl",
+        PySequenceSlots.SQ_LENGTH,
+        _wrap_unaryfunc,
+    ),
+    SQSLOT(
+        "__add__",
+        "sq_concat_impl",
+        PySequenceSlots.SQ_CONCAT,
+        _wrap_binaryfunc,
+    ),
+    SQSLOT(
+        "__mul__",
+        "sq_repeat_impl",
+        PySequenceSlots.SQ_REPEAT,
+        _wrap_indexargfunc,
+    ),
+    SQSLOT(
+        "__rmul__",
+        "sq_repeat_impl",
+        PySequenceSlots.SQ_REPEAT,
+        _wrap_indexargfunc,
+    ),
+    SQSLOT(
+        "__getitem__",
+        "sq_item_impl",
+        PySequenceSlots.SQ_ITEM,
+        _wrap_sq_item,
+    ),
+    SQSLOT(
+        "__setitem__",
+        "sq_ass_item_impl",
+        PySequenceSlots.SQ_ASS_ITEM,
+        _wrap_sq_setitem,
+    ),
+    SQSLOT(
+        "__delitem__",
+        "sq_ass_item_impl",
+        PySequenceSlots.SQ_ASS_ITEM,
+        _wrap_sq_delitem,
+    ),
+    SQSLOT(
+        "__contains__",
+        "sq_contains_impl",
+        PySequenceSlots.SQ_CONTAINS,
+        _wrap_objobjproc,
+    ),
+    SQSLOT(
+        "__iadd__",
+        "sq_inplace_concat_impl",
+        PySequenceSlots.SQ_INPLACE_CONCAT,
+        _wrap_binaryfunc,
+    ),
+    SQSLOT(
+        "__imul__",
+        "sq_inplace_repeat_impl",
+        PySequenceSlots.SQ_INPLACE_REPEAT,
+        _wrap_indexargfunc,
+    ),
+]
+
+
+@functools.cache
+def _compute_slotdefs(obj_type: type) -> dict[str, SlotDef]:
+    masks = get_type_slots(obj_type)
+    d: dict[str, SlotDef] = {}
+    for sd in _SLOTDEFS:
+        if sd.name in d:
+            continue
+        if has_slot(masks[sd.group.value], sd.slot):
+            d[sd.name] = sd
+    return d
 
 
 class VariableTrackerMeta(type):
@@ -651,7 +1739,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     tp_methods: dict[str, Method] = {}
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
-    tp_getset: dict[str, GetSet] = {}
+    tp_getset: dict[str, GetSet] = {
+        # object.__class__ has a non-NULL setter: it rejects non-heap types with
+        # TypeError rather than AttributeError, so this is unmodeled, not readonly.
+        "__class__": GetSet(
+            getter=lambda self, tx: VariableTracker.build(
+                tx,
+                self.python_type(),
+                AttrSource(self.source, "__class__") if self.source else None,
+            ),
+            setter=unmodeled_setter,
+        ),
+    }
     tp_members: dict[str, Member] = {}
 
     def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
@@ -676,6 +1775,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def lookup_slotdefs(self, name: str) -> SlotDef | None:
+        return self._slotdefs.get(name)
+
+    def method_flags_type(self) -> type:
+        """Type whose CPython ml_flags define this VT's tp_methods arities
+        (see _derive_method_flags). Defaults to python_type(); a VT whose
+        python_type() is a pure-Python stand-in without C ml_flags (e.g.
+        OrderedSet) overrides this to the builtin whose method arities it
+        mirrors, so MethodFlags still enforces arity."""
+        return maybe_get_python_type(self)
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -811,6 +1921,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return "<unknown type>"
 
+    def python_qualified_name(self) -> str:
+        """
+        Equivalent to _PyType_GetFullyQualifiedName
+
+        See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+        """
+        try:
+            type_ = self.python_type()
+        except NotImplementedError:
+            return "<unknown type>"
+        # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
+        # (and not execute user code)
+        mod = type_.__module__
+        qn = type_.__qualname__
+        if mod not in ("__main__", "builtins"):
+            return f"{mod}.{qn}"
+        else:
+            return qn
+
     def as_python_constant(self) -> Any:
         """For constants"""
         raise AsPythonConstantNotImplementedError(self)
@@ -834,13 +1963,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
-        #
-        # Returns None when the type has no nb_bool, causing generic_bool to
-        # fall through to length check, then truthy default.
-        return None
+        unimplemented(
+            gb_type="Missing nb_bool_impl override",
+            context=f"nb_bool_impl {self}",
+            explanation=f"{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
 
     def is_hashable(self) -> bool:
         """Whether the underlying Python object is hashable.
@@ -890,7 +2021,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # Sourceless: no real object to hash — fake id.
         return id(self), True
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: InstructionTranslatorBase,
         other: VariableTracker,
@@ -903,17 +2034,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         the comparison (signaling do_richcompare to try the other operand).
 
         Called from two paths:
-        - call_method("__eq__") calls richcompare_impl directly (like CPython's
+        - call_method("__eq__") calls tp_richcompare_impl directly (like CPython's
           a.__eq__(b) calling tp_richcompare without do_richcompare).
-        - generic_richcompare calls richcompare_impl as part of the 4-step
+        - generic_richcompare calls tp_richcompare_impl as part of the 4-step
           do_richcompare algorithm (subclass priority, forward, reflected,
           fallback).
         """
         unimplemented(
-            gb_type="Missing richcompare_impl override",
-            context=f"richcompare_impl {self} {op}",
+            gb_type="Missing tp_richcompare_impl override",
+            context=f"tp_richcompare_impl {self} {op}",
             explanation=f"{type(self).__name__} does not implement "
-            f"richcompare_impl. Add a richcompare_impl override to "
+            f"tp_richcompare_impl. Add a tp_richcompare_impl override to "
             f"{type(self).__name__}.",
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
@@ -963,6 +2094,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def get_value_for_setattr(self) -> object | None:
+        """Return the wrapped Python object for generic STORE_ATTR mutation,
+        or None to decline.  Only override for VTs with __dict__ and
+        standard __setattr__."""
+        return None
+
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -973,6 +2110,46 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV overrides to check self.value.__dict__ + side effects.
         """
         return None
+
+    def tp_descr_get_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_get slot.
+
+        Called when type_implements_tp_descr_get returns True for this type.
+        Subclasses override to provide the actual descriptor read.
+        """
+        unimplemented(
+            gb_type="tp_descr_get_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_get slot but no tp_descr_get_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_get C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Dispatched by the "__set__"/"__delete__" TPSLOT entries (via
+        _wrap_descr_set/_wrap_descr_delete) for any type whose
+        PyTypeSlots.TP_DESCR_SET bit is set. Subclasses override to provide
+        the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
@@ -985,7 +2162,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
         """Default attribute access via object_generic_getattr.
@@ -1001,10 +2178,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             result = getset.getter(self, tx)
             if result is not None:
                 return result
-
-        # object.__class__: one shared getset on `object` rather than per-VT.
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
 
         try:
             py_type = self.python_type()
@@ -1090,18 +2263,33 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> list[VariableTracker]:
         raise NotImplementedError
 
+    def _hasattr_check_side_effects(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> ConstantVariable | None:
+        """If *name* has a pending mutation, return the hasattr result; else None."""
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        return None
+
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try getattro_impl, catch AttributeError.
+        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
 
         Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
         call tp_getattro, suppress AttributeError via PyErr_Clear, return
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None:
+            return result
+
         try:
-            self.getattro_impl(tx, name)
+            self.tp_getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
         except ObservedAttributeError:
             tx.exn_vt_stack.clear_current_exception()
@@ -1176,7 +2364,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -1184,7 +2372,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             args=[f"object of type '{self.python_type_name()}' has no len()"],
         )
 
-    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
         raise_observed_exception(
             TypeError,
@@ -1198,7 +2386,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        # vt_getitem handles dispatch and raises TypeError for non-subscriptable
+        # generic_getitem handles dispatch and raises TypeError for non-subscriptable
         # objects.  This base fallback fires for types with mp_subscript at the
         # C level but no Dynamo override yet.
         unimplemented(
@@ -1215,7 +2403,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L168-L181
-        # Key has already been converted to int via nb_index_impl by vt_getitem.
+        # Key has already been converted to int via nb_index_impl by generic_getitem.
         unimplemented(
             gb_type="unsupported __getitem__ (sq_item)",
             context=f"sq_item_impl {self} {key}",
@@ -1223,13 +2411,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[],
         )
 
-    def sq_contains(
+    def sq_contains_impl(
         self, tx: InstructionTranslatorBase, item: VariableTracker
     ) -> VariableTracker:
         """Called when sq_contains is not implemented."""
         unimplemented(
             gb_type="missing sq_contains",
-            context=f"sq_contains not implemented for {self.python_type_name()}",
+            context=f"sq_contains_impl not implemented for {self.python_type_name()}",
             explanation=f"Dynamo does not know how to check if `{item.debug_repr()}` is in `{self.debug_repr()}`.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
@@ -1298,245 +2486,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # (tp_slot) dispatch below, mirroring the old super().call_method path.
         method = self.lookup_tp_method(name)
         if method is not None:
-            result = method.invoke(self, tx, name, args, kwargs)
+            result = method(self, tx, name, args, kwargs)
             if result is not None:
                 return result
 
-        if name == "__getitem__":
-            if len(args) == 1 and not kwargs:
-                from .object_protocol import vt_getitem
+        slotdef = self._slotdefs.get(name)
+        if slotdef is not None:
+            return slotdef(self, tx, args, kwargs)
 
-                return vt_getitem(tx, self, args[0])
-            raise_args_mismatch(
-                tx,
-                name,
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        elif name == "__setitem__":
-            if len(args) == 2 and not kwargs:
-                from .object_protocol import generic_setitem
-
-                return generic_setitem(tx, self, args[0], args[1])
-            raise_args_mismatch(
-                tx,
-                name,
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        elif name == "__delitem__":
-            if len(args) == 1 and not kwargs:
-                from .object_protocol import generic_delitem
-
-                return generic_delitem(tx, self, args[0])
-            raise_args_mismatch(
-                tx,
-                name,
-                "1 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
-        elif name == "__len__" and not (args or kwargs):
-            from .object_protocol import generic_len
-
-            return generic_len(tx, self)
-        elif name == "__str__" and not (args or kwargs):
-            from .object_protocol import generic_str
-
-            return generic_str(tx, self)
-        elif name == "__repr__" and not args and not kwargs:
-            return self.repr_impl(tx)
-        elif name == "__iter__" and not args and not kwargs:
-            return self.tp_iter_impl(tx)
-        elif name == "__next__" and not args and not kwargs:
-            return self.tp_iternext_impl(tx)
-        elif name == "__init__":
-            return self.tp_init_impl(tx, args, kwargs)
-        elif name == "__call__":
-            return self.call_function(tx, args, kwargs)
-        elif name == "__contains__" and not kwargs:
-            if len(args) != 1:
-                msg = VariableTracker.build(tx, f"expected 1 argument, got {len(args)}")
-                raise_observed_exception(TypeError, tx, args=[msg])
-
-            return self.sq_contains(tx, args[0])
-        elif (
-            name == "__getattr__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and not kwargs
-        ):
-            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
-            # the type's __getattr__ method, not the full attribute resolution.
-            # Currently we dispatch through getattro_impl which does the full
-            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
-            # call __getattr__ directly for UDOV types.
-            return self.getattro_impl(tx, args[0].as_python_constant())
-        elif (
-            name == "__getattribute__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and not kwargs
-        ):
-            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
-            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
-            # Currently we route through getattro_impl which, for UDOV,
-            # includes __getattr__. Fix in a follow-up to have UDOV
-            # override this to call generic_getattr (the inner helper)
-            # directly, skipping __getattr__.
-            return self.getattro_impl(tx, args[0].as_python_constant())
-        elif name == "__index__" and not args and not kwargs:
-            return self.nb_index_impl(tx)
-        elif name == "__int__" and not args and not kwargs:
-            return self.nb_int_impl(tx)
-        elif name == "__float__" and not args and not kwargs:
-            return self.nb_float_impl(tx)
-        elif name == "__get__" and len(args) in (1, 2) and not kwargs:
-            # Route to tp_descr_get_impl if the VT implements it.
-            # Mirrors slot_tp_descr_get which calls __get__(self, obj, type).
-            # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9771-L9790
-            if hasattr(self, "tp_descr_get_impl"):
-                obj = args[0]
-                owner = args[1] if len(args) > 1 else obj.getattro_impl(tx, "__class__")
-                return self.tp_descr_get_impl(tx, obj, owner)
-        elif name == "__or__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_or_impl(tx, args[0])
-        elif name == "__ror__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_or_impl(tx, args[0], reverse=True)
-        elif name == "__ior__":
-            return self.nb_inplace_or_impl(tx, args[0])
-        elif name in ("__mul__", "__rmul__", "__imul__"):
-            if kwargs or len(args) != 1:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[f"expected 1 argument, got {len(args)}"],
-                )
-            from .object_protocol import slot_wrapper_imul, slot_wrapper_mul
-
-            if name == "__mul__":
-                return slot_wrapper_mul(tx, self, args[0])
-            if name == "__rmul__":
-                return slot_wrapper_mul(tx, self, args[0], reverse=True)
-            return slot_wrapper_imul(tx, self, args[0])
-        elif name in ("__matmul__", "__rmatmul__", "__imatmul__"):
-            if kwargs or len(args) != 1:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[f"expected 1 argument, got {len(args)}"],
-                )
-
-            if name == "__matmul__":
-                return self.nb_matrix_multiply_impl(tx, args[0])
-            if name == "__rmatmul__":
-                return self.nb_matrix_multiply_impl(tx, args[0], reverse=True)
-            return self.nb_inplace_matrix_multiply_impl(tx, args[0])
-        elif name == "__lshift__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_lshift_impl(tx, args[0])
-        elif name == "__rlshift__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_lshift_impl(tx, args[0], reverse=True)
-        elif name == "__ilshift__":
-            return self.nb_inplace_lshift_impl(tx, args[0])
-        elif name == "__rshift__":
-            return self.nb_rshift_impl(tx, args[0])
-        elif name == "__rrshift__":
-            return self.nb_rshift_impl(tx, args[0], reverse=True)
-        elif name == "__irshift__":
-            return self.nb_inplace_rshift_impl(tx, args[0])
-        elif name == "__and__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_and_impl(tx, args[0])
-        elif name == "__rand__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_and_impl(tx, args[0], reverse=True)
-        elif name == "__iand__":
-            return self.nb_inplace_and_impl(tx, args[0])
-        elif name == "__xor__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_xor_impl(tx, args[0])
-        elif name == "__rxor__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_xor_impl(tx, args[0], reverse=True)
-        elif name == "__ixor__":
-            return self.nb_inplace_xor_impl(tx, args[0])
-        elif name == "__floordiv__":
-            return self.nb_floor_divide_impl(tx, args[0])
-        elif name == "__rfloordiv__":
-            return self.nb_floor_divide_impl(tx, args[0], reverse=True)
-        elif name == "__ifloordiv__":
-            return self.nb_inplace_floor_divide_impl(tx, args[0])
-        elif name == "__truediv__":
-            return self.nb_true_divide_impl(tx, args[0])
-        elif name == "__rtruediv__":
-            return self.nb_true_divide_impl(tx, args[0], reverse=True)
-        elif name == "__itruediv__":
-            return self.nb_inplace_true_divide_impl(tx, args[0])
-        elif name == "__mod__":
-            return self.nb_remainder_impl(tx, args[0])
-        elif name == "__rmod__":
-            return self.nb_remainder_impl(tx, args[0], reverse=True)
-        elif name == "__imod__":
-            return self.nb_inplace_remainder_impl(tx, args[0])
-        elif name == "__divmod__":
-            return self.nb_divmod_impl(tx, args[0])
-        elif name == "__rdivmod__":
-            return self.nb_divmod_impl(tx, args[0], reverse=True)
-        elif name == "__pow__":
-            z = args[1] if len(args) == 2 else None
-            return self.nb_power_impl(tx, args[0], z, reverse=False)
-        elif name == "__rpow__":
-            z = args[1] if len(args) == 2 else None
-            return self.nb_power_impl(tx, args[0], z, reverse=True)
-        elif name == "__ipow__":
-            return self.nb_inplace_power_impl(tx, args[0], None)
-        elif name == "__hash__" and not args and not kwargs:
+        if name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name in ("__add__", "__radd__", "__iadd__"):
-            if kwargs or len(args) != 1:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[f"expected 1 argument, got {len(args)}"],
-                )
-            from .object_protocol import slot_wrapper_add, slot_wrapper_iadd
 
-            if name == "__add__":
-                return slot_wrapper_add(tx, self, args[0])
-            if name == "__radd__":
-                return slot_wrapper_add(tx, self, args[0], reverse=True)
-            return slot_wrapper_iadd(tx, self, args[0])
-        elif name == "__sub__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_subtract_impl(tx, args[0])
-        elif name == "__rsub__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_subtract_impl(tx, args[0], reverse=True)
-        elif name == "__isub__":
-            return self.nb_inplace_subtract_impl(tx, args[0])
-        elif name in _RICHCOMPARE_OPS and not kwargs:
-            if len(args) != 1:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[f"expected 1 argument, got {len(args)}"],
-                )
-            # a.__eq__(b) calls the type's tp_richcompare directly, without
-            # do_richcompare's reflected-operand protocol.  This matches
-            # CPython where a.__eq__(b) can return NotImplemented.
-            # See object_protocol.py for the full dispatch architecture.
-            return self.richcompare_impl(tx, args[0], name)
-        elif name == "__subclasscheck__" and len(args) == 1 and not kwargs:
+        if name == "__subclasscheck__" and len(args) == 1 and not kwargs:
             if (self_py := self.as_python_constant()) and (
                 derived_py := args[0].as_python_constant()
             ):
@@ -1861,7 +2824,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def repr_impl(
+    def tp_repr_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
@@ -1873,14 +2836,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Subclasses override to provide the actual repr implementation.
         """
         unimplemented(
-            gb_type="repr_impl not implemented",
-            context=f"{type(self).__name__} has tp_repr slot but no repr_impl override",
+            gb_type="tp_repr_impl not implemented",
+            context=f"{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
             explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
-            "the corresponding VariableTracker doesn't implement repr_impl.",
+            "the corresponding VariableTracker doesn't implement tp_repr_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    def str_impl(
+    def repr_recursive_sentinel(self) -> str:
+        """What repr() emits for this object when it contains itself.
+
+        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
+        """
+        return "..."
+
+    def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
@@ -1889,8 +2859,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         handles dispatch and repr fallback.
         """
         unimplemented(
-            gb_type="str_impl not implemented",
-            context=f"{type(self).__name__} has no str_impl override for {self.python_type_name()}",
+            gb_type="tp_str_impl not implemented",
+            context=f"{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
             explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
             f"in {type(self).__name__}.",
             hints=[*graph_break_hints.SUPPORTABLE],
@@ -2417,6 +3387,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     @property
     def tp_repr(self) -> Slot | None:
         return _tp_type(maybe_get_python_type(self)).tp_repr
+
+    @property
+    def _slotdefs(self):
+        return _compute_slotdefs(maybe_get_python_type(self))
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """

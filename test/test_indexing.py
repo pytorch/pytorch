@@ -1537,6 +1537,17 @@ class TestIndexing(TestCase):
         r[...] = 9.9
         self.assertEqual(9.9, r)
 
+    # https://github.com/pytorch/pytorch/issues/191458
+    @onlyNativeDeviceTypes
+    def test_setitem_uint64_above_int64_max(self, device):
+        x = torch.zeros((1,), dtype=torch.uint64, device=device)
+        x[0] = 1 << 63
+        self.assertEqual(x[0].item(), 1 << 63)
+        x[0] = (1 << 64) - 1
+        self.assertEqual(x[0].item(), (1 << 64) - 1)
+        x[0] = (1 << 63) - 1
+        self.assertEqual(x[0].item(), (1 << 63) - 1)
+
     def test_basic_advanced_combined(self, device):
         # From the NumPy indexing example
         x = torch.arange(0, 12, device=device).view(4, 3)
@@ -1614,6 +1625,22 @@ class TestIndexing(TestCase):
             ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"
         ):
             torch.unravel_index(torch.tensor(0, device=device), (2, -3))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"'shape' cannot have zero dimensions when 'indices' is non-empty, but got \(2, 0, 3, 1\)",
+        ):
+            torch.unravel_index(
+                torch.tensor([[0, 0, 0], [0, 0, 0]], device=device, dtype=torch.uint8),
+                (2, 0, 3, 1),
+            )
+
+        res = torch.unravel_index(
+            torch.tensor([], device=device, dtype=torch.int64), (2, 0, 3, 1)
+        )
+        self.assertEqual(len(res), 4)
+        for r in res:
+            self.assertEqual(r.numel(), 0)
 
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)

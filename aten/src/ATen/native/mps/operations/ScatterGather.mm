@@ -103,7 +103,7 @@ static void scatter_set_metal(const Tensor& self, int64_t dim, const Tensor& ind
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_set_{}_{}", scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
@@ -237,7 +237,7 @@ static void scatter_reduce_metal(const Tensor& self,
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("scatter_{}_strided_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];
@@ -311,7 +311,7 @@ static void gather_metal(const Tensor& self, int64_t dim, const Tensor& index, c
         });
       } else {
         auto sizes = index.sizes();
-        std::array<uint32_t, 3> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
+        c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
         auto pso = lib.getPipelineStateForFunc(
             fmt::format("gather_strided_{}_{}", scalarToMetalTypeString(output), scalarToMetalTypeString(index)));
         [encoder setComputePipelineState:pso];

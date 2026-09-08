@@ -100,17 +100,12 @@ fi
 
 echo "Calling -m pip install . -v --no-build-isolation at $(date)"
 
-if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
-    STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
-fi
-
 (
     set -x
 
     mkdir -p build
 
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-        EXTRA_CAFFE2_CMAKE_FLAGS="${EXTRA_CAFFE2_CMAKE_FLAGS[@]} $STATIC_CMAKE_FLAG" \
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \

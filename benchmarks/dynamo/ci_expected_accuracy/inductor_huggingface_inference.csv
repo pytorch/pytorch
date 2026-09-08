@@ -1,125 +1,125 @@
-name,accuracy,graph_breaks
+name,accuracy,graph_breaks,calls_captured,fallbacks_to_eager
 
 
 
-AlbertForMaskedLM,pass,0
+AlbertForMaskedLM,pass,0,395,0
 
 
 
-AllenaiLongformerBase,pass,4
+AllenaiLongformerBase,pass,4,1780,0
 
 
 
-BartForCausalLM,pass,0
+BartForCausalLM,pass,0,336,0
 
 
 
-BertForMaskedLM,pass,0
+BertForMaskedLM,pass,0,315,0
 
 
 
-BlenderbotForCausalLM,pass_due_to_skip,0
+BlenderbotForCausalLM,pass_due_to_skip,0,0,0
 
 
 
-DebertaV2ForMaskedLM,pass_due_to_skip,0
+DebertaV2ForMaskedLM,pass_due_to_skip,0,0,0
 
 
 
-DistilBertForMaskedLM,pass,0
+DistilBertForMaskedLM,pass,0,160,0
 
 
 
-DistillGPT2,pass,3
+DistillGPT2,pass,3,291,0
 
 
 
-ElectraForCausalLM,pass,0
+ElectraForCausalLM,pass,0,322,0
 
 
 
-GPT2ForSequenceClassification,pass,0
+GPT2ForSequenceClassification,pass,0,1076,0
 
 
 
-GoogleFnet,pass,0
+GoogleFnet,pass,0,232,0
 
 
 
-LayoutLMForMaskedLM,pass,0
+LayoutLMForMaskedLM,pass,0,420,0
 
 
 
-M2M100ForConditionalGeneration,pass,0
+M2M100ForConditionalGeneration,pass,0,887,0
 
 
 
-MBartForCausalLM,pass,0
+MBartForCausalLM,pass,0,337,0
 
 
 
-MT5ForConditionalGeneration,pass,0
+MT5ForConditionalGeneration,pass,0,1232,0
 
 
 
-MegatronBertForCausalLM,pass,0
+MegatronBertForCausalLM,pass,0,739,0
 
 
 
-MobileBertForMaskedLM,pass,0
+MobileBertForMaskedLM,pass,0,1307,0
 
 
 
-OPTForCausalLM,pass,0
+OPTForCausalLM,pass,0,366,0
 
 
 
-PLBartForCausalLM,pass,0
+PLBartForCausalLM,pass,0,186,0
 
 
 
-PegasusForCausalLM,pass,0
+PegasusForCausalLM,pass,0,333,0
 
 
 
-Qwen/Qwen3-0.6B,pass,0
+Qwen/Qwen3-0.6B,pass,0,2282,0
 
 
 
-RobertaForCausalLM,pass,0
+RobertaForCausalLM,pass,0,329,0
 
 
 
-T5ForConditionalGeneration,pass,0
+T5ForConditionalGeneration,pass,0,847,0
 
 
 
-T5Small,pass,0
+T5Small,pass,0,847,0
 
 
 
-TrOCRForCausalLM,pass,0
+TrOCRForCausalLM,pass,0,447,0
 
 
 
-XGLMForCausalLM,pass,0
+XGLMForCausalLM,pass,0,971,0
 
 
 
-XLNetLMHeadModel,pass,0
+XLNetLMHeadModel,pass,0,818,0
 
 
 
-YituTechConvBert,pass,0
+YituTechConvBert,pass,0,650,0
 
 
 
-google/gemma-2-2b,pass,0
+google/gemma-2-2b,pass,0,2380,0
 
 
 
-meta-llama/Llama-3.2-1B,pass,0
+meta-llama/Llama-3.2-1B,pass,0,1066,0
 
 
 
-openai/whisper-tiny,pass,0
+openai/whisper-tiny,pass,0,383,0

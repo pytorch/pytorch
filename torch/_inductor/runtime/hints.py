@@ -199,15 +199,7 @@ class DeviceProperties(typing.NamedTuple):
 
         device_interface = get_interface_for_device(device)
         props = device_interface.get_device_properties(device)
-        try:
-            multi_processor_count = props.multi_processor_count
-        except AttributeError:
-            if device_type == "xpu":
-                multi_processor_count = props.gpu_subslice_count
-            elif device_type == "mtia":
-                multi_processor_count = 64
-            else:
-                raise
+        multi_processor_count = device_interface.get_multi_processor_count(device)
         return cls(
             type=device_type,
             index=device.index,
@@ -320,6 +312,8 @@ class InductorMeta(typing.TypedDict, total=False):
     RSPLIT_SIZE: int
     has_loadstore_with_contiguous_rdim: bool
     tma_min_block_sizes: dict[str, int]
+    uses_tma: bool
+    uses_device_tma: bool
     host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int
@@ -328,6 +322,7 @@ class InductorMeta(typing.TypedDict, total=False):
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool
     max_persistent_rblock: int
+    strict_reduction_rblock: int
     kernel_num_gb: float
     kernel_flop: int
 
@@ -345,6 +340,7 @@ class InductorMeta(typing.TypedDict, total=False):
     combo_tuning_groups: typing.Any
     combo_coordesc_field_order: list[str]
     combo_coordesc_field_limits: dict[str, int]
+    combo_coordesc_field_minimums: dict[str, int]
     combo_warp_stage_candidates: typing.Any
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any

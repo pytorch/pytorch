@@ -51,6 +51,8 @@ Speed up builds:
 - Install `ninja` (`pip install ninja`) for faster builds
 - Use `ccache` for incremental compilation caching
 
+Full list of build environment variables: [`cmake/EnvVarForwarding.cmake`](../cmake/EnvVarForwarding.cmake)
+
 Rebuild specific targets: `(cd build && ninja <target>)`
 
 ### Testing

@@ -39,12 +39,14 @@ __all__ = [
     "saved_tensors_hooks",
     "save_on_cpu",
     "disable_saved_tensors_hooks",
+    "node_creation_hook",
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "queue_callback",
     "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
     "set_override_stale_capture_stream",
@@ -73,6 +75,12 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the edges from this node to its input functions.
+
+        Each entry is a ``(Node, int)`` pair. The node is ``None`` for an input
+        that does not require gradients. The integer is the output index of the
+        input function to which this edge connects.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -248,7 +256,7 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     This is to enable more accurate error checking within the autograd engine.
     It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
-    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    if you are doing inplace operation on the Tensor data in a way that PyTorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
     the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
@@ -261,6 +269,29 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     if isinstance(tensor, torch.Tensor):
         tensor = (tensor,)
     torch._C._increment_version(tensor)
+
+
+def queue_callback(callback: Callable[[], None]) -> None:
+    """Queue a callback to run after the current backward pass completes.
+
+    Must be called during a backward pass, for example from a
+    :class:`torch.autograd.Function` backward or a backward hook. The callback
+    runs once the backward pass currently executing on this thread completes
+    successfully; it is not run if the backward pass raises an error.
+    Callbacks queued multiple times run multiple times, in queueing order.
+
+    Example::
+
+        >>> t = torch.rand(3, requires_grad=True)
+        >>>
+        >>> def hook(unused_grad):
+        ...     torch.autograd.graph.queue_callback(lambda: print("backward done"))
+        >>>
+        >>> _ = t.register_hook(hook)
+        >>> t.sum().backward()
+        backward done
+    """
+    Variable._execution_engine.queue_callback(callback)
 
 
 class saved_tensors_hooks:
@@ -456,6 +487,81 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
+class node_creation_hook:
+    """Context-manager that registers a hook called on each autograd Node created within it.
+
+    In that context, ``hook`` is called once for every autograd graph node
+    created by operations on tensors that require grad, with the freshly
+    created :class:`torch.autograd.graph.Node` as its only argument. The
+    intended use is to record the node, stash entries in ``node.metadata``,
+    or register backward hooks on it via
+    :meth:`~torch.autograd.graph.Node.register_hook` and
+    :meth:`~torch.autograd.graph.Node.register_prehook`.
+
+    The node is passed to the hook only once it is fully populated: its
+    ``next_functions`` are wired, all outputs' metadata are bound, and the
+    tensors saved for backward (``_saved_*``) have been stored, so a hook
+    that inspects the node sees its complete state.
+
+    The hook should have the following signature::
+
+        hook(node: torch.autograd.graph.Node) -> None
+
+    The registration is thread-local and propagates like other autograd
+    thread-local state: it is active on autograd engine worker threads, so
+    nodes created during backward (e.g. with ``create_graph=True`` or inside
+    checkpoint recomputation) also fire the hook.
+
+    When nesting this context-manager, every active hook is called for each
+    node, in registration order (outermost context-manager first). Creating
+    a new autograd node from inside a hook raises an error; hooks must only
+    observe the node they are given.
+
+    One motivating use case is attributing work done during backward to the
+    forward region that created the graph, by capturing state at node
+    creation time and restoring it around the node's backward execution::
+
+        >>> # xdoctest: +SKIP
+        >>> def creation_hook(node):
+        ...     # ``current_region()``/``enter_region()`` are user-defined and
+        ...     # stand in for whatever thread-local state you want to restore
+        ...     # while this node runs in backward.
+        ...     region = current_region()
+        ...     node.register_prehook(lambda gO: enter_region(region))
+        ...     node.register_hook(lambda gI, gO: enter_region(None))
+        >>>
+        >>> with torch.autograd.graph.node_creation_hook(creation_hook):
+        ...     loss = model(inputs)
+
+    Example::
+
+        >>> a = torch.ones(5, requires_grad=True)
+        >>> with torch.autograd.graph.node_creation_hook(lambda node: print(node)):
+        ...     b = a * 2
+        <AccumulateGrad object at ...>
+        <MulBackward0 object at ...>
+
+    .. note::
+        An ``AccumulateGrad`` node fires this hook when it is created, but
+        not when a previously created one is reused. The node is created on
+        demand the first time a leaf tensor is wired into a graph and is then
+        cached (via a weak reference) on the leaf, so it fires again only
+        after the old node has been freed. Since freeing the autograd graph
+        drops that node, code that frees the graph each iteration (the common
+        case) fires the hook consistently on each leaf's first use within the
+        context.
+    """
+
+    def __init__(self, hook: Callable[[Node], None]) -> None:
+        self.hook = hook
+
+    def __enter__(self) -> None:
+        torch._C._autograd._push_node_creation_hook(self.hook)
+
+    def __exit__(self, *args: object) -> None:
+        torch._C._autograd._pop_node_creation_hook()
+
+
 def region_activation_memory_budget(
     budget: float,
 ) -> contextlib.AbstractContextManager[None]:
@@ -482,7 +588,8 @@ def region_activation_memory_budget(
         annotation is rejected rather than silently applied graph-wide), and all
         annotated nodes must agree on the budget. To use different budgets for
         different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph.
+        ``torch._dynamo.graph_break()``) so each part becomes its own graph. The
+        context remains active across graph breaks within the region.
 
     This only has an effect under :func:`torch.compile`; using it outside of a
     compiled region raises a ``RuntimeError``.
@@ -516,9 +623,7 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback.annotate(
-        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
-    )
+    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
@@ -548,11 +653,22 @@ def set_override_stale_capture_stream(enabled: bool) -> None:
     stream, allowing the capture to proceed. This is a process-global setting
     and is not thread-local.
 
+    The flag also governs the end-of-backward sync between each leaf's stream
+    and the caller's current stream. A leaf whose incoming gradients are all
+    undefined (e.g. patterns that compute certain gradients out of band and
+    return ``None`` from autograd) cannot be reconciled by the override, so
+    when exactly one of the two streams is capturing, that sync would cross
+    the capture boundary: with the flag enabled the sync is skipped (work on
+    a non-capturing stream is not part of the capture, so the ordering has no
+    effect on it); with the flag disabled a ``RuntimeError`` is raised.
+
     Args:
         enabled (bool): If ``True``, override stale non-capturing streams with
-            the producer's capturing stream during CUDA graph capture. If
-            ``False`` (the process-initial state), raise an error only when the
-            stale stream is the default stream (stream 0); other stale streams
+            the producer's capturing stream during CUDA graph capture, and
+            skip end-of-backward leaf syncs that would cross the capture
+            boundary. If ``False`` (the process-initial state), raise an error
+            when the stale stream is the default stream (stream 0) or when a
+            leaf sync would cross the capture boundary; other stale streams
             are left unchanged.
     """
     return torch._C._set_override_stale_capture_stream(enabled)

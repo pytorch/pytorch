@@ -263,8 +263,15 @@ int64_t _fused_sdp_choice_xpu(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  sdp::sdp_params kernel_params{
-      query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = select_sdp_backend_xpu(kernel_params);
 
   if (backend == sdp::SDPBackend::error) {

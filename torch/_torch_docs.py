@@ -14403,6 +14403,80 @@ Example:
 )
 
 add_docstr(
+    torch.Generator.philox_state,
+    r"""
+Generator.philox_state(increment) -> tuple[Tensor, Tensor, Tensor]
+
+Reserves ``increment`` values from this generator's Philox4x32-10 stream and
+returns the reserved position as ``(seed, offset, intragraph_offset)``, three
+1-element ``int64`` tensors. This is the same reservation protocol the
+built-in CUDA random kernels use (``PhiloxCudaState`` in C++), so kernels
+built on it draw from the same stream as, and compose with, the built-in
+random operations. Only Philox-based generators (currently CUDA) support this
+method.
+
+**What the reservation grants.** With ``effective_offset =
+(uint64(offset) + uint64(intragraph_offset)) % 2**64`` (both operands
+reinterpreted back from int64 to uint64 first; see below), the caller owns
+the Philox counter values ``effective_offset / 4`` through
+``effective_offset / 4 + ceil(increment / 4) - 1`` (the counter advances once
+per 4 generated values), at the fixed ``seed``, for **every** subsequence.
+Following the built-in kernels' convention of one subsequence per thread
+(``curand_init(seed, subsequence, effective_offset, ...)``, where the counter
+occupies ``counter.x/y`` and the subsequence ``counter.z/w``), a thread may
+generate up to ``increment`` values rounded up to a multiple of 4. The
+generator's offset advances by that rounded amount, so ``increment`` must be
+at least the number of 32-bit values any single thread of the consuming
+kernel generates.
+
+**int64 reinterpretation.** Seed and offset are unsigned 64-bit quantities
+returned bit-exactly in ``int64`` tensors (PyTorch tensors have no uint64
+arithmetic support); values at or above ``2**63`` appear negative. Kernels
+should reinterpret the bits back to uint64 (e.g. load as int64 and bitcast);
+for host-side inspection use ``.item() & (2**64 - 1)``. The offset wraps
+modulo ``2**64`` on advancement.
+
+**Graph capture.** The two return modes mirror the C++ ``PhiloxCudaState``
+protocol. Outside capture (``HostState``), ``seed`` and ``offset`` are CPU
+tensors holding the current values; ``.item()`` is cheap and does not
+synchronize, so callers pass the values as scalar kernel arguments. During
+capture (``DevState``, under :class:`torch.accelerator.Graph` or
+:class:`torch.cuda.CUDAGraph`), ``seed`` and ``offset`` are CUDA tensors
+aliasing generator state that each replay refills with the values current at
+replay time, so kernels must load them from device memory at run time.
+``intragraph_offset`` is always a CPU tensor: 0 outside capture, and this
+reservation's position within the graph during capture. Callers branch on
+capture state (e.g. :func:`torch.cuda.is_current_stream_capturing`, or the
+device of the returned tensors), exactly like the built-in kernels branch on
+``PhiloxCudaState`` via ``at::cuda::philox::unpack``.
+
+.. warning::
+    Tensors returned during capture alias the capture's state: their contents
+    are undefined until the first replay and they must not be used after the
+    graph is destroyed.
+
+Arguments:
+    increment (int): Number of Philox outputs to reserve. Must be
+        non-negative and at most ``2**64 - 1``; the offset it advances
+        wraps modulo ``2**64`` (under graph capture, where the intragraph
+        offset starts at 0, the total reserved within one graph must stay
+        below ``2**64``).
+
+Returns:
+    tuple[Tensor, Tensor, Tensor]: ``(seed, offset, intragraph_offset)``,
+    each a 1-element ``int64`` tensor. ``seed`` and ``offset`` hold the
+    generator's seed and the reserved stream position as uint64 bits (CPU
+    tensors outside capture, CUDA tensors aliasing generator state during
+    capture); ``intragraph_offset`` is always a CPU tensor holding this
+    reservation's position within the capturing graph (0 outside capture).
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> seed, offset, intragraph = g_cuda.philox_state(4)
+""",
+)
+
+add_docstr(
     torch.Generator.clone_state,
     r"""
 Generator.clone_state() -> torch.Generator
@@ -14831,56 +14905,22 @@ are freshly created instead of aliasing the input.
 """,
 )
 
-for unary_base_func_name in (
-    "exp",
-    "sqrt",
-    "abs",
-    "acos",
-    "asin",
-    "atan",
-    "ceil",
-    "cos",
-    "cosh",
-    "erf",
-    "erfc",
-    "expm1",
-    "floor",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "neg",
-    "tan",
-    "tanh",
-    "sin",
-    "sinh",
-    "round",
-    "lgamma",
-    "frac",
-    "reciprocal",
-    "sigmoid",
-    "trunc",
-    "zero",
-):
-    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
-    if hasattr(torch, unary_foreach_func_name):
+# Create docs for our private APIs that will link to the public ones
+for private_func_name in dir(torch):
+    if not private_func_name.startswith("_foreach_"):
+        continue
+    if private_func_name == "_foreach_powsum":
+        continue
+    foreach_func_name = private_func_name.removeprefix("_foreach_")
+    private_func = getattr(torch, private_func_name)
+    if private_func.__doc__ is None:
         add_docstr(
-            getattr(torch, unary_foreach_func_name),
+            private_func,
             rf"""
-{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
-
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+Please use our public :func:`torch.foreach.{foreach_func_name}` instead.
+This private API is maintained during migration to support backwards
+compatibility.
             """,
-        )
-    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
-    if hasattr(torch, unary_inplace_foreach_func_name):
-        add_docstr(
-            getattr(torch, unary_inplace_foreach_func_name),
-            rf"""
-{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
-
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
-        """,
         )
 
 add_docstr(
