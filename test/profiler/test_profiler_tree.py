@@ -277,8 +277,8 @@ class _TestProfilerTreeBase(TestCase):
 
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTree(_TestProfilerTreeBase):
-    hw_classification = HardwareClassification.GENERIC
+class TestProfilerTreeCPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CPU
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
@@ -573,6 +573,11 @@ class TestProfilerTree(_TestProfilerTreeBase):
                 torch/profiler/profiler.py(...): stop
                   ...""",
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTree(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("too slow")
     @unittest.skipIf(
