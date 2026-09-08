@@ -295,6 +295,7 @@ inline T cast_to(const U from) {
   return static_cast<T>(from);
 }
 
+// Metal rejects static_cast<bfloat>(fp8)
 template <
     typename T,
     typename U,
