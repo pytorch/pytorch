@@ -1,3 +1,6 @@
+import collections
+import contextlib
+import functools
 import importlib
 import importlib.util
 import io
@@ -8,6 +11,10 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+from . import common
 from .common import parse_args, run
 from .torchbench import setup_torchbench_cwd, TorchBenchmarkRunner
 
@@ -21,7 +28,7 @@ except ImportError:
         return False
 
 
-class TestDynamoBenchmark(unittest.TestCase):
+class TestDynamoBenchmark(TestCase):
     def test_timm_auto_install_uses_no_deps(self) -> None:
         module_name = "benchmarks.dynamo._timm_models_install_test"
         module_path = os.path.join(os.path.dirname(__file__), "timm_models.py")
@@ -157,3 +164,98 @@ class TestDynamoBenchmark(unittest.TestCase):
             run(TorchBenchmarkRunner(), args, original_dir)
         finally:
             os.chdir(original_dir)
+
+
+# Verify one matched eager/compiled measurement plus four untimed stabilization calls.
+class TestHuggingFaceLLMPerformance(TestCase):
+    def test_compilation_latency_uses_matched_work(self) -> None:
+        calls = collections.Counter()
+        clock = [0.0]
+        result = {}
+
+        class Model(torch.nn.Module):
+            def forward(self, inputs):
+                calls["eager"] += 1
+                clock[0] += 10.0
+
+        class Runner(common.BenchmarkRunner):
+            hf_llm = True
+            suite_name = "test"
+
+            def maybe_cast(self, model, example_inputs):
+                return model, example_inputs
+
+            def deepcopy_and_maybe_parallelize(self, model):
+                return model
+
+            def init_optimizer(self, name, device, params):
+                pass
+
+            def pick_grad(self, name, is_training):
+                return contextlib.nullcontext()
+
+            def generate(self, model, example_inputs):
+                return model(example_inputs)
+
+        def optimize_ctx(fn):
+            def compiled(*args, **kwargs):
+                calls["compiled"] += 1
+                clock[0] += 30.0 if calls["compiled"] == 1 else 10.0
+
+            return compiled
+
+        def experiment(args, model_iter_fn, model, example_inputs, **kwargs):
+            result.update(kwargs)
+            return "done"
+
+        runner = Runner()
+        runner.args = types.SimpleNamespace(
+            aot_precompile=False,
+            export_aot_inductor=False,
+            export_nativert=False,
+            only="model",
+            profile_dynamo_cache_lookup=False,
+            print_compilation_time=False,
+            print_memory=False,
+            snapshot_memory=False,
+            torchscript_jit_trace=False,
+            training=False,
+            use_warm_peak_memory=False,
+            xla=False,
+        )
+        model = Model()
+
+        def get_peak_memory():
+            return calls["compiled"] or calls["eager"]
+
+        def get_dynamo_stats():
+            return collections.Counter(calls_captured=calls["compiled"])
+
+        with (
+            mock.patch.object(common, "current_device", "cuda"),
+            mock.patch.object(common, "empty_gpu_cache"),
+            mock.patch.object(common, "get_dynamo_stats", side_effect=get_dynamo_stats),
+            mock.patch.object(common, "get_peak_memory", side_effect=get_peak_memory),
+            mock.patch.object(
+                common.time, "perf_counter", side_effect=lambda: clock[0]
+            ),
+            mock.patch.object(torch.cuda, "reset_peak_memory_stats"),
+            mock.patch.object(common, "speedup_experiment", experiment),
+        ):
+            runner.run_performance_test(
+                "model",
+                model,
+                (),
+                optimize_ctx,
+                functools.partial(experiment, object()),
+            )
+
+        self.assertEqual(calls, {"eager": 1, "compiled": 5})
+        self.assertEqual(result["compilation_latency"], 20.0)
+        self.assertEqual(result["eager_peak_mem"], 1)
+        self.assertEqual(result["dynamo_peak_mem"], 5)
+        self.assertEqual(result["dynamo_stats"], {"calls_captured": 5})
+
+
+if __name__ == "__main__":
+    run_tests()
