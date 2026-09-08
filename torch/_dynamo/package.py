@@ -1886,8 +1886,10 @@ class CompilePackage:
     def _uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
+        # A package must be initialized before it can be uninstalled; uninstall
+        # no longer reads _innermost_fn, this only rejects an uninitialized one.
         if self._innermost_fn is None:
-            raise AssertionError("_innermost_fn is not set in uninstall")
+            raise AssertionError("cannot uninstall an uninitialized package")
         if self._uninstall_finalizer is not None:
             self._uninstall_finalizer.detach()
             self._uninstall_finalizer = None
