@@ -2240,6 +2240,7 @@ class TestIndexingDevice(TestCase):
         }
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    @dtypesIfMPS(torch.float32, torch.half, torch.bfloat16)
     def test_index_add_fast_path(self, device, dtype):
         # Originally test added for CUDA implementation:
         # Coverage for the index_add_ TMA fast path: one eligible case + five
@@ -2312,6 +2313,7 @@ class TestIndexingDevice(TestCase):
 
     @serialTest()
     @onlyAccelerator
+    @skipMPS
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_fast_path: this shape does
@@ -2360,6 +2362,7 @@ class TestIndexingDevice(TestCase):
     @serialTest()
     @onlyAccelerator
     @dtypes(torch.complex64, torch.complex128, torch.bool)
+    @dtypesIfMPS(torch.complex64, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # Originally test added for CUDA implementation:
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
