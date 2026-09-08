@@ -7,6 +7,7 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import functools
 import importlib.util
@@ -32,9 +33,9 @@ from ...lowering import (
     register_lowering,
     view,
 )
-from ...utils import _IntLike, ceildiv
+from ...utils import _IntLike, ceildiv, is_gpu
 from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape_equal
-from .configs import flex_gemm_search_space
+from .configs import flex_gemm_default_config, flex_gemm_search_space
 from .constraints import (
     aux_output_shape_error,
     FLEX_GEMM_CAPTURE_SHAPE_ERROR,
@@ -100,6 +101,30 @@ class QuackScaledMmUnsupported(QuackFallbackUnsupported):
 
 class QuackGroupedMmUnsupported(QuackFallbackUnsupported):
     """Grouped-mm contract QuACK's varlen-M path does not cover."""
+
+
+class QuackFp32PrecisionUnsupported(QuackFallbackUnsupported):
+    """float32 GEMM operands while the fp32 matmul precision forbids TF32."""
+
+
+# Silent fallback would drop a pinned QUACK ``config``; these raise instead.
+QUACK_PINNED_CONFIG_ERRORS = (QuackGroupedMmUnsupported, QuackFp32PrecisionUnsupported)
+
+
+def check_quack_fp32_operands(gemm_args: Sequence[TensorBox]) -> None:
+    """QuACK computes float32 GEMM operands in TF32; honor "highest" like Inductor's mm lowering."""
+    if not any(
+        arg.get_dtype() is torch.float32 and is_gpu(arg.get_device_or_error().type)
+        for arg in gemm_args
+    ):
+        return
+    if torch.backends.cuda.matmul.fp32_precision == "tf32":
+        return
+    raise QuackFp32PrecisionUnsupported(
+        "FlexGEMM QUACK computes float32 GEMM operands in TF32, but "
+        f"torch.get_float32_matmul_precision() is {torch.get_float32_matmul_precision()!r}; "
+        "opt in with torch.set_float32_matmul_precision('high') or use bfloat16/float16 operands"
+    )
 
 
 def has_flex_gemm_quack() -> bool:
@@ -632,6 +657,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    check_quack_fp32_operands(gemm_args)
     epilogue_arg_placeholders = (
         *mainloop_scale_nodes,
         *flex_gemm_epilogue_arg_placeholders(subgraph.graph_module, gemm_fx_node),
@@ -694,13 +720,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     if grouped_mm and (
-        epilogue_analysis.required_geometries
-        or outputs.local_reduce is not None
-        or outputs.main_transform is not None
+        epilogue_analysis.local_reduce.matches or outputs.local_reduce is not None
     ):
         raise QuackGroupedMmUnsupported(
-            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped "
-            "reductions or grouped-main outputs"
+            "FlexGEMM QUACK grouped_mm (varlen) does not yet support grouped reductions"
         )
     indexed_output = outputs.indexed_output
     indexed_input = None
@@ -944,8 +967,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     legal_configs = flex_gemm_quack_configs(
         flex_gemm_epilogue_template, template_kwargs, template_config
     )
+    varlen = bool(cu_seqlens_indices)
     quack_configs = (
-        flex_gemm_search_space(legal_configs) if tuned else legal_configs[:1]
+        flex_gemm_search_space(legal_configs, varlen=varlen)
+        if tuned
+        else (flex_gemm_default_config(legal_configs, varlen=varlen),)
     )
     log_flex_gemm_artifact(
         "config_candidates",
@@ -1012,13 +1038,18 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
     if backend == "QUACK":
+        # The QUACK path rewrites the body in place (1-D capture folding); the
+        # fallback below must re-lower the untouched original.
+        quack_subgraph = dataclasses.replace(
+            subgraph, graph_module=copy.deepcopy(subgraph.graph_module)
+        )
         try:
             return lower_quack_flex_gemm(
-                body_gemm_op, subgraph, args, gemm_kwargs, kernel_options
+                body_gemm_op, quack_subgraph, args, gemm_kwargs, kernel_options
             )
         except QuackFallbackUnsupported as error:
             if (
-                isinstance(error, QuackGroupedMmUnsupported)
+                isinstance(error, QUACK_PINNED_CONFIG_ERRORS)
                 and "config" in kernel_options
             ):
                 raise
