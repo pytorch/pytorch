@@ -281,10 +281,10 @@ def _replay_input_mutation(
         with torch.no_grad():
             orig.copy_(updated)
     elif (
-        # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
         torch.is_grad_enabled()
         and (orig.requires_grad or updated.requires_grad)
         and orig._is_view()
+        # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
@@ -302,7 +302,11 @@ def _replay_input_mutation(
             raise RuntimeError(msg)
         if idx not in warned:
             warned.add(idx)
-            warnings.warn(msg, stacklevel=2)
+            # No stacklevel: the mutation was captured during tracing, so the
+            # user frame that wrote it is not on this replay call stack (which
+            # differs anyway between the reference epilogue and the codegen'd
+            # exec). The message self-identifies via input idx and compile id.
+            warnings.warn(msg)
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
     else:
@@ -687,11 +691,25 @@ class _RuntimeCompiledFnInvoker:
                     torch._C._set_grad_enabled(True)
 
 
+def _resolve_compile_id_str(runtime_metadata: ViewAndMutationMeta) -> str | None:
+    # runtime_metadata.compile_id_str is only stamped on the autograd path; the
+    # inference path leaves it None, so fall back to the current compile id.
+    # Both the reference epilogue and the codegen'd wrapper resolve through here
+    # so they brand the mutation warning identically. Keep both in sync.
+    compile_id_str = runtime_metadata.compile_id_str
+    if compile_id_str is None:
+        compile_id = CompileContext.current_compile_id()
+        if compile_id is not None:
+            compile_id_str = str(compile_id)
+    return compile_id_str
+
+
 @dataclass
 class _RuntimeForwardEpilogue:
     runtime_metadata: ViewAndMutationMeta
     trace_joint: bool
     keep_input_mutations: bool
+    compile_id_str: str | None = None
     epilogue_args_idx: tuple[int, ...] = field(init=False)
     warned_inputs: set[int] = field(default_factory=set, init=False)
     output_handlers: tuple[
@@ -703,6 +721,8 @@ class _RuntimeForwardEpilogue:
     ] = field(init=False)
 
     def __post_init__(self) -> None:
+        if self.compile_id_str is None:
+            self.compile_id_str = _resolve_compile_id_str(self.runtime_metadata)
         epilogue_args_idx = list(self.runtime_metadata.mutated_inp_runtime_indices)
         for info in self.runtime_metadata.output_info:
             if (
@@ -878,7 +898,7 @@ class _RuntimeForwardEpilogue:
                         original_inpt,
                         updated_inpt,
                         idx=inpt_idx,
-                        compile_id=self.runtime_metadata.compile_id_str,
+                        compile_id=self.compile_id_str,
                         warned=self.warned_inputs,
                         hidden=meta.mutations_hidden_from_autograd,
                         under_no_grad=meta.mutations_under_no_grad_or_inference_mode,
@@ -1065,11 +1085,7 @@ def _create_runtime_wrapper(
     # pickled into the cached BundledAOTAutogradResult: writing it back would brand every
     # deserialized cache entry with the compile id current at load time, defeating the
     # {cid!r} the codegen'd epilogue bakes into its warning.
-    compile_id_str = runtime_metadata.compile_id_str
-    if compile_id_str is None:
-        compile_id = CompileContext.current_compile_id()
-        if compile_id is not None:
-            compile_id_str = str(compile_id)
+    compile_id_str = _resolve_compile_id_str(runtime_metadata)
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
@@ -3906,7 +3922,8 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
             raise RuntimeError(
                 f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
-                f"for tangent {tangent_idx}, the gradient of {which}. The backward "
+                f"for tangent {tangent_idx} (tangents_{tangent_idx + 1} in the "
+                f"backward graph), the gradient of {which}. The backward "
                 "requires this tangent, so this is a bug in AOTAutograd or the backend "
                 "(materialize_grads / mark_non_differentiable mismatch); please report it "
                 f"at https://github.com/pytorch/pytorch/issues.{trace}"
