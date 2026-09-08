@@ -120,7 +120,7 @@ __device__ int binarySearchForMultinomial(const scalar_t* cumdist,
 #ifdef USE_ROCM
     int mid = std::midpoint(start, end);
 #else
-    int mid = cuda::std::midpoint(start, end);
+    int mid = ::cuda::std::midpoint(start, end);
 #endif
 
     scalar_t midVal = cumdist[mid];

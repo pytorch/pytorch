@@ -155,7 +155,7 @@ inline int64_t resolve_root_int(
 #ifdef USE_ROCM
       auto m = std::midpoint(l, r);
 #else
-      auto m = cuda::std::midpoint(l, r);
+      auto m = ::cuda::std::midpoint(l, r);
 #endif
       // for tril:
       //    b = 2f - 1, sign = 1, hence (2f + m - 1) * m / 2

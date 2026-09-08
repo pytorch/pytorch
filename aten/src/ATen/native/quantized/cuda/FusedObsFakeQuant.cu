@@ -86,7 +86,7 @@ __global__ void ChooseQuantizationParamsKernelImpl(
       initial_zero_point = std::midpoint(
           static_cast<double>(qmin), static_cast<double>(qmax));
 #else
-      initial_zero_point = cuda::std::midpoint(
+      initial_zero_point = ::cuda::std::midpoint(
           static_cast<double>(qmin), static_cast<double>(qmax));
 #endif
     }
