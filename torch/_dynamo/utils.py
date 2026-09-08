@@ -722,6 +722,45 @@ def compile_time_record_function(name: str) -> Generator[Any, None, None]:
         yield
 
 
+# Global rather than the thread-local this file uses for other depth counters
+# (see _dynamo_timed_tls): gc.set_threshold is process-wide, so a per-thread
+# depth would let a second thread save the already-raised value as its
+# "original" and restore that permanently when it exits.
+_gc_threshold_lock = threading.Lock()
+_gc_threshold_depth = 0
+_gc_threshold_saved: tuple[int, int, int] | None = None
+
+
+@contextlib.contextmanager
+def deferred_full_gc() -> Generator[None, None, None]:
+    """Raise the gen2 GC threshold for the duration of a compile.
+
+    See config.gc_gen2_threshold_during_compile. Reentrant: nested compiles share
+    the outermost adjustment, and the original thresholds are restored once the
+    outermost one finishes.
+    """
+    global _gc_threshold_depth, _gc_threshold_saved
+    threshold = config.gc_gen2_threshold_during_compile
+    if threshold is None:
+        yield
+        return
+    with _gc_threshold_lock:
+        if _gc_threshold_depth == 0:
+            _gc_threshold_saved = gc.get_threshold()
+            gen0, gen1, gen2 = _gc_threshold_saved
+            # Never lower a threshold the caller already raised past ours.
+            gc.set_threshold(gen0, gen1, max(gen2, threshold))
+        _gc_threshold_depth += 1
+    try:
+        yield
+    finally:
+        with _gc_threshold_lock:
+            _gc_threshold_depth -= 1
+            if _gc_threshold_depth == 0 and _gc_threshold_saved is not None:
+                gc.set_threshold(*_gc_threshold_saved)
+                _gc_threshold_saved = None
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -1310,9 +1349,11 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.ListIteratorVariable,
             variables.TupleIteratorVariable,
             variables.DequeIteratorVariable,
+            variables.DequeReverseIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
             variables.FrozensetVariable,
+            variables.DictKeySetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
         )
@@ -1402,7 +1443,7 @@ _FuncTypes: TypeAlias = (
 
 
 def is_function_or_wrapper(
-    value: Any,
+    value: object,
 ) -> TypeIs[_FuncTypes | torch._ops.OpOverloadPacket | torch._ops.OpOverload]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
@@ -1410,7 +1451,7 @@ def is_function_or_wrapper(
 
 
 def is_function(
-    value: Any,
+    value: object,
 ) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
@@ -1444,7 +1485,7 @@ cmp_name_to_op_str_mapping = {
 
 
 def is_wrapper_or_member_descriptor(
-    value: Any,
+    value: object,
 ) -> TypeIs[
     types.GetSetDescriptorType
     | types.MethodDescriptorType
@@ -1496,14 +1537,14 @@ def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, str | None]:
     return fn, attr_name
 
 
-def is_numpy_ndarray(value: Any) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
+def is_numpy_ndarray(value: object) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
     if not np:
         return False
 
     return istype(value, np.ndarray)
 
 
-def istensor(obj: Any) -> bool:
+def istensor(obj: object) -> bool:
     """Check of obj is a tensor"""
     tensor_list: tuple[type, ...] = (
         torch.Tensor,
@@ -1514,7 +1555,7 @@ def istensor(obj: Any) -> bool:
     return istype(obj, tensor_list)
 
 
-def is_lazy_module(mod: Any) -> bool:
+def is_lazy_module(mod: object) -> bool:
     return isinstance(mod, LazyModuleMixin)
 
 
@@ -1703,8 +1744,8 @@ class CompilationMetrics:
         def us_to_ms(metric: int | None) -> int | None:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Any | None) -> str | None:
-            def safe_str(item: Any) -> str:
+        def collection_to_str(metric: object | None) -> str | None:
+            def safe_str(item: object) -> str:
                 try:
                     return str(item)
                 except Exception:
@@ -1718,11 +1759,11 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Any | None) -> str | None:
+        def collection_to_json_str(metric: object | None) -> str | None:
             if metric is None:
                 return None
             try:
-                return json.dumps(list(metric))
+                return json.dumps(list(cast("Iterable[object]", metric)))
             except Exception:
                 return "<unknown>"
 
@@ -2573,6 +2614,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -2739,7 +2781,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
 
 
 def is_jit_model(
-    model0: Any,
+    model0: object,
 ) -> TypeIs[
     torch.jit._trace.TopLevelTracedModule
     | torch.jit._script.RecursiveScriptModule
@@ -3443,7 +3485,7 @@ def iter_contains(
 
 
 def key_is_id(
-    k: Any,
+    k: object,
 ) -> TypeIs[torch.Tensor | torch.nn.Module | MethodWrapperType]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
@@ -3498,7 +3540,7 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException
 
 
-def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
+def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: object) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
     # where multiple torch.compile invocations reuse the same global name,
@@ -4417,7 +4459,7 @@ def run_node(
 
     with set_current_node(node):
 
-        def make_error_message(e: Any) -> str:
+        def make_error_message(e: object) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)

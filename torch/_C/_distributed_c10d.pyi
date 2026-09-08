@@ -120,8 +120,13 @@ def set_debug_level_from_env() -> None: ...
 class ReduceOp:
     # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
+    # pyrefly: ignore  # unknown-name
+    op: RedOpType
     @property
     def factor(self) -> float | Tensor: ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> ReduceOp: ...
 
     # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
@@ -480,6 +485,9 @@ class ProcessGroup:
         XCCL = ...
         CUSTOM = ...
 
+    @overload
+    def __init__(self, rank: int, size: int) -> None: ...
+    @overload
     def __init__(
         self,
         store: Store,
@@ -816,8 +824,28 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
+    class Options(Backend.Options):
+        fake_option: int
+        error_on_collective: bool
+        simulate_uniform_ranks: bool
+
+        def __init__(self) -> None: ...
+
     @staticmethod
-    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
+    def _create_internal(
+        rank: int,
+        world_size: int,
+        options: FakeProcessGroup.Options | None = ...,
+    ) -> FakeProcessGroup: ...
+    # getOptions() returns null when the group was built without options, and
+    # callers (test_device_mesh) branch on that, so this must stay optional.
+    # Backend.options is not, which makes the narrowing a real LSP violation
+    # rather than a stub inaccuracy: this property is bound to a different C++
+    # method than the base one, and widening it to match would misdescribe
+    # behavior three assertIsNone checks already pin.
+    @property
+    # pyrefly: ignore  # bad-override
+    def options(self) -> FakeProcessGroup.Options | None: ...
 
 class FakeWork(Work):
     seq_id: int

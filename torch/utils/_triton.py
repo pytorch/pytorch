@@ -222,7 +222,12 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton(*, include_cpu: bool = False) -> bool:
+    """Return whether a usable Triton backend is available.
+
+    By default, this helper only considers accelerator devices; callers must
+    explicitly include CPU.
+    """
     if not has_triton_package():
         return False
 
@@ -241,7 +246,7 @@ def has_triton() -> bool:
     # specific TritonUnavailableError rather than RuntimeError so unexpected
     # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
-        if ":" in name:
+        if ":" in name or (name == "cpu" and not include_cpu):
             continue
         if not (
             device_interface.is_available() and device_interface.is_triton_capable()
