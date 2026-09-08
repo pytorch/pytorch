@@ -2,6 +2,7 @@
 """Pass tests for torch.linalg, torch.fft, and torch.special typing."""
 
 from collections.abc import Sequence
+from typing_extensions import assert_type
 
 import torch
 
@@ -17,7 +18,14 @@ def test_linalg(axes: Sequence[int], tensors: Sequence[torch.Tensor]) -> None:
     eig_result = torch.linalg.eig(t)
     eigh_result = torch.linalg.eigh(t)
     lu_result = torch.linalg.lu_factor(t)
-    chol = torch.linalg.cholesky(t @ t.T)  # Ensure positive definite
+    chol = torch.linalg.cholesky(torch.eye(3))
+    assert_type(svd_result, torch.return_types.linalg_svd)
+    assert_type(qr_result, torch.return_types.linalg_qr)
+    assert_type(svd_result.U, torch.Tensor)
+    assert_type(svd_result.S, torch.Tensor)
+    assert_type(svd_result.Vh, torch.Tensor)
+    assert_type(qr_result.Q, torch.Tensor)
+    assert_type(qr_result.R, torch.Tensor)
 
     # Norms
     norm_val = torch.linalg.norm(t)
@@ -56,6 +64,23 @@ def test_linalg(axes: Sequence[int], tensors: Sequence[torch.Tensor]) -> None:
     torch.linalg.polar(t)
     error: type[RuntimeError] = torch.linalg.LinAlgError
     cross_result = torch.linalg.cross(v, v)
+
+
+def test_symbolic_dimensions(
+    axes: Sequence[int | torch.SymInt], axis: torch.SymInt
+) -> None:
+    t = torch.randn(3, 3)
+    torch.linalg.norm(t, dim=axes)
+    torch.linalg.vector_norm(t, dim=axes)
+    torch.linalg.vector_norm(t, dim=axes, out=t)
+    torch.linalg.vector_norm(t, dim=axis)
+    torch.linalg.matrix_norm(t, dim=axes)
+    torch.linalg.matrix_norm(t, dim=axes, out=t)
+    torch.linalg.tensorsolve(t, t, dims=axes)
+    torch.fft.fftn(t, dim=axes)
+    torch.fft.fftshift(t, dim=axes)
+    torch.masked.norm(t)
+    torch.masked.norm(t, ord=2.0)
 
 
 # torch.fft operations

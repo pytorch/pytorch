@@ -973,8 +973,11 @@ def argument_type_str_pyi(t: Type, *, use_sequence: bool = False) -> str:
 
     elif isinstance(t, ListType):
         if str(t.elem) == "int":
-            size = "Sequence[_int]" if use_sequence else "_size"
-            ret = f"_int | {size}" if t.size is not None else size
+            # PythonArgs::intlistWithDefault accepts SymInt elements (and a
+            # single SymInt for fixed-size lists), guarding them to integers.
+            elem = "_int | SymInt" if use_sequence else "_int"
+            size = f"Sequence[{elem}]" if use_sequence else "_size"
+            ret = f"{elem} | {size}" if t.size is not None else size
         elif t.is_tensor_like():
             # Tensor?[] translates to tuple[Tensor | None, ...] | list[Tensor | None] | None
             # Tensor[] translates to tuple[Tensor, ...] | list[Tensor]
