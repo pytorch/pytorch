@@ -54,7 +54,13 @@ std::optional<libkineto::TypedValue> toTypedMetadataValue(
     return libkineto::TypedValue{value.toDouble()};
   }
   if (value.isString()) {
-    return libkineto::TypedValue{std::string{value.toStringRef()}};
+    const std::string& stringValue = value.toStringRef();
+    // Preserve ivalueToStr's fallback until Kineto escapes quotes in typed
+    // string metadata.
+    if (stringValue.find('"') != std::string::npos) {
+      return libkineto::TypedValue{std::string{"None"}};
+    }
+    return libkineto::TypedValue{stringValue};
   }
   if (value.isBool()) {
     return libkineto::TypedValue{value.toBool()};
