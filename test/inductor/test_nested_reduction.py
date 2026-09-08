@@ -1388,10 +1388,33 @@ class _NestedReductionBase:
         actual, sources = run_and_get_code(torch.compile(f), x, weight)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
         self.check_fusion()
-        expected_splits = 1 if shared_external_source else 2
-        FileCheck().check_count("tl.split(", expected_splits, exactly=True).run(
-            "\n".join(sources)
-        )
+        # One split of the lane source and one of the per-group scale, which
+        # is lifted to the parent tile and split like the data.
+        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+
+    def test_producer_consumer_lane_fold_splits_computed_value(self):
+        """Lanes split the normalized value once, not the raw x and w loads."""
+        B, D, G = 32, 1024, 16
+
+        def f(x, weight):
+            y = F.rms_norm(x, (D,), weight)
+            yg = y.view(B, D // G, G)
+            scale = (yg.abs().amax(dim=-1) / 6.0).clamp(min=1e-12, max=448.0)
+            pairs = yg.view(B, D // G, G // 2, 2)
+            inv = scale.reciprocal().unsqueeze(-1)
+            return pairs[..., 0] * inv, pairs[..., 1] * inv, scale
+
+        x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
+        expected = self.get_unnested_reference(f, (x, weight))
+        actual, sources = run_and_get_code(torch.compile(f), x, weight)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.check_fusion()
+        # The weight lane split has a singleton leading dim; its absence means
+        # the lane replay folded x * rstd * w onto the parent value.
+        FileCheck().check_count("tl.split(", 2, exactly=True).check_not(
+            "[1, (R0_BLOCK//2), 2]"
+        ).run("\n".join(sources))
 
     def test_producer_consumer_independent_sub_parent_source(self):
         B, D, G = 32, 1024, 16
