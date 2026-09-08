@@ -422,12 +422,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         if inductor_meta.get("topk_sort_k") and "y" not in size_hints:
             # Top-k is a chain of block-wide reductions over its keys, so it
             # wants many keys per thread: from 512 lanes one row per program
-            # with a single warp, then one more warp per 2048 lanes up to four,
+            # with a single warp, then one more warp per 2048 lanes up to eight,
             # instead of the bandwidth-oriented default. Narrower rows pack up
             # to eight rows per program over four warps while keeping at least
             # about 128 programs in flight.
             if rnumel >= 512:
-                xblock, num_warps = 1, max(1, min(4, rnumel // 2048))
+                xblock, num_warps = 1, max(1, min(8, rnumel // 2048))
             else:
                 xblock = min(8, next_power_of_2(max(1, xnumel // 128)))
                 num_warps = 4
