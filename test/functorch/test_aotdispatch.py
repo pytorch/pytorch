@@ -5803,7 +5803,7 @@ def forward(self, tangents_1):
             outs = torch.compile(f, backend="inductor")(x)
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"handed None instead of a Tensor for tangent 1, the gradient of the intermediate base behind forward output 0",
+                r"handed None instead of a Tensor for tangent 1 \(tangents_2 in the backward graph\), the gradient of the intermediate base behind forward output 0",
             ):
                 outs[3].sum().backward()
 
@@ -5828,7 +5828,7 @@ def forward(self, tangents_1):
             self.assertIsInstance(outs[0], TwoTensor)
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"handed None instead of a Tensor for tangent 1, the gradient of forward output 1",
+                r"handed None instead of a Tensor for tangent 1 \(tangents_2 in the backward graph\), the gradient of forward output 1",
             ) as cm:
                 outs[0].sum().backward()
         self.assertIn("return x * 2, h * 1.0, h.detach()", str(cm.exception))
@@ -5907,7 +5907,7 @@ def forward(self, tangents_1):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"handed None instead of a Tensor for tangent 0, "
+            r"handed None instead of a Tensor for tangent 0 \(tangents_1 in the backward graph\), "
             r"the gradient of the mutation of forward input 2",
         ):
             AOTDispatchAutograd.process_runtime_tangent(None, None, 0, desc)
