@@ -462,6 +462,16 @@ class DecoratedDefaultsElementForwardModule(torch.nn.Module):
         return x * scale
 
 
+class DecoratedCalledDefaultForwardModule(torch.nn.Module):
+    # keep_attribute roots the guard at the function via scale_flag (not through
+    # __defaults__). The tuple is pulled in only by the call-site default binding
+    # of `scale` -- the ordinary DefaultsSource shape whose base is the function,
+    # not the tuple.
+    @keep_attribute
+    def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
+        return x * scale
+
+
 def keep_none_default(func):
     @functools.wraps(func)
     def wrapper(self, x):
@@ -1005,19 +1015,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__dict__["cache"], _Missing)
 
     def test_a_whole_tuple_guard_keeps_defaults_verbatim(self):
-        # A __defaults__ tuple that carries BOTH a whole-tuple guard (the tuple
-        # is in guard_tree_values) and a per-element guard reached via
-        # DefaultsSource (the element is in guard_tree_values but is rooted at
-        # the FUNCTION, not the tuple, so it is not a child of the tuple) must
-        # stay verbatim: pruning the unguarded sibling to _Missing would rebake
-        # the whole-tuple guard against a value it can never match at load.
+        # A __defaults__ tuple that carries a whole-tuple guard (the tuple is in
+        # guard_tree_values) while one element is _keep for an UNRELATED reason
+        # (interned, shared, reachable elsewhere) but is NOT a child of the tuple
+        # must stay verbatim: pruning the unguarded sibling to _Missing would
+        # rebake the whole-tuple guard against a value it can never match at load.
         def base(x, a="alpha", b="beta"):
             return x
 
         d = base.__defaults__
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
-        # No container->element edge: DefaultsSource does not record the tuple.
+        # No container->element edge: the kept element is not guarded THROUGH
+        # this tuple, so the whole-tuple guard governs and the tuple stays whole.
         GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__defaults__, ("alpha", "beta"))
@@ -1510,6 +1520,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             inner.__defaults__ = original
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_fqn_mismatched_function_prunes_an_unpicklable_called_default(self):
+        # The call-site default binding (DefaultsSource, base = the function)
+        # registers the __defaults__ tuple via SEQUENCE_LENGTH, but the generic
+        # container->element edge keys on the function, not the tuple, so the
+        # tuple is carried verbatim and drags in the unpicklable sibling default.
+        # This shape is unreachable through _test_serialization: its guard filter
+        # drops the whole-tuple SEQUENCE_LENGTH guard, so the tuple is never
+        # _keep and gets pruned regardless. Only the full compile path (all
+        # guards live) puts the tuple in guard_tree_values while the guarded
+        # element is rooted at the function -- so drive a real compile here.
+        mod = DecoratedCalledDefaultForwardModule()
+        # Serializes cleanly with the edge recorded on the tuple; without it this
+        # raises PackageError("cannot pickle '_thread.lock' object").
+        torch.compile(mod, backend="eager")(torch.randn(3))
 
     def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):
         # The container->element edge is recorded on the source, not the
