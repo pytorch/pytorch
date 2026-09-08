@@ -4778,7 +4778,6 @@ class GuardsStatePickler(FunctionPicklerBase):
             attributes = {
                 name: self._prune(value, "unguarded function attribute")
                 for name, value in obj.__dict__.items()
-                if self._keep(value)
             }
         # An unguarded annotation/type param may be an unpicklable local class;
         # prune it. (On 3.14 __annotations__ is a fresh dict, so always pruned.)
