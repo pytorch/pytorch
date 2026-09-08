@@ -419,18 +419,25 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         xblock_vals = self._persistent_xblock_vals()
 
-        if inductor_meta.get("topk_sort") and "y" not in size_hints and rnumel >= 512:
-            # Top-k is a chain of block-wide reductions over packed keys, so it
-            # wants one row per program and about 64 keys per thread: a single
-            # warp up to 2048 lanes instead of the bandwidth-oriented default.
-            num_warps = max(1, rnumel // 2048)
+        if inductor_meta.get("topk_sort_k") and "y" not in size_hints:
+            # Top-k is a chain of block-wide reductions over its keys, so it
+            # wants many keys per thread: from 512 lanes one row per program
+            # with a single warp, then one more warp per 2048 lanes up to four,
+            # instead of the bandwidth-oriented default. Narrower rows pack up
+            # to eight rows per program over four warps while keeping at least
+            # about 128 programs in flight.
+            if rnumel >= 512:
+                xblock, num_warps = 1, max(1, min(4, rnumel // 2048))
+            else:
+                xblock = min(8, next_power_of_2(max(1, xnumel // 128)))
+                num_warps = 4
             warps = [num_warps]
             if max_autotune_enabled:
                 warps += [w for w in (1, 2, 4, 8) if w != num_warps]
             configs = [
                 triton_config_reduction(
                     size_hints,
-                    1,
+                    xblock,
                     rnumel,
                     num_warps=w,
                     min_num_warps=1,

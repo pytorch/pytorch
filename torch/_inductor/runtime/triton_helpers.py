@@ -792,14 +792,43 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 @triton.jit
 def frexp(x):
-    # TODO(isuruf): use inline_asm_elementwise here
-    zero = x == 0
-    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
-    special = zero | not_finite
-    safe_x = tl.where(special, 1.0, x)
-    y = libdevice.ilogb(safe_x) + 1
-    exponent = tl.where(special, 0, y)
-    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
+    # Decompose the IEEE-754 bit pattern with integer ops rather than calling
+    # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
+    # float32 subnormals to zero and would return a mantissa of 0 for subnormal
+    # inputs, and the float path also loses the sign of -0.0.
+    if x.dtype == tl.float64:
+        MBITS: tl.constexpr = 52
+        EMASK: tl.constexpr = 0x7FF
+        BIAS: tl.constexpr = 1023
+    elif x.dtype == tl.float32:
+        MBITS: tl.constexpr = 23
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    elif x.dtype == tl.bfloat16:
+        MBITS: tl.constexpr = 7
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    else:
+        tl.static_assert(x.dtype == tl.float16)
+        MBITS: tl.constexpr = 10
+        EMASK: tl.constexpr = 0x1F
+        BIAS: tl.constexpr = 15
+    FMASK: tl.constexpr = (1 << MBITS) - 1
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    bits = x.to(idtype, bitcast=True)
+    exp_field = (bits >> MBITS) & EMASK
+    frac = bits & FMASK
+    # Normalize subnormals by converting the fraction to float (exact, since
+    # it fits in the mantissa), then reuse the normal-number path on that.
+    is_sub = (exp_field == 0) & (frac != 0)
+    norm_bits = frac.to(x.dtype).to(idtype, bitcast=True)
+    src_bits = tl.where(is_sub, (bits & ~FMASK) | (norm_bits & FMASK), bits)
+    src_exp = tl.where(is_sub, (norm_bits >> MBITS) - (BIAS - 1 + MBITS), exp_field)
+    mantissa_bits = (src_bits & ~(EMASK << MBITS)) | ((BIAS - 1) << MBITS)
+    # frexp(+-0) = (+-0, 0), frexp(+-inf) = (+-inf, 0), frexp(nan) = (nan, 0)
+    special = (exp_field == EMASK) | ((exp_field == 0) & (frac == 0))
+    mantissa = tl.where(special, x, mantissa_bits.to(x.dtype, bitcast=True))
+    exponent = tl.where(special, 0, src_exp - (BIAS - 1)).to(tl.int32)
     return mantissa, exponent
 
 
@@ -1037,6 +1066,52 @@ def _topk_unpack32(packed, descending: tl.constexpr, key_dtype: tl.constexpr):
 
 
 @triton.jit
+def _topk_extract_fp32(
+    x, idxs, rnumel, k: tl.constexpr, dim: tl.constexpr, descending: tl.constexpr
+):
+    """Top-k of fp32 x by k rounds of extreme-key-then-lowest-lane reductions.
+
+    Keys stay 32-bit (sign-adjusted bits, NaN sign cleared so NaN orders above
+    +inf); the lane carries the NaN sign in bit 30 so the value is restored
+    bit-identical. Lane r of the result holds rank r % k.
+    """
+    orig = x.to(tl.int32, bitcast=True)
+    is_nan = x != x
+    bits = tl.where(is_nan, orig & 0x7FFFFFFF, orig)
+    key = tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    lane32 = idxs.to(tl.int32)
+    lane = lane32 | ((is_nan & (orig < 0)).to(tl.int32) << 30)
+    sentinel: tl.constexpr = -2147483648 if descending else 2147483647
+    if rnumel is not None:
+        key = tl.where(idxs < rnumel, key, sentinel)
+        if not descending:
+            lane = tl.where(idxs < rnumel, lane, 2147483647)
+    slot_id = lane32 % k
+    out_key = key
+    out_lane = lane
+    for rank in tl.static_range(k):
+        if descending:
+            best = tl.max(key, axis=dim, keep_dims=True)
+        else:
+            best = tl.min(key, axis=dim, keep_dims=True)
+        best_lane = tl.min(
+            tl.where(key == best, lane, 2147483647), axis=dim, keep_dims=True
+        )
+        slot = slot_id == rank
+        out_key = tl.where(slot, best, out_key)
+        out_lane = tl.where(slot, best_lane, out_lane)
+        retire = lane == best_lane
+        key = tl.where(retire, sentinel, key)
+        if not descending:
+            # Ascending retires to INT_MAX, which a NaN key with an all-ones
+            # payload also reaches; keep retired lanes out of that tie.
+            lane = tl.where(retire, 2147483647, lane)
+    vbits = tl.where(out_key < 0, out_key ^ 0x7FFFFFFF, out_key)
+    vbits = tl.where((out_lane >> 30) != 0, vbits + (-2147483648), vbits)
+    return vbits.to(tl.float32, bitcast=True), out_lane & 0x3FFFFFFF
+
+
+@triton.jit
 def topk_with_index(
     x,
     idxs,
@@ -1044,12 +1119,13 @@ def topk_with_index(
     k: tl.constexpr,
     dim: tl.constexpr = None,
     descending: tl.constexpr = True,
-    key_dtype: tl.constexpr = tl.float32,
+    key_dtype: tl.constexpr = None,
 ):
     """Top-k of x with source indices, repeated across the reduction dim.
 
     Lane r of the result holds rank r % k, so the first k lanes are the answer.
-    key_dtype is the tensor's dtype; 16-bit floats select on 32-bit keys.
+    key_dtype is the tensor's dtype (None means fp32); 16-bit floats select on
+    32-bit keys.
     """
     x, idxs = tl.broadcast(x, idxs)
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
@@ -1058,8 +1134,20 @@ def topk_with_index(
     )
     tl.static_assert(x.dtype == tl.float32, "topk_with_index expects fp32 values")
     n: tl.constexpr = x.shape[_dim]
+    if key_dtype is None:
+        fp32_keys: tl.constexpr = True
+    else:
+        fp32_keys: tl.constexpr = key_dtype == tl.float32
 
-    if key_dtype == tl.float32:
+    if n >= 64 * k and fp32_keys:
+        # Few ranks over many lanes: rounds of "take the extreme key, then
+        # retire that lane" are tree reductions, which Triton lowers far
+        # better than the bitonic network's per-stage shuffles. fp32 keeps
+        # 32-bit keys and recovers the lane with a second reduction.
+        values, lanes = _topk_extract_fp32(x, idxs, rnumel, k, _dim, descending)
+        return values, lanes.to(idxs.dtype)
+
+    if fp32_keys:
         packed = _topk_pack64(x, idxs, rnumel, descending)
         sentinel: tl.constexpr = (
             -9223372036854775808 if descending else 9223372036854775807
@@ -1069,9 +1157,8 @@ def topk_with_index(
         sentinel: tl.constexpr = -2147483648 if descending else 2147483647
 
     if n >= 64 * k:
-        # Few ranks over many lanes: k rounds of "take the extreme key, then
-        # retire that lane" cost k tree reductions, which Triton lowers far
-        # better than the bitonic network's per-stage shuffles.
+        # 16-bit keys already share an int32 with the lane, so one reduction
+        # per rank finds both.
         top = packed
         for rank in tl.static_range(k):
             if descending:
@@ -1090,7 +1177,7 @@ def topk_with_index(
                 ),
                 x.shape,
             )
-    if key_dtype == tl.float32:
+    if fp32_keys:
         values, lanes = _topk_unpack64(top, descending)
     else:
         values, lanes = _topk_unpack32(top, descending, key_dtype)
