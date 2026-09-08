@@ -64,8 +64,9 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
         for param, _ in missing:
             if param not in temporarily_removed:
                 temporarily_removed[param] = optim.state.pop(param)
+    temporarily_enabled = [param for param in params if not param.requires_grad]
     try:
-        for param in params:
+        for param in temporarily_enabled:
             param.requires_grad_(True)
         result = _original_unflatten_optim_state_dict(optim, state_dict, info)
         empty = [param for param, value in optim.state.items() if not value]
@@ -79,8 +80,8 @@ def _unflatten_optim_state_dict(optim, state_dict, info):
     finally:
         for param, value in temporarily_removed.items():
             optim.state[param] = value
-        for param, value in zip(params, requires_grad):
-            param.requires_grad_(value)
+        for param in temporarily_enabled:
+            param.requires_grad_(False)
 
 
 def _patch_consolidate_hf_safetensors() -> None:
