@@ -3085,7 +3085,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         loaded = self._load(staged_with_graph_breaks)
         installed = [
             code
-            for code in loaded._package._installed_precompile_codes
+            for code in loaded._package._installed_precompile_codes.values()
             if code.co_name.startswith("torch_dynamo_resume_in")
         ]
         self.assertTrue(installed, "expected resume frames to be installed")
