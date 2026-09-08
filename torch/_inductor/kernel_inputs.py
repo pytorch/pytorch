@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
@@ -10,6 +11,36 @@ from torch._inductor.utils import has_free_symbols
 from torch._inductor.virtualized import V
 
 from .ir import FixedLayout, FlexibleLayout, Layout
+
+
+@functools.lru_cache
+def architecture_name_from_device(device: torch.device) -> str | None:
+    """Return the lookup-table architecture key for ``device``.
+
+    CUDA/HIP read ``gcnArchName`` from ``DeviceInterface.get_device_properties``,
+    which is the canonical architecture id for those backends.
+
+    Other registered backends fall back to ``name`` when ``gcnArchName`` is absent.
+    Third-party lookup tables must key rows using this exact string (spacing and
+    capitalization included). ``name`` is often a driver-exposed product label
+    (e.g. ``Ascend910B``, ``NVIDIA H100 80GB HBM3``) rather than a pure arch id;
+    backends that rely on lookup tables should keep ``name`` stable across runs.
+
+    A dedicated ``DeviceInterface.get_device_architecture`` could replace this
+    fallback later; for now ``gcnArchName or name`` is the contract.
+
+    Returns ``None`` if the device is unregistered or properties are unavailable.
+    """
+    try:
+        device_interface = get_interface_for_device(device)
+        device_properties = device_interface.get_device_properties(device)
+    except (NotImplementedError, RuntimeError):
+        return None
+    arch = getattr(device_properties, "gcnArchName", None)
+    if arch:
+        return arch
+    name = getattr(device_properties, "name", None)
+    return name or None
 
 
 if TYPE_CHECKING:
@@ -103,13 +134,7 @@ class KernelInputs(ABC):
     def device_name(self) -> str | None:
         """Architecture name from the device's properties, if present."""
         if self._device_name is None:
-            device = self.device()
-            try:
-                device_interface = get_interface_for_device(device)
-                device_properties = device_interface.get_device_properties(device)
-            except NotImplementedError:
-                return None
-            self._device_name = getattr(device_properties, "gcnArchName", None)
+            self._device_name = architecture_name_from_device(self.device())
         return self._device_name
 
     def shapes_symbolic(self) -> tuple[tuple[Any, ...], ...]:
