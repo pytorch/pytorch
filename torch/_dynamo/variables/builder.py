@@ -792,9 +792,7 @@ def _is_dim_dynamic_from_source_dynamism(
     if not isinstance(source, LocalSource) or source.dynamism is None:
         return False
 
-    source_dynamism: dict[str, tuple[bool, ...]] = dict(
-        typing.cast(Any, source.dynamism)
-    )
+    source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
