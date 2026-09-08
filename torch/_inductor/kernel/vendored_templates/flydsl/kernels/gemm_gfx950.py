@@ -26,6 +26,7 @@ class GemmGfx950Param:
     group_m: fx.Constexpr[int]
     use_half_tile_interleaved: fx.Constexpr[bool]
     has_bias: fx.Constexpr[bool]
+    has_epilogue: fx.Constexpr[bool]
     has_k_tail: fx.Constexpr[bool]
     async_load_bytes: fx.Constexpr[int]
     in_data_bytes: fx.Constexpr[int]
@@ -50,6 +51,7 @@ def make_gemm_gfx950_param(
     group_m: int = 0,
     use_half_tile_interleaved: bool = False,
     has_bias: bool = False,
+    has_epilogue: bool = False,
     has_k_tail: bool = False,
     mma_m: int = 16,
     mma_n: int = 16,
@@ -168,6 +170,7 @@ def make_gemm_gfx950_param(
         group_m=group_m,
         use_half_tile_interleaved=use_half_tile_interleaved,
         has_bias=has_bias,
+        has_epilogue=has_epilogue,
         has_k_tail=has_k_tail,
         async_load_bytes=GFX950_DMA_BYTES,
         in_data_bytes=in_dbytes,
@@ -284,6 +287,7 @@ def gemm_gfx950_kernel(
     k: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
 ):
     block_m = param.block_m
     block_n = param.block_n
@@ -529,7 +533,11 @@ def gemm_gfx950_kernel(
         current_stage = (current_stage + 1) % stages
 
     frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
-    frag_C_out.store(frag_C.load().to(elem_dtype))
+    for i in range_constexpr(fx.size(frag_C.shape).unpack()):
+        val = frag_C[i]
+        if const_expr(param.has_epilogue):
+            val = epilogue_fn(val.to(elem_dtype))
+        frag_C_out[i] = val.to(elem_dtype)
 
     fx.gpu.barrier()
     for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
@@ -553,6 +561,7 @@ def gemm_hti_gfx950_kernel(
     k: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
 ):
     block_m = param.block_m
     block_n = param.block_n
@@ -832,6 +841,8 @@ def gemm_hti_gfx950_kernel(
                 global_n_idx = bid_n * block_n + n_part * half_block_n + col
                 safe_global_n_idx = (global_n_idx < n).select(global_n_idx, 0)
                 val = val + bias_buf[safe_global_n_idx].to(fx.Float32)
+            if const_expr(param.has_epilogue):
+                val = epilogue_fn(val.to(elem_dtype))
             frag_C_out[i] = val.to(elem_dtype)
 
         fx.gpu.barrier()
@@ -947,6 +958,7 @@ def launch_gemm_gfx950(
     n: fx.Int32,
     k: fx.Int32,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
     stream: fx.Stream = fx.Stream(None),
 ):
     elem_dtype = _elem_dtype(param)
@@ -978,7 +990,7 @@ def launch_gemm_gfx950(
     )
     kernel_impl._known_block_size = [param.block_threads, 1, 1]
     kernel_impl._func.__name__ = make_gemm_gfx950_kernel_name(param)
-    kernel_impl(out, a, b, out, m, n, k, tiled_mma, param).launch(
+    kernel_impl(out, a, b, out, m, n, k, tiled_mma, param, epilogue_fn).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
         stream=stream,

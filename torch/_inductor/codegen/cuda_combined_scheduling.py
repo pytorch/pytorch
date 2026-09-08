@@ -92,7 +92,7 @@ class CUDACombinedScheduling(BaseScheduling):
         elif self._flydsl_scheduling.is_flydsl_template(
             node1
         ) or self._flydsl_scheduling.is_flydsl_template(node2):
-            return False
+            return self._flydsl_scheduling.can_fuse_vertical(node1, node2)
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
         # Triton, or NVGEMM-winning MTBs silently lose Triton prologue fusion.
@@ -181,8 +181,6 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._flydsl_scheduling.is_flydsl_template(template_node):
-            if epilogue_nodes:
-                raise AssertionError("flydsl template does not support epilogue nodes")
             if prologue_nodes:
                 raise AssertionError("flydsl template does not support prologue nodes")
             return self._flydsl_scheduling.codegen_template(
