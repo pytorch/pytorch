@@ -271,7 +271,16 @@ def get_flydsl_mm_template_kwargs(
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
-    return get_gemm_configs()
+    return [
+        {
+            **gemm_config,
+            "MAT2_IS_NK": True,
+            "GEMM_M": m_static,
+            "GEMM_N": n_static,
+            "GEMM_K": k_static,
+        }
+        for gemm_config in get_gemm_configs()
+    ]
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)

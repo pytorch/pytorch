@@ -1,9 +1,10 @@
 import contextlib
 import os
 
+from flydsl.compiler import jit_argument as flydsl_jit_argument
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
-    launch_gemm_gfx950,
+    launch_gemm_gfx950_no_bias,
     make_gemm_param_and_validate,
 )
 from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
@@ -11,15 +12,19 @@ from torch._inductor.runtime.flydsl_cache import ensure_flydsl_cache_dir
 {{gen_defines()}}
 
 
-_gemm_call_cache = {}
+_gemm_call_entry = None
 
 
-def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, bias_tensor, stream):
+def _static_tensor_arg(tensor):
+    return flydsl_jit_argument.from_torch_tensor(tensor)
+
+
+def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream):
     """First call compiles and executes; subsequent calls dispatch the cached executor."""
-    has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
-    cache_key = (int(has_k_tail),)
-    entry = _gemm_call_cache.get(cache_key)
+    global _gemm_call_entry
+    entry = _gemm_call_entry
     if entry is None:
+        has_k_tail = infer_has_k_tail(k, TILE_K, STAGES)
         param = make_gemm_param_and_validate(
             m,
             n,
@@ -38,18 +43,17 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, bias_tensor, stream):
         )
         assert param is not None, "unsupported FlyDSL GEMM shape/config"
         entry = [param, None]
-        _gemm_call_cache[cache_key] = entry
+        _gemm_call_entry = entry
     else:
         param = entry[0]
     executor = entry[1]
     if executor is None:
         ensure_flydsl_cache_dir()
         executor = flyc.compile(
-            launch_gemm_gfx950,
-            output_mn,
-            mat1_mk,
-            mat2_nk,
-            bias_tensor,
+            launch_gemm_gfx950_no_bias,
+            _static_tensor_arg(output_mn),
+            _static_tensor_arg(mat1_mk),
+            _static_tensor_arg(mat2_nk),
             m,
             n,
             k,
@@ -63,7 +67,6 @@ def _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, bias_tensor, stream):
             output_mn,
             mat1_mk,
             mat2_nk,
-            bias_tensor,
             m,
             n,
             k,
@@ -89,16 +92,18 @@ def _temporary_env(updates):
 
 
 def _flydsl_mm(output, mat1, mat2, stream):
-    k = mat1.shape[-1]
-    mat2_nk = mat2.transpose(0, 1)
+    m = GEMM_M
+    n = GEMM_N
+    k = GEMM_K
+    if MAT2_IS_NK:
+        mat2_nk = mat2
+    else:
+        mat2_nk = mat2.transpose(0, 1)
 
-    mat1_mk = mat1.view(-1, k)
-    m = mat1_mk.shape[0]
-    n = mat2_nk.shape[0]
-    output_mn = output.view(-1, n)
-    bias_tensor = mat1_mk
+    mat1_mk = mat1
+    output_mn = output
 
-    _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, bias_tensor, stream)
+    _run_gemm_gfx950(m, n, k, output_mn, mat1_mk, mat2_nk, stream)
     return output
 
 
@@ -149,4 +154,5 @@ def {{kernel_name}}_precompile(
             try:
                 _flydsl_mm(output, mat1, mat2, stream=0)
             finally:
-                _gemm_call_cache.clear()
+                global _gemm_call_entry
+                _gemm_call_entry = None
