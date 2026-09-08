@@ -21,6 +21,12 @@ def _linear_lr_init(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total
     )
 
 
+def _composite_initial_step(self):
+    self._step_count = 0
+
+
 def install() -> None:
     lr_scheduler.ConstantLR.__init__ = _constant_lr_init
     lr_scheduler.LinearLR.__init__ = _linear_lr_init
+    lr_scheduler.SequentialLR._initial_step = _composite_initial_step
+    lr_scheduler.ChainedScheduler._initial_step = _composite_initial_step
