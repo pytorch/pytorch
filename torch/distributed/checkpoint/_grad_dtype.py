@@ -1,5 +1,7 @@
 import torch
 
+from . import state_dict as _state_dict
+
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     for param_group in optim.param_groups:
@@ -36,5 +38,22 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
             for param in missing:
                 param.grad = None
 
+
+_original_unflatten_optim_state_dict = _state_dict._unflatten_optim_state_dict
+
+
+def _unflatten_optim_state_dict(optim, state_dict, info):
+    params = [param for group in optim.param_groups for param in group["params"]]
+    requires_grad = [param.requires_grad for param in params]
+    try:
+        for param in params:
+            param.requires_grad_(True)
+        return _original_unflatten_optim_state_dict(optim, state_dict, info)
+    finally:
+        for param, value in zip(params, requires_grad):
+            param.requires_grad_(value)
+
+
+_state_dict._unflatten_optim_state_dict = _unflatten_optim_state_dict
 
 __all__ = ["_init_optim_state"]
