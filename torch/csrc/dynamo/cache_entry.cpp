@@ -87,6 +87,11 @@ void enable_precompile_cache_keys() {
 // frame's callback chain is a miss for the attributes below. Interned names
 // plus the no-raise lookup keep the walk off the exception path entirely.
 py::object lookup_optional(py::handle handle, PyObject* name) {
+  if (name == nullptr) {
+    // A NULL name means an interned-literal PyUnicode_InternFromString hit OOM
+    // at module init; report absent rather than deref NULL in GetOptionalAttr.
+    return py::object();
+  }
   PyObject* value = nullptr;
   // pythoncapi_compat provides PyObject_GetOptionalAttr before 3.13.
   if (PyObject_GetOptionalAttr(handle.ptr(), name, &value) < 0) {
