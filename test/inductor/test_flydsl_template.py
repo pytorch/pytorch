@@ -508,13 +508,13 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
 
-    def test_compiled_cache_keys_on_extra_constexpr(self):
+    def test_compiled_cache_keys_on_extra_key(self):
         jit_func = SimpleNamespace()
         compiled = mock.Mock()
         compiler = mock.Mock(return_value=compiled)
         dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
 
-        for key in ("epilogue_a", "epilogue_b"):
+        for key in ("epilogue_a", "epilogue_a", "epilogue_b"):
             run_cached_flydsl(
                 jit_func,
                 object(),
@@ -525,6 +525,7 @@ class TestFlyDSLTemplate(TestCase):
             )
 
         self.assertEqual(compiler.call_count, 2)
+        compiled.assert_called_once_with(dispatch)
 
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
@@ -1129,29 +1130,110 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @parametrize(
+        "dtype,use_half_tile_interleaved",
+        (
+            (torch.float16, False),
+            (torch.bfloat16, False),
+            (torch.bfloat16, True),
+        ),
+    )
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         epilogue_fusion=True,
     )
-    def test_flydsl_gemm_accumulator_epilogue_fusion(self):
+    def test_flydsl_gemm_accumulator_epilogue_fusion(
+        self, dtype, use_half_tile_interleaved
+    ):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
         from torch._inductor.utils import run_and_get_code
 
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
 
         def fn(a, b):
-            return torch.mm(a, b.t()) + 1.0
+            result = torch.mm(a, b.t())
+            return torch.relu(-(((result + 1.0) * 0.5 - 2.0) / 3.0))
 
-        for dtype in (torch.float16, torch.bfloat16):
-            with self.subTest(dtype=dtype):
-                a = torch.randn(32, 128, device="cuda", dtype=dtype)
-                b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        waves = 2 if use_half_tile_interleaved else 4
+        gemm_config = asdict(
+            flydsl_heuristics.FlyDSLGemmConfig(
+                M_WAVES=waves,
+                N_WAVES=waves,
+                USE_HALF_TILE_INTERLEAVED=use_half_tile_interleaved,
+            )
+        )
+        a = torch.randn(32, 128, device="cuda", dtype=dtype)
+        b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_gemm_configs",
+            return_value=[gemm_config],
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", dynamic=False), a, b
+            )
+        self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
+        self.assertIn("EPILOGUE_FN = lambda acc:", code)
+        self.assertNotIn("triton_poi_", code)
+        self.assertIn(
+            f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}",
+            code,
+        )
+        self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        epilogue_fusion=True,
+    )
+    def test_flydsl_gemm_epilogue_fusion_rejections(self):
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        def unsupported_sin(a, b, unused):
+            return torch.sin(torch.mm(a, b.t()))
+
+        def extra_tensor_read(a, b, scale):
+            return torch.mm(a, b.t()) * scale
+
+        def different_output_dtype(a, b, unused):
+            return torch.mm(a, b.t()) > 0
+
+        dtype = torch.bfloat16
+        a = torch.randn(32, 128, device="cuda", dtype=dtype)
+        b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        scale = torch.randn(32, 128, device="cuda", dtype=dtype)
+        for name, fn in (
+            ("unsupported_op", unsupported_sin),
+            ("extra_tensor_read", extra_tensor_read),
+            ("different_output_dtype", different_output_dtype),
+        ):
+            with self.subTest(name=name):
+                torch._dynamo.reset()
                 result, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", dynamic=False), a, b
+                    torch.compile(fn, backend="inductor", dynamic=False),
+                    a,
+                    b,
+                    scale,
                 )
-                self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
-                self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
+                self.assertIn("async_compile.flydsl", code)
+                self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
+                self.assertIn("triton_poi_", code)
+                expected = fn(a, b, scale)
+                if expected.dtype is torch.bool:
+                    self.assertEqual(result, expected)
+                else:
+                    self.assertEqual(result, expected, atol=3e-2, rtol=3e-2)
 
 
 if __name__ == "__main__":

@@ -75,19 +75,31 @@ class FlyDSLScheduling(BaseScheduling):
                 node.get_size(), template.get_size()
             ):
                 return False
+            if node.get_dtype() != template.get_dtype():
+                log.debug(
+                    "Rejecting FlyDSL GEMM epilogue fusion: output dtype %s "
+                    "does not match GEMM dtype %s",
+                    node.get_dtype(),
+                    template.get_dtype(),
+                )
+                return False
             reads |= OrderedSet(read.name for read in scheduler_node.read_writes.reads)
 
         if reads != OrderedSet([template.get_name()]):
+            log.debug(
+                "Rejecting FlyDSL GEMM epilogue fusion: expected only %s, got reads %s",
+                template.get_name(),
+                reads,
+            )
             return False
         try:
-            from torch._inductor.kernel.flydsl.epilogue import (
-                materialize_flydsl_scheduler_epilogue,
-            )
+            from .epilogue import materialize_flydsl_scheduler_epilogue
 
             materialize_flydsl_scheduler_epilogue(
                 template.get_name(), list(node2.get_nodes())
             )
-        except (AttributeError, NotImplementedError):
+        except NotImplementedError as error:
+            log.debug("Rejecting FlyDSL GEMM epilogue fusion: %s", error)
             return False
         return True
 

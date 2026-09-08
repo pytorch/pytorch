@@ -97,14 +97,11 @@ class FlyDSLTemplateKernel(Kernel):
         if self.original_output_name is None:
             raise AssertionError("Fused FlyDSL epilogue requires an output name")
 
-        from torch._inductor.kernel.flydsl.epilogue import (
-            materialize_flydsl_scheduler_epilogue,
-        )
+        from .epilogue import materialize_flydsl_scheduler_epilogue
 
-        _, source = materialize_flydsl_scheduler_epilogue(
+        return materialize_flydsl_scheduler_epilogue(
             self.original_output_name, list(self.epilogue_nodes)
         )
-        return source
 
     def render(self, template, **kwargs):
         from torch._inductor.select_algorithm import PartialRender

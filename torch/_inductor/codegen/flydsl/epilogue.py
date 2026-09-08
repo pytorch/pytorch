@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
+"""Materialize accumulator-only Inductor epilogues as FlyDSL expressions."""
+
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor.ir import ComputedBuffer, Pointwise
@@ -39,7 +42,11 @@ class _EpilogueOps(OpsHandler[Any]):
             )
         return _Expr("acc")
 
-    def constant(self, value: Any, dtype: torch.dtype) -> Any:
+    def constant(self, value: bool | float | int, dtype: torch.dtype) -> str:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise NotImplementedError(
+                "FlyDSL GEMM epilogues require finite scalar constants"
+            )
         return repr(value)
 
     def add(self, a: Any, b: Any, *, alpha: Any = 1) -> _Expr:
@@ -55,19 +62,29 @@ class _EpilogueOps(OpsHandler[Any]):
     def mul(self, a: Any, b: Any) -> _Expr:
         return self._binary("*", a, b)
 
-    def truediv(self, a: Any, b: Any) -> _Expr:
-        return self._binary("/", a, b)
-
     def neg(self, x: Any) -> _Expr:
         return self._unary("-", x)
+
+    def gt(self, a: Any, b: Any) -> _Expr:
+        return self._binary(">", a, b)
+
+    def where(self, condition: Any, input: Any, other: Any) -> _Expr:
+        return _Expr(f"({condition}).select({input}, {other})")
+
+    def maximum(self, a: Any, b: Any) -> _Expr:
+        return self.where(self.gt(a, b), a, b)
+
+    def relu(self, x: Any) -> _Expr:
+        return self.maximum(x, 0)
 
 
 def materialize_flydsl_scheduler_epilogue(
     original_buffer_name: str,
     epilogue_nodes: list[BaseSchedulerNode],
-) -> tuple[str, str]:
+) -> str:
+    """Render supported scheduler nodes as a capture-free constexpr lambda."""
     if not epilogue_nodes:
-        return "", (
+        return (
             "HAS_EPILOGUE: fx.Constexpr = False\n"
             "EPILOGUE_KEY: fx.Constexpr = 'identity'\n"
             "EPILOGUE_FN = lambda acc: acc\n"
@@ -94,10 +111,9 @@ def materialize_flydsl_scheduler_epilogue(
         raise AssertionError(f"missing final FlyDSL epilogue value {final_name}")
 
     result = str(env[final_name])
-    key = hashlib.sha256(result.encode()).hexdigest()[:16]
+    key = hashlib.sha256(result.encode()).hexdigest()
     return (
-        key,
         "HAS_EPILOGUE: fx.Constexpr = True\n"
         f"EPILOGUE_KEY: fx.Constexpr = {key!r}\n"
-        f"EPILOGUE_FN = lambda acc: {result}\n",
+        f"EPILOGUE_FN = lambda acc: {result}\n"
     )
