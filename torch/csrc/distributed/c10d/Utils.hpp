@@ -6,6 +6,7 @@
 #include <c10/util/env.h>
 #include <c10/util/error.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -692,6 +693,9 @@ using SizeType = uint64_t;
     (void)__output;                                                            \
     if (!(success_cond)) {                                                     \
       if (errno == EINTR) {                                                    \
+        if (c10d::detail::isTerminationSignalReceived()) {                     \
+          C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(errno)); \
+        }                                                                      \
         continue;                                                              \
       } else if (                                                              \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) {      \
@@ -704,21 +708,24 @@ using SizeType = uint64_t;
     }                                                                          \
   }
 #else
-#define SYSCHECK(expr, success_cond)                                     \
-  while (true) {                                                         \
-    auto __output = (expr);                                              \
-    (void)__output;                                                      \
-    if (!(success_cond)) {                                               \
-      if (errno == EINTR) {                                              \
-        continue;                                                        \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {              \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");             \
-      } else {                                                           \
-        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno)); \
-      }                                                                  \
-    } else {                                                             \
-      break;                                                             \
-    }                                                                    \
+#define SYSCHECK(expr, success_cond)                                           \
+  while (true) {                                                               \
+    auto __output = (expr);                                                    \
+    (void)__output;                                                            \
+    if (!(success_cond)) {                                                     \
+      if (errno == EINTR) {                                                    \
+        if (c10d::detail::isTerminationSignalReceived()) {                     \
+          C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(errno)); \
+        }                                                                      \
+        continue;                                                              \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {                    \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");                   \
+      } else {                                                                 \
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno));       \
+      }                                                                        \
+    } else {                                                                   \
+      break;                                                                   \
+    }                                                                          \
   }
 #endif
 

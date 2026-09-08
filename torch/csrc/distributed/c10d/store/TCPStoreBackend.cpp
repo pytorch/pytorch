@@ -601,7 +601,13 @@ void TCPStoreMasterDaemon::run() {
         fds[i].revents = 0;
       }
 
-      SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+      int r = ::poll(fds.data(), fds.size(), -1);
+      if (r == -1) {
+        if (errno == EINTR) {
+          continue;
+        }
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno));
+      }
 
       // TCPStore's listening socket has an event and it should now be able to
       // accept new connections.
