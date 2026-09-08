@@ -543,6 +543,193 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
 
+    @parametrize("raises", (False, True))
+    def test_precompile_flydsl_restores_environment(self, raises):
+        from torch._inductor.runtime.flydsl_cache import precompile_flydsl
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        seen = []
+
+        def kernel(*, mat1, output, stream, compile_only):
+            self.assertIsInstance(mat1, FakeTensor)
+            self.assertEqual(mat1.shape, (2, 3))
+            self.assertEqual(mat1.stride(), (4, 1))
+            self.assertEqual(output.dtype, torch.bfloat16)
+            self.assertTrue(compile_only)
+            self.assertEqual(stream, 0)
+            self.assertEqual(os.environ["COMPILE_ONLY"], "1")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            seen.append(True)
+            if raises:
+                raise RuntimeError("compile failed")
+
+        with mock.patch.dict(
+            os.environ, {"COMPILE_ONLY": "0", "FLYDSL_GPU_ARCH": "gfx942"}
+        ):
+
+            def precompile():
+                precompile_flydsl(
+                    kernel,
+                    {"mat1": (2, 3), "output": (2, 5)},
+                    {"mat1": (4, 1), "output": (5, 1)},
+                    {"mat1": "float32", "output": "bfloat16"},
+                    "gfx950",
+                )
+
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "compile failed"):
+                    precompile()
+            else:
+                precompile()
+            self.assertEqual(os.environ["COMPILE_ONLY"], "0")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
+        self.assertEqual(seen, [True])
+
+    @parametrize("kind", ("mm", "grouped_mm", "mxfp8_grouped_mm"))
+    def test_flydsl_precompile_fake_tensors(self, kind):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        namespace = dict(
+            torch=torch,
+            flyc=flyc,
+            fx=fx,
+            GEMM_M=256,
+            GEMM_N=256,
+            GEMM_K=512,
+            GEMM_G=2,
+            GEMM_DTYPE_ID=2,
+            TILE_M=128,
+            TILE_N=128,
+            TILE_K=64,
+            STAGES=2,
+            M_WAVES=1,
+            N_WAVES=4,
+            GROUP_M=0,
+            USE_HALF_TILE_INTERLEAVED=False,
+            A_IS_TRANSPOSED=False,
+            B_IS_TRANSPOSED=True,
+            BLOCK_R=64,
+            BLOCK_C=128,
+        )
+        source = jinja2.Template(load_kernel_template(f"flydsl_{kind}")).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: f"def kernel_main({','.join(names)}, output, stream):",
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        exec(compile(source, "<flydsl precompile test>", "exec"), namespace)
+        shapes = {"mat1": (256, 512), "mat2": (512, 256), "output": (256, 256)}
+        strides = {"mat1": (512, 1), "mat2": (1, 512), "output": (256, 1)}
+        dtypes = dict.fromkeys(shapes, "bfloat16")
+        if kind != "mm":
+            shapes.update(mat2=(2, 512, 256), offs=(2,))
+            strides.update(mat2=(131072, 256, 1), offs=(1,))
+            dtypes["offs"] = "int32"
+        if kind == "mxfp8_grouped_mm":
+            strides["mat2"] = (131072, 1, 512)
+            dtypes.update(
+                mat1="float8_e4m3fn",
+                mat2="float8_e4m3fn",
+                scale_a="float8_e8m0fnu",
+                scale_b="float8_e8m0fnu",
+            )
+            shapes.update(scale_a=(256, 16), scale_b=(2, 4096))
+            strides.update(scale_a=(16, 1), scale_b=(4096, 1))
+        # Exercise the real compiler with metadata only, including on hosts
+        # without a GPU. A normal flyc.compile call attempts to execute.
+        with mock.patch.object(
+            torch.cuda,
+            "get_device_properties",
+            side_effect=AssertionError("device queried"),
+        ):
+            namespace["kernel_precompile"](
+                shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
+            )
+
+    @parametrize("block_m", (2, 4, 8))
+    def test_grouped_row_tile_upper_bound(self, block_m):
+        from itertools import product
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_config import (
+            grouped_row_tiles_upper_bound,
+        )
+
+        for total in range(9):
+            for groups in range(1, 5):
+                actual_max = max(
+                    sum((rows + block_m - 1) // block_m for rows in partition)
+                    for partition in product(range(total + 1), repeat=groups)
+                    if sum(partition) == total
+                )
+                self.assertEqual(
+                    grouped_row_tiles_upper_bound(total, groups, block_m),
+                    actual_max,
+                )
+
+    def test_precompile_flydsl_concurrent_dispatch(self):
+        from torch._inductor.runtime.flydsl_cache import precompile_flydsl
+
+        precompile_started = threading.Event()
+        release_precompile = threading.Event()
+        cold_started = threading.Event()
+        cold_compiler_started = threading.Event()
+        warm_dispatch = mock.Mock()
+        cold_jit = SimpleNamespace()
+
+        def precompile_kernel(**kwargs):
+            precompile_started.set()
+            self.assertTrue(release_precompile.wait(5))
+
+        def cold_compiler(*args):
+            cold_compiler_started.set()
+            self.assertNotEqual(os.environ.get("COMPILE_ONLY"), "1")
+            return mock.Mock()
+
+        def cold_launch():
+            cold_started.set()
+            return run_cached_flydsl(
+                cold_jit,
+                constexpr_param=_CacheParam(),
+                compiler=cold_compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        # Supply a dispatch argument because the cache keys include its device.
+        dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
+        warm_jit = SimpleNamespace()
+        run_cached_flydsl(
+            warm_jit,
+            constexpr_param=_CacheParam(),
+            compiler=lambda *args: warm_dispatch,
+            dispatch_args=(dispatch,),
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            precompile = pool.submit(precompile_flydsl, precompile_kernel, {}, {}, {})
+            try:
+                self.assertTrue(precompile_started.wait(5))
+                run_cached_flydsl(
+                    warm_jit,
+                    constexpr_param=_CacheParam(),
+                    compiler=mock.Mock(
+                        side_effect=AssertionError("unexpected compile")
+                    ),
+                    dispatch_args=(dispatch,),
+                )
+                warm_dispatch.assert_called_once_with(dispatch)
+                cold = pool.submit(cold_launch)
+                self.assertTrue(cold_started.wait(5))
+                self.assertFalse(cold_compiler_started.wait(0.05))
+            finally:
+                release_precompile.set()
+            precompile.result()
+            cold.result()
+
     def _assert_compiled_mm(
         self,
         a,
@@ -599,9 +786,9 @@ class TestFlyDSLTemplate(TestCase):
                 a = torch.randn(m, k, device="cuda", dtype=dtype)
                 b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
-                self.assertIn(".mark_layout_dynamic()", code)
+                self.assertIn("flydsl_tensor_arg", code)
                 self.assertNotIn("mat2.transpose(0, 1)", code)
-                self.assertIn("_inductor_tensor_arg(mat2)", code)
+                self.assertIn("flydsl_tensor_arg(mat2)", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
@@ -899,7 +1086,7 @@ class TestFlyDSLTemplate(TestCase):
         ) as grid_size:
             code = self._assert_compiled_grouped_mm(a, b, offs)
         grid_size.assert_called_once()
-        self.assertIn("FLYDSL_COMPILE_ONLY", code)
+        self.assertIn("precompile_flydsl", code)
         self.assertIn("_precompile", code)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
@@ -1109,72 +1296,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertNotIn("async_compile.flydsl", code)
         self.assertIn("extern_kernels._grouped_mm", code)
         self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
-
-
-
-    def test_compiled_cache_keys_on_device_and_param(self):
-        jit_func = SimpleNamespace()
-        compiled = mock.Mock()
-        compiler = mock.Mock(return_value=compiled)
-
-        def invoke(device_index):
-            dispatch = SimpleNamespace(device=SimpleNamespace(index=device_index))
-            return run_cached_flydsl(
-                jit_func,
-                object(),
-                constexpr_param=_CacheParam(),
-                compiler=compiler,
-                dispatch_args=(dispatch,),
-            )
-
-        first = invoke(0)
-        with mock.patch(
-            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
-        ) as cache_lock:
-            second = invoke(0)
-        third = invoke(1)
-
-        self.assertIs(first, compiled)
-        self.assertIs(second, compiled)
-        self.assertIs(third, compiled)
-        cache_lock.__enter__.assert_not_called()
-        self.assertEqual(compiler.call_count, 2)
-        compiled.assert_called_once()
-
-    def test_compiled_cache_serializes_same_param(self):
-        jit_func = SimpleNamespace()
-        compile_started = threading.Event()
-        allow_compile = threading.Event()
-        compiled = mock.Mock()
-        compile_calls = 0
-
-        def compiler(*args):
-            nonlocal compile_calls
-            compile_calls += 1
-            compile_started.set()
-            self.assertTrue(allow_compile.wait(5))
-            return compiled
-
-        def invoke(value):
-            return run_cached_flydsl(
-                jit_func,
-                object(),
-                constexpr_param=_CacheParam(),
-                compiler=compiler,
-                dispatch_args=(value,),
-            )
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(invoke, "first")
-            self.assertTrue(compile_started.wait(5))
-            second = pool.submit(invoke, "second")
-            allow_compile.set()
-            self.assertIs(first.result(), compiled)
-            self.assertIs(second.result(), compiled)
-
-        self.assertEqual(compile_calls, 1)
-        compiled.assert_called_once_with("second")
-
 
     # ------------------------------------------------------------------
     # MXFP8 ragged grouped GEMM (aten._scaled_grouped_mm_v2)
@@ -1456,11 +1577,9 @@ class TestFlyDSLTemplate(TestCase):
             self.skipTest("FlyDSL runtime unavailable")
 
         code = self._assert_compiled_mxfp8_grouped_mm(group_sizes, k, n)
-        self.assertIn(".mark_layout_dynamic()", code)
+        self.assertIn("flydsl_tensor_arg", code)
         self.assertIn("_precompile", code)
-        # Compile-only is an argument, not a process-global env flag: warming
-        # and a real dispatch can share a process.
-        self.assertIn("compile_only=True", code)
+        self.assertIn("precompile_flydsl", code)
         self.assertNotIn("FLYDSL_COMPILE_ONLY", code)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
@@ -1578,6 +1697,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertGreaterEqual(int(window_offs.min()), 0)
             covered += rows
         self.assertEqual(covered, total_m)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -23,7 +23,6 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
-    GPU_ALIGN_BYTES,
     _descriptor_shape_fits_in_int32,
     _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
@@ -182,7 +181,6 @@ def use_flydsl_grouped_mm_template(
 
     n = mat_b.get_size()[-1]
     k = mat_a.get_size()[-1]
-    g = mat_b.get_size()[0]
     if not sizevars.statically_known_equals(mat1_stride[-2], k):
         return False
     if not sizevars.statically_known_equals(mat2_stride[-2], n):
@@ -207,12 +205,10 @@ def use_flydsl_grouped_mm_template(
     ):
         return False
 
-    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
-    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
-    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
-    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
-    if m_static is None or n_static is None or k_static is None or g_static is None:
+    static_shape = _flydsl_grouped_static_shape(mat_a, mat_b, offs)
+    if static_shape is None:
         return False
+    m_static, n_static, k_static, g_static = static_shape
     if n_static % 32 != 0 or k_static % 32 != 0:
         return False
     tensor_spans = (

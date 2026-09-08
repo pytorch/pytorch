@@ -180,8 +180,6 @@ def _warn_guard_fallback(K, N, E, BLOCK_C, BLOCK_R, err) -> None:
     )
 
 
-
-
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm as _llvm
@@ -190,6 +188,7 @@ from flydsl.expr.arith import ArithValue
 from flydsl.expr.typing import T, Vector as Vec
 
 from . import mxfp8_buffer_ops as buffer_ops
+from .grouped_config import grouped_row_tiles_upper_bound
 from .mxfp8_gemm_utils import (
     compute_global_swizzle,
     G2SLoader,
@@ -1046,14 +1045,11 @@ def get_mxfp8_grouped_gemm_grid_size(
 ) -> tuple[int, int]:
     """(n_blocks, n_c_tiles) for a launch covering `rows` tokens.
 
-    The row-tile count is over-provisioned to ``ceildiv(rows, BLOCK_R) + E``:
-    a group boundary that falls inside a tile costs the next group a slot, and
-    E boundaries can each do that. Blocks whose slot lands past the last group
-    resolve to ``active == False`` and are predicated off by the surplus-slot
-    guard, so the surplus is a launch-descriptor cost, not work.
+    Group sizes are device-resident, so the host uses a row-tile upper bound.
+    Surplus blocks are predicated off by the kernel's active-tile guard.
     """
     n_c_tiles = ceildiv(param.n, param.block_c)
-    n_slots = ceildiv(rows, param.block_r) + param.group_count
+    n_slots = grouped_row_tiles_upper_bound(rows, param.group_count, param.block_r)
     return n_slots * n_c_tiles, n_c_tiles
 
 
