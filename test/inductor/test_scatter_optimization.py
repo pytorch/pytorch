@@ -347,11 +347,13 @@ class TestPartitionedScatterOpt(TestCase):
         read the graph in list order, so it has to sort before it looks."""
         torch.manual_seed(42)
         N, n, D = 8192, 8, 4
+        desorted = False
 
         def desort(graph):
             """Stand in for an earlier post_grad pass: clone a node just before its
             last user and redirect every use to the clone, leaving the first user
             reading a definition that now comes later in the list."""
+            nonlocal desorted
             nodes = list(graph.nodes)
             position = {node: i for i, node in enumerate(nodes)}
             for node in nodes:
@@ -369,6 +371,7 @@ class TestPartitionedScatterOpt(TestCase):
                 node.replace_all_uses_with(
                     clone, delete_user_cb=lambda u: u is not clone
                 )
+                desorted = True
                 return
 
         def f(out, idx, vals, x):
@@ -385,13 +388,13 @@ class TestPartitionedScatterOpt(TestCase):
         vals = torch.randn(N, D, dtype=torch.float32)
         x = torch.randn(16, 32, dtype=torch.float32)
 
-        with config.patch(
-            post_grad_custom_pre_pass=desort,
-            fx_graph_cache=False,
-            fx_graph_remote_cache=False,
-        ):
+        with config.patch(post_grad_custom_pre_pass=desort):
             self._check_accuracy(f, (out, idx, vals, x), atol=1.0, rtol=1e-2)
 
+        self.assertTrue(
+            desorted,
+            "desort found no node to move; the test no longer exercises the sort",
+        )
         self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
 
     def test_broadcast_values_multidim_index(self):
@@ -426,6 +429,67 @@ class TestPartitionedScatterOpt(TestCase):
                 0,
                 "broadcast values must be rejected by a gate, not reshaped",
             )
+
+    def test_multidim_index_dynamic_shape(self):
+        """A symbolic index shape must fail the flattening gate without a guard."""
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+        vals = torch.randn(B, T, D, dtype=torch.float32)
+        torch._dynamo.mark_dynamic(idx, 0)
+        torch._dynamo.mark_dynamic(vals, 0)
+
+        with torch.no_grad():
+            compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+            for current_idx, current_vals in (
+                (idx, vals),
+                (
+                    torch.randint(0, 4, (B * 2, T), dtype=torch.int64),
+                    torch.randn(B * 2, T, D, dtype=torch.float32),
+                ),
+            ):
+                expected = f(out, current_idx, current_vals)
+                actual = compiled_f(out, current_idx, current_vals)
+                self.assertTrue(torch.allclose(expected, actual, atol=1.0, rtol=1e-2))
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"], 0
+        )
+
+    def test_multidim_index_nonzero_scatter_dim(self):
+        """Only values without an unindexed prefix can use the current flatten."""
+        torch.manual_seed(42)
+        n, rows, D = 64, 512, 4
+        P = B = T = n
+
+        def f(out, idx, vals):
+            return torch.ops.aten.index_put.default(out, [None, idx], vals, True)
+
+        out = torch.zeros(P, rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+
+        # The prefix dimension is broadcast, so flattening the leading index
+        # dimensions is valid.
+        vals = torch.randn(B, T, D, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        # A materialized prefix moves the index dimensions away from the front.
+        vals = torch.randn(P, B, T, D, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"], 0
+        )
 
     def test_skip_accumulate_false(self):
         """index_put with accumulate=False doesn't match the registered patterns."""

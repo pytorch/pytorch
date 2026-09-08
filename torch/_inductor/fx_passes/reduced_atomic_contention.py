@@ -29,7 +29,11 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._logging import getArtifactLogger
-from torch.fx.experimental.symbolic_shapes import optimization_hint
+from torch.fx.experimental.symbolic_shapes import (
+    optimization_hint,
+    statically_known_true,
+    sym_eq,
+)
 
 
 log = logging.getLogger(__name__)
@@ -116,9 +120,10 @@ def _evaluate_candidate(
       3. Runs on a CUDA device (this optimization targets GPU atomic contention)
       4. Non-bool dtype
       5. scatter_dim in bounds
-      6. Resolvable, non-zero sizes
-      7. index_size >= min_index_size
-      8. contention_ratio >= threshold  (uses scatter_dim_size, not output_numel)
+      6. Multi-dimensional index can be flattened without moving value dimensions
+      7. Resolvable, non-zero sizes
+      8. index_size >= min_index_size
+      9. contention_ratio >= threshold  (uses scatter_dim_size, not output_numel)
     """
     node_name = output_node.name
 
@@ -156,17 +161,21 @@ def _evaluate_candidate(
         return None
 
     # A multi-dimensional index makes the replacement flatten values against the
-    # index shape. index_put only requires those to broadcast, and a broadcast
-    # operand has too few elements to reshape to the flattened length.
+    # leading index dimensions. This is valid only when values has no dimensions
+    # corresponding to the unindexed prefix and the index shapes are known equal.
     index_ndim = len(index_meta["shape"])
     if index_ndim > 1:
-        values_node = output_node.args[2] if len(output_node.args) > 2 else None
+        values_node = output_node.args[2]
         values_meta = (
             _get_tensor_meta(values_node) if isinstance(values_node, fx.Node) else None
         )
+        expected_values_ndim = index_ndim + len(input_meta["shape"]) - scatter_dim - 1
         if (
             values_meta is None
-            or values_meta["shape"][:index_ndim] != index_meta["shape"]
+            or len(values_meta["shape"]) != expected_values_ndim
+            or not statically_known_true(
+                sym_eq(values_meta["shape"][:index_ndim], index_meta["shape"])
+            )
         ):
             _record_skip(ctx, "broadcast_operand", node_name)
             return None
@@ -653,9 +662,9 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
         return graph
 
     # post_grad only sorts the graph after this pass runs, so a node may still sit
-    # after one of its users here. build_memory_profile raises on the out-of-order
-    # node, and replace_by_example inserts at the match node, so an argument placed
-    # after it would leave the nodes we emit reading a later definition.
+    # after one of its users here. Sort locally because both the memory profile and
+    # replacement depend on list order; moving the global sort would also change
+    # the ordering observed by unrelated post-grad passes.
     stable_topological_sort(graph)
 
     # Stage 2: build the memory profile and run the pattern matcher.
