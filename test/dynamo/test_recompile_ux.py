@@ -533,9 +533,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== ExtraState cache lock: concurrency and lifetime =====
 
-    @torch._dynamo.config.patch(
-        recompile_limit=10000, accumulated_recompile_limit=100000
-    )
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
         """lookup() takes the ExtraState cache lock to snapshot the cache
         entries and drain any pending evictions and invalidations -- brief,
@@ -571,16 +568,24 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         def hammer(tid):
             try:
-                # Fresh shapes disjoint across threads (so each miss compiles a
-                # new entry, none collide) interleaved with the warm hits.
-                size = 1000 * (tid + 1)
-                for _ in range(50):
-                    if stop.is_set():
-                        break
-                    for arg in warm:
-                        opt(arg)
-                    size += 1
-                    opt(torch.randn(size))
+                # config.patch is thread-local (a ContextVar), so the limits
+                # must be raised inside the worker or its fresh-shape misses hit
+                # the default recompile_limit and go RUN_ONLY, collapsing this
+                # into a warm-only lookup hammer that never reaches
+                # create_cache_entry -- the one locked region that runs Python.
+                with torch._dynamo.config.patch(
+                    recompile_limit=10000, accumulated_recompile_limit=100000
+                ):
+                    # Fresh shapes disjoint across threads (so each miss compiles
+                    # a new entry, none collide) interleaved with the warm hits.
+                    size = 1000 * (tid + 1)
+                    for _ in range(50):
+                        if stop.is_set():
+                            break
+                        for arg in warm:
+                            opt(arg)
+                        size += 1
+                        opt(torch.randn(size))
             except Exception as e:
                 errors.put(e)
 
@@ -611,7 +616,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # Pin that compiles actually raced the lookups: without a new entry
         # installed under the lock, this degrades to the warm-only lookup smoke
         # test the fresh-shape streams were added to strengthen.
-        self.assertGreater(cnt.frame_count, warmup_frames, "no compile raced")
+        # A real floor: 4 threads x 50 fresh shapes compile ~200 entries, so
+        # this separates a raced compile hammer from the ~5 stray compiles a
+        # thread-local-limit miss would leave (> warmup_frames alone cannot).
+        self.assertGreater(
+            cnt.frame_count, warmup_frames + 100, "compiles did not race"
+        )
 
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
         """reset_code can run while other threads are parked on the same
@@ -635,22 +645,33 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         warmup_frames = cnt.frame_count
 
         errors = queue.SimpleQueue()
+        iters = queue.SimpleQueue()
         stop = threading.Event()
 
         def caller():
+            n = 0
             try:
                 while not stop.is_set():
                     for arg in args:
                         opt(arg)
+                    n += 1
             except Exception as e:
                 errors.put(e)
+            finally:
+                iters.put(n)
 
         def resetter():
             try:
-                for _ in range(30):
-                    # The public reset path: it holds compile_lock, so it
-                    # races the LOOKUPS here (which take no compile lock) but
-                    # not an in-flight compile's cache-entry snapshot.
+                # A bare range(30) finishes in well under a millisecond, so the
+                # callers observe stop after a single iteration and never race a
+                # reset against an in-flight lookup. Reset on a wall-clock budget
+                # instead, so the callers accumulate real iterations against a
+                # continuously emptied cache.
+                # The public reset path holds compile_lock, so it races the
+                # LOOKUPS here (which take no compile lock) but not an in-flight
+                # compile's cache-entry snapshot.
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
                     torch._dynamo.eval_frame.remove_from_cache(f.__code__)
             except Exception as e:
                 errors.put(e)
@@ -686,6 +707,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # without this the test can pass while no reset ever interleaved with a
         # lookup (every other assertion holds whether or not the race happened).
         self.assertGreater(cnt.frame_count, warmup_frames, "resets forced no recompile")
+        # Pin that the callers actually interleaved with the resets rather than
+        # observing stop after one pass -- the frame_count guard above cannot
+        # tell the intended stress apart from a handful of serialized calls.
+        total_iters = 0
+        while not iters.empty():
+            total_iters += iters.get_nowait()
+        self.assertGreater(total_iters, 20, "callers never raced the resets")
 
     def test_concurrent_install_and_reset_against_lookups(self):
         """Eight threads look f up while two install and reset precompile
