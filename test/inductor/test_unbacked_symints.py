@@ -76,6 +76,21 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
+    def test_linalg_cross_unbacked_last_dim(self, device):
+        # Regression: linalg_cross's meta check was written as
+        # `self.size(dim) == 3 and other.size(dim) == 3`. `and` has to decide
+        # the truthiness of its left operand, so it called bool() on the first
+        # SymBool - a guard - and an unbacked last dim raised Eq(u0, 3).
+        def fn(x):
+            nz = x.nonzero()
+            a = torch.ones(4, nz.size(0), device=x.device)
+            return torch.linalg.cross(a, a)
+
+        x = torch.tensor([1, 0, 1, 1], device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        expected = fn(x)
+        torch.testing.assert_close(actual, expected)
+
     def test_remove_no_ops_unbacked_shape_dde(self, device):
         # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
         # which raises GuardOnDataDependentSymNode when the tuples contain
