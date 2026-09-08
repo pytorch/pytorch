@@ -1,8 +1,11 @@
+import torch
+
 from . import lr_scheduler
 
 
 _original_constant_lr_init = lr_scheduler.ConstantLR.__init__
 _original_linear_lr_init = lr_scheduler.LinearLR.__init__
+_original_reduce_lr = lr_scheduler.ReduceLROnPlateau._reduce_lr
 
 
 def _constant_lr_init(self, optimizer, factor=1.0 / 3, total_iters=5, last_epoch=-1):
@@ -27,6 +30,34 @@ def _linear_lr_init(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total
     )
 
 
+def _reduce_lr(self, epoch):
+    if len(self.optimizer.param_groups) != len(self.min_lrs):
+        if self.default_min_lr is None:
+            raise RuntimeError(
+                "The number of param groups in the `optimizer` "
+                f"({len(self.optimizer.param_groups)}) differs "
+                f"from when `ReduceLROnPlateau` was initialized "
+                f"({len(self.min_lrs)}), usually due to a new "
+                "param group being added to the optimizer. Please "
+                "modify the `min_lrs` field to match the length "
+                "of the `optimizer` param groups."
+            )
+        self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
+
+    for i, param_group in enumerate(self.optimizer.param_groups):
+        old_lr = param_group["lr"]
+        if isinstance(old_lr, torch.Tensor):
+            min_lr = torch.as_tensor(
+                self.min_lrs[i], device=old_lr.device, dtype=old_lr.dtype
+            )
+            new_lr = torch.maximum(old_lr * self.factor, min_lr)
+            if bool(torch.any(old_lr - new_lr > self.eps)):
+                lr_scheduler._update_param_group_val(param_group, "lr", new_lr)
+        else:
+            _original_reduce_lr(self, epoch)
+            break
+
+
 def _composite_initial_step(self):
     self._step_count = 0
     self._last_lr = lr_scheduler._param_groups_val_list(self.optimizer, "lr")
@@ -35,5 +66,6 @@ def _composite_initial_step(self):
 def install() -> None:
     lr_scheduler.ConstantLR.__init__ = _constant_lr_init
     lr_scheduler.LinearLR.__init__ = _linear_lr_init
+    lr_scheduler.ReduceLROnPlateau._reduce_lr = _reduce_lr
     lr_scheduler.SequentialLR._initial_step = _composite_initial_step
     lr_scheduler.ChainedScheduler._initial_step = _composite_initial_step
