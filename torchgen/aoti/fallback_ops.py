@@ -109,6 +109,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.baddbmm.out": {},
     "aten.bernoulli_.float": {},
     "aten.bernoulli_.Tensor": {},
+    "aten.bmm.dtype_out": {"since": "TORCH_VERSION_2_15_0"},
     "aten.bmm.out": {},
     "aten.bucketize.Tensor": {},
     "aten.cat.default": {},
