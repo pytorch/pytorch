@@ -145,7 +145,8 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // which GC can fire while ANOTHER ExtraState's cache_mutex is held during
   // its guard evaluation, and two threads doing that against each other's
   // states deadlock (CacheLock releases only the GIL, not the peer's lock).
-  // Parked requests are applied by the next holder of cache_mutex.
+  // Parked requests are applied by the next cache_mutex holder that runs at
+  // cache_python_depth 0; a nested (mid-guard-eval) holder re-parks them.
   std::mutex pending_invalidation_mutex;
   std::vector<std::pair<py::object, py::object>> pending_invalidations;
   // Cheap early-out for drain_pending_invalidations, so the hot lookup paths
