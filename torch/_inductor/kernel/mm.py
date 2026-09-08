@@ -271,6 +271,9 @@ def get_flydsl_mm_template_kwargs(
     if n_static % 32 != 0 or k_static % 32 != 0:
         return []
 
+    # The FlyDSL GEMM template consumes the RHS as contiguous [N, K].  The
+    # aten.mm lowering sees B.T as a [K, N] ReinterpretView, so pass the
+    # underlying B buffer and bake the static GEMM dimensions into the template.
     return [
         {
             **gemm_config,
