@@ -263,10 +263,7 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__annotations__ = annotations
         # Assign __dict__ before __type_params__: on Python < 3.12 the function
         # has no __type_params__ slot, so that write lands in __dict__ and a
-        # wholesale __dict__ assignment afterwards would discard it. Both
-        # picklers hand a freshly built dict here (the AOT side keeps only the
-        # entries that pickle), so a helper that stashed `self.d is self.__dict__`
-        # comes back with those as two distinct objects.
+        # wholesale __dict__ assignment afterwards would discard it.
         fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
@@ -769,11 +766,14 @@ def _cpu_codegen_target_problem(
     vec_isa_width, vec_isa_macro) -- because pick_vec_isa() already folds
     cpp.simdlen and ATEN_CPU_CAPABILITY into the ISA it returns: a simdlen that
     caps the width picks a narrower ISA, so the width and macro already reflect
-    it. march does not gate for a different reason: the resolved ISA appends its
-    own arch flags after cpp.march on the compile line, and the later flag wins,
-    so kernels built for a given resolved ISA rebuild identically here whatever
-    cpp.march is set to. Comparing the resolved triple is therefore complete,
-    and comparing the raw simdlen/march knobs on top of it is not just
+    it. march does not gate for a different reason: the arch flags pick_vec_isa()
+    emits are what select the instruction set, and they are emitted after
+    cpp.march on the compile line -- the x86 ISAs enable it with explicit -m
+    flags (-mavx2, -mavx512f) that hold regardless of cpp.march, while VecSVE's
+    own -march, coming later, wins over it. Either way kernels built for a given
+    resolved ISA rebuild identically here whatever cpp.march is set to.
+    Comparing the resolved triple is therefore complete, and comparing the raw
+    simdlen/march knobs on top of it is not just
     redundant, it is wrong -- it rejects an artifact whose kernels this host can
     reproduce merely because the knob that got there differs (an artifact built
     under cpp.simdlen=256 is loadable on any host that resolves to the same
