@@ -25,11 +25,11 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
@@ -393,7 +393,9 @@ class ReplicateTestGPU(ReplicateTest):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device)
 
 
-instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda", allow_xpu=True)
+instantiate_device_type_tests(
+    ReplicateTestGPU, globals(), only_for="cuda", allow_xpu=True
+)
 
 
 class DDP_TP_Test(InductorTestCase):
