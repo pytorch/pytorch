@@ -363,16 +363,19 @@ class AOTCompiledFunction:
         try:
             pickler.dump(state)
         except (pickle.PicklingError, TypeError) as e:
-            # Preserve the original exception type and message -- callers and
-            # tests match on it (e.g. "cannot pickle '_thread.lock' object") --
-            # and append guidance: a nested function's __dict__ rides verbatim,
-            # a common source of an unpicklable value reaching the artifact.
-            raise type(e)(
+            # Preserve the original exception object -- callers and tests match
+            # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
+            # guidance. Mutate args and re-raise rather than type(e)(msg): a
+            # TypeError subclass from a user __reduce__ may take a non-message
+            # constructor, so reconstructing would swap the real error for a
+            # constructor failure.
+            e.args = (
                 f"{e}\n"
                 "Some value reached by the artifact is not picklable (a nested "
                 "function's __dict__ rides verbatim, a common source). Mark it "
-                "as external data by using `external_data={'key': ...}`."
-            ) from e
+                "as external data by using `external_data={'key': ...}`.",
+            )
+            raise
         if pickler.errors:
             raise RuntimeError(
                 f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
