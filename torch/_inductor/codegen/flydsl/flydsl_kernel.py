@@ -16,7 +16,6 @@ from torch._inductor.virtualized import V
 MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
-kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 
 class FlyDSLTemplateKernel(Kernel):
@@ -171,6 +170,9 @@ class FlyDSLTemplateKernel(Kernel):
             call_args.append(call_arg)
             arg_types.append(arg_type)
 
+        # FlyDSL generated modules expose `{kernel_name}_main` as a normal
+        # Python callable.  Calling it directly avoids the Triton-specific
+        # `.run(..., stream=...)` adapter while preserving the same stream logic.
         device = V.graph.get_current_device_or_throw()
         call_args_str = ", ".join(wrapper.prepare_triton_kernel_call(call_args))
         current_stream_idx = V.graph.scheduler.current_stream_idx

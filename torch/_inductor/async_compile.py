@@ -637,6 +637,11 @@ class AsyncCompile:
         """Reload a kernel module from PyCodeCache and return its entry point."""
         mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
         main_func_name = f"{kernel_name}_{main_suffix}"
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find kernel function '{main_func_name}'. Available callables: {available}"
+            )
         return getattr(mod, main_func_name)
 
     def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
@@ -709,8 +714,8 @@ class AsyncCompile:
         Compile FlyDSL kernels.
 
         FlyDSL generated source is written through PyCodeCache so the module can
-        be imported and its `{kernel_name}_main` entry point can be wrapped for
-        Inductor's `.run(...)` call convention.
+        be imported and its `{kernel_name}_main` entry point can be called
+        directly from the Inductor wrapper.
         """
         from torch._inductor.codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
 
@@ -747,16 +752,7 @@ class AsyncCompile:
             return LambdaFuture(get_result, future=subprocess_task)
         else:
             key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
-            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
-
-            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
-            if not hasattr(mod, main_func_name):
-                available = [name for name in dir(mod) if callable(getattr(mod, name))]
-                raise RuntimeError(
-                    f"Could not find FlyDSL main kernel function '{main_func_name}'. Available callables: {available}"
-                )
-
-            return getattr(mod, main_func_name)
+            return self._load_kernel_fn(kernel_name, MAIN_SUFFIX, key, path)
 
     def pallas(self, kernel_name: str, source_code: str):
         """

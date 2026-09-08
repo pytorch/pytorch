@@ -16,6 +16,9 @@ _gemm_call_entry = None
 
 
 def _static_tensor_arg(tensor):
+    # Inductor only emits this template for static GEMM shapes with explicit
+    # size/stride guards, so FlyDSL can compile against static memref layouts and
+    # avoid per-launch dynamic-layout ABI slots.
     return flydsl_jit_argument.from_torch_tensor(tensor)
 
 
@@ -96,6 +99,7 @@ def _flydsl_mm(output, mat1, mat2, stream):
     n = GEMM_N
     k = GEMM_K
     if MAT2_IS_NK:
+        # The lowering passes the original contiguous B buffer for A @ B.T.
         mat2_nk = mat2
     else:
         mat2_nk = mat2.transpose(0, 1)
