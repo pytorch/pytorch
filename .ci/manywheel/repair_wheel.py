@@ -486,6 +486,22 @@ def main() -> None:
             c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
             lib_so_rpath = f"{rpaths}:$ORIGIN"
             force_rpath = True
+            # Pre-10.0 TheRock SDKs ship a rocSHMEM that dlopens the bare name
+            # "libnuma.so". At wheel runtime that name resolves nowhere: the
+            # SDK vendors numa only as librocm_sysdeps_numa.so.1, and on user
+            # systems the bare dev name exists only if numactl-devel is
+            # installed (#195670). The 10.0 SDK line links the vendored soname
+            # directly instead (rocm-systems#6640), so bundle a bare-named
+            # copy, reached via $ORIGIN on the RPATHs above, only for older
+            # SDKs. The builder image installs numactl-libs for this.
+            ver = gpu_arch_version
+            if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
+                is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
+                libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
+                libnuma = Path(libdir) / "libnuma.so.1"
+                if not libnuma.is_file():
+                    sys.exit(f"libnuma to bundle for rocSHMEM not found: {libnuma}")
+                bundled_libs.append(BundledLib(src=libnuma, dest_name="libnuma.so"))
         else:
             # Legacy OS/tarball layout (/opt/rocm, e.g. rocm7.2): bundle the
             # ROCm libs into the wheel so it stays self-contained.
