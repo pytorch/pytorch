@@ -915,7 +915,7 @@ def add(x, y):
 
     def test_abandoned_package_uninstalls_on_gc(self):
         # Without the finalizer, each load+install of one artifact would leave
-        # behind its per-owner entries and per-install uuid-named resume globals.
+        # behind its per-owner entries and per-package uuid-named resume globals.
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1044,7 +1044,7 @@ def add(x, y):
     def test_two_packages_from_one_artifact_coexist(self):
         # Two loads of one artifact serve the same frame at once: their
         # precompile entries are told apart by owner and their resume functions
-        # by per-install names, so one can be served while the other is live and
+        # by per-package names, so one can be served while the other is live and
         # each unloads without disturbing the other.
         ctx = DiskDynamoStore()
 
@@ -1115,7 +1115,7 @@ def add(x, y):
         # pkg_a's structurally identical entry first. Put pkg_b in its own
         # isolate_recompiles region and serve from a context in that region,
         # so lookup is region-exact and pkg_b's own entry -- and the resume
-        # functions renamed under pkg_b's per-install token -- are what run.
+        # functions renamed under pkg_b's per-package token -- are what run.
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1210,8 +1210,12 @@ def add(x, y):
             )
         )
         pkg.install(backends)
+        # Serve through the dynamo wrapper: a raw fn(x) call never enters the
+        # eval-frame handler, so the installed precompile entry (and the
+        # rebuilt closure) would never be consulted.
+        compiled = torch._dynamo.optimize(package=pkg)(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(fn(x), expected)
+            self.assertEqual(compiled(x), expected)
 
     def test_uninstall_leaves_a_users_rebinding_alone(self):
         # uninstall() pops a global only while it still holds the value this
