@@ -1961,8 +1961,8 @@ optim_db: list[OptimizerInfo] = [
         Muon,
         optim_inputs_func=optim_inputs_func_muon,
         optim_error_inputs_func=optim_error_inputs_func_muon,
-        supported_impls=(),
-        not_og_supported_flags=(),
+        supported_impls=("foreach",),
+        not_og_supported_flags=("foreach",),
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
