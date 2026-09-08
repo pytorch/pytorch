@@ -4703,12 +4703,33 @@ def meta_median(input):
         aten.median.dim_values,
         aten.nanmedian.dim,
         aten.nanmedian.dim_values,
+    ]
+)
+@out_wrapper("values", "indices")
+def meta_median_dim(input, dim=-1, keepdim=False):
+    if device_hint(input) == "cuda":
+        utils.alert_not_deterministic("median CUDA with indices output")
+    dim = utils.reduction_dims(input.shape, (dim,))
+    if input.dim() > 0 and not input.dtype.is_floating_point:
+        torch._check_index(
+            input.shape[dim[0]] != 0,
+            lambda: f"median(): Expected reduction dim {dim[0]} to have non-zero size.",
+        )
+    output_shape = _compute_reduction_shape(input, dim, keepdim)
+    return (
+        input.new_empty(output_shape),
+        input.new_empty(output_shape, dtype=torch.long),
+    )
+
+
+@register_meta(
+    [
         aten.mode.default,
         aten.mode.values,
     ]
 )
 @out_wrapper("values", "indices")
-def meta_median_mode_dim(input, dim=-1, keepdim=False):
+def meta_mode_dim(input, dim=-1, keepdim=False):
     if device_hint(input) == "cuda":
         utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
