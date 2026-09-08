@@ -3208,6 +3208,11 @@ class SplitScan(Scan):
     pass
 
 
+# Top-k only keeps k lanes live past the first selection stages, so it
+# tolerates persistent blocks up to the codegen limit; a full sort stays at 512.
+TOPK_MAX_SORT_BLOCK = 16384
+
+
 @ir_dataclass
 class ScanScatter(Scan):
     """A scan whose dense result is consumed only by a masked scatter store."""
@@ -3356,12 +3361,10 @@ class Sort(Loops):
         # It also isn't bandwidth bound so fusion is unlikely to help.
         # When decompose_sort_ops is enabled, skip the size limit to always
         # attempt Triton sort (index dtype is widened to int32 in lowering).
-        # Top-k only keeps k lanes live past the first selection stages, so
-        # it tolerates blocks up to the persistent limit.
         if config.triton.decompose_sort_ops:
             is_persistent_kernel = config.triton.persistent_reductions
         else:
-            max_rblock = 512 if top_k is None else 16384
+            max_rblock = 512 if top_k is None else TOPK_MAX_SORT_BLOCK
             is_persistent_kernel = (
                 config.triton.persistent_reductions
                 and sizevars.statically_known_true(sympy.Le(sort_numel, max_rblock))
