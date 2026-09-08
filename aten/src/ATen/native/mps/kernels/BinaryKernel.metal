@@ -630,9 +630,6 @@ struct logical_xor_functor {
   REGISTER_BINARY_OP(NAME, half2, bool);          \
   REGISTER_BINARY_CASTOUT_OP(NAME, half2, bool)
 
-// fp8 variants for eq/ne only -- mirrors CPU/CUDA, which implement
-// (in)equality but not ordering comparisons for fp8. `isnan` lowers to
-// `self != self` and needs ne.
 #define REGISTER_FP8_EQ_OP(NAME)                 \
   REGISTER_BINARY_OP(NAME, float8_e4m3fn, bool); \
   REGISTER_BINARY_CASTOUT_OP(NAME, float8_e4m3fn, bool)
