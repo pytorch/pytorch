@@ -85,7 +85,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
-    TEST_ACCELERATOR,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -8884,6 +8883,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 if isinstance(ev, torch.Tensor):
                     self.assertEqual(ev.device.type, "cpu")
 
+    @onlyAccelerator
     @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_aot_backward_context_reentry_after_graph_break(self, device):
         def fn(x, y, scalar):
@@ -8898,15 +8898,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         y = torch.randn(8, device=device, requires_grad=True)
         scalar = torch.randn((), device=device)
 
-        before_break, after_break = torch.compile(fn, backend="aot_eager")(
-            x, y, scalar
-        )
+        before_break, after_break = torch.compile(fn, backend="aot_eager")(x, y, scalar)
         loss = before_break.sum().to(device) + after_break.sum()
         loss.backward()
 
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, -y.detach().sin())
 
+    @onlyAccelerator
     def test_cuda_sync(self, device):
         def fn(x):
             y = x + 1
@@ -8919,6 +8918,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    @onlyAccelerator
     def test_device_context_matmul_avoids_native_bmm_router_graph_break(self, device):
         torch._dynamo.utils.counters.clear()
 
