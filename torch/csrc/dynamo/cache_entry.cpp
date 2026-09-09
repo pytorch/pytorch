@@ -88,8 +88,10 @@ void enable_precompile_cache_keys() {
 // plus the no-raise lookup keep the walk off the exception path entirely.
 py::object lookup_optional(py::handle handle, PyObject* name) {
   if (name == nullptr) {
-    // A NULL name means an interned-literal PyUnicode_InternFromString hit OOM
-    // at module init; report absent rather than deref NULL in GetOptionalAttr.
+    // A NULL name means the caller's function-local PyUnicode_InternFromString
+    // hit OOM on its first call and left a MemoryError set; clear it to keep
+    // the no-raise contract and report absent rather than deref NULL below.
+    PyErr_Clear();
     return py::object();
   }
   PyObject* value = nullptr;
