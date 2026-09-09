@@ -1121,6 +1121,32 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(marked), 1)
         self.assertEqual(len(survived), 1)
         self.assertIs(survived[0].guard_manager, w1)
+        # invalidate_locked relinks the victim to the tail (move_to_back), so
+        # the survivor is now at the front.
+        self.assertEqual(entries[-1].trace_annotation, "Invalidated")
+        self.assertIs(entries[0].guard_manager, w1)
+
+        # The identity walk spans every region bucket and the victim need not be
+        # the front entry: invalidate the second entry of an isolated region.
+        def g(x):
+            return x.sin() + x.cos()
+
+        opt = torch._dynamo.optimize(
+            backend="eager", dynamic=False, isolate_recompiles=True
+        )(g)
+        opt(torch.randn(3))
+        opt(torch.randn(4))
+        region = opt._isolate_recompiles_id
+        entries = _get_cache_entries_for_region(g.__code__, region)
+        self.assertEqual(len(entries), 2)
+        v0, v1 = entries[0].guard_manager, entries[1].guard_manager
+        v1.extra_state.invalidate(DeletedGuardManagerWrapper("gone"), v1)
+        entries = _get_cache_entries_for_region(g.__code__, region)
+        self.assertEqual(
+            [e.trace_annotation == "Invalidated" for e in entries], [False, True]
+        )
+        self.assertIs(entries[0].guard_manager, v0)
+        self.assertEqual(_get_cache_entries_for_region(g.__code__, -1), [])
 
     def test_region_clear_from_inside_a_lookup_is_parked(self):
         # _clear_cache_entries_for_region run by a backend __eq__ inside
@@ -1229,6 +1255,62 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             get_code_region_exec_strategy(code, region).recursive_action,
             FrameAction.DEFAULT,
         )
+
+    def test_precompile_region_reset_from_inside_a_lookup_is_parked(self):
+        # _reset_precompile_entries_for_region run by a backend __eq__ inside a
+        # lookup parks (PendingEviction::PRECOMPILE_REGION) rather than splicing
+        # the precompile list a sibling lookup may be walking; the next
+        # depth-zero holder applies it. The other parked kinds have deterministic
+        # drivers of their own (CACHE_REGION and CLEAR_ALL here, OWNER and
+        # PRECOMPILE_ALL in the region-owned install PR); this closes the last.
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+        entry = _debug_get_cache_entry_list(code)[0]
+        _load_precompile_entry(code, entry.guard_manager, entry.code, 7)
+        self.assertTrue(_has_precompile_entries(code, 7))
+        seen = []
+
+        def reset():
+            _reset_precompile_entries_for_region(code, 7)
+            seen.append(_has_precompile_entries(code, 7))
+
+        hook.append(reset)
+        self.assertEqual(
+            torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
+        )
+        self.assertFalse(hook, "the backend __eq__ hook never fired")
+        # Parked, not evicted, while the lookup was live; drained by the reader.
+        self.assertEqual(seen, [True])
+        self.assertFalse(_has_precompile_entries(code, 7))
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
