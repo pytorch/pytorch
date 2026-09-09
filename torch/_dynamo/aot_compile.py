@@ -90,6 +90,20 @@ class CompileArtifacts:
             )
 
 
+@dataclasses.dataclass
+class _ProbeState:
+    """Shared by an AOTCompilePickler and the throwaway probe picklers its
+    _dumps_cleanly spawns, so the whole probe tree sees one memo."""
+
+    # id(value) -> picklable; probing nested functions is exponential without it.
+    cache: dict[int, bool] = dataclasses.field(default_factory=dict)
+    # Ids being probed right now, for cycle-breaking.
+    inflight: set[int] = dataclasses.field(default_factory=set)
+    # Whether a probe short-circuited on an in-flight id; such a verdict is
+    # returned but not cached.
+    leaned: bool = False
+
+
 class AOTCompilePickler(FunctionPicklerBase):
     def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
         super().__init__(buf)
@@ -98,16 +112,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
-        # Memoize _dumps_cleanly by object id so probing nested functions is not
-        # exponential in nesting depth; shared into probe picklers below.
-        self._dumps_cleanly_cache: dict[int, bool] = {}
-        # Ids currently being probed (cycle-breaking, replaces an optimistic
-        # cache seed) and a shared flag recording whether any probe short-
-        # circuited on one; both are shared into probe picklers so a False
-        # computed while leaning on an in-flight id is not cached. See
-        # _dumps_cleanly.
-        self._dumps_cleanly_inflight: set[int] = set()
-        self._dumps_cleanly_leaned: list[bool] = [False]
+        self._probe_state = _ProbeState()
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -133,7 +138,7 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
             # pickler nothing it holds is pruned -- except annotations, type
-            # params, and __dict__ entries that will not pickle. The runtime
+            # params, __doc__, and __dict__ entries that will not pickle. The runtime
             # assigns those back and never forces the pruned ones, so a value
             # this pickler cannot serialize (a <locals> annotation class, a PEP
             # 695 function-scoped TypeVar, or a __dict__ entry like the
@@ -167,31 +172,27 @@ class AOTCompilePickler(FunctionPicklerBase):
         # pickler of this exact class keeps external_data/persistent_id behaviour
         # identical to the real dump. A recursion overflow counts as unpicklable
         # (the value is pruned) rather than re-raising, matching the guard side.
+        state = self._probe_state
         vid = id(value)
-        cached = self._dumps_cleanly_cache.get(vid)
+        cached = state.cache.get(vid)
         if cached is not None:
             return cached
-        if vid in self._dumps_cleanly_inflight:
-            # A value whose annotations reach back to itself (mutually-
-            # referencing <locals> annotation classes) re-enters here mid-probe.
-            # Report picklable to break the cycle -- pickle's own memo handles
-            # the reference -- but do NOT cache it: an earlier version seeded the
-            # cache with this optimistic True, which then leaked into a
-            # dependent's real dump and cached a WRONG False for a picklable
-            # value, silently pruning it and detonating at call time.
-            self._dumps_cleanly_leaned[0] = True
+        if vid in state.inflight:
+            # Re-entered mid-probe (a value whose attributes reach back to
+            # itself). Say picklable to break the cycle -- pickle's memo handles
+            # the reference -- and record the lean so a verdict computed on top
+            # of it is not cached as final.
+            state.leaned = True
             return True
         probe = type(self)(self.external_data, io.BytesIO())
-        # Share one cache across the probe tree: probing a nested function
-        # re-probes its own annotations, so without this the probe count is
-        # exponential in nesting depth. The probed values stay alive for the
-        # whole dump, so id reuse within a pass is not a concern.
-        probe._dumps_cleanly_cache = self._dumps_cleanly_cache
-        probe._dumps_cleanly_inflight = self._dumps_cleanly_inflight
-        probe._dumps_cleanly_leaned = self._dumps_cleanly_leaned
-        self._dumps_cleanly_inflight.add(vid)
-        leaned_before = self._dumps_cleanly_leaned[0]
-        self._dumps_cleanly_leaned[0] = False
+        # One memo across the probe tree: probing a nested function re-probes
+        # its own annotations. Every probed value is owned by the function being
+        # pickled, which pickle keeps alive until dump() returns, so an id is not
+        # reused within one serialize().
+        probe._probe_state = state
+        state.inflight.add(vid)
+        leaned_before = state.leaned
+        state.leaned = False
         try:
             probe.dump(value)
         except Exception:
@@ -203,19 +204,15 @@ class AOTCompilePickler(FunctionPicklerBase):
             # whole dump later.
             result = not probe.errors
         finally:
-            self._dumps_cleanly_inflight.discard(vid)
-        leaned = self._dumps_cleanly_leaned[0]
-        # Propagate upward: a caller that consulted this value also leaned on
-        # whatever we leaned on.
-        self._dumps_cleanly_leaned[0] = leaned_before or leaned
-        # A False reached while leaning on an in-flight short-circuit may be a
-        # false negative (the seed it trusted could still resolve unpicklable),
-        # so it is returned for this call but not cached, so a later probe of the
-        # value recomputes rather than reusing it. (Not caching only prevents
-        # reuse; a prune this call already drove off the False still stands.) A
-        # True, or a False that leaned on nothing, is final.
+            state.inflight.discard(vid)
+        leaned = state.leaned
+        # A caller that consulted this value also leaned on whatever we did.
+        state.leaned = leaned_before or leaned
+        # A False that leaned on an in-flight True may be a false negative:
+        # return it but do not cache it. A True, or a False that leaned on
+        # nothing, is final.
         if result or not leaned:
-            self._dumps_cleanly_cache[vid] = result
+            state.cache[vid] = result
         return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
@@ -698,7 +695,13 @@ class AOTCompiledModel:
         # here would, when all of them opted out, fall through to the first
         # result below and silently serve the wrong graph.
         for result in self.compiled_results:
-            if result.guard_check(self.model, *args, **kwargs):
+            # A guard that raises did not match; _no_match_message names the
+            # raiser, so the scan tolerates it the same way the report does.
+            try:
+                matched = result.guard_check(self.model, *args, **kwargs)
+            except Exception:
+                continue
+            if matched:
                 # guard_check already passed; call fn directly so result()
                 # does not re-run the guard eval on this hot dispatch path.
                 return result.fn(self.model, *args, **kwargs)
@@ -732,7 +735,7 @@ class AOTCompiledModel:
                 # global; feed that into the same detection the non-raising
                 # branch uses so the footer points at the real cause instead of
                 # the generic "add a ModelInput" hint.
-                if "KeyError on G[" in detail or "G['" in detail:
+                if "KeyError on G[" in detail:
                     missing_global = True
                 lines.append(f"  [{i}] <guard check raised {kind}: {detail}>")
                 continue
