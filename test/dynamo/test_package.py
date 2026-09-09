@@ -158,7 +158,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled(x), mod(x))
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, use_w=True), mod(x, use_w=True))
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("named parameters" in line for line in logs.output))
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
         torch._dynamo.reset()
