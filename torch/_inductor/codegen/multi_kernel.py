@@ -22,6 +22,20 @@ from .common import TensorArg, WorkspaceArg
 log = logging.getLogger(__name__)
 
 
+def _codegen_nan_check(kernels, allowed_args: OrderedSet[str] | None = None) -> None:
+    wrapper = V.graph.wrapper_code
+    seen: OrderedSet[str] = OrderedSet()
+    for kernel in kernels:
+        _, call_args, precompile_args, _ = kernel.args.python_argdefs()
+        for arg, precompile_arg in zip(call_args, precompile_args):
+            if arg in seen or (allowed_args is not None and arg not in allowed_args):
+                continue
+            seen.add(arg)
+            if isinstance(precompile_arg, TensorArg):
+                wrapper.writeline(f"assert not {arg}.isnan().any().item()")
+                wrapper.writeline(f"assert not {arg}.isinf().any().item()")
+
+
 class MultiKernelState:
     """
     Maintain state of multi-kernel compilation so we don't define duplicated
@@ -305,19 +319,7 @@ class MultiKernel:
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
-        wrapper = V.graph.wrapper_code
-        seen: OrderedSet[str] = OrderedSet()
-        for k in self.kernels:
-            _, call_args, precompile_args, _ = k.args.python_argdefs()
-            for arg, precompile_arg in zip(call_args, precompile_args):
-                if arg in seen:
-                    continue
-                seen.add(arg)
-                if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
+        _codegen_nan_check(self.kernels)
 
     @property
     def removed_buffers(self):
@@ -345,7 +347,7 @@ class MultiKernel:
 
 
 class MultiKernelPlan:
-    """Compile-time wrapper for a bounded choice of ordered kernel sequences."""
+    """Compile-time wrapper for a bounded choice of overwrite-only kernel sequences."""
 
     def __init__(self, plans):
         if len(plans) < 2 or any(len(plan) < 1 for plan in plans):
@@ -362,6 +364,19 @@ class MultiKernelPlan:
         ):
             raise NotImplementedError(
                 "multi-kernel plans with different internal workspaces are not supported"
+            )
+        if any(
+            kernel.mutations or kernel.inplace_update_buffers
+            for kernel in all_kernels
+        ):
+            raise NotImplementedError(
+                "multi-kernel plans with in-place updates are not supported"
+            )
+        if any(
+            kernel.inductor_meta.get("atomic_add_found") for kernel in all_kernels
+        ):
+            raise NotImplementedError(
+                "multi-kernel plans with atomic output updates are not supported"
             )
         self.call_args, self.arg_types, arg_index = self._union_call_args(plans)
         self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel_plan(
@@ -417,10 +432,19 @@ class MultiKernelPlan:
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
-        # The selected plan has already produced the common logical outputs.
-        # Reusing the first kernel's checks would miss outputs of a later stage,
-        # so leave checks to the enclosing graph until output metadata is wired.
-        pass
+        plan_args = []
+        for plan in self.plans:
+            plan_args.append(
+                OrderedSet(
+                    arg
+                    for kernel in plan
+                    for arg in kernel.args.python_argdefs()[1]
+                )
+            )
+        common_args = OrderedSet.intersection(*plan_args)
+        _codegen_nan_check(
+            (kernel for plan in self.plans for kernel in plan), common_args
+        )
 
     @property
     def removed_buffers(self):
@@ -704,15 +728,7 @@ class MultiKernelPlanCall:
             os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
         )
         self.picked_plan = None
-        if config.triton.multi_kernel > 1:
-            picked_by_config = config.triton.multi_kernel - 2
-            if picked_by_config >= len(plans):
-                raise AssertionError(
-                    f"expected picked_by_config < len(plans), "
-                    f"got {picked_by_config} >= {len(plans)}"
-                )
-            self.picked_plan = picked_by_config
-        elif not self.disable_cache:
+        if not self.disable_cache:
             self.load_cache()
 
     @property
@@ -764,12 +780,6 @@ class MultiKernelPlanCall:
         return [args[i] for i in self.arg_index[plan_index][kernel_index]]
 
     def _clone_plan_args(self, args, plan_index):
-        """Clone each mutated union argument once for the whole plan.
-
-        Cloning each stage independently would disconnect a producer's cloned
-        intermediate from the consumer's cloned input.  Cloning the union here
-        preserves that sharing across the complete benchmarked sequence.
-        """
         from ..compile_fx import clone_preserve_strides
 
         cloned = list(args)
@@ -793,23 +803,28 @@ class MultiKernelPlanCall:
             cloned[index] = clones_by_identity[identity]
         return cloned
 
+    @gpu_benchmark_lock
     def benchmark_plans(self, *args, **kwargs):
-        def wrap_plan(plan_index):
+        def wrap_plan(plan_index, plan_args):
             def inner():
-                cloned_args = self._clone_plan_args(args, plan_index)
                 for kernel_index, kernel in enumerate(self.plans[plan_index]):
                     filtered_args = self._get_filtered_args(
-                        cloned_args, plan_index, kernel_index
+                        plan_args, plan_index, kernel_index
                     )
                     kernel.run(*filtered_args, **kwargs)
 
             return inner
 
         device = self.plans[0][0].device_props.type
-        return [
-            benchmarker.benchmark(wrap_plan(plan_index), device=device, rep=40)
-            for plan_index in range(len(self.plans))
-        ]
+        timings = []
+        for plan_index in range(len(self.plans)):
+            plan_args = self._clone_plan_args(args, plan_index)
+            timings.append(
+                benchmarker.benchmark(
+                    wrap_plan(plan_index, plan_args), device=device, rep=40
+                )
+            )
+        return timings
 
     def run(self, *args, **kwargs):
         if self.picked_plan is None:
