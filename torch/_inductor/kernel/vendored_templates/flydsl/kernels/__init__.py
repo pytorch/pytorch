@@ -7,9 +7,6 @@ from typing import Any
 _EXPORT_MODULES = {
     "GEMM_DTYPE_BF16": "gemm_gfx950",
     "GEMM_DTYPE_FP16": "gemm_gfx950",
-    "MXFPFormat": "gemm_mxfp_gfx950",
-    "MXFPGemmDerived": "gemm_mxfp_gfx950",
-    "MXFPGemmParams": "gemm_mxfp_gfx950",
     "gemm_mxfp_gfx950": "gemm_mxfp_gfx950",
     "infer_has_k_tail": "gemm_gfx950",
     "make_gemm_gfx950_param": "gemm_gfx950",

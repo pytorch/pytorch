@@ -281,6 +281,7 @@ def is_gemm_config_valid_for_shape(
     )
 
 
+@functools.cache
 def get_exhaustive_mxfp_gemm_configs(
     mxfp_format: MXFPFormat,
 ) -> list[FlyDSLMXFPConfig]:
@@ -306,7 +307,7 @@ def get_exhaustive_mxfp_gemm_configs(
             )
             _check_mxfp_gemm_config(mxfp_format, asdict(gemm))
             valid_configs.append(gemm)
-        except Exception as error:
+        except ValueError as error:
             log.debug(
                 "Skipping invalid exhaustive FlyDSL %s config %s: %s",
                 mxfp_format,
@@ -352,6 +353,7 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     return valid_configs
 
 
+@functools.cache
 def get_default_mxfp_gemm_configs(
     mxfp_format: MXFPFormat,
 ) -> list[FlyDSLMXFPConfig]:
@@ -361,7 +363,7 @@ def get_default_mxfp_gemm_configs(
         try:
             _check_mxfp_gemm_config(mxfp_format, asdict(gemm_config))
             valid_configs.append(gemm_config)
-        except Exception as error:
+        except ValueError as error:
             log.debug(
                 "Skipping invalid default FlyDSL %s config %s: %s",
                 mxfp_format,
@@ -621,14 +623,28 @@ def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
 
 
 def get_mxfp_gemm_configs_for_shape(
-    mxfp_format: MXFPFormat, m: int, n: int, k: int, out_dtype: str
+    mxfp_format: MXFPFormat,
+    m: int,
+    n: int,
+    k: int,
+    out_dtype: str,
+    *,
+    a_is_transposed: bool = False,
+    b_is_transposed: bool = True,
 ) -> list[dict[str, int]]:
     """Return format-specific configurations valid for one concrete shape."""
     configs = [
         gemm_config
         for gemm_config in get_mxfp_gemm_configs(mxfp_format)
         if is_mxfp_config_valid_for_shape(
-            mxfp_format, m, n, k, out_dtype, gemm_config
+            mxfp_format,
+            m,
+            n,
+            k,
+            out_dtype,
+            gemm_config,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
         )
     ]
     if config.flydsl_enable_autotuning or not configs:

@@ -164,8 +164,6 @@ class MXFPGemmDerived:
     granules_per_row: int
     ldg_a_iters: int
     ldg_b_iters: int
-    dma_a_iters: int
-    dma_b_iters: int
     ldg_wait_count: int
     lds_scale: bool
     sc_a_iters: int
@@ -175,7 +173,6 @@ class MXFPGemmDerived:
     scale_row_bytes: int
     a_stage_bytes: int
     b_stage_bytes: int
-    smem_bytes: int
 
 
 def mxfp_gemm_derived(
@@ -207,8 +204,6 @@ def mxfp_gemm_derived(
         raise ValueError(
             f"block_k must be a multiple of the MFMA K depth: block_k={block_k}"
         )
-    if block_k % elements_per_byte != 0:
-        raise ValueError(f"block_k must be a whole number of bytes: block_k={block_k}")
     block_k_bytes = block_k // elements_per_byte
 
     block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
@@ -291,9 +286,7 @@ def mxfp_gemm_derived(
             f"capacity={GFX950_LDS_CAPACITY}"
         )
 
-    dma_a_iters = ldg_a_iters + sc_a_iters
-    dma_b_iters = ldg_b_iters + sc_b_iters
-    ldg_wait_count = dma_a_iters + dma_b_iters
+    ldg_wait_count = ldg_a_iters + sc_a_iters + ldg_b_iters + sc_b_iters
     # Scale DMA contributes to the vmcnt wait budget.
     if (stages - 2) * ldg_wait_count >= 63:
         if lds_scale:
@@ -302,8 +295,6 @@ def mxfp_gemm_derived(
                 "budget for this pipeline depth"
             )
         raise ValueError("staged pipeline wait count exceeds supported range")
-
-    smem_bytes = tile_bytes + scale_bytes
 
     return MXFPGemmDerived(
         block_threads=block_threads,
@@ -314,8 +305,6 @@ def mxfp_gemm_derived(
         granules_per_row=granules_per_row,
         ldg_a_iters=ldg_a_iters,
         ldg_b_iters=ldg_b_iters,
-        dma_a_iters=dma_a_iters,
-        dma_b_iters=dma_b_iters,
         ldg_wait_count=ldg_wait_count,
         lds_scale=lds_scale,
         sc_a_iters=sc_a_iters,
@@ -325,7 +314,6 @@ def mxfp_gemm_derived(
         scale_row_bytes=scale_row_bytes,
         a_stage_bytes=a_stage_bytes,
         b_stage_bytes=b_stage_bytes,
-        smem_bytes=smem_bytes,
     )
 
 
@@ -647,9 +635,6 @@ def gemm_mxfp_gfx950_kernel(
     r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), out_elem)
     thr_copy_C = fx.make_tiled_copy_C(r2g_atom, tiled_mma).get_slice(tid)
     thr_gC = thr_copy_C.partition_S(gC)
-    scale_group = (fx.Int32(tid) % fx.Int32(GFX950_WAVE_SIZE)) // fx.Int32(
-        MXFP_MFMA_N
-    )
 
     ab_load_context = AsyncLoadContext(
         wave_offset=get_wave_lds_offset(tid, GFX950_DMA_BYTES),
@@ -815,7 +800,7 @@ def gemm_mxfp_gfx950_kernel(
         """Issue dword scale loads and return their registers."""
         regs = []
         for q in range_constexpr(0, n_repeat, 4):
-            row = row_base + fx.Int32(repeat_stride) * (fx.Int32(q) + scale_group)
+            row = row_base + fx.Int32(repeat_stride) * (fx.Int32(q) + lane_grp)
             offset = (base + row) * fx.Int32(scale_k32) + col32
             reg = fx.make_rmem_tensor(1, fx.Uint32)
             regs.append(reg)
@@ -827,7 +812,7 @@ def gemm_mxfp_gfx950_kernel(
         n_units = n_repeat * d.k_halves
         regs = []
         for q in range_constexpr(0, n_units, 4):
-            unit = fx.Int32(q) + scale_group
+            unit = fx.Int32(q) + lane_grp
             if const_expr(q + 4 > n_units):
 
                 unit = unit % fx.Int32(n_units)
@@ -850,7 +835,7 @@ def gemm_mxfp_gfx950_kernel(
         u0, u1 = _permlane_swap(16, t0, t0)
         w0, w1 = _permlane_swap(16, t1, t1)
         for lane_word in (u0, u1, w0, w1):
-            words.append(fx.Int32(lane_word) >> (scale_group * fx.Int32(8)))
+            words.append(fx.Int32(lane_word) >> (lane_grp * fx.Int32(8)))
         return words
 
     def packed_scale_finish(regs):
@@ -891,14 +876,13 @@ def gemm_mxfp_gfx950_kernel(
 
     def issue_frag_transposed(base_bytes, layout, row_band, kh):
         parts = []
-        lane16 = lane % fx.Int32(MXFP_MFMA_M)
         for part in range_constexpr(2):
             byte_block = fx.Int32(
                 kh * (MXFP_MFMA_K // 2)
                 + part * (MXFP_MFMA_K // 16)
             ) + lane_grp * fx.Int32(MXFP_MFMA_K // 8)
-            src_kbyte = byte_block + lane16 // fx.Int32(2)
-            src_outer = row_band + (lane16 % fx.Int32(2)) * fx.Int32(8)
+            src_kbyte = byte_block + lane_row // fx.Int32(2)
+            src_outer = row_band + (lane_row % fx.Int32(2)) * fx.Int32(8)
             off = fx.get_scalar(fx.crd2idx((src_outer, src_kbyte), layout))
             addr = fx.Int32(fx.ptrtoint(base_bytes)) + fx.Int32(off)
             parts.append(_ds_read_tr8_b64(addr))
@@ -1000,10 +984,10 @@ def gemm_mxfp_gfx950_kernel(
     if const_expr(d.lds_scale):
         # Base byte offset for this lane's first scale value.
         sc_lane_base_a = (
-            a_row_base * fx.Int32(d.scale_row_bytes) + scale_group
+            a_row_base * fx.Int32(d.scale_row_bytes) + lane_grp
         )
         sc_lane_base_b = (
-            b_row_base * fx.Int32(d.scale_row_bytes) + scale_group
+            b_row_base * fx.Int32(d.scale_row_bytes) + lane_grp
         )
 
     def lds_scale_read(base_bytes, dyn_base, repeat_stride, n_repeat):
@@ -1054,7 +1038,7 @@ def gemm_mxfp_gfx950_kernel(
             return
 
         if const_expr(packed_unit_scale):
-            col_base = k_tile * fx.Int32(block_k // MXFP_MFMA_K)
+            col_base = k_tile * fx.Int32(d.k_halves)
             a_regs = packed_unit_issue(
                 sa32, m_base, a_row_base, m_repeat_stride, d.mma_m_repeat,
                 col_base,
@@ -1081,7 +1065,7 @@ def gemm_mxfp_gfx950_kernel(
         if const_expr(packed_repeat_scale):
             issued = []
             for kh in range_constexpr(d.k_halves):
-                col32 = k_tile * fx.Int32(block_k // MXFP_MFMA_K) + fx.Int32(kh)
+                col32 = k_tile * fx.Int32(d.k_halves) + fx.Int32(kh)
                 issued.append(
                     (
                         packed_scale_issue(
@@ -1120,9 +1104,9 @@ def gemm_mxfp_gfx950_kernel(
         av, bv = load_fragments(stage)
         for kh in range_constexpr(d.k_halves):
             scale_col = (
-                k_tile * fx.Int32(block_k // MXFP_SCALE_BLOCK_K)
+                k_tile * fx.Int32(d.scale_row_bytes)
                 + fx.Int32(kh * (MXFP_MFMA_K // MXFP_SCALE_BLOCK_K))
-                + scale_group
+                + lane_grp
             )
             sa_words = [
                 load_scale_word(

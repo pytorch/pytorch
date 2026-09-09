@@ -1174,10 +1174,7 @@ def get_flydsl_mxfp_template_kwargs(
     scale_b: Any,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
-    from ..heuristics.template.flydsl import (
-        get_mxfp_gemm_configs_for_shape,
-        is_mxfp_config_valid_for_shape,
-    )
+    from ..heuristics.template.flydsl import get_mxfp_gemm_configs_for_shape
 
     if not use_flydsl_gemm_template(layout):
         return []
@@ -1326,15 +1323,11 @@ def get_flydsl_mxfp_template_kwargs(
             "B_IS_TRANSPOSED": b_is_transposed,
         }
         for gemm_config in get_mxfp_gemm_configs_for_shape(
-            mxfp_format, m, n, k, out_dtype_name
-        )
-        if is_mxfp_config_valid_for_shape(
             mxfp_format,
             m,
             n,
             k,
             out_dtype_name,
-            gemm_config,
             a_is_transposed=a_is_transposed,
             b_is_transposed=b_is_transposed,
         )
@@ -1426,22 +1419,6 @@ def tuned_scaled_mm_v2(
                 mxfp_layout,
             )
             return node
-
-        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
-        return scaled_mm_v2_fallback(
-            mat_a,
-            mat_b,
-            scale_a,
-            recipe_a,
-            swizzle_a,
-            scale_b,
-            recipe_b,
-            swizzle_b,
-            bias,
-            out_dtype,
-            fallback_contraction_dim,
-            use_fast_accum,
-        )
 
     # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
     # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,
