@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """
-Partitioned scatter optimization for high-contention index_put operations.
+Partitioned scatter optimization for high-contention scatter operations.
 
 Algorithm:
   1. Assign each write operation a partition: partition_id = op_id & (P - 1)
@@ -23,6 +23,7 @@ from torch._inductor.fx_passes.memory_estimator import build_memory_profile
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
+    Ignored,
     Match,
     PatternMatcherPass,
     register_graph_pattern,
@@ -38,10 +39,64 @@ prims = torch.ops.prims
 
 _INDEX_PUT_TARGETS = (aten.index_put.default, aten.index_put_.default)
 
+# embedding_dense_backward lands here rather than on index_put: its decomposition
+# is in decomps_to_exclude, so Inductor lowers this op directly at IR level.
+_MASKED_INDEX_PUT_TARGET = aten._unsafe_masked_index_put_accumulate.default
+
+# target -> (indices arg position, mask arg position or None)
+#   index_put(self, indices, values, accumulate)
+#   _unsafe_masked_index_put_accumulate(self, mask, indices, values)
+_SCATTER_ARGS = {
+    aten.index_put.default: (1, None),
+    aten.index_put_.default: (1, None),
+    _MASKED_INDEX_PUT_TARGET: (2, 1),
+}
+
+# index_add only decomposes into index_put for some dtypes; below fp32 it reaches
+# the post-grad graph intact, so match it directly.
+#   index_add(self, dim, index, source, *, alpha=1)
+_INDEX_ADD_TARGET = aten.index_add.default
+
+# Same atomic_add store via the scatter_reduce_ lowering, but with an explicit
+# dim and a values-shaped index.
+#   scatter_add(self, dim, index, src)
+#   scatter_reduce(self, dim, index, src, reduce, *, include_self)
+#   scatter(self, dim, index, src, *, reduce)
+_SCATTER_REDUCE_TARGETS = (
+    aten.scatter_add.default,
+    aten.scatter_reduce.two,
+    aten.scatter.reduce,
+)
+
+
+def _is_summing_scatter(node: fx.Node) -> bool:
+    """Only reduce="sum" lowers to atomic_add, and include_self=False leaves
+    untouched slots at their original value, which scatter-into-zeros cannot."""
+    if node.kwargs.get("include_self", True) is not True:
+        return False
+    if node.target is aten.scatter_add.default:
+        return True
+    reduce = node.kwargs.get("reduce")
+    if reduce is None and len(node.args) > 4:
+        reduce = node.args[4]
+    return reduce in ("sum", "add")
+
+
+def _accumulation_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Dtype the partial sums are accumulated in, widened for narrow floats when
+    partitioned_scatter_fp32_accumulation is set."""
+    if (
+        config.partitioned_scatter_fp32_accumulation
+        and dtype.is_floating_point
+        and dtype.itemsize < 4
+    ):
+        return torch.float32
+    return dtype
+
 
 @dataclass
 class ScatterCandidate:
-    """An index_put(accumulate=True) op that passed the cheap (non-memory) gates."""
+    """A scatter op that passed the cheap (non-memory) gates."""
 
     output_node: fx.Node
     index_node: fx.Node
@@ -49,9 +104,14 @@ class ScatterCandidate:
     output_size: int
     index_size: int
     scatter_dim_size: int
-    element_bytes: int
+    # Upper bound on the scattered values' numel, exact for the index_put family.
+    values_numel: int
     contention_ratio: float
     dtype: torch.dtype
+    acc_dtype: torch.dtype
+
+    # Only set for _unsafe_masked_index_put_accumulate.
+    mask_node: "fx.Node | None" = None
 
 
 @dataclass
@@ -81,7 +141,7 @@ class ScatterMemoryState:
 class ScatterPassContext:
     """Per-invocation state, passed to the pattern callbacks via closures."""
 
-    # index_put nodes that survived the cheap pre-scan, keyed by output node.
+    # Scatter nodes that survived the cheap pre-scan, keyed by output node.
     candidates: dict[fx.Node, ScatterCandidate] = field(default_factory=dict)
 
     # Built lazily, only when at least one candidate survives the pre-scan.
@@ -108,30 +168,34 @@ def _record_skip(
 def _evaluate_candidate(
     output_node: fx.Node, force: bool, ctx: ScatterPassContext
 ) -> "ScatterCandidate | None":
-    """
-    Cheap (non-memory) gates, in order:
-      1. Single non-None index (multi-axis not supported)
-      2. Valid tensor metadata
-      3. Runs on a CUDA device (this optimization targets GPU atomic contention)
-      4. Non-bool dtype
-      5. scatter_dim in bounds
-      6. Resolvable, non-zero sizes
-      7. index_size >= min_index_size
-      8. contention_ratio >= threshold  (uses scatter_dim_size, not output_numel)
-    """
+    """Every gate that does not need the memory profile: supported shape, dtype
+    and device, then the min-index-size and contention-ratio thresholds. Each
+    rejection is recorded under its own skip reason."""
     node_name = output_node.name
+    is_scatter_reduce = output_node.target in _SCATTER_REDUCE_TARGETS
+    is_index_add = output_node.target is _INDEX_ADD_TARGET
 
     input_node = output_node.args[0]
-    indices_arg = output_node.args[1]
-
     if not isinstance(input_node, fx.Node):
         _record_skip(ctx, "input_not_node", node_name)
         return None
 
-    scatter_dim, index_node = _extract_scatter_dim_and_index(indices_arg)
-    if scatter_dim is None or index_node is None:
-        _record_skip(ctx, "multi_index", node_name)
-        return None
+    if is_scatter_reduce or is_index_add:
+        scatter_dim, index_node = output_node.args[1], output_node.args[2]
+        mask_node = None
+        if not isinstance(scatter_dim, int) or not isinstance(index_node, fx.Node):
+            _record_skip(ctx, "no_meta", node_name)
+            return None
+    else:
+        # pyrefly: ignore [bad-index]
+        indices_pos, mask_pos = _SCATTER_ARGS[output_node.target]
+        mask_node = output_node.args[mask_pos] if mask_pos is not None else None
+        scatter_dim, index_node = _extract_scatter_dim_and_index(
+            output_node.args[indices_pos]
+        )
+        if scatter_dim is None or index_node is None:
+            _record_skip(ctx, "multi_index", node_name)
+            return None
 
     input_meta = _get_tensor_meta(input_node)
     index_meta = _get_tensor_meta(index_node)
@@ -150,12 +214,23 @@ def _evaluate_candidate(
         _record_skip(ctx, "bool_dtype", node_name)
         return None
 
-    if scatter_dim >= len(input_meta["shape"]):
+    ndim = len(input_meta["shape"])
+    if scatter_dim < 0:
+        scatter_dim += ndim
+    if not 0 <= scatter_dim < ndim:
         _record_skip(ctx, "dim_out_of_bounds", node_name)
         return None
 
     output_size = _resolve_numel(input_meta["numel"])
-    index_size = _resolve_numel(index_meta["numel"])
+    # index_put writes one row per index element; a values-shaped scatter index
+    # only writes a slot once per position along scatter_dim.
+    if is_scatter_reduce:
+        if scatter_dim >= len(index_meta["shape"]):
+            _record_skip(ctx, "dim_out_of_bounds", node_name)
+            return None
+        index_size = _resolve_numel(index_meta["shape"][scatter_dim])
+    else:
+        index_size = _resolve_numel(index_meta["numel"])
 
     if output_size is None or index_size is None:
         _record_skip(ctx, "dynamic_no_hint", node_name)
@@ -193,6 +268,8 @@ def _evaluate_candidate(
         )
         return None
 
+    acc_dtype = _accumulation_dtype(input_meta["dtype"])
+
     return ScatterCandidate(
         output_node=output_node,
         index_node=index_node,
@@ -200,15 +277,18 @@ def _evaluate_candidate(
         output_size=output_size,
         index_size=index_size,
         scatter_dim_size=scatter_dim_size,
-        element_bytes=input_meta["dtype"].itemsize,
+        values_numel=index_size * (output_size // scatter_dim_size),
         contention_ratio=contention_ratio,
         dtype=input_meta["dtype"],
+        acc_dtype=acc_dtype,
+        # pyrefly: ignore [bad-argument-type]
+        mask_node=mask_node,
     )
 
 
 def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
     """
-    Cheap pre-scan for index_put(accumulate=True) ops that could be rewritten.
+    Cheap pre-scan for accumulating scatter ops that could be rewritten.
 
     Applies every gate that does not require the memory profile (device, dtype,
     shape, min index size, contention ratio) so we can skip building the
@@ -217,10 +297,23 @@ def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
     force: bool = config.partitioned_scatter_force
 
     for node in graph.nodes:
-        if node.op != "call_function" or node.target not in _INDEX_PUT_TARGETS:
+        if node.op != "call_function":
             continue
-        args = node.args
-        if len(args) < 4 or args[3] is not True:
+        if node.target in _SCATTER_ARGS:
+            # index_put takes accumulate as a trailing arg; the masked op is always
+            # accumulating.
+            if node.target in _INDEX_PUT_TARGETS and (
+                len(node.args) < 4 or node.args[3] is not True
+            ):
+                continue
+        elif node.target in _SCATTER_REDUCE_TARGETS:
+            if not _is_summing_scatter(node):
+                continue
+        elif node.target is _INDEX_ADD_TARGET:
+            # alpha scales the source; the rewrite adds it unscaled.
+            if node.kwargs.get("alpha", 1) != 1:
+                continue
+        else:
             continue
 
         ctx.n_candidates += 1
@@ -308,10 +401,12 @@ def _compute_num_partitions(
     """
     Return the largest power-of-2 P in [min_p, max_p] satisfying:
       1. Memory: output_size * element_bytes * (P - 1) <= available_bytes
-      2. Diminishing-returns cap (skipped when force=True):
-         P <= 4 * writes_per_slot, where writes_per_slot = index_size / scatter_dim_size.
-         Past ~4W partitions for a slot taking W writes most partition slots are
-         never written, so the zero-fill and reduce over them buy nothing.
+      2. Traffic cap (skipped when force=True): P <= writes_per_slot, where
+         writes_per_slot = index_size / scatter_dim_size. The expanded buffer
+         costs P * output_bytes to zero-fill plus the same to reduce, against the
+         scatter's own index_size * row_bytes, so the overhead ratio is exactly
+         P / writes_per_slot. Capping it at 1x also lands near the point where
+         extra partitions stop being written at all.
 
     Returns 0 if min_p doesn't fit. Power-of-2 is required by the bitwise-AND
     partition assignment.
@@ -328,10 +423,28 @@ def _compute_num_partitions(
 
     if not force and index_size > 0 and scatter_dim_size > 0:
         writes_per_slot = index_size / scatter_dim_size
-        contention_cap = max(min_p, 2 ** int(math.log2(max(1, 4 * writes_per_slot))))
-        p = min(p, contention_cap)
+        traffic_cap = max(min_p, 2 ** int(math.log2(max(1, writes_per_slot))))
+        p = min(p, traffic_cap)
 
     return p
+
+
+def _widen_bytes(candidate: ScatterCandidate) -> int:
+    """Bytes the widened partials add outside the expanded buffer: the values copy
+    in acc_dtype, plus the width the peak's own output copy cannot credit."""
+    if candidate.acc_dtype == candidate.dtype:
+        return 0
+
+    values_bytes = candidate.values_numel * candidate.acc_dtype.itemsize
+    uncredited = candidate.acc_dtype.itemsize - candidate.dtype.itemsize
+    return values_bytes + candidate.output_size * uncredited
+
+
+def _overhead_bytes(candidate: ScatterCandidate, num_partitions: int) -> int:
+    """Bytes the rewrite adds on top of the output the peak already counts."""
+    copies = max(0, num_partitions - 1)
+    expanded = candidate.output_size * candidate.acc_dtype.itemsize * copies
+    return expanded + _widen_bytes(candidate)
 
 
 def _check_memory(
@@ -354,12 +467,14 @@ def _check_memory(
         return 0
 
     baseline = state.peak_mem_by_node[idx]
-    available = state.allowed_peak_bytes - baseline - state.committed_overhead_bytes
+    # The widening is a fixed cost, so it comes off the budget before sizing P.
+    charged = state.committed_overhead_bytes + _widen_bytes(candidate)
+    available = state.allowed_peak_bytes - baseline - charged
 
     num_partitions = _compute_num_partitions(
         available,
         candidate.output_size,
-        candidate.element_bytes,
+        candidate.acc_dtype.itemsize,
         min_p,
         max_p,
         index_size=candidate.index_size,
@@ -368,9 +483,7 @@ def _check_memory(
     )
 
     if _artifact_log.isEnabledFor(logging.DEBUG):
-        overhead = (
-            candidate.output_size * candidate.element_bytes * max(0, num_partitions - 1)
-        )
+        overhead = _overhead_bytes(candidate, num_partitions)
         _artifact_log.debug(
             "partitioned_scatter: memory check node=%s "
             "baseline_peak=%d MB committed=%d MB available=%d MB "
@@ -402,7 +515,7 @@ def _resolve_numel(numel: Any) -> int | None:
 
 def _validate_memory(match: Match, ctx: ScatterPassContext, force: bool) -> bool:
     """
-    Second-stage gate (the memory budget) for a matched index_put node.
+    Second-stage gate (the memory budget) for a matched scatter node.
 
     The cheap gates already ran in the pre-scan; here we only look up the
     surviving candidate and size the partition count against the memory budget.
@@ -422,7 +535,7 @@ def _validate_memory(match: Match, ctx: ScatterPassContext, force: bool) -> bool
         num_partitions = _compute_num_partitions(
             available_bytes=2**62,
             output_size=candidate.output_size,
-            element_bytes=candidate.element_bytes,
+            element_bytes=candidate.acc_dtype.itemsize,
             min_p=min_p,
             max_p=max_p,
             index_size=candidate.index_size,
@@ -442,8 +555,8 @@ def _validate_memory(match: Match, ctx: ScatterPassContext, force: bool) -> bool
     match._num_partitions = num_partitions  # type: ignore[attr-defined]
     match._scatter_dim = candidate.scatter_dim  # type: ignore[attr-defined]
     match._index_node = candidate.index_node  # type: ignore[attr-defined]
-    match._output_size = candidate.output_size  # type: ignore[attr-defined]
-    match._element_bytes = candidate.element_bytes  # type: ignore[attr-defined]
+    match._mask_node = candidate.mask_node  # type: ignore[attr-defined]
+    match._overhead_bytes = _overhead_bytes(candidate, num_partitions)  # type: ignore[attr-defined]
 
     if _artifact_log.isEnabledFor(logging.DEBUG):
         _artifact_log.debug(
@@ -465,15 +578,79 @@ def _validate_memory(match: Match, ctx: ScatterPassContext, force: bool) -> bool
     return True
 
 
+def _as_dtype(tensor, dtype: torch.dtype):
+    """Cast only when the dtype differs, to keep identity converts out of the graph."""
+    if tensor.dtype == dtype:
+        return tensor
+    return torch.ops.prims.convert_element_type.default(tensor, dtype)
+
+
+def _expanded_zeros(
+    input_tensor, scatter_dim: int, num_partitions: int, acc_dtype: torch.dtype
+):
+    """Zero buffer holding one copy of the output per partition along scatter_dim."""
+    expanded_shape = list(input_tensor.shape)
+    expanded_shape[scatter_dim] *= num_partitions
+    buffer = torch.ops.aten.full.default(
+        expanded_shape,
+        0,
+        dtype=acc_dtype,
+        layout=torch.strided,
+        device=input_tensor.device,
+        pin_memory=False,
+    )
+    return expanded_shape, buffer
+
+
+def _sum_partitions(
+    input_tensor,
+    scattered_buffer,
+    expanded_shape: list,
+    scatter_dim: int,
+    num_partitions: int,
+    dim_size,
+    dtype,
+):
+    """Split scatter_dim into [num_partitions, dim_size], sum it away, accumulate."""
+    reduce_shape = list(expanded_shape)
+    reduce_shape[scatter_dim] = num_partitions
+    reduce_shape.insert(scatter_dim + 1, dim_size)
+    reshaped = torch.ops.aten.view.default(scattered_buffer, reduce_shape)
+
+    # Preserve dtype for integer types that don't promote during sum
+    if dtype in (torch.int8, torch.int16, torch.int32, torch.uint8):
+        reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim], dtype=dtype)
+    else:
+        reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim])
+
+    # Partials are wider than the output, so round only after summing them.
+    if reduced.dtype != dtype:
+        widened = _as_dtype(input_tensor, reduced.dtype)
+        return _as_dtype(widened + reduced, dtype)
+
+    return input_tensor + reduced
+
+
+def _commit(match: Match, ctx: ScatterPassContext, num_partitions: int) -> None:
+    """Charge this scatter's overhead so later candidates in the same invocation
+    see a correspondingly smaller budget."""
+    if ctx.memory is not None:
+        ctx.memory.committed_overhead_bytes += match._overhead_bytes  # type: ignore[attr-defined]
+
+    ctx.n_applied += 1
+    ctx.applied_partitions.append(num_partitions)
+    counters["inductor"]["partitioned_scatter_applied"] += 1
+
+
 def _create_replacement(
-    match: Match, ctx: ScatterPassContext, input_tensor, indices, values
+    match: Match, ctx: ScatterPassContext, input_tensor, indices, values, mask=None
 ) -> None:
     """Replace high-contention index_put with partitioned scatter."""
     num_partitions: int = match._num_partitions  # type: ignore[attr-defined]
     scatter_dim: int = match._scatter_dim  # type: ignore[attr-defined]
     index_node = match._index_node  # type: ignore[attr-defined]
 
-    def repl(input_tensor, index_node, values):
+    def scatter(input_tensor, index_node, values, mask):
         dim_size = input_tensor.shape[scatter_dim]
         num_operations = index_node.numel()
 
@@ -484,9 +661,16 @@ def _create_replacement(
             flat_values = values.reshape(
                 [num_operations] + list(values.shape[values_ndim:])
             )
+            if mask is not None:
+                # Mask shares the index's leading dims, so flatten it the same way.
+                mask = mask.reshape([num_operations] + list(mask.shape[values_ndim:]))
         else:
             flat_index = index_node
             flat_values = values
+
+        # index_add takes an int32 index, which the offset below can push out of
+        # range, and the iota that builds that offset follows this dtype.
+        flat_index = _as_dtype(flat_index, torch.int64)
 
         # partition_id = op_id & (num_partitions - 1), requires power-of-2
         operation_ids = torch.ops.prims.iota.default(
@@ -501,17 +685,11 @@ def _create_replacement(
             operation_ids, num_partitions - 1
         )
 
-        # Expanded buffer: one copy per partition along scatter_dim
-        expanded_shape = list(input_tensor.shape)
-        expanded_shape[scatter_dim] *= num_partitions
-        expanded_buffer = torch.ops.aten.full.default(
-            expanded_shape,
-            0,
-            dtype=flat_values.dtype,
-            layout=torch.strided,
-            device=flat_values.device,
-            pin_memory=False,
+        acc_dtype = _accumulation_dtype(input_tensor.dtype)
+        expanded_shape, expanded_buffer = _expanded_zeros(
+            input_tensor, scatter_dim, num_partitions, acc_dtype
         )
+        flat_values = _as_dtype(flat_values, acc_dtype)
 
         # Shift each write into its partition's slice
         partition_offsets = partition_ids * dim_size
@@ -525,41 +703,100 @@ def _create_replacement(
         else:
             adjusted_indices = [adjusted_index]
 
-        scattered_buffer = torch.ops.aten.index_put.default(
-            expanded_buffer, adjusted_indices, flat_values, True
-        )
-
-        # Reshape to [..., num_partitions, dim_size, ...] then sum partitions
-        reduce_shape = list(expanded_shape)
-        reduce_shape[scatter_dim] = num_partitions
-        reduce_shape.insert(scatter_dim + 1, dim_size)
-        reshaped = torch.ops.aten.view.default(scattered_buffer, reduce_shape)
-
-        # Preserve dtype for integer types that don't promote during sum
-        if flat_values.dtype in (torch.int8, torch.int16, torch.int32, torch.uint8):
-            reduced = torch.ops.aten.sum.dim_IntList(
-                reshaped, [scatter_dim], dtype=flat_values.dtype
+        if mask is None:
+            scattered_buffer = torch.ops.aten.index_put.default(
+                expanded_buffer, adjusted_indices, flat_values, True
             )
         else:
-            reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim])
+            # Keep the masked op rather than folding the mask into the values: it
+            # clamps the out-of-range indices that masked-off lanes may carry.
+            scattered_buffer = _MASKED_INDEX_PUT_TARGET(
+                expanded_buffer, mask, adjusted_indices, flat_values
+            )
 
-        return input_tensor + reduced
+        return _sum_partitions(
+            input_tensor,
+            scattered_buffer,
+            expanded_shape,
+            scatter_dim,
+            num_partitions,
+            dim_size,
+            input_tensor.dtype,
+        )
+
+    mask_node = match._mask_node  # type: ignore[attr-defined]
+    if mask_node is None:
+        # replace_by_example traces by arity, so the mask cannot just default.
+        def repl(input_tensor, index_node, values):  # type: ignore[misc]
+            return scatter(input_tensor, index_node, values, None)
+
+        example_args = [input_tensor, index_node, values]
+    else:
+        repl = scatter  # type: ignore[assignment]
+        example_args = [input_tensor, index_node, values, mask_node]
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, example_args)
+    _commit(match, ctx, num_partitions)
+
+
+def _create_scatter_reduce_replacement(
+    match: Match, ctx: ScatterPassContext, input_tensor, values
+) -> None:
+    """Replace a high-contention scatter_add / scatter_reduce(sum)."""
+    num_partitions: int = match._num_partitions  # type: ignore[attr-defined]
+    scatter_dim: int = match._scatter_dim  # type: ignore[attr-defined]
+    index_node = match._index_node  # type: ignore[attr-defined]
+
+    def repl(input_tensor, index, values):
+        dim_size = input_tensor.shape[scatter_dim]
+        # scatter_add takes an int32 index too; same widening as the index_put path.
+        index = _as_dtype(index, torch.int64)
+
+        # Writes only collide if they differ along scatter_dim, so partition on
+        # that position; a contiguous slice of values then stays in one partition.
+        num_operations = index.shape[scatter_dim]
+        operation_ids = torch.ops.prims.iota.default(
+            num_operations,
+            start=0,
+            step=1,
+            dtype=index.dtype,
+            device=index.device,
+            requires_grad=False,
+        )
+        partition_ids = torch.ops.aten.bitwise_and.Scalar(
+            operation_ids, num_partitions - 1
+        )
+        broadcast_shape = [1] * len(index.shape)
+        broadcast_shape[scatter_dim] = num_operations
+        partition_offsets = (
+            torch.ops.aten.view.default(partition_ids, broadcast_shape) * dim_size
+        )
+        adjusted_index = index + partition_offsets
+
+        acc_dtype = _accumulation_dtype(input_tensor.dtype)
+        expanded_shape, expanded_buffer = _expanded_zeros(
+            input_tensor, scatter_dim, num_partitions, acc_dtype
+        )
+        values = _as_dtype(values, acc_dtype)
+        # Summing onto a zero buffer, so scatter_add serves all three source ops.
+        scattered_buffer = torch.ops.aten.scatter_add.default(
+            expanded_buffer, scatter_dim, adjusted_index, values
+        )
+
+        return _sum_partitions(
+            input_tensor,
+            scattered_buffer,
+            expanded_shape,
+            scatter_dim,
+            num_partitions,
+            dim_size,
+            input_tensor.dtype,
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [input_tensor, index_node, values])
-
-    # Charge this scatter's expanded buffer so later candidates in the same
-    # invocation see a correspondingly smaller budget.
-    if ctx.memory is not None:
-        output_size: int = match._output_size  # type: ignore[attr-defined]
-        element_bytes: int = match._element_bytes  # type: ignore[attr-defined]
-        ctx.memory.committed_overhead_bytes += (
-            output_size * element_bytes * (num_partitions - 1)
-        )
-
-    ctx.n_applied += 1
-    ctx.applied_partitions.append(num_partitions)
-    counters["inductor"]["partitioned_scatter_applied"] += 1
+    _commit(match, ctx, num_partitions)
 
 
 def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
@@ -577,12 +814,55 @@ def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
     def replacement(match: Match, input_tensor, indices, values) -> None:
         _create_replacement(match, ctx, input_tensor, indices, values)
 
+    def masked_replacement(match: Match, input_tensor, mask, indices, values) -> None:
+        _create_replacement(match, ctx, input_tensor, indices, values, mask=mask)
+
     for target in _INDEX_PUT_TARGETS:
         register_graph_pattern(
             CallFunction(target, Arg(), Arg(), Arg(), True),
             extra_check=extra_check,
             pass_dict=patterns,  # type: ignore[arg-type]
         )(replacement)
+
+    # No trailing True to match: this op is always accumulating.
+    register_graph_pattern(
+        CallFunction(_MASKED_INDEX_PUT_TARGET, Arg(), Arg(), Arg(), Arg()),
+        extra_check=extra_check,
+        pass_dict=patterns,  # type: ignore[arg-type]
+    )(masked_replacement)
+
+    def index_add_replacement(match: Match, input_tensor, values) -> None:
+        # index_add is index_put accumulate with the 1-D index at dim.
+        scatter_dim: int = match._scatter_dim  # type: ignore[attr-defined]
+        index_node = match._index_node  # type: ignore[attr-defined]
+        indices = [None] * scatter_dim + [index_node]
+        _create_replacement(match, ctx, input_tensor, indices, values)
+
+    register_graph_pattern(
+        CallFunction(_INDEX_ADD_TARGET, Arg(), Ignored(), Ignored(), Arg()),
+        extra_check=extra_check,
+        pass_dict=patterns,  # type: ignore[arg-type]
+    )(index_add_replacement)
+
+    def scatter_reduce_replacement(match: Match, input_tensor, values) -> None:
+        _create_scatter_reduce_replacement(match, ctx, input_tensor, values)
+
+    # dim is Ignored() because the replacement needs the normalized dim off the
+    # candidate; reduce/include_self were already vetted by _is_summing_scatter.
+    for scatter_pattern in (
+        CallFunction(aten.scatter_add.default, Arg(), Ignored(), Ignored(), Arg()),
+        CallFunction(
+            aten.scatter_reduce.two, Arg(), Ignored(), Ignored(), Arg(), Ignored()
+        ),
+        CallFunction(
+            aten.scatter.reduce, Arg(), Ignored(), Ignored(), Arg(), reduce=Ignored()
+        ),
+    ):
+        register_graph_pattern(
+            scatter_pattern,
+            extra_check=extra_check,
+            pass_dict=patterns,  # type: ignore[arg-type]
+        )(scatter_reduce_replacement)
 
     return patterns
 
