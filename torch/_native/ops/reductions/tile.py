@@ -38,8 +38,13 @@ class TileMap:
     """
 
     def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
-        if tpr != 1 and tpr % WARP != 0:
-            raise ValueError(f"tpr must be 1 or a multiple of {WARP}, got {tpr}")
+        # The warp COUNT must be a power of two, not just a multiple of 32: the cross-warp
+        # butterfly spans tpr // WARP groups only then, and silently drops a partial otherwise.
+        nw = tpr // WARP
+        if tpr != 1 and (tpr % WARP or nw & (nw - 1)):
+            raise ValueError(
+                f"tpr must be 1 or a power-of-two multiple of {WARP}, got {tpr}"
+            )
         unroll = vec_size(N, itemsize) * loads
         if unroll > MAX_UNROLL:
             raise ValueError(
@@ -220,9 +225,14 @@ class TileReduce:
     ):
         if axis not in ("row", "col"):
             raise ValueError(f"axis must be 'row' or 'col', got {axis!r}")
-        if axis == "row" and tpr != 1 and (tpr % WARP or tpr > nt or nt % tpr):
+        nwpr = tpr // WARP
+        if (
+            axis == "row"
+            and tpr != 1
+            and (tpr % WARP or tpr > nt or nt % tpr or nwpr & (nwpr - 1))
+        ):
             raise ValueError(
-                f"tpr must be 1 or a multiple of {WARP} dividing nt: {tpr=} {nt=}"
+                f"tpr must be 1 or a power-of-two multiple of {WARP} dividing nt: {tpr=} {nt=}"
             )
         if use_tma and (axis != "row" or tpr != 1):
             raise ValueError(
