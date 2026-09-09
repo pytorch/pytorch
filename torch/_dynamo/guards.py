@@ -4682,6 +4682,19 @@ def pickle_guards_state(
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
+    except RecursionError as e:
+        # A guard rooted at an fqn-mismatched function is now traversed rather
+        # than dropped, so pickle walks whatever user data hangs off it -- and a
+        # deep (but finite, acyclic) object graph, or a pathological __reduce__
+        # that never memoizes, overflows the recursion limit here. That is a
+        # serialization limit, not a compiler bug: bypass it (or raise under
+        # strict_precompile) like any other unpicklable value, rather than
+        # hard-failing a program that compiled fine before. Walking the object
+        # graph to report WHERE the overflow happened is skipped deliberately --
+        # it would recurse again off an already exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "guard state exceeded the recursion limit while pickling"
+        ) from e
     except Exception as e:
         # Deliberately broad, AssertionError included: GradScaler.__getstate__
         # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
