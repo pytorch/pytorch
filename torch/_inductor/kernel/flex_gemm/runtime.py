@@ -1,17 +1,13 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import concurrent.futures
 import contextlib
 import contextvars
 import dataclasses
-import functools
 import inspect
 import logging
 import os
 import threading
-import time
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -40,19 +36,6 @@ def inductor_quack_cache_dir() -> str:
     return os.path.join(cache_dir(), "quack")
 
 
-def register_quack_ops_source_dir() -> None:
-    """Fingerprint the PyTorch-owned EpiOp sources into QuACK's disk-cache key.
-
-    QuACK hashes its own package to version cached kernels; ops defined under
-    ``quack_ops`` must be hashed the same way, before the first compile.
-    """
-    from torch._vendor.quack import cache as quack_cache
-
-    source_dir = Path(__file__).resolve().parent / "quack_ops"
-    if source_dir not in quack_cache.EXTRA_SOURCE_DIRS:
-        quack_cache.EXTRA_SOURCE_DIRS.append(source_dir)
-
-
 _CONFIG_SELECTION: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
     "flex_gemm_config_selection", default=None
 )
@@ -69,95 +52,18 @@ def select_flex_gemm_configs():
         _CONFIG_SELECTION.reset(token)
 
 
-class _InductorCompileExecutor(concurrent.futures.Executor):
-    """Run QuACK's GPU-blind compile worker in Inductor's process pool.
-
-    Inductor owns the pool's lifetime, so the inherited ``shutdown`` is a no-op.
-    """
-
-    def __init__(self, quack_arch: str | None, cute_dsl_arch: str | None) -> None:
-        self.arch = (quack_arch, cute_dsl_arch)
-
-    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
-        from torch._inductor.async_compile import AsyncCompile
-
-        return AsyncCompile.process_pool().submit(
-            _flex_gemm_compile_worker, *self.arch, fn, *args, **kwargs
-        )
-
-
-@functools.cache
-def _init_flex_gemm_compile_worker(
-    quack_arch: str | None, cute_dsl_arch: str | None
-) -> None:
-    """Pin QuACK's dispatch and ptxas arch once per Inductor compile worker."""
-    from torch._vendor.quack.cache import async_compile as quack_async
-
-    if quack_arch is not None:
-        os.environ["QUACK_ARCH"] = quack_arch
-    if cute_dsl_arch is not None:
-        os.environ["CUTE_DSL_ARCH"] = cute_dsl_arch
-    register_quack_ops_source_dir()
-    quack_async._pin_dsl_arch(cute_dsl_arch)
-    if quack_arch is not None:
-        quack_async._install_gpu_blind_device_attrs()
-
-
-def _flex_gemm_compile_worker(
-    quack_arch: str | None,
-    cute_dsl_arch: str | None,
-    fn: Any,
-    *args: Any,
-    **kwargs: Any,
-) -> str | None:
-    """Run one QuACK pool job inside an Inductor compile worker."""
-    _init_flex_gemm_compile_worker(quack_arch, cute_dsl_arch)
-    return fn(*args, **kwargs)
-
-
 _PRECOMPILE_LOCK = threading.Lock()
-_PRECOMPILE_POOL: Any = None
 
 
-def precompile_flex_gemm_kernel(run: Callable[[], None], *, wait: bool = True) -> None:
-    """Compile the QuACK kernel ``run`` needs in Inductor's worker pool.
+def precompile_flex_gemm_kernel(run: Callable[[], None]) -> None:
+    """Compile the QuACK kernel ``run`` needs now instead of at first call.
 
-    ``run`` invokes the generated kernel on real tensors; with QuACK's compile
-    pool active, a cold ``jit_cache`` miss ships the pickled compile arguments
-    to a worker and raises ``CompilePending`` instead of compiling in-process.
-    Submission is serialized (QuACK's pool bookkeeping is single-threaded) and
-    the pool is active only inside that window, so kernels launched anywhere
-    else, including Inductor's benchmark loop, never see it. Without ``wait``
-    the compile overlaps the rest of Inductor's compilation; a first call that
-    arrives early blocks on QuACK's per-key file lock and then loads the result.
+    ``run`` invokes the generated kernel on real tensors; the cold ``jit_cache``
+    miss compiles in-process. CuTeDSL compilation is serialized because
+    Inductor precompiles choices from several threads.
     """
-    from torch._vendor.quack.cache import async_compile as quack_async
-
-    global _PRECOMPILE_POOL
     with _PRECOMPILE_LOCK:
-        if _PRECOMPILE_POOL is None:
-            _PRECOMPILE_POOL = quack_async.CompilePool(
-                executor=_InductorCompileExecutor(*quack_async._detect_arch_env())
-            )
-        pool = _PRECOMPILE_POOL
-        previous = quack_async._active_pool
-        quack_async._active_pool = pool
-        try:
-            run()
-            return
-        except quack_async.CompilePending as pending:
-            sha = pending.sha
-        finally:
-            quack_async._active_pool = previous
-    if not wait:
-        return
-    while pool.poll(sha)[0] == "pending":
-        time.sleep(0.02)
-    state, error = pool.poll(sha)
-    if state != "done":
-        log.warning(
-            "FlexGEMM worker precompile failed (%s); compiling in-process", error
-        )
+        run()
 
 
 def flex_gemm_candidate_configs(
@@ -321,7 +227,6 @@ def flex_gemm_epimod(
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
-    register_quack_ops_source_dir()
     # Generated callbacks reference epi_math without importing QuACK into the
     # generated source. Inject it only into the original function's globals;
     # decorated wrappers may belong to third-party modules.
