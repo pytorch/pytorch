@@ -1337,11 +1337,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                                 self_handler,
                                 e,
                             )
-                            unimplemented(
-                                gb_type="invalid call to builtin op handler",
-                                context=f"invalid args to {self_handler}: {args} {kwargs}",
-                                explanation=f"Encountered TypeError when trying to handle op {fn.__name__}",
-                                hints=[*graph_break_hints.DIFFICULT],
+                            raise_args_mismatch(
+                                tx,
+                                fn.__name__,
+                                expect=str(inspect.signature(self_handler)),
+                                actual=f"{args} {kwargs}",
                             )
                     else:
                         raise
