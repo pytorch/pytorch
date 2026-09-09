@@ -1328,42 +1328,52 @@ def is_numpy_float_type(value: object) -> bool:
     )
 
 
-_unpack_fast_types_cache: tuple[type, ...] | None = None
-
-
+@functools.cache
 def _unpack_fast_types() -> tuple[type, ...]:
     # Builtin iterables whose elements we can get directly via
     # unpack_var_sequence, skipping the generic iter/getiter/iternext protocol
-    # (a bottleneck for large iterables). Built lazily since `variables` is a
+    # (a bottleneck for large iterables). Cached lazily since `variables` is a
     # circular import at module load.
-    global _unpack_fast_types_cache
-    if _unpack_fast_types_cache is None:
-        from . import variables
+    from . import variables
 
-        _unpack_fast_types_cache = (
-            variables.ConstDictVariable,
-            variables.DictViewVariable,
-            variables.MappingProxyVariable,
-            variables.DequeVariable,
-            variables.ListVariable,
-            variables.ListIteratorVariable,
-            variables.TupleIteratorVariable,
-            variables.DequeIteratorVariable,
-            variables.DequeReverseIteratorVariable,
-            variables.RangeVariable,
-            variables.SetVariable,
-            variables.FrozensetVariable,
-            variables.DictKeySetVariable,
-            variables.TensorVariable,
-            variables.TupleVariable,
-        )
-    return _unpack_fast_types_cache
+    return (
+        variables.ConstDictVariable,
+        variables.DequeIteratorVariable,
+        variables.DequeReverseIteratorVariable,
+        variables.DequeVariable,
+        variables.DictItemsVariable,
+        variables.DictKeySetVariable,
+        variables.DictKeysVariable,
+        variables.DictValuesVariable,
+        variables.DunderDictVariable,
+        variables.FakeItemVariable,
+        variables.FrozensetVariable,
+        variables.ListIteratorVariable,
+        variables.ListVariable,
+        variables.MappingProxyVariable,
+        variables.NNModuleHooksDictVariable,
+        variables.NumpyNdarrayVariable,
+        variables.OrderedDictVariable,
+        variables.OrderedSetVariable,
+        variables.RangeVariable,
+        variables.SetVariable,
+        variables.SizeVariable,
+        variables.TensorVariable,
+        variables.TensorWithTFOverrideVariable,
+        variables.TupleIteratorVariable,
+        variables.TupleVariable,
+        variables.UnspecializedPythonVariable,
+    )
 
 
 def unpack_iterable(
     tx: InstructionTranslatorBase, iterable: VariableTracker
 ) -> list[VariableTracker]:
-    if isinstance(iterable, _unpack_fast_types()):
+    # Realize first: istype is exact, so a lazy wrapper would otherwise miss
+    # the fast path (and a subclass VT stays excluded since its exact type is
+    # not in _unpack_fast_types).
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         # unpack_var_sequence returns a fresh list, so hand it back directly:
         # no generator, no per-element callback, single allocation.
         return iterable.unpack_var_sequence(tx)
@@ -1386,7 +1396,8 @@ def lazily_unpack(
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, pyiter_next
 
-    if isinstance(iterable, _unpack_fast_types()):
+    iterable = iterable.realize()
+    if istype(iterable, _unpack_fast_types()):
         yield from iterable.unpack_var_sequence(tx)
         return
 
