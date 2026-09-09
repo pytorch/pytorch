@@ -467,6 +467,58 @@ class TestKernelRowTile(TestCase):
                 rt.tma_ok(32, 4, 1 << 20, dev)
         self.assertEqual(props.call_count, 0)
 
+    def test_gapped_rows_are_addressed_at_runtime(self):
+        # Inner stride 1 but a row PITCH that is not the row length. Nothing about the pitch is
+        # baked -- _fake() declares both extents dynamic -- so the reduction must still be right.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        x = torch.randn(4, 512, device="cuda")[::2]
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32), "gapped", x, [torch.float32]
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+
+    def test_misaligned_base_is_served_after_an_aligned_call(self):
+        # A contiguous row can still be under-aligned (a storage offset), which N alone cannot
+        # see. The ALIGNED call runs first on purpose: a plan keyed without alignment would hand
+        # the second call the first's wider claim, which faults at launch.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        aligned = torch.randn(2, 512, device="cuda")
+        (first,) = rt.reduce_row_tile(trait, "align_reuse", aligned, [torch.float32])
+        ref = aligned.double().sum(dim=1).float()
+        self.assertEqual(first, ref, atol=1e-5, rtol=1e-5)
+        for skip in (1, 2):
+            with self.subTest(skip=skip):
+                x = torch.randn(2 * 512 + skip, device="cuda")[skip:].view(2, 512)
+                (got,) = rt.reduce_row_tile(trait, "align_reuse", x, [torch.float32])
+                self.assertEqual(
+                    got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
+                )
+
+    def test_non_power_of_two_warp_count_is_rejected(self):
+        # tpr=96 is a multiple of 32 that divides nt, but 3 warps per row is not a power of two:
+        # the cross-warp butterfly would drop the third partial (256 instead of 384 at N=384).
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.ones(8, 384, device="cuda")
+        with self.assertRaisesRegex(ValueError, "power-of-two"):
+            rt.reduce_row_tile(trait, "nw3", x, [torch.float32], tpr=96, nt=96)
+        # The neighbouring power-of-two width is served, and correctly.
+        (got,) = rt.reduce_row_tile(trait, "nw2", x, [torch.float32], tpr=64, nt=64)
+        self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
+
 
 if __name__ == "__main__":
     run_tests()
