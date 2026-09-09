@@ -2151,10 +2151,8 @@ def _resolve_descriptor_get(
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
         return variables.UserMethodVariable(
-            variables.functions.build_function_vt(
-                tx,
-                type_attr,
-                source and AttrSource(source, "__func__"),
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
             ),
             obj,
             source=source,

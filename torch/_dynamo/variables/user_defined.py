@@ -643,7 +643,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 meta_getattr, types.FunctionType
             ):
                 return variables.UserMethodVariable(
-                    variables.functions.build_function_vt(tx, meta_getattr, None),
+                    variables.UserFunctionVariable(meta_getattr, source=None),
                     self,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
 
@@ -906,12 +906,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         none_var = ConstantVariable.create(None)
         return variables.UserMethodVariable(
-            variables.functions.build_function_vt(
-                tx,
-                descriptor.__get__.__func__,  # type: ignore[union-attr]
+            variables.UserFunctionVariable(  # type: ignore[union-attr]
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
-                descriptor_get_source,
+                descriptor.__get__.__func__,
+                source=descriptor_get_source,
             ),
             descriptor_var,
             source=descriptor_get_source,
@@ -922,7 +921,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__len__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(tx, f"object of type {self.python_type_name()} has no length")
@@ -946,7 +945,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__iter__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         return super().tp_iter_impl(tx)
@@ -956,7 +955,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__neg__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -968,7 +967,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__pos__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -980,7 +979,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__abs__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -993,7 +992,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if m:
             source = self.source and AttrSource(TypeSource(self.source), "__invert__")
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, [], {})
         raise_type_error(
@@ -1017,7 +1016,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             source = self.source and AttrSource(TypeSource(self.source), attr)
             args = [key] if is_delete else [key, value]
             variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, m, source),
+                variables.UserFunctionVariable(m, source=source),
                 self,
             ).call_function(tx, args, {})
             return variables.ConstantVariable.create(None)
@@ -1216,11 +1215,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             TypeSource(self.source), name
                         )
                         return variables.UserMethodVariable(
-                            variables.functions.build_function_vt(
-                                tx,
-                                method,
-                                fn_source,
-                            ),
+                            variables.UserFunctionVariable(method, source=fn_source),
                             self,
                             source=source,
                         ).call_function(tx, args, kwargs)
@@ -1391,10 +1386,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cm_obj = args[1].cm_obj
             fn = getattr(cm_obj, args[0].get_name()).__func__
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(
-                    tx,
-                    fn,
-                    self.source and AttrSource(self.source, "__func__"),
+                variables.UserFunctionVariable(
+                    fn, source=self.source and AttrSource(self.source, "__func__")
                 ),
                 args[1],
                 source=self.source,
@@ -2817,7 +2810,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .. import trace_rules
-        from . import UserFunctionVariable, UserMethodVariable
+        from . import UserMethodVariable
         from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
@@ -2886,10 +2879,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
                 return UserMethodVariable(
-                    variables.functions.build_function_vt(
-                        tx,
+                    variables.UserFunctionVariable(
                         method,
-                        source_fn or (source and AttrSource(source, "__func__")),
+                        source=source_fn or (source and AttrSource(source, "__func__")),
                     ),
                     self,
                     source=source,
@@ -2907,7 +2899,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
                     return variables.UserMethodVariable(
-                        variables.functions.build_function_vt(tx, traceable_fn, None),
+                        variables.UserFunctionVariable(traceable_fn, source=None),
                         self,
                     ).call_function(tx, args, kwargs)
 
@@ -3548,9 +3540,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Not build_function_vt: the builder would install a guard
-                    # on __getattribute__, which makes an nn.Module's guard
-                    # manager tag-unsafe (test_nn_module_tag_overridden_getattr_safe).
+                    # Do not install a guard on __getattr__/__getattribute__: it makes
+                    # the module's guard manager tag-unsafe
+                    # (test_nn_module_tag_overridden_getattr_safe).
                     variables.UserFunctionVariable(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -3740,7 +3732,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 self.source and AttrSource(TypeSource(self.source), name)
             )
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, type_attr, fn_source),
+                variables.UserFunctionVariable(type_attr, source=fn_source),
                 self,
                 source=source,
             )
@@ -3787,12 +3779,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         owner_var = UserDefinedClassVariable(type(self.value))
         return variables.UserMethodVariable(
-            variables.functions.build_function_vt(
-                tx,
-                descriptor.__get__.__func__,  # type: ignore[union-attr]
+            variables.UserFunctionVariable(  # type: ignore[union-attr]
                 # descriptor_get_source is type(descriptor).__get__, which is
                 # already the function; it has no __func__ to unwrap.
-                descriptor_get_source,
+                descriptor.__get__.__func__,
+                source=descriptor_get_source,
             ),
             descriptor_var,
             source=descriptor_get_source,
@@ -3846,8 +3837,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
                 out = variables.UserMethodVariable(
-                    # See the note in tp_getattro_impl: keep __getattr__ off the
-                    # builder so the module's guard manager stays tag-safe.
+                    # See the note in tp_getattro_impl: no guard here, so the
+                    # module's guard manager stays tag-safe.
                     variables.UserFunctionVariable(
                         getattr_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -5676,7 +5667,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             dict.get,
         ):
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(tx, polyfills.mapping_get, None),
+                variables.UserFunctionVariable(polyfills.mapping_get, source=None),
                 self,
             )
         return None

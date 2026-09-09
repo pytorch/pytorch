@@ -53,7 +53,6 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    TypeSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -405,9 +404,9 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    # Not build_function_vt: the builder installs a guard on
-                    # __getattr__/__getattribute__ that makes the module's guard
-                    # manager tag-unsafe (test_nn_module_tag_overridden_getattr_safe).
+                    # Do not install a guard on __getattr__/__getattribute__: it makes
+                    # the module's guard manager tag-unsafe
+                    # (test_nn_module_tag_overridden_getattr_safe).
                     variables.UserFunctionVariable(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -456,7 +455,7 @@ class NNModuleVariable(VariableTracker):
         source = AttrSource(obj_source, "__getattr__")
 
         return variables.UserMethodVariable(
-            # See the note above: keep this off the builder for tag safety.
+            # See the note above: no guard here, for tag safety.
             variables.UserFunctionVariable(
                 getattr_fn, source=AttrSource(source, "__func__")
             ),
@@ -545,26 +544,21 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
-                return variables.functions.build_function_vt(
-                    tx,
-                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
-                    source,
+                return variables.UserFunctionVariable(  # pyrefly: ignore[bad-argument-type]
+                    subobj.fget, source=source
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    variables.functions.build_function_vt(
-                        tx,
+                    variables.UserFunctionVariable(
                         subobj.__func__,
-                        source and AttrSource(source, "__func__"),
+                        source=source and AttrSource(source, "__func__"),
                     ),
                     variables.UserDefinedObjectVariable(type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.functions.build_function_vt(
-                    tx,
-                    subobj.__get__(base),
-                    source,
+                return variables.UserFunctionVariable(
+                    subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
@@ -575,10 +569,8 @@ class NNModuleVariable(VariableTracker):
                         source=AttrSource(source, "__func__"),
                     )
                 return variables.UserMethodVariable(
-                    variables.functions.build_function_vt(
-                        tx,
-                        subobj,
-                        source and AttrSource(source, "__func__"),
+                    variables.UserFunctionVariable(
+                        subobj, source=source and AttrSource(source, "__func__")
                     ),
                     self,
                     source=source,
@@ -707,7 +699,7 @@ class NNModuleVariable(VariableTracker):
                     if not istype(fn, types.FunctionType):
                         raise AssertionError(f"Expected FunctionType, got {type(fn)}")
                 return tx.inline_user_function_return(
-                    variables.functions.build_function_vt(tx, fn, fn_source),
+                    variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
                     allow_nested_graph_breaks=True,
@@ -752,7 +744,7 @@ class NNModuleVariable(VariableTracker):
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
-                variables.functions.build_function_vt(tx, fn, src),
+                variables.UserFunctionVariable(fn, source=src),
                 [self, key],
                 {},
                 allow_nested_graph_breaks=True,
@@ -1141,7 +1133,7 @@ class NNModuleVariable(VariableTracker):
         fn = getattr(module, name).__func__
         fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
         return tx.inline_user_function_return(
-            variables.functions.build_function_vt(tx, fn, fn_source),
+            variables.UserFunctionVariable(fn, source=fn_source),
             [self] + list(args),
             kwargs,
         )

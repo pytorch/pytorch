@@ -5394,8 +5394,8 @@ class SourcelessBuilder:
                 obj_vt = tx.output.side_effects.id_to_variable.get(id(value.__self__))
                 if obj_vt is not None:
                     return torch._dynamo.variables.UserMethodVariable(
-                        torch._dynamo.variables.functions.build_function_vt(
-                            tx, value.__func__, None
+                        torch._dynamo.variables.UserFunctionVariable(
+                            value.__func__, source=None
                         ),
                         obj_vt,
                     )

@@ -2364,11 +2364,9 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            VariableTracker.build(
-                tx,
+            torch._dynamo.variables.UserFunctionVariable(
                 self.value.__call__.__func__,
-                AttrSource(call_source, "__func__"),
-                realize=True,
+                source=AttrSource(call_source, "__func__"),
             ),
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
@@ -5547,10 +5545,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
-                        VariableTracker.build(
-                            tx,
+                        torch._dynamo.variables.UserFunctionVariable(
                             autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                            realize=True,
                         ),
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
@@ -5981,11 +5977,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                VariableTracker.build(
-                    tx,
+                torch._dynamo.variables.UserFunctionVariable(
                     fn.__func__,
-                    source and AttrSource(source, "__func__"),
-                    realize=True,
+                    source=source and AttrSource(source, "__func__"),
                 ),
                 cls_vt,
                 source=source,

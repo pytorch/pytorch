@@ -1789,30 +1789,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-def build_function_vt(
-    tx: "InstructionTranslatorBase",
-    fn: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
-    source: Source | None,
-) -> BaseUserFunctionVariable:
-    """Build the function VT that a method VT binds, via the builder.
-
-    Going through VariableTracker.build is what installs the guards for `fn`.
-    It also consults trace_rules, which can hand back a VT that is not a
-    BaseUserFunctionVariable: SkipFunctionVariable for a disabled method or one
-    from a skipped module, TorchInGraphFunctionVariable for a nonstrict_trace-ed
-    one. A method cannot delegate get_code/bind_args to those, so fall back to
-    constructing the function VT directly, which is what every call site did
-    before methods stopped subclassing UserFunctionVariable.
-
-    The fallback is rare and the guards are installed either way: over a full
-    test/dynamo run it was taken 92 times in 65414 calls (90 skipped, 2 in-graph).
-    """
-    vt = VariableTracker.build(tx, fn, source, realize=True)
-    if isinstance(vt, BaseUserFunctionVariable):
-        return vt
-    return UserFunctionVariable(fn, source=source)
-
-
 class UserMethodVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined method"""
 
@@ -4908,10 +4884,10 @@ class ClassMethodVariable(VariableTracker):
             else None
         )
         return UserMethodVariable(
-            build_function_vt(
-                tx,
+            UserFunctionVariable(
                 self.descriptor.__func__,
-                func_source or (bound_source and AttrSource(bound_source, "__func__")),
+                source=func_source
+                or (bound_source and AttrSource(bound_source, "__func__")),
             ),
             owner,
             source=bound_source,

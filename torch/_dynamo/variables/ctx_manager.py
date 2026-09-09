@@ -201,10 +201,9 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            variables.functions.build_function_vt(
-                tx,
-                self.cm_obj.__enter__.__func__,  # type: ignore[attr-defined]
-                source and AttrSource(source, "__func__"),
+            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+                self.cm_obj.__enter__.__func__,
+                source=source and AttrSource(source, "__func__"),
             ),
             self,
             source=source,
@@ -215,10 +214,9 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     ) -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            variables.functions.build_function_vt(
-                tx,
-                self.cm_obj.__exit__.__func__,  # type: ignore[attr-defined]
-                source and AttrSource(source, "__func__"),
+            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+                self.cm_obj.__exit__.__func__,
+                source=source and AttrSource(source, "__func__"),
             ),
             self,
             source=source,

@@ -342,11 +342,9 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                VariableTracker.build(
-                    tx,
+                variables.UserFunctionVariable(
                     inner_fn.__func__,
-                    source and AttrSource(source, "__func__"),
-                    realize=True,
+                    source=source and AttrSource(source, "__func__"),
                 ),
                 self.objvar,
                 source=source,
@@ -1331,10 +1329,8 @@ class AutogradFunctionVariable(VariableTracker):
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                variables.functions.build_function_vt(
-                    tx,
-                    fn.__func__,
-                    source and AttrSource(source, "__func__"),
+                variables.UserFunctionVariable(
+                    fn.__func__, source=source and AttrSource(source, "__func__")
                 ),
                 variables.UserDefinedClassVariable(self.fn_cls),
                 source=source,
@@ -1564,11 +1560,7 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
                 install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    variables.functions.build_function_vt(
-                        tx,
-                        obj.__func__,
-                        func_source,
-                    ),
+                    variables.UserFunctionVariable(obj.__func__, source=func_source),
                     self,
                     source=source,
                 ).call_function(tx, args, kwargs)
