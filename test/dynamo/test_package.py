@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import itertools
 import os
 import re
 import sys
@@ -1214,6 +1215,8 @@ def add(x, y):
             def fn(x):
                 y = x.sin()
                 torch._dynamo.graph_break()
+                y = y + bias
+                torch._dynamo.graph_break()
                 return y + x.cos() + bias
 
             return fn
@@ -1245,6 +1248,70 @@ def add(x, y):
         compiled = torch._dynamo.optimize(package=pkg)(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), expected)
+
+    def test_reserve_unique_id_through_skips_past_a_loaded_artifacts_counter(self):
+        from torch._dynamo.bytecode_transformation import (
+            _reserve_unique_id_through,
+            unique_id,
+        )
+
+        current = int(unique_id("probe").rsplit("_", 1)[1])
+        _reserve_unique_id_through(current + 50)
+        self.assertGreater(int(unique_id("probe").rsplit("_", 1)[1]), current + 50)
+        # Reserving below the counter must not move it backwards.
+        after = int(unique_id("probe").rsplit("_", 1)[1])
+        _reserve_unique_id_through(0)
+        self.assertGreater(int(unique_id("probe").rsplit("_", 1)[1]), after)
+
+    def test_install_moves_the_counter_past_a_loaded_artifacts_resume_names(self):
+        # A serving process that starts its counter from zero would mint the
+        # loaded artifact's __resume_at_<offset>_<n> names again for its own
+        # captures; install() reserves through the highest loaded n.
+        import torch._dynamo.bytecode_transformation as bt
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + 1
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),), guard_filter_fn)
+        pkg, backends = ctx.load_package(fn, self.path())
+        loaded = [
+            int(name.rsplit("_", 1)[1])
+            for entry in pkg._codes.values()
+            for name in entry.function_names
+            if name.startswith(bt.RESUME_FN_PREFIX)
+        ]
+        self.assertTrue(loaded)
+        with patch.object(bt, "_unique_id_counter", itertools.count()):
+            pkg.install(backends)
+            self.addCleanup(pkg.uninstall)
+            minted = int(bt.unique_id("probe").rsplit("_", 1)[1])
+        self.assertGreater(minted, max(loaded))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_two_packages_share_a_built_in_modules_wrap_inline_frame(self):
+        # Every built-in nn.Module compiles through wrap_inline's one `inner`
+        # code object, so a first package's entries on it must not read as
+        # another package serving the second module: that frame is multi-owner
+        # by design, and a module whose guards miss records its own entry.
+        lin, relu = torch.nn.Linear(2, 2), torch.nn.ReLU()
+        x = torch.randn(3, 2)
+        pkg1 = CompilePackage(lin.forward)
+        self.assertEqual(
+            torch._dynamo.optimize(backend="eager", package=pkg1)(lin)(x), lin(x)
+        )
+        pkg2 = CompilePackage(relu.forward)
+        self.assertEqual(
+            torch._dynamo.optimize(backend="eager", package=pkg2)(relu)(x), relu(x)
+        )
+        self.assertEqual(sum(len(e.guarded_codes) for e in pkg2._codes.values()), 1)
 
     def test_uninstall_leaves_a_users_rebinding_alone(self):
         # uninstall() pops a global only while it still holds the value this
