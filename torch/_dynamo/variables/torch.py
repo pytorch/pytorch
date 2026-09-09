@@ -674,7 +674,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
