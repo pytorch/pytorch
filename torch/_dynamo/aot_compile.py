@@ -67,6 +67,10 @@ class CompileArtifacts:
     # device_type keeps the collapsed accelerator-wins value for BC; a mixed
     # cpu+accelerator graph still emits native CPU code, so keep the full set.
     device_types: frozenset[str] = frozenset()
+    # False for a backend that bakes no native code (the eager family, or a user
+    # backend declaring `emits_native_code = False`), so the ISA gate is skipped.
+    # Defaults True so an artifact saved before the field existed keeps loading.
+    requires_native_backend_compatibility: bool = True
 
     def check_compatibility(self) -> None:
         # The cached info is the receiver so mismatch messages label self
@@ -76,7 +80,10 @@ class CompileArtifacts:
         # recorded no Triton/GPU, requiring a match otherwise -- the correct
         # direction for a compatibility check.
         device_types = self.device_types or frozenset((self.device_type,))
-        check_codegen = emits_native_code(self.backend_name)
+        check_codegen = (
+            self.requires_native_backend_compatibility
+            and emits_native_code(self.backend_name)
+        )
         current = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
@@ -100,8 +107,9 @@ class _ProbeState:
     # Ids being probed right now, for cycle-breaking.
     inflight: set[int] = dataclasses.field(default_factory=set)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
-    # returned but not cached.
+    # not cached as final but parked for the rest of the probe tree.
     leaned: bool = False
+    parked: dict[int, bool] = dataclasses.field(default_factory=dict)
 
 
 class AOTCompilePickler(FunctionPicklerBase):
@@ -135,7 +143,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
                 return reduced
-        elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
+        elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
             # pickler nothing it holds is pruned -- except annotations, type
             # params, __doc__, and __dict__ entries that will not pickle. The runtime
@@ -175,6 +183,8 @@ class AOTCompilePickler(FunctionPicklerBase):
         state = self._probe_state
         vid = id(value)
         cached = state.cache.get(vid)
+        if cached is None and state.inflight:
+            cached = state.parked.get(vid)
         if cached is not None:
             return cached
         if vid in state.inflight:
@@ -208,11 +218,18 @@ class AOTCompilePickler(FunctionPicklerBase):
         leaned = state.leaned
         # A caller that consulted this value also leaned on whatever we did.
         state.leaned = leaned_before or leaned
-        # A False that leaned on an in-flight True may be a false negative:
-        # return it but do not cache it. A True, or a False that leaned on
-        # nothing, is final.
+        # A False that leaned on an in-flight True may be a false negative, so
+        # it is not cached as final. It is parked for the rest of this probe
+        # tree -- re-deriving it is exponential on a cyclic cluster -- and
+        # dropped when the tree finishes, so the real dump never consults it
+        # (a stale park can only over-prune inside a probe, which never flips a
+        # probe verdict). A True, or a False that leaned on nothing, is final.
         if result or not leaned:
             state.cache[vid] = result
+        else:
+            state.parked[vid] = result
+        if not state.inflight:
+            state.parked.clear()
         return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
@@ -635,9 +652,15 @@ def aot_compile_fullgraph(
         codegen_config_ctx: AbstractContextManager[Any] = nullcontext()
         if isinstance(backend, torch._TorchCompileInductorWrapper):
             codegen_config_ctx = torch._inductor.config.patch(backend.config)
+        # A user backend that bakes no native code can say so (on the callable
+        # torch.compile wrapped); the eager family is exempt by name.
+        user_backend = getattr(backend, "compiler_fn", backend)
+        native_backend = getattr(
+            user_backend, "emits_native_code", True
+        ) is not False and emits_native_code(backend_name)
         with codegen_config_ctx:
             system_info = SystemInfo.current(
-                cpu_codegen=(emits_native_code(backend_name) and "cpu" in device_types)
+                cpu_codegen=(native_backend and "cpu" in device_types)
             )
             # Build the artifact under the same config the fingerprint was
             # sampled under: AOTCompiledFunction.__post_init__ runs
@@ -656,6 +679,7 @@ def aot_compile_fullgraph(
                 device_type=device_type,
                 backend_name=backend_name,
                 system_info=system_info,
+                requires_native_backend_compatibility=native_backend,
                 device_types=device_types,
             )
             aot_compiled_fn = AOTCompiledFunction(

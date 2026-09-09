@@ -335,7 +335,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                         f"triggered by the following guard failure(s):\n{failures}"
                     )
                     message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            precompile_entries = [
+                e
+                for e in _debug_get_precompile_entries(frame.f_code)
+                if e.isolate_recompiles_id == get_eval_frame_isolate_recompiles_id()
+            ]
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
                 for entry in precompile_entries:
@@ -1825,6 +1829,10 @@ def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool
     # _TorchCompileWrapper rather than the string the user wrote.
     from torch._dynamo.package import emits_native_code
 
+    # A user backend that bakes no native code can declare it.
+    user_backend = getattr(backend, "compiler_fn", backend)
+    if getattr(user_backend, "emits_native_code", True) is False:
+        return False
     return emits_native_code(str(getattr(backend, "compiler_name", backend)))
 
 
