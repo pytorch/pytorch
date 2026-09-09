@@ -8835,7 +8835,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
-class TestLinalgCudaOnly(TestCase):
+@onlyCUDA
+class TestLinalgCUDA(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
     def setUp(self):
@@ -8852,7 +8853,6 @@ class TestLinalgCudaOnly(TestCase):
         torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
 
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -8915,7 +8915,6 @@ class TestLinalgCudaOnly(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -8960,7 +8959,6 @@ class TestLinalgCudaOnly(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -9016,7 +9014,6 @@ class TestLinalgCudaOnly(TestCase):
             run_test(shape, symmetric=True)
 
 
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -9108,7 +9105,6 @@ class TestLinalgCudaOnly(TestCase):
     @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/150959")
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
-    @onlyCUDA
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -9123,7 +9119,6 @@ class TestLinalgCudaOnly(TestCase):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -9134,7 +9129,6 @@ class TestLinalgCudaOnly(TestCase):
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -9146,7 +9140,6 @@ class TestLinalgCudaOnly(TestCase):
 
     @skipIfRocm
     @slowTest
-    @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
@@ -9219,7 +9212,6 @@ class TestLinalgCudaOnly(TestCase):
             self.assertTrue(info[1] == info[3] == 0)
 
     @skipIfRocm
-    @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
@@ -9255,7 +9247,6 @@ class TestLinalgCudaOnly(TestCase):
             K = 1.0
             self.assertTrue((scaled_residual < K).all())
 
-    @onlyCUDA
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4,
                         torch.bfloat16: 5e-2, torch.half: 5e-2})
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
@@ -9292,7 +9283,6 @@ class TestLinalgCudaOnly(TestCase):
         # `input` is the C operand, not scratch space
         self.assertEqual(inp, inp_before)
 
-    @onlyCUDA
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm_out_distinct_c_and_d_fallbacks(self, device, dtype):
         # Shapes/layouts the distinct-C/D path declines must still be correct
@@ -9327,7 +9317,6 @@ class TestLinalgCudaOnly(TestCase):
         torch.addmm(aliased, mat1, mat2, beta=0.75, alpha=1.0, out=aliased)
         self.assertEqual(aliased, expected.to(dtype), atol=tol, rtol=tol, exact_dtype=False)
 
-    @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     def test_addmm_out_distinct_c_and_d_is_selected(self, device, dtype):
@@ -9361,7 +9350,6 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(kernel_count(padded), 1)
         self.assertGreater(kernel_count(column_major), contiguous_kernels)
 
-    @onlyCUDA
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm_out_padded_leading_dim(self, device, dtype):
         # cuBLASLt can consume a row-major operand whose rows are padded, so the
@@ -9389,7 +9377,6 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(res, expected, atol=tol, rtol=tol, exact_dtype=False)
         self.assertEqual(wide_out[:, n:], untouched)
 
-    @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     @parametrize("shape", [(2, 256, 1024), (18, 128, 128), (64, 96, 32), (256, 384, 128)])
@@ -9425,7 +9412,6 @@ class TestLinalgCudaOnly(TestCase):
         tol = 5e-2 if dtype == torch.bfloat16 else 1e-2
         self.assertEqual(out, aliased, atol=tol, rtol=tol)
 
-    @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.bfloat16, torch.half)
     def test_addmm_out_distinct_c_and_d_float_out_reduced_input(self, device, dtype):
@@ -9465,7 +9451,6 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(float_out, ref.to(torch.float32), atol=5e-2, rtol=5e-2,
                          exact_dtype=False)
 
-    @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double)
     def test_addmm_out_distinct_c_and_d_not_selected_for_fp32(self, device, dtype):
@@ -9492,7 +9477,6 @@ class TestLinalgCudaOnly(TestCase):
         self.assertGreater(kernels, 1)
 
     @dtypes(torch.half)
-    @onlyCUDA
     def test_addmm_baddbmm_overflow(self, device, dtype):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -9518,7 +9502,6 @@ class TestLinalgCudaOnly(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
@@ -9593,7 +9576,6 @@ class TestLinalgCudaOnly(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
     def test__int_mm_errors(self, device):
 
         def genf_int(x, y):
@@ -11594,6 +11576,19 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(ck_out, cpu_out)
 
 
+for test_name in (
+    "test_eig_identity",
+    "test_eigvals_out_variants",
+    "test_eig_out_variants",
+    "test_eig_cuda_complex_eigenvectors",
+    "test_linalg_solve_triangular_large",
+    "test_linalg_batched_lu_stability_large_inputs",
+    "test_linalg_batched_lu_edge_cases",
+):
+    setattr(TestLinalg, test_name, onlyAccelerator(getattr(TestLinalgCUDA, test_name)))
+    delattr(TestLinalgCUDA, test_name)
+
+
 class TestGroupedMM(TestCase):
     def setUp(self):
         super().setUp()
@@ -11716,8 +11711,13 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
+<<<<<<< HEAD
 instantiate_device_type_tests(TestLinalg, globals())
-instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgCUDA, globals(), only_for=("cuda"))
+=======
+instantiate_device_type_tests(TestLinalg, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
+>>>>>>> 2ba11530add (test_linalg: Enable XPU for device-agnostic TestLinalg)
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
