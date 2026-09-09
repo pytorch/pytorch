@@ -32,7 +32,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -54,7 +54,7 @@ from torch.utils._triton import has_triton_package
 
 
 try:
-    from triton_constexpr_configs import (
+    from .triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -66,7 +66,7 @@ try:
         UserDefinedTritonKernelNonInitConfig,
     )
 except ImportError:
-    from test.inductor.triton_constexpr_configs import (
+    from triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -1495,6 +1495,29 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    def test_autotune_hints_meta_is_ordered(self):
+        # inductor_meta is rendered into the kernel source, so the hints must
+        # not depend on set iteration order.
+        xnumel, rnumel = sympy.Integer(64), sympy.Integer(8192)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        kernel.autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
+        kernel.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+        with V.set_kernel_handler(kernel):
+            hints = kernel.inductor_meta_per_kernel()["autotune_hints"]
+        self.assertEqual(
+            hints,
+            (AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ONLINE_SOFTMAX),
+        )
+        self.assertEqual(
+            repr(hints),
+            "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ONLINE_SOFTMAX)",
+        )
 
 
 if __name__ == "__main__":
