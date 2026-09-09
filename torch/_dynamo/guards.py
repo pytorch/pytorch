@@ -4168,6 +4168,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
+        self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
@@ -4310,13 +4311,26 @@ class GuardsStatePickler(FunctionPicklerBase):
         return id(value) in self.guard_tree_values
 
     def _missing(self, reason: str) -> _Missing:
-        """One sentinel per reason; a pruned container shares them."""
+        """One sentinel per reason; a snapshot prunes a whole module dict."""
         if reason not in self._missing_cache:
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
 
     def _prune(self, value: object, reason: str) -> object:
         return value if self._keep(value) else self._missing(reason)
+
+    def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
+        """Built once per module dict so pickle memoizes it across functions."""
+        snapshot = self._globals_snapshots.get(id(f_globals))
+        if snapshot is None:
+            # A sentinel __builtins__ is harmless: FunctionType({}, ...) binds
+            # builtins from the interpreter (CPython >= 3.10) before this applies.
+            snapshot = {
+                name: self._prune(value, "unguarded function global")
+                for name, value in f_globals.items()
+            }
+            self._globals_snapshots[id(f_globals)] = snapshot
+        return snapshot
 
     def _prune_cell(self, cell: types.CellType) -> types.CellType:
         # A carried cell passes through UNCHANGED so pickle memoizes it and two
@@ -4343,6 +4357,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         See Note [Reconstructing a function a guard is rooted at].
         """
+        snapshot = None
+        if self._keep(obj.__globals__):
+            snapshot = self._globals_snapshot(obj.__globals__)
         # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
         # is carried whole; an unkept one is pruned per value. See the Note.
         defaults = obj.__defaults__
@@ -4392,6 +4409,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             annotations=annotations,
             doc=self._prune(obj.__doc__, "unguarded function doc"),
             type_params=type_params,
+            globals_snapshot=snapshot,
         )
 
     # pyrefly: ignore [bad-override]

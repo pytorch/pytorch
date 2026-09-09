@@ -120,8 +120,8 @@ class FunctionPicklerBase(pickle.Pickler):
     decides what a rebuilt function carries; this class fixes HOW it is rebuilt
     so a fix in one pickler cannot be missed in the other.
 
-    Defaults, __doc__, and __dict__ travel as pickle STATE, applied after
-    memoization, so `wrapper.me = wrapper` cycles end.
+    Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
     reduced twice, and save_reduce's recursive-object fallback (present in both
     the C and the pure-Python pickler) drops the outer copy.
@@ -180,7 +180,8 @@ class FunctionPicklerBase(pickle.Pickler):
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
         # functools.wraps copies __module__, so this scope can be a different
-        # file from the one the function lives in. A module that only
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead. A module that only
         # existed in sys.modules at save (exec-created, transformers_modules.*)
         # gets an empty scope. That is safe on the guard-serialization path,
         # which reads attributes off the rebuilt function without calling it;
@@ -202,9 +203,32 @@ class FunctionPicklerBase(pickle.Pickler):
             f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
+    @classmethod
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_state. The
+        # {} is fresh per call, so two functions that shared one module dict at
+        # save get distinct __globals__ after load; deliberate and unobservable,
+        # since no serialized guard reads __globals__ identity.
+        return cls._build_function({}, module, code, qualname, name, closure)
+
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
-        defaults, kwdefaults, attributes, doc, annotations, type_params = state
+        (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        ) = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
         # FunctionType took __doc__/__annotations__/__type_params__ from the code
@@ -218,6 +242,8 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
+        if globals_snapshot is not None:
+            fn.__globals__.update(globals_snapshot)
 
     @staticmethod
     def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
@@ -309,6 +335,7 @@ class FunctionPicklerBase(pickle.Pickler):
         annotations: dict[str, Any],
         doc: Any,
         type_params: tuple[Any, ...] | None,
+        globals_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         # annotations/type_params/doc are passed in rather than read off fn: the
         # guard pickler prunes what no guard reads, so an unpicklable local class
@@ -316,8 +343,19 @@ class FunctionPicklerBase(pickle.Pickler):
         # cannot fail the whole dump (a failure there silently bypasses the
         # package). The AOT pickler passes them through verbatim.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
-        unpickle = type(self)._unpickle_fn_from_module
-        state = (defaults, kwdefaults, attributes, doc, annotations, type_params)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+        state = (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        )
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
