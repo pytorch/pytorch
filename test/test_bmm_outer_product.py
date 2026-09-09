@@ -89,21 +89,53 @@ class TestBmmOuterProductDevice(TestCase):
 
     @onlyAccelerator
     @largeTensorTest("6GB")
-    def test_offsets_past_int32_max(self, device):
+    def test_batch_offset_past_int32_max(self, device):
         # The Triton kernel computed its element offsets in int32. With
         # (batch, M, N) = (512, 8209, 512) the last batch matrix starts at
         # 511 * 8209 * 512 = 2_147_737_088 > INT32_MAX, so those batches were
-        # written ~4 GiB (bf16) before the output and read back uninitialised
-        # (or faulted). batch = 8208 rows was the last size that worked.
+        # stored gigabytes before the output buffer: a CUDA fault, or, when
+        # that address was live memory, uninitialised rows read back for the
+        # overflowing batches. Either way the comparison below cannot pass on
+        # the old kernel. batch = 8208 rows was the last size that worked.
+        # Strided views exercise the same arithmetic on the input loads.
         batch, m, n = 512, 8209, 512
         self.assertGreater((batch - 1) * m * n, torch.iinfo(torch.int32).max)
-        a = torch.randn(batch, m, 1, device=device, dtype=torch.bfloat16)
-        b = torch.randn(batch, 1, n, device=device, dtype=torch.bfloat16)
+        for strided in (False, True):
+            with self.subTest(strided=strided):
+                a = torch.randn(batch, m, 2, device=device, dtype=torch.bfloat16)
+                b = torch.randn(batch, 2, n, device=device, dtype=torch.bfloat16)
+                if strided:
+                    a, b = a[:, :, :1], b[:, :1, :]
+                else:
+                    a, b = a[:, :, :1].contiguous(), b[:, :1, :].contiguous()
+                out = torch.bmm(a, b)
+                # The broadcast product is the reference: `a @ b` would
+                # dispatch to the kernel under test, and a full reference
+                # would be another 4 GiB.
+                for i in (0, batch - 2, batch - 1):
+                    self.assertEqual(out[i], a[i] * b[i])
+                del out
+
+    @onlyAccelerator
+    @largeTensorTest("6GB")
+    def test_row_offset_past_int32_max(self, device):
+        # Inside one batch matrix the store offset is rm * stride_om, so with
+        # (M - 1) * N > INT32_MAX (M, N themselves int32) the last row tiles
+        # wrapped as well: (65536 + 4096, 32768) puts the last 4096 rows past
+        # the limit in a 4.25 GiB bf16 output. (M > INT32_MAX on its own is
+        # not reachable: Triton then specialises M as int64 and every index
+        # derived from it is already 64-bit.)
+        m, n = 2**16 + 4096, 2**15
+        self.assertGreater((m - 1) * n, torch.iinfo(torch.int32).max)
+        a = torch.randn(1, m, 1, device=device, dtype=torch.bfloat16)
+        b = torch.randn(1, 1, n, device=device, dtype=torch.bfloat16)
         out = torch.bmm(a, b)
-        # The broadcast product is the reference: `a @ b` would dispatch to
-        # the kernel under test, and a full reference is another 4 GiB.
-        for i in (0, batch - 2, batch - 1):
-            self.assertEqual(out[i], a[i] * b[i])
+        for rows in (
+            slice(0, 1024),
+            slice(2**16 - 1024, 2**16 + 1024),
+            slice(m - 1024, m),
+        ):
+            self.assertEqual(out[0, rows], a[0, rows] * b[0])
 
     @onlyAccelerator
     def test_m_one_n_one(self, device):
