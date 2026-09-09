@@ -1367,13 +1367,15 @@ void _load_precompile_entry(
   // Drain first, then add, so a parked CLEAR_ALL / PRECOMPILE_ALL is applied
   // before this install rather than sweeping it away with the rest. This only
   // protects the install at depth 0: apply_pending_evictions no-ops whenever a
-  // lookup (on this or any other thread) holds cache_python_depth raised, so a
-  // PRECOMPILE_ALL parked before that lookup stays parked and the next
-  // depth-zero holder can still splice away this just-pushed entry. That
-  // narrow, newly introduced cross-thread race is a tracked follow-up (see the
-  // PR FAQ). Only evictions are drained, not pending invalidations: those
-  // relink cache entries, never precompile_entries, so a parked one cannot
-  // touch this push, and the next depth-zero holder applies it.
+  // lookup (on this or any other thread) holds cache_python_depth raised. When
+  // one does, install()'s own uninstall -> _reset_precompile_entries parks a
+  // PRECOMPILE_ALL that this drain cannot apply; the entry pushed below then
+  // lands behind it and the next depth-zero holder splices it away, leaving the
+  // package installed but serving nothing. That race -- install defeating its
+  // own install under a concurrent lookup -- is a tracked follow-up. Only
+  // evictions are drained, not pending invalidations: those relink cache
+  // entries, never precompile_entries, so a parked one cannot touch this push,
+  // and the next depth-zero holder applies it.
   extra->apply_pending_evictions(
       reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));

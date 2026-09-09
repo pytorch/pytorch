@@ -349,6 +349,10 @@ void destroy_extra_state(void* obj);
 // reset() racing a depth>0 lookup) concurrent with a compile on a third
 // thread; the durable fix is to hand back owning references there the way
 // lookup()/create_cache_entry now do.
+// The same non-owning-handout shape applies to extract_cache_entry, which
+// returns a borrowed CacheEntry* used by dynamo_call_callback after cache_mutex
+// releases at depth 0; it needs the same owning-reference fix and is tracked
+// with _get_cache_entries_for_region above (pytorch/pytorch#196394).
 // Ownership contract
 // args
 //  - code: Borrowed
