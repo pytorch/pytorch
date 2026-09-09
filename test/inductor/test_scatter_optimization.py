@@ -9,9 +9,11 @@ from torch import nn
 from torch._dynamo.utils import counters, same
 from torch._inductor import config, metrics
 from torch._inductor.fx_passes.reduced_atomic_contention import _compute_num_partitions
-from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.runtime.benchmarking import InductorBenchmarker
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.utils._triton import has_triton
 
 
 # set so that metrics appear
@@ -19,8 +21,12 @@ torch._logging.set_logs(inductor_metrics=True)
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
+benchmarker = InductorBenchmarker()
+
 
 class TestScatterOpt(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         metrics.reset()
@@ -36,86 +42,86 @@ class TestScatterOpt(TestCase):
             same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}\n"
         )
 
-    def test_3d_tensor(self):
+    def test_3d_tensor(self, device):
         L, M, N = 2, 1024, 2048
 
         def f(x):
-            y = torch.full([L, M, N], 3.14, dtype=torch.float)
+            y = torch.full([L, M, N], 3.14, device=device, dtype=torch.float)
             y.scatter_(2, x.unsqueeze(2), 2.718)
             return y
 
-        x = torch.randint(0, N, (L, M), dtype=torch.int64)
+        x = torch.randint(0, N, (L, M), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
         expected_num_bytes = (
             L * M * N * torch.float.itemsize + L * M * torch.int64.itemsize
         )
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
-    def test_non_last_dim(self):
+    def test_non_last_dim(self, device):
         """
         Test the case that the scatter dimension is not the last one.
         """
         M, N = 1024, 2048
 
         def f(x):
-            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y = torch.full([M, N], 3.14, device=device, dtype=torch.float)
             y.scatter_(0, x.unsqueeze(0), 2.718)
             return y
 
-        x = torch.randint(0, M, (N,), dtype=torch.int64)
+        x = torch.randint(0, M, (N,), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
         expected_num_bytes = M * N * torch.float.itemsize + N * torch.int64.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
-    def test_neg_scatter_dim(self):
+    def test_neg_scatter_dim(self, device):
         M, N = 1024, 2048
 
         def f(x):
-            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y = torch.full([M, N], 3.14, device=device, dtype=torch.float)
             y.scatter_(-1, x.unsqueeze(1), 2.718)
             return y
 
-        x = torch.randint(0, N, (M,), dtype=torch.int64)
+        x = torch.randint(0, N, (M,), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
         expected_num_bytes = M * N * torch.float.itemsize + M * torch.int64.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
-    def test_shorter_index_tensor(self):
+    def test_shorter_index_tensor(self, device):
         M, N = 1024, 2048
 
         def f(x):
-            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y = torch.full([M, N], 3.14, device=device, dtype=torch.float)
             y.scatter_(1, x.unsqueeze(1), 2.718)
             return y
 
-        x = torch.randint(0, N, (M // 2,), dtype=torch.int64)
+        x = torch.randint(0, N, (M // 2,), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
 
         # no match since the index tensor is shorter. May support it in future.
         self.assertEqual(0, counters["inductor"]["pattern_matcher_count"])
 
-    def test_nonzero_const_tensor(self):
+    def test_nonzero_const_tensor(self, device):
         M, N = 1024, 2048
 
         def f(x):
-            y = torch.full([M, N], 3.14, dtype=torch.float)
+            y = torch.full([M, N], 3.14, device=device, dtype=torch.float)
             y.scatter_(1, x.unsqueeze(1), 2.718)
             return y
 
-        x = torch.randint(0, N, (M,), dtype=torch.int64)
+        x = torch.randint(0, N, (M,), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
         expected_num_bytes = M * N * torch.float.itemsize + M * torch.int64.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
-    def test_can_not_optimize_due_to_dense(self):
+    def test_can_not_optimize_due_to_dense(self, device):
         M, N = 1024, 2048
 
         def f(x):
-            y = torch.full([M, N], 0, dtype=torch.float)
+            y = torch.full([M, N], 0, device=device, dtype=torch.float)
             y.scatter_(1, x, 0.618)
             return y
 
-        x = torch.randint(0, N, (M, N // 2), dtype=torch.int64)
+        x = torch.randint(0, N, (M, N // 2), device=device, dtype=torch.int64)
         self.do_acc_test(f, x)
         expected_num_bytes = M * N * torch.float.itemsize + M * (N // 2) * (
             torch.int64.itemsize + torch.float.itemsize
@@ -124,15 +130,15 @@ class TestScatterOpt(TestCase):
         # to StarDep mentioned here: https://github.com/pytorch/pytorch/pull/129043#discussion_r1651699706
         self.assertGreaterEqual(metrics.num_bytes_accessed, expected_num_bytes)
 
-    def test_can_not_optimize_due_to_non_const(self):
+    def test_can_not_optimize_due_to_non_const(self, device):
         M, N = 1024, 2048
 
         def f(x, y):
             y.scatter_(1, x, 0.618)
             return y
 
-        x = torch.randint(0, N, (M, 1), dtype=torch.int64)
-        y = torch.randn([M, N])
+        x = torch.randint(0, N, (M, 1), device=device, dtype=torch.int64)
+        y = torch.randn([M, N], device=device)
         self.do_acc_test(f, x, y)
 
         # The generated code is quite in-efficient.
@@ -152,7 +158,7 @@ class TestScatterOpt(TestCase):
         over_estimate = M * torch.float.itemsize + M * N * torch.float.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes + over_estimate)
 
-    def test_dtype_preserved(self):
+    def test_dtype_preserved(self, device):
         """
         The full+scatter -> pointwise rewrite must preserve the const tensor's
         dtype. torch.where with Python scalar branches promotes to the default
@@ -167,11 +173,11 @@ class TestScatterOpt(TestCase):
             metrics.reset()
 
             def f(x):
-                y = torch.full([M, N], 3.14, dtype=dtype)
+                y = torch.full([M, N], 3.14, device=device, dtype=dtype)
                 y.scatter_(1, x.unsqueeze(1), 2.718)
                 return y
 
-            x = torch.randint(0, N, (M,), dtype=torch.int64)
+            x = torch.randint(0, N, (M,), device=device, dtype=torch.int64)
             expect = f(x)
             actual = torch.compile(f)(x)
             self.assertEqual(expect.dtype, dtype)
@@ -186,7 +192,7 @@ class TestScatterOpt(TestCase):
             )
             self.check_metric()
 
-    def test_cross_entropy_loss(self):
+    def test_cross_entropy_loss(self, device):
         """
         Match full+scatter in CEL and replaces it with a pointwise.
 
@@ -201,7 +207,7 @@ class TestScatterOpt(TestCase):
             # use a smaller V if not doing perf test to avoid OOM
             # in CI
             V = V // 100
-        ref_model = nn.Linear(D, V).to(torch.bfloat16)
+        ref_model = nn.Linear(D, V, device=device).to(torch.bfloat16)
         opt_model = copy.deepcopy(ref_model)
         ce = nn.CrossEntropyLoss()
 
@@ -210,8 +216,8 @@ class TestScatterOpt(TestCase):
 
         opt_f = torch.compile(f)
 
-        x = torch.randn(B, T, D).to(torch.bfloat16)
-        label = torch.randint(0, V, (B, T)).to(torch.int64)
+        x = torch.randn(B, T, D, device=device).to(torch.bfloat16)
+        label = torch.randint(0, V, (B, T), device=device).to(torch.int64)
 
         f(ref_model, x, label)
         ref_grad = ref_model.weight.grad
@@ -223,20 +229,21 @@ class TestScatterOpt(TestCase):
         self.check_metric()
 
         if DO_PERF_TEST:
-            if GPU_TYPE == "xpu":
-                raise unittest.SkipTest(
-                    "torch.xpu.reset_peak_memory_stats not implemented."
-                )
-            torch.cuda.reset_peak_memory_stats()
+            device_module = torch.get_device_module(device)
+            device_module.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
-            ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
-            peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            ms = benchmarker.benchmark_gpu(
+                lambda: opt_f(opt_model, x, label), device_type=device
+            )
+            peak_mem = device_module.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 
 
 class TestPartitionedScatterOpt(TestCase):
     """Tests for the partitioned scatter FX pass (reduced_atomic_contention.py)."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -273,7 +280,7 @@ class TestPartitionedScatterOpt(TestCase):
                 )
 
     def _make_scatter_inputs(
-        self, N, output_shape, dtype=torch.float32, index_high=None, dim=0
+        self, N, output_shape, device, dtype=torch.float32, index_high=None, dim=0
     ):
         """
         Create (out, idx, vals) for a 1-index scatter-add along `dim`.
@@ -281,17 +288,17 @@ class TestPartitionedScatterOpt(TestCase):
         """
         if index_high is None:
             index_high = output_shape[dim] // 2 or 1
-        idx = torch.randint(0, index_high, (N,), dtype=torch.int64)
+        idx = torch.randint(0, index_high, (N,), device=device, dtype=torch.int64)
         val_shape = list(output_shape)
         val_shape[dim] = N
         if dtype in (torch.int32,):
-            vals = torch.randint(0, 4, val_shape, dtype=dtype)
+            vals = torch.randint(0, 4, val_shape, device=device, dtype=dtype)
         else:
-            vals = torch.randn(val_shape, dtype=dtype)
-        out = torch.zeros(output_shape, dtype=dtype)
+            vals = torch.randn(val_shape, device=device, dtype=dtype)
+        out = torch.zeros(output_shape, device=device, dtype=dtype)
         return out, idx, vals
 
-    def test_pr_reference_accuracy(self):
+    def test_pr_reference_accuracy(self, device):
         """Scaled-down PR benchmark: three scatter-adds with high contention (4 slots)."""
         torch.manual_seed(42)
         N, D, n_small = 10_000, 10, 51
@@ -302,20 +309,20 @@ class TestPartitionedScatterOpt(TestCase):
             out2 = out2.index_put([idx2], vals, accumulate=True)
             return out0, out1, out2
 
-        vals = torch.randn(N, D, dtype=torch.float32)
-        out0 = torch.zeros(n_small, D, dtype=torch.float32)
-        out1 = torch.zeros(n_small, D, dtype=torch.float32)
-        out2 = torch.zeros(n_small, D, dtype=torch.float32)
-        idx0 = torch.randint(0, 4, (N,), dtype=torch.int64)
-        idx1 = torch.randint(0, 4, (N,), dtype=torch.int64)
-        idx2 = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(N, D, device=device, dtype=torch.float32)
+        out0 = torch.zeros(n_small, D, device=device, dtype=torch.float32)
+        out1 = torch.zeros(n_small, D, device=device, dtype=torch.float32)
+        out2 = torch.zeros(n_small, D, device=device, dtype=torch.float32)
+        idx0 = torch.randint(0, 4, (N,), device=device, dtype=torch.int64)
+        idx1 = torch.randint(0, 4, (N,), device=device, dtype=torch.int64)
+        idx2 = torch.randint(0, 4, (N,), device=device, dtype=torch.int64)
 
         self._check_accuracy(
             f, (out0, out1, out2, idx0, idx1, idx2, vals), atol=1.0, rtol=1e-2
         )
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
-    def test_accuracy_int32_exact(self):
+    def test_accuracy_int32_exact(self, device):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
         torch.manual_seed(4)
         N = 8192
@@ -323,10 +330,12 @@ class TestPartitionedScatterOpt(TestCase):
         def f(out, idx, vals):
             return out.index_put([idx], vals, accumulate=True)
 
-        out, idx, vals = self._make_scatter_inputs(N, (8,), torch.int32, index_high=8)
+        out, idx, vals = self._make_scatter_inputs(
+            N, (8,), device, torch.int32, index_high=8
+        )
         self._check_accuracy(f, (out, idx, vals), exact=True)
 
-    def test_accuracy_inplace_index_put(self):
+    def test_accuracy_inplace_index_put(self, device):
         """index_put_ (in-place) is also matched and produces correct output."""
         torch.manual_seed(7)
         N, n, D = 8192, 8, 4
@@ -335,13 +344,13 @@ class TestPartitionedScatterOpt(TestCase):
             out.index_put_([idx], vals, accumulate=True)
             return out
 
-        out = torch.zeros(n, D, dtype=torch.float32)
-        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
-        vals = torch.randn(N, D, dtype=torch.float32)
+        out = torch.zeros(n, D, device=device, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), device=device, dtype=torch.int64)
+        vals = torch.randn(N, D, device=device, dtype=torch.float32)
 
         self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
 
-    def test_skip_accumulate_false(self):
+    def test_skip_accumulate_false(self, device):
         """index_put with accumulate=False doesn't match the registered patterns."""
         n = 256
 
@@ -349,14 +358,14 @@ class TestPartitionedScatterOpt(TestCase):
             return out.index_put([idx], vals, accumulate=False)
 
         torch.manual_seed(10)
-        out = torch.zeros(n, dtype=torch.float32)
-        idx = torch.randperm(n, dtype=torch.int64)
-        vals = torch.randn(n, dtype=torch.float32)
+        out = torch.zeros(n, device=device, dtype=torch.float32)
+        idx = torch.randperm(n, device=device, dtype=torch.int64)
+        vals = torch.randn(n, device=device, dtype=torch.float32)
 
         self._check_accuracy(f, (out, idx, vals), exact=True)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
 
-    def test_pass_disabled(self):
+    def test_pass_disabled(self, device):
         """When partitioned_scatter_enabled=False the pass is a no-op."""
         config.partitioned_scatter_enabled = False
 
@@ -365,9 +374,9 @@ class TestPartitionedScatterOpt(TestCase):
         def f(out, idx, vals):
             return out.index_put([idx], vals, accumulate=True)
 
-        out = torch.zeros(n, dtype=torch.float32)
-        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
-        vals = torch.randn(N, dtype=torch.float32)
+        out = torch.zeros(n, device=device, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), device=device, dtype=torch.int64)
+        vals = torch.randn(N, device=device, dtype=torch.float32)
 
         with torch.no_grad():
             expected = f(out, idx, vals)
@@ -377,7 +386,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertTrue(same(expected, actual, tol=1e-3))
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
 
-    def test_force_mode_bypasses_heuristic_gates(self):
+    def test_force_mode_bypasses_heuristic_gates(self, device):
         """
         partitioned_scatter_force=True bypasses the min_index_size and
         min_contention_ratio gates while still enforcing correctness constraints.
@@ -389,15 +398,15 @@ class TestPartitionedScatterOpt(TestCase):
             return out_a, out_b
 
         torch.manual_seed(15)
-        # Op A: index_size=100 < min_index_size → normally skipped by gate 6
-        out_a = torch.zeros(10, dtype=torch.float32)
-        idx_a = torch.randint(0, 5, (100,), dtype=torch.int64)
-        vals_a = torch.randn(100, dtype=torch.float32)
+        # Op A: index_size=100 < min_index_size -> normally skipped by gate 6
+        out_a = torch.zeros(10, device=device, dtype=torch.float32)
+        idx_a = torch.randint(0, 5, (100,), device=device, dtype=torch.int64)
+        vals_a = torch.randn(100, device=device, dtype=torch.float32)
 
-        # Op B: contention_ratio=0.25 < min_contention_ratio → normally skipped by gate 7
-        out_b = torch.zeros(16384, dtype=torch.float32)
-        idx_b = torch.randint(0, 16384, (4096,), dtype=torch.int64)
-        vals_b = torch.randn(4096, dtype=torch.float32)
+        # Op B: contention_ratio=0.25 < min_contention_ratio -> normally skipped by gate 7
+        out_b = torch.zeros(16384, device=device, dtype=torch.float32)
+        idx_b = torch.randint(0, 16384, (4096,), device=device, dtype=torch.int64)
+        vals_b = torch.randn(4096, device=device, dtype=torch.float32)
 
         args = (out_a, idx_a, vals_a, out_b, idx_b, vals_b)
 
@@ -432,96 +441,22 @@ class TestPartitionedScatterOpt(TestCase):
                 f"force mode output mismatch: expected={e[:5]} actual={a[:5]}",
             )
 
-    def test_skip_cpu_device(self):
-        """CPU scatters are never rewritten, even with force enabled."""
-        torch.manual_seed(21)
-        N, n = 8192, 8
-
-        def f(out, idx, vals):
-            return out.index_put([idx], vals, accumulate=True)
-
-        out = torch.zeros(n, dtype=torch.float32, device="cpu")
-        idx = torch.randint(0, 4, (N,), dtype=torch.int64, device="cpu")
-        vals = torch.randn(N, dtype=torch.float32, device="cpu")
-
-        config.partitioned_scatter_force = True
-        with torch.no_grad():
-            expected = f(out, idx, vals)
-            actual = torch.compile(f, backend="inductor", fullgraph=True)(
-                out, idx, vals
-            )
-
-        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
-        self.assertGreater(
-            counters["inductor"]["partitioned_scatter_skipped_cpu_device"],
-            0,
-            "CPU scatter should be skipped by the device gate",
-        )
-        self.assertTrue(torch.allclose(expected, actual, atol=1e-1, rtol=1e-2))
-
-    def test_compute_num_partitions_tight_budget(self):
-        """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
-        # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
-        # P=8: overhead = 1M * 4 * 7 = 28 MB > 20 MB
-        result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
-        self.assertEqual(result, 4)
-
-    def test_compute_num_partitions_diminishing_returns_cap(self):
-        """Diminishing-returns cap limits P when memory is not the bottleneck."""
-        available = 10**12  # effectively unlimited
-
-        # writes_per_slot=64 → cap=256, min(256, max_p=128) = 128
-        result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=1024,
-            scatter_dim_size=16,
-        )
-        self.assertEqual(result, 128)
-
-        # writes_per_slot=4 → cap=16
-        result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=64,
-            scatter_dim_size=16,
-        )
-        self.assertEqual(result, 16)
-
-        # writes_per_slot=0.5 → cap=max(2, 2)=2
-        result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=8,
-            scatter_dim_size=16,
-        )
-        self.assertEqual(result, 2)
-
-    def test_skip_low_contention_ratio_multidim(self):
+    def test_skip_low_contention_ratio_multidim(self, device):
         """
         Contention gate uses index_size / scatter_dim_size, not index_size / output_numel.
 
         For [vocab=4096, dim=64] with N=50000 indices:
-          wrong: 50000 / (4096*64) = 0.19 → skip
-          right: 50000 / 4096 = 12.2 → apply
+          wrong: 50000 / (4096*64) = 0.19 -> skip
+          right: 50000 / 4096 = 12.2 -> apply
         """
         vocab, dim, N = 4096, 64, 50_000
 
         def f(out, idx, vals):
             return out.index_put([idx], vals, accumulate=True)
 
-        out = torch.zeros(vocab, dim, dtype=torch.float32)
-        idx = torch.randint(0, vocab, (N,), dtype=torch.int64)
-        vals = torch.randn(N, dim, dtype=torch.float32)
+        out = torch.zeros(vocab, dim, device=device, dtype=torch.float32)
+        idx = torch.randint(0, vocab, (N,), device=device, dtype=torch.int64)
+        vals = torch.randn(N, dim, device=device, dtype=torch.float32)
 
         with torch.no_grad():
             expected = f(out, idx, vals)
@@ -536,13 +471,13 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertGreater(
             counters["inductor"]["partitioned_scatter_applied"],
             0,
-            "pass skipped for [vocab, dim] output — contention gate likely still uses "
+            "pass skipped for [vocab, dim] output -- contention gate likely still uses "
             "output_numel instead of scatter_dim_size",
         )
 
-    @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @unittest.skipUnless(has_triton(), "requires triton")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
-    def test_memory_aware_partition_count(self):
+    def test_memory_aware_partition_count(self, device):
         """
         Verify that live tensor memory constrains num_partitions.
 
@@ -551,12 +486,12 @@ class TestPartitionedScatterOpt(TestCase):
 
         Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
         The budget is sized off the peak at the index_put *allocation* point, where
-        all four inputs plus the 40 MB output are live (612 MB) — idx/vals are only
+        all four inputs plus the 40 MB output are live (612 MB) -- idx/vals are only
         freed once the node completes. Headroom is derived from those sizes rather
         than hardcoded so it tracks any change to them.
 
-        Sub-test 1: headroom fits P-1 extra output buffers → P=4 applied.
-        Sub-test 2: floor = total_gpu → no headroom → pass skips.
+        Sub-test 1: headroom fits P-1 extra output buffers -> P=4 applied.
+        Sub-test 2: floor = total_gpu -> no headroom -> pass skips.
         """
         torch.manual_seed(12)
         N = 11_000_000
@@ -567,15 +502,18 @@ class TestPartitionedScatterOpt(TestCase):
             scattered = out.index_put([idx], vals, accumulate=True)
             return scattered + persistent.sum()
 
-        out = torch.zeros(output_size, dtype=torch.float32, device=GPU_TYPE)
-        idx = torch.randint(0, output_size, (N,), dtype=torch.int64, device=GPU_TYPE)
-        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
-        persistent = torch.randn(persist_n, dtype=torch.float32, device=GPU_TYPE)
+        out = torch.zeros(output_size, dtype=torch.float32, device=device)
+        idx = torch.randint(0, output_size, (N,), dtype=torch.int64, device=device)
+        vals = torch.randn(N, dtype=torch.float32, device=device)
+        persistent = torch.randn(persist_n, dtype=torch.float32, device=device)
 
         with torch.no_grad():
             expected = f(out, idx, vals, persistent)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        device_module = torch.get_device_module(device)
+        if not hasattr(device_module, "mem_get_info"):
+            raise unittest.SkipTest("mem_get_info not implemented.")
+        _, total_gpu = device_module.mem_get_info()
 
         out_bytes = output_size * 4
         baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
@@ -631,15 +569,15 @@ class TestPartitionedScatterOpt(TestCase):
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
 
-    @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @unittest.skipUnless(has_triton(), "requires triton")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
-    def test_memory_budget_shared_across_scatters(self):
+    def test_memory_budget_shared_across_scatters(self, device):
         """
         Several scatters in one graph must share the budget, not each claim it.
 
         The memory profile describes the untransformed graph, so a candidate
         evaluated after an earlier rewrite has to be charged for that scatter's
-        expanded buffer — otherwise N scatters each commit the full budget.
+        expanded buffer -- otherwise N scatters each commit the full budget.
 
         Three 20 MB scatters here share room for one extra buffer, so exactly
         one may be rewritten.
@@ -654,15 +592,18 @@ class TestPartitionedScatterOpt(TestCase):
             c = out2.index_put([idx], vals, accumulate=True)
             return a, b, c
 
-        outs = [torch.zeros(S, dtype=torch.float32, device=GPU_TYPE) for _ in range(3)]
-        idx = torch.randint(0, S, (N,), dtype=torch.int64, device=GPU_TYPE)
-        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
+        outs = [torch.zeros(S, dtype=torch.float32, device=device) for _ in range(3)]
+        idx = torch.randint(0, S, (N,), dtype=torch.int64, device=device)
+        vals = torch.randn(N, dtype=torch.float32, device=device)
         args = (*outs, idx, vals)
 
         with torch.no_grad():
             expected = f(*args)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        device_module = torch.get_device_module(device)
+        if not hasattr(device_module, "mem_get_info"):
+            raise unittest.SkipTest("mem_get_info not implemented.")
+        _, total_gpu = device_module.mem_get_info()
 
         # Each out dies right after its own scatter, so the peak at every
         # index_put is the three inputs plus that node's 20 MB output.
@@ -692,12 +633,12 @@ class TestPartitionedScatterOpt(TestCase):
                 f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
             )
 
-    @unittest.skipUnless(HAS_GPU, "requires GPU")
-    def test_perf_atomic_contention(self):
+    @unittest.skipUnless(has_triton(), "requires triton")
+    def test_perf_atomic_contention(self, device):
         """
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with
-        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
-        1.5× floor catches regressions with enough slack for hardware variance.
+        moderate contention (8 slots). CI on ROCm MI300X delivers ~1.8x, so the
+        1.5x floor catches regressions with enough slack for hardware variance.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
@@ -709,11 +650,11 @@ class TestPartitionedScatterOpt(TestCase):
             out2 = out2.index_put([idx], vals, accumulate=True)
             return out0, out1, out2
 
-        vals = torch.randn(N, D, dtype=torch.float32, device=GPU_TYPE)
-        out0 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
-        out1 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
-        out2 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
-        idx = torch.randint(0, 8, (N,), dtype=torch.int64, device=GPU_TYPE)
+        vals = torch.randn(N, D, dtype=torch.float32, device=device)
+        out0 = torch.zeros(n, D, dtype=torch.float32, device=device)
+        out1 = torch.zeros(n, D, dtype=torch.float32, device=device)
+        out2 = torch.zeros(n, D, dtype=torch.float32, device=device)
+        idx = torch.randint(0, 8, (N,), dtype=torch.int64, device=device)
         inputs = (out0, out1, out2, idx, vals)
 
         config.partitioned_scatter_enabled = False
@@ -722,7 +663,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             for _ in range(3):
                 baseline_fn(*inputs)
-        baseline_ms = benchmarker.benchmark_gpu(lambda: baseline_fn(*inputs))
+        baseline_ms = benchmarker.benchmark_gpu(
+            lambda: baseline_fn(*inputs), device_type=device
+        )
 
         config.partitioned_scatter_enabled = True
         torch._dynamo.reset()
@@ -731,7 +674,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             for _ in range(3):
                 partitioned_fn(*inputs)
-        partitioned_ms = benchmarker.benchmark_gpu(lambda: partitioned_fn(*inputs))
+        partitioned_ms = benchmarker.benchmark_gpu(
+            lambda: partitioned_fn(*inputs), device_type=device
+        )
 
         speedup = baseline_ms / partitioned_ms
         n_applied = counters["inductor"]["partitioned_scatter_applied"]
@@ -739,30 +684,134 @@ class TestPartitionedScatterOpt(TestCase):
         print(
             f"\nbaseline={baseline_ms:.3f} ms  "
             f"partitioned={partitioned_ms:.3f} ms  "
-            f"speedup={speedup:.2f}×  applied={n_applied}"
+            f"speedup={speedup:.2f}x  applied={n_applied}"
         )
 
         self.assertGreater(
             n_applied,
             0,
-            "pass did not apply to any op — check gates/config",
+            "pass did not apply to any op -- check gates/config",
         )
         self.assertGreater(
             speedup,
             MIN_SPEEDUP,
-            f"expected ≥{MIN_SPEEDUP:.1f}× speedup (moderate contention, 8 slots), "
-            f"got {speedup:.2f}×  "
+            f"expected >={MIN_SPEEDUP:.1f}x speedup (moderate contention, 8 slots), "
+            f"got {speedup:.2f}x  "
             f"(baseline={baseline_ms:.3f} ms, partitioned={partitioned_ms:.3f} ms)",
         )
 
         config.partitioned_scatter_enabled = True
 
 
-if HAS_GPU:
-    torch.set_default_device(GPU_TYPE)
+class TestPartitionedScatterOptGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_compute_num_partitions_tight_budget(self):
+        """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
+        # P=4: overhead = 1M * 4 * 3 = 12 MB <= 20 MB
+        # P=8: overhead = 1M * 4 * 7 = 28 MB > 20 MB
+        result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
+        self.assertEqual(result, 4)
+
+    def test_compute_num_partitions_diminishing_returns_cap(self):
+        """Diminishing-returns cap limits P when memory is not the bottleneck."""
+        available = 10**12  # effectively unlimited
+
+        # writes_per_slot=64 -> cap=256, min(256, max_p=128) = 128
+        result = _compute_num_partitions(
+            available,
+            1024,
+            4,
+            min_p=2,
+            max_p=128,
+            index_size=1024,
+            scatter_dim_size=16,
+        )
+        self.assertEqual(result, 128)
+
+        # writes_per_slot=4 -> cap=16
+        result = _compute_num_partitions(
+            available,
+            1024,
+            4,
+            min_p=2,
+            max_p=128,
+            index_size=64,
+            scatter_dim_size=16,
+        )
+        self.assertEqual(result, 16)
+
+        # writes_per_slot=0.5 -> cap=max(2, 2)=2
+        result = _compute_num_partitions(
+            available,
+            1024,
+            4,
+            min_p=2,
+            max_p=128,
+            index_size=8,
+            scatter_dim_size=16,
+        )
+        self.assertEqual(result, 2)
+
+
+class TestPartitionedScatterOptOnlyCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+        counters.clear()
+        torch._dynamo.reset()
+        self._saved_enabled = config.partitioned_scatter_enabled
+        self._saved_force = config.partitioned_scatter_force
+        config.partitioned_scatter_enabled = True
+
+    def tearDown(self):
+        config.partitioned_scatter_enabled = self._saved_enabled
+        config.partitioned_scatter_force = self._saved_force
+        super().tearDown()
+
+    def test_skip_cpu_device(self, device):
+        """CPU scatters are never rewritten, even with force enabled."""
+        torch.manual_seed(21)
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(n, dtype=torch.float32, device=device)
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64, device=device)
+        vals = torch.randn(N, dtype=torch.float32, device=device)
+
+        config.partitioned_scatter_force = True
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_cpu_device"],
+            0,
+            "CPU scatter should be skipped by the device gate",
+        )
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-1, rtol=1e-2))
+
+
+instantiate_device_type_tests(
+    TestScatterOpt, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPartitionedScatterOpt, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPartitionedScatterOptOnlyCPU, globals(), only_for="cpu"
+)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if has_triton():
         run_tests()
