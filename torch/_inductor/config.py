@@ -53,6 +53,21 @@ def autotune_at_compile_time_default() -> bool | None:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME")
 
 
+def lite_mode_default(lite_value: bool, default: bool) -> bool:
+    """Default for a knob that lite_mode_options overrides.
+
+    TORCHINDUCTOR_LITE_MODE=1 installs the same bundle as
+    torch.compile(mode="lite"), so an existing test list can be re-run under
+    all-fallback mode without editing the tests, and so the setting reaches
+    model-generation subprocesses (e.g. test/cpp/aoti_inference). Keep this a
+    function rather than a module-level bool: a bool would be picked up as a
+    settable config entry that silently does nothing after import.
+    """
+    if os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1":
+        return lite_value
+    return default
+
+
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
@@ -236,6 +251,14 @@ runtime_triton_nan_asserts = (
 )
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Skips codegen for range bounds, a subset of scalar_asserts. These are
+# inequalities between a symbol and a constant (e.g. u0 >= 4). This is unsafe
+# because the skipped assertions check expected shape invariants, including
+# hand-written torch._check().
+unsafe_skip_scalar_range_asserts = (
+    os.environ.get("TORCHINDUCTOR_UNSAFE_SKIP_SCALAR_RANGE_ASSERTS") == "1"
+)
+
 # Disable by default in fbcode
 alignment_asserts = (
     os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
@@ -249,7 +272,7 @@ pick_loop_orders = True
 inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
-allow_buffer_reuse = True
+allow_buffer_reuse = lite_mode_default(False, True)
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
@@ -364,12 +387,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {
-    "batch_linear_lhs": {
-        "devices": ("xpu",),
-        "min_fuse_set_size": 2,
-    },
-}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -398,8 +416,9 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-# DEPRECATED. This setting is ignored.
-use_mixed_mm = True
+use_mixed_mm: bool = Config(
+    default=True, deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -413,8 +432,9 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# DEPRECATED. This setting is ignored.
-mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
+mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = Config(
+    default="heuristic", deprecated=True, deprecation_message="does not do anything"
+)
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -451,7 +471,7 @@ reorder_for_compute_comm_overlap_passes: list[
 reorder_prefetch_limit: int | None = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
@@ -640,11 +660,12 @@ multi_kernel_hints: list[int] = []
 
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
@@ -735,21 +756,21 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # Different from default inductor mode that fuses all nodes, this config enables an
 # opt-in mode that only fuse for user-specified nodes. The motivation is to provide
 # guaranteed numeric correctness and give full control to users.
-fallback_by_default: bool = False
+fallback_by_default: bool = lite_mode_default(True, False)
 
 
 # This config allows selective decomposition of certain operators in the graph.
 # Currently the only use case is to patch the same-name config in functorch, for
 # inductor lite mode. See more details in [Note: Selective Decomposition]
-selective_decompose: bool = False
+selective_decompose: bool = lite_mode_default(True, False)
 
 
 # Use dead code elimination
-use_dce: bool = True
+use_dce: bool = lite_mode_default(False, True)
 
 
 # Use fx graph passes
-use_pre_grad_passes: bool = True
+use_pre_grad_passes: bool = lite_mode_default(False, True)
 
 # "early": pre-grad passes run before cache lookup (every compile).
 # "late": pre-grad passes run after cache lookup (only on cache miss);
@@ -759,13 +780,15 @@ use_pre_grad_passes: bool = True
 pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
 
 
-use_joint_graph_passes: bool = True
-use_post_grad_passes: bool = True
+use_joint_graph_passes: bool = lite_mode_default(False, True)
+use_post_grad_passes: bool = lite_mode_default(False, True)
 
 
 cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
+
+flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -824,7 +847,7 @@ def _parse_autoheuristic_collect_env():
 
 
 def _parse_autoheuristic_use_env():
-    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm").split(",")
+    use_env = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "").split(",")
     return use_env
 
 
@@ -834,7 +857,6 @@ class autoheuristic_collect:
     """
 
     pad_mm = "pad_mm" in _parse_autoheuristic_collect_env()
-    mixed_mm = "mixed_mm" in _parse_autoheuristic_collect_env()
 
 
 class autoheuristic_use:
@@ -843,7 +865,6 @@ class autoheuristic_use:
     """
 
     pad_mm = True if "pad_mm" in _parse_autoheuristic_use_env() else None
-    mixed_mm = True if "mixed_mm" in _parse_autoheuristic_use_env() else None
 
 
 # If set to 1, will run a JIT post compile hook if one is set.
@@ -2025,7 +2046,7 @@ class triton:
 
     # reorder nodes to minimize the number of graph partitions while
     # not incurring large memory overhead
-    reorder_for_reducing_graph_partitions: bool = True
+    reorder_for_reducing_graph_partitions: bool = lite_mode_default(False, True)
 
     # Memory budget multiplier for cudagraph partition reordering.
     # When reordering nodes to minimize partitions, the reordering is only
@@ -2202,6 +2223,12 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
+    # Use scalar accumulators for online softmax in non-persistent CUDA
+    # reduction loops.
+    scalar_online_softmax_accumulators: bool = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_ONLINE_SOFTMAX_ACCUMULATORS", "1") == "1"
+    )
+
     # Generate code using the tl.make_block_ptr() API for loads/stores. Block
     # pointers were removed from the Triton frontend in triton-lang/triton#10833,
     # so this flag is honored only where the installed Triton still provides the
@@ -2254,8 +2281,8 @@ class triton:
     )
     # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
     # args instead of creating them device-side inside the kernel. Selects the
-    # descriptor flavor only; requires use_tensor_descriptor and
-    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    # descriptor flavor only. Pointwise/reduction kernels additionally require
+    # use_tensor_descriptor and assume_aligned_inputs; GEMM templates do not.
     enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
 
     # Expand the Blackwell GEMM search space with Meta Triton autoWS knobs
@@ -2315,9 +2342,13 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
+    nested_reduction: bool = Config(
+        justknob="pytorch/inductor:nested_reduction",
+        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
+        default=True,
+    )
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
@@ -2445,6 +2476,11 @@ class aot_inductor:
     # AOTI_RUNTIME_CHECK_INPUTS=1, avoiding errors from the [2+, ...] lowerbound
     # restriction when backed_size_oblivious is off.
     check_lowerbound: bool = True
+
+    # Whether to check upperbound constraints on dynamic shapes during runtime.
+    # The upperbound is inferred from the lowering inputs and the dynamic shape
+    # spec, so it can be tighter than the traffic the model can actually serve.
+    check_upperbound: bool = True
 
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
@@ -2716,6 +2752,12 @@ class cuda(cutlass):
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
 
+    # When True, inductor autotune pushes a per-op dynamic-dims mask for
+    # symbolic GEMM dims so TunableOp persists wildcard kernel-map entries that
+    # runtime concrete-miss lookups can reuse. False stops producing new
+    # wildcard entries; existing rows in a loaded file still satisfy lookups.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
+
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):
@@ -2818,6 +2860,7 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
+    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
@@ -3065,11 +3108,17 @@ _cache_config_ignore_prefix: list[str] = [
     "autotune_remote_cache",
 ]
 
-# Config keys whose values are callable factories. save_config_portable will
-# instantiate the factory and use .uuid() for serialization.
-_cache_config_factory_keys: list[str] = [
-    "inductor_choices_class",
-]
+
+def _serialize_inductor_choices(config: dict[str, Any]) -> None:
+    from .choices import inductor_choices_cache_key
+
+    if "inductor_choices_class" in config:
+        config["inductor_choices_class"] = inductor_choices_cache_key(
+            config["inductor_choices_class"]
+        )
+
+
+_cache_config_serializer = _serialize_inductor_choices
 
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []

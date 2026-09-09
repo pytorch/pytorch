@@ -3,10 +3,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -23,6 +25,7 @@
 #include <ATen/ops/tril_native.h>
 #include <ATen/ops/triu_indices_native.h>
 #include <ATen/ops/triu_native.h>
+#include <ATen/ops/zero_native.h>
 #endif
 
 #include <algorithm>
@@ -30,6 +33,19 @@
 #include <cstddef>
 
 namespace at::native {
+
+Tensor& zero_cuda_(Tensor& self) {
+  void* const ptr = self.mutable_data_ptr();
+  if (ptr != nullptr && self.is_non_overlapping_and_dense()) {
+    AT_CUDA_CHECK(cudaMemsetAsync(
+        ptr,
+        0,
+        self.numel() * self.dtype().itemsize(),
+        at::cuda::getCurrentCUDAStream(self.device().index())));
+    return self;
+  }
+  return self.fill_(0);
+}
 
 Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
@@ -132,7 +148,7 @@ inline int64_t resolve_root_int(
     // binary search for the correct answer
     x <<= 1; // the loop always compares with 2x, so do it once here
     while (l + 1 < r) {
-      auto m = (l + r) >> 1;
+      auto m = c10::cuda::compat::midpoint(l, r);
       // for tril:
       //    b = 2f - 1, sign = 1, hence (2f + m - 1) * m / 2
       // for triu:
