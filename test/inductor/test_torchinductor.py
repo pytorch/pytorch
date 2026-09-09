@@ -1418,6 +1418,25 @@ class skip_if_cpp_wrapper:
         return wrapper
 
 
+class skip_if_lite_mode:
+    """For tests whose premise is that a region behaves differently from the
+    graph around it. Under TORCHINDUCTOR_LITE_MODE=1 the whole graph is already
+    all-fallback, so there is no contrast left to observe and the assertions are
+    either vacuous or unsatisfiable."""
+
+    def __init__(self, reason: str = "") -> None:
+        self.reason = reason
+
+    def __call__(self, fn, *args, **kwargs):
+        @functools.wraps(fn)
+        def wrapper(test_self):
+            if config.fallback_by_default:
+                raise unittest.SkipTest(f"no contrast under lite mode: {self.reason}")
+            return fn(test_self, *args, **kwargs)
+
+        return wrapper
+
+
 def is_dynamic_shape_enabled():
     # What's the best way to decide this?
     return not torch._dynamo.config.assume_static_by_default
@@ -18015,6 +18034,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("aten::zeros_like", code[0])
         self.assertNotIn("from(nullptr, 0)", code[0])
 
+    @skip_if_lite_mode("the parent's cos falls back too, so assertNotIn fails")
     def test_regional_fallback_by_default_invoke_subgraph(self):
         # A nested region carrying inductor_config_patches={"fallback_by_default": True}
         # must fall back *only inside the region*: the region's ops become
@@ -18069,6 +18089,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         self.assertNotIn("aten.cos", body)
 
+    @skip_if_lite_mode("neither half emits a Triton reduction to compare")
     def test_regional_codegen_only_config_cpp_wrapper(self):
         # A codegen-TIME knob on the region must reach the cpp wrapper.
         # `triton.persistent_reductions` is consulted while the region's kernels
