@@ -114,6 +114,16 @@ class SerializedCode:
         )
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ read through the plain slot, so a user __getattr__ on a
+    __slots__ receiver never runs; None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
 class _Missing:
     def __init__(self, reason: str | None = None) -> None:
         self._reason = reason
@@ -319,17 +329,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
-        # A name served PER-INSTANCE resolves only after self is restored, which
-        # is after pickle rebuilds the method, so getattr() at load would miss
-        # it: carry func+self explicitly. That covers an instance __dict__
-        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
-        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
-        # lookup we must also not probe below -- it can recurse). A type receiver
-        # (classmethod) is exempt: its namespace is restored with the class.
+        # A name served PER-INSTANCE resolves only after self is restored, i.e.
+        # after pickle rebuilds the method, so getattr() at load would miss it:
+        # carry func+self explicitly. That covers an instance __dict__ monkeypatch
+        # (m.forward = MethodType(f, m)), a __slots__ member descriptor, and a
+        # __getattr__ proxy (which must not be probed below -- it can recurse).
+        # A type receiver (classmethod) is exempt: its namespace is restored.
         cls = type(method.__self__)
-        self_dict = getattr(method.__self__, "__dict__", None)
+        self_dict = _instance_dict(method.__self__)
         instance_served = not isinstance(method.__self__, type) and (
-            (isinstance(self_dict, dict) and name in self_dict)
+            (self_dict is not None and name in self_dict)
             or (
                 name is not None
                 and isinstance(
@@ -1265,6 +1274,13 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def owns_install_on(self, code: types.CodeType, isolate_recompiles_id: int) -> bool:
+        """True when install() put this package's entries on code in that region."""
+        return (
+            self._installed_precompile_region_id == isolate_recompiles_id
+            and id(code) in self._installed_precompile_codes
+        )
 
     @property
     def serialization_guard_filter_fn(
