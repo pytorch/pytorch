@@ -4316,6 +4316,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         return self._missing_cache[reason]
 
     def _prune(self, value: object, reason: str) -> object:
+        # A literal always pickles, so carrying it costs nothing and keeps the
+        # rebuilt state deterministic: an interned literal would otherwise be
+        # kept only when some unrelated guard happens to register it.
+        if value is None or type(value) in (bool, int, float, str, bytes):
+            return value
         return value if self._keep(value) else self._missing(reason)
 
     def _prune_cell(self, cell: types.CellType) -> types.CellType:
@@ -4546,7 +4551,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             if "<locals>" in obj.__qualname__:
                 return self._reduce_function_by_value(obj)
             resolved: Any = None
-            if obj.__module__ in sys.modules:
+            # __module__ need not be a str (a decorator can set anything); an
+            # unhashable one must not TypeError out of the reducer.
+            if isinstance(obj.__module__, str) and obj.__module__ in sys.modules:
                 resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     resolved = getattr(resolved, name, None)
@@ -4683,15 +4690,11 @@ def pickle_guards_state(
     except torch._dynamo.exc.PackageError:
         raise
     except RecursionError as e:
-        # A guard rooted at an fqn-mismatched function is now traversed rather
-        # than dropped, so pickle walks whatever user data hangs off it -- and a
-        # deep (but finite, acyclic) object graph, or a pathological __reduce__
-        # that never memoizes, overflows the recursion limit here. That is a
-        # serialization limit, not a compiler bug: bypass it (or raise under
-        # strict_precompile) like any other unpicklable value, rather than
-        # hard-failing a program that compiled fine before. Walking the object
-        # graph to report WHERE the overflow happened is skipped deliberately --
-        # it would recurse again off an already exhausted stack.
+        # A deep (but finite) guarded object graph, or a __reduce__ that never
+        # memoizes, overflows the recursion limit inside dump: a serialization
+        # limit, not a compiler bug. Reporting WHERE it overflowed is skipped
+        # deliberately, since walking the object graph would recurse again off
+        # an already exhausted stack.
         raise torch._dynamo.exc.PackageError(
             "guard state exceeded the recursion limit while pickling"
         ) from e
