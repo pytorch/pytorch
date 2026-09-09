@@ -7,6 +7,7 @@ import itertools
 import pickle
 import sys
 import tempfile
+import threading
 import types
 import unittest
 import weakref
@@ -111,6 +112,16 @@ def keep_attribute(func):
     return wrapper
 
 
+def keep_name(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 def keep_renamed_name(func):
     # __name__ differs from co_name, so a co_name fallback reads "forward".
     func.__name__ = "renamed_forward"
@@ -137,6 +148,11 @@ def keep_annotations(func):
         return func(self, x)
 
     return wrapper
+
+
+class UnpicklableDefault:
+    def __reduce__(self):
+        raise RuntimeError("unrelated default cannot pickle")
 
 
 def _cell_is_empty(cell):
@@ -175,6 +191,12 @@ class DecoratedRenamedNameForwardModule(torch.nn.Module):
 class DecoratedAnnotationsForwardModule(torch.nn.Module):
     @keep_annotations
     def forward(self, x):
+        return x * 2
+
+
+class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
+    @keep_name
+    def forward(self, x, unused=UnpicklableDefault()):
         return x * 2
 
 
@@ -231,6 +253,30 @@ def doc_wrapper(func):
 
 
 DOC_WRAPPED = doc_wrapper(_doc_base)
+
+
+class UnpicklableGuardedDefault:
+    def __init__(self):
+        self.flag = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("guarded default cannot pickle")
+
+
+def keep_default_attribute(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0].flag == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedUnpicklableGuardedDefaultForwardModule(torch.nn.Module):
+    @keep_default_attribute
+    def forward(self, x, cfg=UnpicklableGuardedDefault()):
+        return x * 2
 
 
 def keep_name_with_empty_cell(func):
@@ -339,6 +385,10 @@ FQN_MISMATCH_CASES = [
     subtest(
         ("EQUALS_MATCH", DecoratedRenamedNameForwardModule, ("__name__", "forward")),
         name="renamed_name",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedUnpicklableDefaultForwardModule, ("__name__", "x")),
+        name="name_beside_unpicklable_default",
     ),
     subtest(
         (
@@ -800,6 +850,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
 
+    def test_reduce_keeps_the_function_dict_key_set(self):
+        # __dict__ must round-trip with its key set intact: an unguarded value
+        # prunes to _Missing IN PLACE, exactly like the sibling containers
+        # (__defaults__/__kwdefaults__/__annotations__). Dropping the key
+        # instead shrinks the dict, so a guard reading its shape rebakes against
+        # the smaller dict at load and never matches again. See the attributes
+        # branch in _reduce_function_by_value.
+        def base(x):
+            return x
+
+        base.tag = 2.0  # guarded
+        base.cache = threading.Lock()  # unpicklable and unguarded
+        buf = io.BytesIO()
+        gtv = {id(base): base, id(base.tag): base.tag}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(set(out.__dict__), {"tag", "cache"})
+        self.assertEqual(out.__dict__["tag"], 2.0)
+        self.assertIsInstance(out.__dict__["cache"], _Missing)
+
     def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
         # after reload; rebuilding every cell silently unshares them.
@@ -823,6 +893,55 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_pruned_shared_closure_cell_stays_shared(self):
+        # An unguarded shared cell prunes to a single _Missing cell, and the two
+        # functions closing over it must still share that one pruned cell;
+        # _prune_cell memoizes by the original cell's id. Rebuilding a fresh
+        # pruned cell per function would silently unshare them. See _prune_cell.
+        def outer():
+            shared = UnpicklableDefault()
+
+            def a():
+                return shared
+
+            def b():
+                return shared
+
+            return a, b
+
+        a, b = outer()
+        self.assertIs(a.__closure__[0], b.__closure__[0])
+        buf = io.BytesIO()
+        # Only the functions are rooted; the shared cell and its contents are
+        # omitted from guard_tree_values, so the cell is pruned.
+        gtv = {id(a): a, id(b): b}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
+        self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_locals_function_prunes_unguarded_values(self):
+        # A <locals> function is rebuilt by value too, and used to carry its
+        # defaults and closure verbatim: one unpicklable unguarded neighbour
+        # bypassed the whole package. Pruning has to keep the signature's
+        # shape -- defaults length, kwdefaults keys -- so a guard reading the
+        # structure rather than the values still rebuilds against it.
+        def outer():
+            captured = UnpicklableDefault()
+
+            def inner(x, unused=UnpicklableDefault(), *, kw=UnpicklableDefault()):
+                return x, captured
+
+            return inner
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__defaults__[0], _Missing)
+        self.assertIsInstance(out.__kwdefaults__["kw"], _Missing)
+        self.assertIsInstance(out.__closure__[0].cell_contents, _Missing)
 
     def test_unguarded_fqn_mismatched_function_is_pruned(self):
         # Rebuilding by value is only for functions a guard is rooted at; an
@@ -851,6 +970,38 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
+
+    def test_reduce_sentinels_an_unpicklable_annotation(self):
+        # An annotation nothing guards can be an unpicklable local class; it must
+        # be pruned to a sentinel rather than fail the whole dump (which silently
+        # bypasses the package). Pruning is selective: an annotation some guard
+        # reads is carried through verbatim, only the unguarded one sentinels.
+        class Local:
+            pass
+
+        def fn(x, y):
+            return x
+
+        fn.__annotations__ = {"x": Local, "y": int}
+        buf = io.BytesIO()
+        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__annotations__["x"], _Missing)
+        self.assertIs(out.__annotations__["y"], int)
+
+    def test_reduce_sentinels_an_unpicklable_doc(self):
+        # __doc__ prunes like an annotation: a doc no guard reads can be an
+        # unpicklable object (here a lock reassigned onto __doc__), so it must
+        # sentinel rather than fail the whole dump. A guarded doc is carried
+        # through verbatim -- see test_guard_rooted_at_wrapper_preserves_copied_doc.
+        def fn(x):
+            return x
+
+        fn.__doc__ = threading.Lock()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__doc__, _Missing)
 
     def test_function_reaching_itself_through_its_dict(self):
         # wrapper.me = wrapper, and wrapper is its own free variable; identity
@@ -934,6 +1085,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             SELF_REFERENCING_WRAPPED.flag = 2.0
 
+    def test_guard_rooted_at_fqn_mismatched_function_with_an_empty_cell(self):
+        # The wrapper owns the empty cell and is rebuilt by value, so the cell
+        # goes through _prune_cell and _reduce_cell rebuilds it empty.
+        def fn(x):
+            return EMPTY_CELL_WRAPPED(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        _empty_cell_base.__name__ = "renamed"
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            _empty_cell_base.__name__ = "_empty_cell_base"
+
     def test_guard_rooted_at_a_none_valued_closure_cell(self):
         # The cell is reached as a CELL through the wrapper's __closure__, so
         # _reduce_cell has to hand None back as a value, not an empty cell.
@@ -968,6 +1133,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
         finally:
             DOC_WRAPPED.__doc__ = "base doc"
+
+    def test_unserializable_guarded_value_is_a_package_error(self):
+        # Whatever the pickler raises for a value some guard reads -- here a
+        # RuntimeError from the value's own __reduce__ -- surfaces as a
+        # PackageError: a bypass for non-strict callers, never a compiler
+        # crash. strict_precompile is on for this class, so it re-raises.
+        mod = DecoratedUnpicklableGuardedDefaultForwardModule()
+        with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
+            self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
         # The rebuilt function's __module__ names a module that only ever lived

@@ -310,8 +310,11 @@ class FunctionPicklerBase(pickle.Pickler):
         doc: Any,
         type_params: tuple[Any, ...] | None,
     ) -> tuple[Any, ...]:
-        # Everything is passed in rather than read off fn so the subclass
-        # decides what the rebuilt function carries.
+        # annotations/type_params/doc are passed in rather than read off fn: the
+        # guard pickler prunes what no guard reads, so an unpicklable local class
+        # in an annotation -- or a __doc__ reassigned to an unpicklable object --
+        # cannot fail the whole dump (a failure there silently bypasses the
+        # package). The AOT pickler passes them through verbatim.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         unpickle = type(self)._unpickle_fn_from_module
         state = (defaults, kwdefaults, attributes, doc, annotations, type_params)

@@ -4167,6 +4167,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        self._missing_cache: dict[str, _Missing] = {}
+        self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4291,21 +4293,105 @@ class GuardsStatePickler(FunctionPicklerBase):
     # evaluating that source against the sentinel raises while the guard manager
     # is still being built and the whole load fails, so it is rebuilt from its
     # code object instead (FunctionPicklerBase._reduce_function).
+    #
+    # Rebuilding drags along whatever the function holds -- closure cells,
+    # defaults, attributes, and the module scope its body reads -- and carrying
+    # all of that would let an unpicklable neighbour fail a package that never
+    # needed it. So only values some guard tree node references are carried
+    # (_keep) and the rest become sentinels. A registered CONTAINER is carried
+    # verbatim rather than pruned per element: a guard on the __defaults__ tuple
+    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
+    # CONSTANT_MATCH register -- rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make that guard
+    # fail forever with no load error.
+
+    def _keep(self, value: object) -> bool:
+        """Identity match; an interned value that collides is kept, harmlessly."""
+        return id(value) in self.guard_tree_values
+
+    def _missing(self, reason: str) -> _Missing:
+        """One sentinel per reason; a pruned container shares them."""
+        if reason not in self._missing_cache:
+            self._missing_cache[reason] = _Missing(reason)
+        return self._missing_cache[reason]
+
+    def _prune(self, value: object, reason: str) -> object:
+        return value if self._keep(value) else self._missing(reason)
+
+    def _prune_cell(self, cell: types.CellType) -> types.CellType:
+        # A carried cell passes through UNCHANGED so pickle memoizes it and two
+        # functions closing over one variable still share it after reload.
+        if self._keep(cell):
+            return cell
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return cell
+        if self._keep(contents):
+            return cell
+        # Memoize by the ORIGINAL cell's identity so two functions sharing one
+        # unguarded cell still share a single pruned cell after reload, rather
+        # than each getting a distinct _Missing-filled one.
+        pruned = self._pruned_cells.get(id(cell))
+        if pruned is None:
+            pruned = types.CellType(self._missing("unguarded function closure"))
+            self._pruned_cells[id(cell)] = pruned
+        return pruned
 
     def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
-        """Pickle a function by value.
+        """Pickle a function by value, pruned to what some guard reads.
 
         See Note [Reconstructing a function a guard is rooted at].
         """
+        # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
+        # is carried whole; an unkept one is pruned per value. See the Note.
+        defaults = obj.__defaults__
+        if defaults is not None and not self._keep(defaults):
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None and not self._keep(kwdefaults):
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
+
+        closure = obj.__closure__
+        if closure is not None:
+            # No verbatim gate like the other containers: a cell is never a
+            # literal a value guard could keep whole, and _prune_cell is
+            # length-preserving, so pruning every cell is always safe.
+            closure = tuple(self._prune_cell(cell) for cell in closure)
+        if self._keep(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+            }
+        # An unguarded annotation/type param may be an unpicklable local class;
+        # prune it. (On 3.14 __annotations__ is a fresh dict, so always pruned.)
+        raw_annotations = self._read_raw_annotations(obj)
+        if self._keep(raw_annotations):
+            annotations = raw_annotations
+        else:
+            annotations = {
+                name: self._prune(value, "unguarded function annotation")
+                for name, value in raw_annotations.items()
+            }
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params is not None and not self._keep(type_params):
+            type_params = tuple(
+                self._prune(t, "unguarded function type param") for t in type_params
+            )
         return self._reduce_function(
             obj,
-            defaults=obj.__defaults__,
-            kwdefaults=obj.__kwdefaults__,
-            closure=obj.__closure__,
-            attributes=obj.__dict__,
-            annotations=self._read_raw_annotations(obj),
-            doc=obj.__doc__,
-            type_params=getattr(obj, "__type_params__", None),
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            closure=closure,
+            attributes=attributes,
+            annotations=annotations,
+            doc=self._prune(obj.__doc__, "unguarded function doc"),
+            type_params=type_params,
         )
 
     # pyrefly: ignore [bad-override]
