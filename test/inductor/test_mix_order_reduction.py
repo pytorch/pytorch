@@ -1427,6 +1427,59 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
 
+    def test_unmasked_tail_with_uneven_row_count(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/195845
+
+        The mix-order-reduction split loop generates ``xmask`` whenever xnumel
+        isn't a multiple of XBLOCK, but never applied it before reducing: the
+        tail iteration read garbage lanes past xnumel straight into the
+        running accumulator. Checked via absolute error against a float64
+        reference, since ``same()``'s relative tolerance is too loose to
+        catch a small fixed offset against column sums in the thousands.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            y = x * 2 + 0.25
+            return y.max(dim=-1).values, y.float().sum(dim=0)
+
+        def check(nrows, ncols=129, atol=0.05):
+            torch._dynamo.reset()
+            x = torch.randn(nrows, ncols, dtype=torch.bfloat16, device=GPU_TYPE)
+            ref_y = x.double() * 2 + 0.25
+            ref_rowmax = ref_y.max(dim=-1).values
+            ref_colsum = ref_y.sum(dim=0)
+
+            act_rowmax, act_colsum = torch.compile(f)(x)
+
+            sum_diff = (act_colsum.double() - ref_colsum).abs().max().item()
+            max_diff = (act_rowmax.double() - ref_rowmax).abs().max().item()
+            self.assertLess(
+                sum_diff,
+                atol,
+                f"nrows={nrows}: column-sum abs diff {sum_diff} exceeds the "
+                "bf16 noise floor -- unmasked tail rows corrupting the "
+                "accumulator",
+            )
+            self.assertLess(
+                max_diff, atol, f"nrows={nrows}: row-max abs diff {max_diff}"
+            )
+
+        # 40961 is not a multiple of any typical XBLOCK (32/64/128/...); the
+        # padded/offset rows around it exercise both a mismatched tail and
+        # the evenly-divisible control in one parametrized sweep. metrics
+        # accumulate across compiles, so just confirm mix-order codegen was
+        # actually exercised at least once rather than resetting every lap.
+        for offset in (-1, 0, 1, 2):
+            check(40960 + offset)
+        self.assertGreaterEqual(
+            metrics.codegen_mix_order_reduction,
+            1,
+            "mix-order reduction was never exercised by this test",
+        )
+
 
 class OverFusionTest(TestBase):
     """
