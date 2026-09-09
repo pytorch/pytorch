@@ -2505,7 +2505,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2569,7 +2568,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         hdl.barrier(timeout_ms=60000)
         return t, hdl
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2593,7 +2591,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         t2, hdl2 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
         del hdl2, t2
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2608,7 +2605,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         numel, dtype = 4 * 1024 * 1024, torch.float
         self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2636,7 +2632,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
             "MemPool should return the same storage block for same-size re-allocation",
         )
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
