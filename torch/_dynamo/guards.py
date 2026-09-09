@@ -4302,6 +4302,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             defaults=obj.__defaults__,
             kwdefaults=obj.__kwdefaults__,
             closure=obj.__closure__,
+            attributes=obj.__dict__,
+            annotations=self._read_raw_annotations(obj),
+            doc=obj.__doc__,
+            type_params=getattr(obj, "__type_params__", None),
         )
 
     # pyrefly: ignore [bad-override]
