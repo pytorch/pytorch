@@ -6,6 +6,7 @@ import importlib
 import itertools
 import math
 import struct
+import subprocess
 import sys
 import unittest
 from types import SimpleNamespace
@@ -142,6 +143,35 @@ class TestFlexGemmRuntimeImport(TestCase):
         sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
         importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
         self.assertNotIn("torch._vendor.quack", sys.modules)
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_quack_cache_fingerprint_covers_quack_ops_before_any_cache_use(self):
+        # A non-FlexGEMM caller (RMSNorm, symmetric GEMM) may compute QuACK's memoized source
+        # fingerprint first; quack_ops must already be registered by then.
+        script = (
+            "from pathlib import Path\n"
+            "import torch._vendor.quack\n"
+            "from torch._vendor.quack import cache\n"
+            "from torch._vendor.quack.cache import jit\n"
+            "import torch._inductor.kernel.flex_gemm.quack_ops as quack_ops\n"
+            "ops_dir = Path(quack_ops.__file__).resolve().parent\n"
+            "assert ops_dir in cache.EXTRA_SOURCE_DIRS, cache.EXTRA_SOURCE_DIRS\n"
+            "with_ops = jit._compute_source_fingerprint()\n"
+            "cache.EXTRA_SOURCE_DIRS.remove(ops_dir)\n"
+            "jit._compute_source_fingerprint.cache_clear()\n"
+            "assert with_ops != jit._compute_source_fingerprint(), 'quack_ops not hashed'\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_vendored_quack_imports_without_cloudpickle(self):
+        script = (
+            "import sys; sys.modules['cloudpickle'] = None\n"
+            "import torch._vendor.quack.gemm_runtime.identity\n"
+            "import torch._vendor.quack.epilogue.frontend\n"
+            "import torch._inductor.kernel.flex_gemm.runtime\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=300)
 
     def test_quack_support_probe_requires_cutlass(self):
         from torch._inductor.kernel.flex_gemm import lowering
@@ -668,9 +698,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
 
     def test_local_reduce_propagates_before_grouped_view_matching(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceAnalysis,
-            gemm_node,
+        from torch._inductor.kernel.flex_gemm.epilogue import gemm_node
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmLocalReduceAnalysis,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -680,7 +710,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             return reduced.view(4, 2, 3)
 
         graph_module = make_fx(body)(torch.randn(4, 8), torch.randn(8, 12))
-        analysis = FlexGemmLocalReduceAnalysis.from_graph_module(
+        analysis = GemmLocalReduceAnalysis.from_graph_module(
             graph_module,
             gemm_node(graph_module, torch.ops.aten.mm.default),
         )
@@ -696,9 +726,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
 
         with self.assertRaisesRegex(
             NotImplementedError, "grouped reshape must split exactly"
@@ -707,9 +735,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("unbacked_dim", (1, 2))
     def test_grouped_layout_rejects_unbacked_structural_dimensions(self, unbacked_dim):
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape = [4, -1, 2]
@@ -718,9 +744,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_grouped_layout_rejected_backed_group_does_not_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.quack_reductions import (
-            grouped_tensor_layout,
-        )
+        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
@@ -1946,8 +1970,8 @@ class TestFlexGemmAnalysis(TestCase):
 
     def test_epilogue_analysis_matches_prepare_softmax(self):
         from torch._inductor import inductor_prims
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceAnalysis,
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmLocalReduceAnalysis,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1956,7 +1980,7 @@ class TestFlexGemmAnalysis(TestCase):
             return inductor_prims.prepare_softmax_online(grouped, -1)[0]
 
         graph_module = make_fx(body)(torch.randn(4, 8))
-        analysis = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
+        analysis = GemmLocalReduceAnalysis.from_graph_module(graph_module)
         prepare_softmax = next(
             node
             for node in graph_module.graph.nodes
@@ -2118,59 +2142,59 @@ class TestFlexGemmAnalysis(TestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmIndexedOutputStore,
-            FlexGemmLocalReduceAnalysis,
-            FlexGemmLocalReduceMatch,
-            FlexGemmLocalReduceStore,
-            FlexGemmOutputLocalReducePlan,
-            FlexGemmOutputPlan,
-            tuple_output_plan,
-        )
+        from torch._inductor.kernel.flex_gemm.epilogue import tuple_output_plan
         from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmIndexedOutputStore,
+            GemmLocalReduceAnalysis,
+            GemmLocalReduceMatch,
+            GemmLocalReduceStore,
+            GemmOutputLocalReducePlan,
+            GemmOutputPlan,
+        )
 
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(GemmEpilogueGraph({}, {}))
+        match = GemmLocalReduceMatch(aux, geometry)
+        analysis = GemmLocalReduceAnalysis(GemmEpilogueGraph({}, {}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
-            FlexGemmOutputPlan(object())
+            GemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
-            FlexGemmOutputPlan(node, (object(),))
+            GemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputPlan(
+            GemmOutputPlan(
                 node,
-                indexed_output=FlexGemmIndexedOutputStore(aux, aux, ()),
+                indexed_output=GemmIndexedOutputStore(aux, aux, ()),
             )
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputPlan(node, output_storage_nodes=(aux,))
+            GemmOutputPlan(node, output_storage_nodes=(aux,))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceMatch(object(), geometry)
+            GemmLocalReduceMatch(object(), geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(object())
+            GemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(match)
+            GemmOutputLocalReducePlan(match)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(object())
+            GemmLocalReduceStore(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, object())
+            GemmLocalReduceStore(aux, object())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), (), analysis)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(node, (object(),), analysis)
-        FlexGemmOutputPlan(
+        GemmOutputPlan(
             node,
             (aux,),
-            local_reduce=FlexGemmOutputLocalReducePlan(
-                match, store=FlexGemmLocalReduceStore(aux)
+            local_reduce=GemmOutputLocalReducePlan(
+                match, store=GemmLocalReduceStore(aux)
             ),
         )
-        FlexGemmOutputPlan(
+        GemmOutputPlan(
             node,
             (aux,),
-            local_reduce=FlexGemmOutputLocalReducePlan(match, feeds_main=True),
+            local_reduce=GemmOutputLocalReducePlan(match, feeds_main=True),
         )
 
     @parametrize(
@@ -2184,11 +2208,11 @@ class TestFlexGemmAnalysis(TestCase):
         name_fn=lambda case: case[0],
     )
     def test_local_reduce_output_storage_classifies_transpose(self, case):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceOutputStorage,
-            match_flex_gemm_local_reduce_output_storage,
-        )
         from torch._inductor.kernel.flex_gemm.output_layout import TRANSPOSED
+        from torch._inductor.kernel.gemm_epilogue_analysis import (
+            GemmLocalReduceOutputStorage,
+            match_gemm_local_reduce_output_storage,
+        )
         from torch.fx.experimental.proxy_tensor import make_fx
 
         _, transpose, shape, expected_nodes = case
@@ -2196,11 +2220,11 @@ class TestFlexGemmAnalysis(TestCase):
         output = next(
             node for node in graph_module.graph.nodes if node.op == "output"
         ).args[0]
-        storage = match_flex_gemm_local_reduce_output_storage(output)
+        storage = match_gemm_local_reduce_output_storage(output)
         if expected_nodes is None:
             self.assertIsNone(storage)
             return
-        self.assertIsInstance(storage, FlexGemmLocalReduceOutputStorage)
+        self.assertIsInstance(storage, GemmLocalReduceOutputStorage)
         self.assertIs(storage.layout, TRANSPOSED)
         self.assertEqual(len(storage.nodes), expected_nodes)
         self.assertIs(storage.nodes[-1], output)
@@ -2568,6 +2592,26 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(addmm_fn, backend="inductor", fullgraph=True)(bias, a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_flex_gemm_route_uses_only_vendored_quack(self):
+        # A pip `quack` may be installed; the fused route must load neither it nor cloudpickle.
+        script = (
+            "import sys, torch\n"
+            "from torch._higher_order_ops.flex_gemm import flex_gemm\n"
+            "a = torch.randn(64, 32, device='cuda', dtype=torch.bfloat16)\n"
+            "b = torch.randn(32, 64, device='cuda', dtype=torch.bfloat16)\n"
+            "for tuned in (False, True):\n"
+            "    fn = torch.compile(lambda a, b: flex_gemm(torch.mm, (a, b), torch.relu,"
+            " kernel_options={'backend': 'QUACK', 'tuned': tuned}), fullgraph=True)\n"
+            "    fn(a, b)\n"
+            "    torch._dynamo.reset()\n"
+            "assert 'quack' not in sys.modules, 'pip quack was imported'\n"
+            "assert 'cloudpickle' not in sys.modules, 'cloudpickle was imported'\n"
+        )
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=900)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
