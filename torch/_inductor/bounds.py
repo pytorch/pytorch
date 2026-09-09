@@ -135,7 +135,8 @@ class BoundVars:
             raise AssertionError(f"expected exactly 1 output node, got {len(output)}")
         # don't bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
-        return interp.env[output[0]]
+        bound = interp.env[output[0]]
+        return ValueRanges.unknown() if bound is None else bound
 
     def set_indirect(self, old: Expr, new: ValueRanges[Expr]) -> ValueRanges[Expr]:
         if not isinstance(new, ValueRanges):
