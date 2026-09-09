@@ -43,6 +43,11 @@
         offs_b_n = rn % N
     offs_k = tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+    # Keep contiguous hints for full tiles, but avoid wrapping scale loads at tails.
+    scale_a_rows = offs_a_m if M % BLOCK_M == 0 else rm
+    scale_b_rows = offs_b_n if N % BLOCK_N == 0 else rn
+    scale_a_mask = (M % BLOCK_M == 0) | (rm < M)
+    scale_b_mask = (N % BLOCK_N == 0) | (rn < N)
 
     for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
         {% if not EVEN_K %}
@@ -67,15 +72,19 @@
         scale_a = _e8m0_to_fp32(
             tl.load(
                 A_inverse_scale
-                + (offs_a_m // SCALE_BLOCK_ROWS_A) * stride_scale_am
-                + scale_block * stride_scale_ak
+                + (scale_a_rows // SCALE_BLOCK_ROWS_A) * stride_scale_am
+                + scale_block * stride_scale_ak,
+                mask=scale_a_mask,
+                other=127,
             )
         )
         scale_b = _e8m0_to_fp32(
             tl.load(
                 B_inverse_scale
                 + scale_block * stride_scale_bk
-                + (offs_b_n // SCALE_BLOCK_ROWS_B) * stride_scale_bn
+                + (scale_b_rows // SCALE_BLOCK_ROWS_B) * stride_scale_bn,
+                mask=scale_b_mask,
+                other=127,
             )
         )
         partial = tl.dot(a, b, out_dtype=ACC_TYPE)
