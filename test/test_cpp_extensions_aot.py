@@ -12,11 +12,10 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_WINDOWS,
-    parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
 )
@@ -45,16 +44,6 @@ except ImportError as e:
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
         "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
     ) from e
-
-
-# cpu and mps use the ATen-dispatched .cpp extension (device-agnostic ops);
-# cuda and xpu use backend-specific kernel extensions from setup.py.
-_SIGMOID_ADD_BACKENDS = {
-    "cpu": "torch_test_cpp_extension.cpp",
-    "mps": "torch_test_cpp_extension.cpp",
-    "cuda": "torch_test_cpp_extension.cuda",
-    "xpu": "torch_test_cpp_extension.sycl",
-}
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -125,16 +114,23 @@ class TestCppExtensionAOT(common.TestCase):
 class TestCppExtensionAOTDevice(common.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @parametrize("device_type", list(_SIGMOID_ADD_BACKENDS))
-    def test_sigmoid_add_extension(self, device_type):
-        module_name = _SIGMOID_ADD_BACKENDS[device_type]
-        if not torch.get_device_module(device_type).is_available():
-            raise unittest.SkipTest(f"{device_type} not available")
-        if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
+    def test_sigmoid_add_extension(self, device):
+        sigmoid_add_backends = {
+            "cpu": "torch_test_cpp_extension.cpp",
+            "mps": "torch_test_cpp_extension.cpp",
+            "cuda": "torch_test_cpp_extension.cuda",
+            "xpu": "torch_test_cpp_extension.sycl",
+        }
+        module_name = sigmoid_add_backends.get(device)
+        if module_name is None:
+            raise unittest.SkipTest(f"{device} not supported by this test")
+        if not torch.get_device_module(device).is_available():
+            raise unittest.SkipTest(f"{device} not available")
+        if device == "xpu" and os.getenv("USE_NINJA", "0") == "0":
             raise unittest.SkipTest("sycl extension requires ninja to build")
         ext = importlib.import_module(module_name)
-        x = torch.zeros(100, device=device_type, dtype=torch.float32)
-        y = torch.zeros(100, device=device_type, dtype=torch.float32)
+        x = torch.zeros(100, device=device, dtype=torch.float32)
+        y = torch.zeros(100, device=device, dtype=torch.float32)
         z = ext.sigmoid_add(x, y).cpu()
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
@@ -461,7 +457,12 @@ class TestTorchLibrary(common.TestCase):
         self.assertIn("torch_library::logical_and", str(s.graph))
 
 
-instantiate_parametrized_tests(TestCppExtensionAOTDevice)
+instantiate_device_type_tests(
+    TestCppExtensionAOTDevice,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     common.run_tests()
