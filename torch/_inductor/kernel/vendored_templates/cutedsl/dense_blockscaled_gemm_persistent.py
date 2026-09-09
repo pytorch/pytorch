@@ -505,11 +505,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             local_reduce_source_op = lambda value: value
             local_reduce_finalize = lambda value, group: value
             local_reduce_consumer = None
+            tensor_epilogue_returns_local_reduce = False
         else:
             (
                 local_reduce_group,
                 local_reduce_axis,
                 local_reduce_feeds_main,
+                tensor_epilogue_returns_local_reduce,
                 local_reduce_op,
                 local_reduce_init,
                 local_reduce_combine,
@@ -558,6 +560,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         self.local_reduce_source_op = local_reduce_source_op
         self.local_reduce_finalize = local_reduce_finalize
         self.local_reduce_consumer = local_reduce_consumer
+        self.tensor_epilogue_returns_local_reduce = tensor_epilogue_returns_local_reduce
         self.has_cross_warp_local_reduce = cutlass.const_expr(
             (local_reduce_tensor is not None or local_reduce_feeds_main)
             and local_reduce_axis == 0
@@ -1731,7 +1734,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         local_reduce_vec = acc_vec.to(epilogue_input_dtype).to(
                             self.acc_dtype
                         )
-                        local_reduce_vec = self.local_reduce_source_op(local_reduce_vec)
+                        if cutlass.const_expr(
+                            not self.tensor_epilogue_returns_local_reduce
+                        ):
+                            local_reduce_vec = self.local_reduce_source_op(
+                                local_reduce_vec
+                            )
                     if cutlass.const_expr(self.local_reduce_feeds_main):
                         group = cutlass.const_expr(self.local_reduce_group)
                         if cutlass.const_expr(self.local_reduce_axis == 1):
@@ -1765,6 +1773,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         epilogue_result = epilogue_op(
                             acc_vec.to(epilogue_input_dtype), *tuple(epilogue_values)
                         )
+                    if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+                        assert not self.local_reduce_feeds_main
+                        local_reduce_vec = epilogue_result[-1].to(self.acc_dtype)
+                        if cutlass.const_expr(has_epilogue_outputs):
+                            epilogue_result = epilogue_result[:-1]
+                        else:
+                            epilogue_result = epilogue_result[0]
                     if cutlass.const_expr(
                         local_reduce_feed_tensor is not None
                         and self.local_reduce_axis == 1
@@ -1860,12 +1875,20 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             grouped = local_reduce_vec.reshape(
                                 ((1, fragment_group, repeats), 1, 1)
                             )
-                            reduced = grouped.reduce(
-                                self.local_reduce_op,
-                                init_val=self.local_reduce_init,
-                                reduction_profile=((None, 1, None), 1, 1),
-                            )
-                            if cutlass.const_expr(group <= fragment_n):
+                            if cutlass.const_expr(
+                                self.tensor_epilogue_returns_local_reduce
+                            ):
+                                reduced = grouped[((0, 0, None), None, None)]
+                            else:
+                                reduced = grouped.reduce(
+                                    self.local_reduce_op,
+                                    init_val=self.local_reduce_init,
+                                    reduction_profile=((None, 1, None), 1, 1),
+                                )
+                            if cutlass.const_expr(
+                                group <= fragment_n
+                                and not self.tensor_epilogue_returns_local_reduce
+                            ):
                                 reduced = self.local_reduce_finalize(reduced, group)
                             reduced = reduced.reshape(((1, 1, repeats), 1, 1))
                             reduced = reduced.broadcast_to(grouped.shape)
