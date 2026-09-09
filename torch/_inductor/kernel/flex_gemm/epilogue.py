@@ -34,6 +34,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
+    LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
@@ -46,7 +47,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_STORE_ARG_NAME,
     ungrouped_reduction_error,
     unsupported_reduction_op_error,
-    validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import (
@@ -762,7 +762,8 @@ class FlexGemmLocalReduceAnalysis:
             if layout.group_size <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 return self.match_feed_value(value, grouped_source, layout)
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
-        validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
+        if layout.group_size > LOCAL_REDUCE_FRAGMENT_WIDTH:
+            raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
         source_meta = source_node.meta.get("val")
         if (
             output_meta is not None
