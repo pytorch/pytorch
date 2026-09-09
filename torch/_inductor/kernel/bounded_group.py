@@ -63,17 +63,14 @@ def _scan_scatter(matches, bases, dtype, value_fn):
     int_matches_loader = to_dtype(matches, torch.int32).make_loader()
     bases_loader = bases.make_loader()
 
-    def combine_fn(a_tuple, b_tuple):
-        (a,) = a_tuple
-        (b,) = b_tuple
-        return (ops.add(a, b),)
-
-    def output_indexer(idx, result):
+    def scatter(idx, result):
+        matched = matches_loader(idx)
         offset = ops.add(
             bases_loader([idx[0]]), ops.sub(result[0], ops.constant(1, torch.int32))
         )
-        offset = ops.where(matches_loader(idx), offset, ops.constant(0, torch.int32))
-        return [ops.indirect_indexing(offset, routes, check=False, wrap_neg=False)]
+        offset = ops.where(matched, offset, ops.constant(0, torch.int32))
+        index = [ops.indirect_indexing(offset, routes, check=False, wrap_neg=False)]
+        return index, value_fn(idx), matched
 
     scan = ir.ScanScatter(
         device=device,
@@ -82,15 +79,13 @@ def _scan_scatter(matches, bases, dtype, value_fn):
         ranges=[groups],
         scan_ranges=[routes],
         size=[groups, routes],
-        combine_fn=combine_fn,
+        combine_fn=lambda a, b: (ops.add(a[0], b[0]),),
         reindex=lambda index, scan_index: [index[0], scan_index[0]],
         reduction_hint=ir.ReductionHint.DEFAULT,
         output_index=0,
         dtypes=(torch.int32,),
         inner_fns=(int_matches_loader,),
-        output_indexer=output_indexer,
-        output_value=lambda idx, result: value_fn(idx),
-        store_mask=lambda idx, result: matches_loader(idx),
+        scatter=scatter,
     )
     buffer = ir.ComputedBuffer(
         name=None,

@@ -3217,9 +3217,11 @@ TOPK_MAX_SORT_BLOCK = 16384
 class ScanScatter(Scan):
     """A scan whose dense result is consumed only by a masked scatter store."""
 
-    output_indexer: Callable[[Sequence[Expr], tuple[OpsValue, ...]], Sequence[Expr]]
-    output_value: Callable[[Sequence[Expr], tuple[OpsValue, ...]], OpsValue]
-    store_mask: Callable[[Sequence[Expr], tuple[OpsValue, ...]], OpsValue]
+    # (idx, scan result) -> (store index, stored value, store predicate)
+    scatter: Callable[
+        [Sequence[Expr], tuple[OpsValue, ...]],
+        tuple[Sequence[Expr], OpsValue, OpsValue],
+    ]
 
     def store_reduction(
         self,
@@ -3230,16 +3232,11 @@ class ScanScatter(Scan):
     ) -> Any:
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.scan(self.dtypes, self.combine_fn, values)
-        value = ops.set_store_mask(
-            self.output_value(idx, result),
-            self.store_mask(idx, result),
+        index, value, mask = self.scatter(
+            idx, ops.scan(self.dtypes, self.combine_fn, values)
         )
-        return ops.store(
-            output_name or "unnamed",
-            indexer(self.output_indexer(idx, result)),
-            value,
-        )
+        value = ops.set_store_mask(value, mask)
+        return ops.store(output_name or "unnamed", indexer(index), value)
 
 
 @ir_dataclass
