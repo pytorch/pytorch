@@ -1715,6 +1715,16 @@ class GuardBuilder(GuardBuilderBase):
         if source_name != "":
             example_value = self.get(source)
             self.guard_tree_values[id(example_value)] = example_value
+            # A guard rooted at a bound method reduces through method.__func__
+            # (FunctionPicklerBase), so the func must be registered before pickle
+            # can reach it -- otherwise an unseeded func reduces to _Missing and
+            # the load AttributeErrors on it. Seed it here, where every method a
+            # guard is rooted at is already known, so pickle ordering cannot beat
+            # it. Save-path only (read only by the serializer).
+            if self.save_guards and inspect.ismethod(example_value):
+                self.guard_tree_values.setdefault(
+                    id(example_value.__func__), example_value.__func__
+                )
 
         guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -4686,6 +4696,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.ismethod(obj):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
+                if self._keep(obj):
+                    # A guard reads a method's attributes through __func__, so
+                    # the function it carries is guarded too, and an fqn
+                    # mismatch there is rebuilt rather than pruned.
+                    self.guard_tree_values[id(obj.__func__)] = obj.__func__
                 return reduced
 
         elif isinstance(obj, types.CellType):
@@ -4769,6 +4784,13 @@ def pickle_guards_state(
     guard_tree_values = builder.guard_tree_values
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
+    for leaf in leaves:
+        # A guard rooted at a bound method reads through __func__, so the
+        # function _reduce_bound_method carries must be rebuilt, not pruned.
+        # reducer_override checks missing_values before guard_tree_values, so
+        # register the func here, before missing_values is populated below.
+        if inspect.ismethod(leaf) and id(leaf) in guard_tree_values:
+            guard_tree_values.setdefault(id(leaf.__func__), leaf.__func__)
     for leaf in leaves:
         if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
             base = leaf.__self__
