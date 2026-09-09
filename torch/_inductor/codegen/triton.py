@@ -161,6 +161,12 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
+_R_NUMEL_REUSE_SYMBOL_TYPES = (
+    SymT.SIZE,
+    SymT.UNBACKED_INT,
+    SymT.PRECOMPUTED_SIZE,
+)
+
 
 def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
@@ -3341,7 +3347,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return
 
         sizevars = V.graph.sizevars
-        replacements = {}
         for prefix, numel in self.numels.items():
             if not prefix_is_reduction(prefix):
                 continue
@@ -3350,14 +3355,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 r_numel_symbol = sympy.Symbol(
                     f"{prefix}numel", integer=True, nonnegative=True
                 )
-                replacements[r_numel_symbol] = numel
-        self._r_numel_reuse_replacements.update(replacements)
-
-        allowed_symbol_types = (
-            SymT.SIZE,
-            SymT.UNBACKED_INT,
-            SymT.PRECOMPUTED_SIZE,
-        )
+                self._r_numel_reuse_replacements[r_numel_symbol] = numel
 
         # Only these symbols become ordinary ks* size arguments, which are the
         # kernel arguments this profitability check is intended to eliminate.
@@ -3366,7 +3364,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 symbol
                 for expr in exprs
                 for symbol in expr.free_symbols
-                if symbol_is_type(symbol, allowed_symbol_types)
+                if symbol_is_type(symbol, _R_NUMEL_REUSE_SYMBOL_TYPES)
             )
 
         all_indexing_exprs = [
@@ -3385,18 +3383,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _replace_reduction_numel_in_index(
         self, index: sympy.Expr, *, simulate: bool = False
     ) -> sympy.Expr:
+        # Real emission has nothing profitable to rewrite.
         if not simulate and not self._r_numel_reuse_eliminated_symbols:
             return index
 
+        # The kernel has no dynamic reduction extent available for reuse.
         if not self._r_numel_reuse_replacements:
             return index
 
         sizevars = V.graph.sizevars
-        allowed_symbol_types = (
-            SymT.SIZE,
-            SymT.UNBACKED_INT,
-            SymT.PRECOMPUTED_SIZE,
-        )
 
         def replacement(candidate: sympy.Basic) -> sympy.Symbol | None:
             if not isinstance(candidate, sympy.Expr):
@@ -3407,7 +3402,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 return None
             if any(
-                not symbol_is_type(symbol, allowed_symbol_types)
+                not symbol_is_type(symbol, _R_NUMEL_REUSE_SYMBOL_TYPES)
                 for symbol in candidate.free_symbols
             ):
                 return None
