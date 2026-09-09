@@ -98,10 +98,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // parked-invalidation drain at cache_python_depth 0, whose decrefs of the
   // entry's code/backend/old guard_manager can fire a user __del__ under the
   // lock. A __del__ that takes compile_lock is a residual ABBA this design
-  // accepts (a hot-path drain is rare). create_cache_entry has the same
-  // residual: it runs after the callback returns holding cache_mutex but no
-  // compile_lock, so a __del__ its ctor triggers can take compile_lock --
-  // accepted for the same reason (compile time, __del__ only). The other sites
+  // accepts (a hot-path drain is rare); create_cache_entry, which holds
+  // cache_mutex but no compile_lock after the callback returns, has the same
+  // accepted residual (compile time, __del__ only). The other sites
   // that run Python under cache_mutex (the _debug_get_cache_entry_list drain,
   // the CacheEntry ctor; try_lookup_without_guard_eval releases like lookup())
   // run only at compile/debug time. A second cycle needs no compile_lock:
@@ -150,13 +149,11 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
   // Invalidations that arrived while cache_mutex was contended. invalidate()
-  // must never BLOCK on cache_mutex: it is reached from weakref.finalize,
-  // which GC can fire while ANOTHER ExtraState holds its cache_mutex across
-  // the Python it runs under the lock (create_cache_entry's guard-manager
-  // attribute stores), and two threads doing that against each other's
-  // states deadlock (CacheLock releases only the GIL, not the peer's lock).
-  // Parked requests are applied by the next cache_mutex holder that runs at
-  // cache_python_depth 0; a nested (mid-guard-eval) holder re-parks them.
+  // must never BLOCK on cache_mutex: it is reached from weakref.finalize, which
+  // GC can fire while ANOTHER ExtraState holds its cache_mutex across the
+  // Python it runs under the lock (create_cache_entry's guard-manager stores),
+  // and two threads doing that against each other's states deadlock (CacheLock
+  // releases only the GIL). Applied by the next depth-0 holder; nested re-park.
   std::mutex pending_invalidation_mutex;
   std::vector<std::pair<py::object, py::object>> pending_invalidations;
   // Cheap early-out for drain_pending_invalidations, so the hot lookup paths
@@ -190,12 +187,11 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::atomic<bool> has_pending_evictions{false};
   // Count of live lookup() snapshots iterating raw entry pointers with
   // cache_mutex released for guard evaluation. lookup() raises it under the
-  // lock at depth 0, then drops the lock; another thread that takes cache_mutex
+  // lock at depth 0, then drops the lock; another thread taking cache_mutex
   // sees a non-zero count and parks every destroy/relink
   // (apply_pending_evictions, drain_pending_invalidations, invalidate,
-  // clear_in_place) so those snapshots stay valid. It is thus a cross-thread
-  // signal decremented on lookup()'s return paths after the lock is dropped, so
-  // it is atomic rather than cache_mutex-guarded.
+  // clear_in_place) so those snapshots stay valid. It is a cross-thread signal
+  // decremented after the lock drops, hence atomic, not cache_mutex-guarded.
   std::atomic<size_t> cache_python_depth{0};
 
   ExtraState(PyCodeObject* orig_code_arg);
@@ -337,17 +333,14 @@ void destroy_extra_state(void* obj);
 // Python-side snapshot of this code's cache entries) must additionally hold
 // convert_frame.compile_lock, as torch._dynamo.reset() and remove_from_cache
 // do; this function only makes the reset safe against concurrent lookups.
-// Caveat: a clear parked behind cache_python_depth > 0 is drained -- and its
-// nodes destroyed -- by whichever thread next reaches depth zero, which holds
-// no compile_lock, so the ordering above does NOT cover that deferred drain. A
-// COMPILE that snapshotted raw entry pointers via _get_cache_entries_for_region
-// (non-owning py::cast wrappers, not counted by the lookup-snapshot mechanism)
-// can race it, including on the compiling thread itself, whose
-// _get_cache_entries_for_region / _get_total_cache_entry_count prologue drains
-// pending evictions. extract_cache_entry hands out the same non-owning shape (a
-// borrowed CacheEntry* used by dynamo_call_callback after cache_mutex releases
-// at depth 0). Both need owning references the way lookup()/create_cache_entry
-// now hand back; tracked in pytorch/pytorch#196394.
+// Caveat: a clear parked behind cache_python_depth > 0 drains -- destroying
+// its nodes -- on whichever thread next reaches depth zero, with no
+// compile_lock, so the ordering above does not cover it. Two non-owning
+// handouts used after cache_mutex releases at depth 0 can race that drain:
+// _get_cache_entries_for_region's py::cast wrappers (even on the compiling
+// thread, whose prologue drains) and extract_cache_entry's borrowed
+// CacheEntry*. Both need owning references like lookup()/create_cache_entry;
+// pytorch/pytorch#196394.
 // Ownership contract
 // args
 //  - code: Borrowed
