@@ -9639,9 +9639,9 @@ class Scheduler:
             ):
                 continue
             snapshot = _LoopStateSnapshot.create((consumer,))
-            if self._try_masked_reindex_reduction_consumer(
-                reduction, consumer
-            ) and self.can_fuse(reduction, consumer, can_reorder=True):
+            if not self._try_masked_reindex_reduction_consumer(reduction, consumer):
+                continue
+            if self.can_fuse(reduction, consumer, can_reorder=True):
                 self.fuse_two_nodes(reduction, consumer, fused_nodes)
                 did_fuse = True
             else:
