@@ -14,6 +14,7 @@ import platform
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
@@ -734,7 +735,6 @@ def wrap_forward_function(fn: Callable):
     return wrapped
 
 
-@torch._dynamo.config.patch("enable_aot_compile", True)
 def _aot_wraps_deco(f):
     @functools.wraps(f)
     def wrapper(x):
@@ -752,8 +752,21 @@ def _aot_wraps_base(x):
 _aot_wraps_helper = _aot_wraps_deco(_aot_wraps_base)
 
 
+@torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def path(self):
+        path = os.path.join(cache_dir(), f"package_{self.id()}")
+        os.makedirs(path, exist_ok=True)
+        return os.path.join(path, "model.pt")
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
+
     def test_aot_compile_rebuilds_a_wraps_wrapper_of_a_module_level_function(self):
         # Pickling the wrapper by reference finds the base function instead
         # ("not the same object"), so it is rebuilt from its code object, the
@@ -777,17 +790,43 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(x), fn(x))
 
-    def path(self):
-        path = os.path.join(cache_dir(), f"package_{self.id()}")
-        os.makedirs(path, exist_ok=True)
-        return os.path.join(path, "model.pt")
+    def test_aot_compile_rebuilt_wrapper_keeps_its_own_module_scope(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # code was compiled against the decorator's module: an escaped wrapper
+        # must reload with THAT scope, not the wrappee's (same-named globals
+        # would otherwise read the wrong value silently).
+        deco_mod = types.ModuleType("_aot_deco_mod_for_scope_test")
+        deco_mod.SCALE = 100
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x) * SCALE\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        helper = deco_mod.deco(_aot_wraps_base)
+        self.assertEqual(helper.__module__, __name__)
 
-    def setUp(self):
-        super().setUp()
+        def outer():
+            def fn(x):
+                return x + 1, helper
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
         torch._dynamo.reset()
-        torch._dynamo.utils.counters.clear()
-        DynamoCache.clear()
-        PrecompileContext.clear()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x)[1](1), (1 + 1) * 100)
 
     def test_aot_compile_basic_fn(self):
         def fn(x, y):
@@ -1463,6 +1502,7 @@ from user code:
         self.assertIn("SOME_GLOBAL", message)
         # The entry that raised must not swallow the one that can explain itself.
         self.assertIn("dtype mismatch", message)
+        self.assertIn("load with an f_globals", message)
         self.assertEqual(len(message.splitlines()), 4)
 
     def test_aot_compile_module_disable_guard_check(self):
@@ -1709,7 +1749,7 @@ from user code:
         try:
             with open(self.path(), "rb") as f:
                 loaded = torch.compiler.load_compiled_function(f)
-            with self.assertRaisesRegex(RuntimeError, "pass f_globals"):
+            with self.assertRaisesRegex(RuntimeError, "an f_globals carrying it"):
                 loaded(x)
         finally:
             globals()["AOT_POOL_MODE"] = saved
@@ -2452,15 +2492,18 @@ from user code:
         # An eager artifact holds no generated code, so there is no baked vector
         # width to protect and the comparison must not run at all -- otherwise
         # capture-here/serve-there, which is the whole point of the feature,
-        # rejects an artifact over a target it never used.
+        # rejects an artifact over a target it never used. Arm the capture-time
+        # flag so the exemption pinned here is the backend NAME's.
         self.assertEqual(artifacts.backend_name, "eager")
+        self.assertFalse(artifacts.requires_native_backend_compatibility)
+        artifacts.requires_native_backend_compatibility = True
         artifacts.system_info = dataclasses.replace(
             artifacts.system_info, cpu_codegen_target=stale
         )
         artifacts.check_compatibility()
 
         # The rest is about the receiver order, which only a native backend
-        # reaches.
+        # (name and capture-time flag) reaches.
         artifacts.backend_name = "inductor"
         current_target = _current_cpu_codegen_target()
         if current_target is None:
@@ -2540,12 +2583,29 @@ from user code:
         artifacts = compiled._artifacts
         self.assertFalse(artifacts.requires_native_backend_compatibility)
         self.assertIsNone(artifacts.system_info.cpu_codegen_target)
-        # A host that resolves no codegen target at all still loads it.
+        # A host that resolves no codegen target at all still loads it, from
+        # the in-memory artifact and from disk alike.
+        compiled.save_compiled_function(self.path())
         with patch(
             "torch._dynamo.package._current_cpu_codegen_target", return_value=None
         ):
             artifacts.check_compatibility()
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(loaded(x), fn(x))
+
+        def undeclared_backend(gm, example_inputs):
+            return GraphModuleSerializableCallable(gm)
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target", return_value=target
+        ):
+            native = torch.compile(
+                fn, fullgraph=True, backend=undeclared_backend
+            ).aot_compile(((x,), {}))
+        self.assertTrue(native._artifacts.requires_native_backend_compatibility)
+        self.assertEqual(native._artifacts.system_info.cpu_codegen_target, target)
 
     def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
         # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
@@ -3227,8 +3287,6 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         # lock and raises -- which an earlier version cached as g being
         # unpicklable, so an UNRELATED h silently lost its .g and died at call
         # time. The in-flight result is no longer cached, so h keeps g.
-        import threading
-
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
