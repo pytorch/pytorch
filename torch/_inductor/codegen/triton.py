@@ -3332,8 +3332,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         1. Collect size symbols from all ordinary indexing and range-tree
            expressions.
-        2. Simulate every statically valid replacement with the corresponding
-           existing ``rN_numel`` argument. Simulating them together detects
+        2. Simulate every exact reduction-extent replacement with the
+           corresponding existing ``rN_numel`` argument. Simulating them
+           together detects
            arguments that become unused only after multiple replacements.
         3. Record the size symbols absent from the fully rewritten expressions.
         4. During source emission, keep only replacements involving one of
@@ -3346,11 +3347,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.features.indexing_node_schedule is not self.features.node_schedule:
             return
 
-        sizevars = V.graph.sizevars
         for prefix, numel in self.numels.items():
             if not prefix_is_reduction(prefix):
                 continue
-            numel = sizevars.simplify(sizevars.remove_precomputed_replacements(numel))
             if has_free_symbols(numel):
                 r_numel_symbol = sympy.Symbol(
                     f"{prefix}numel", integer=True, nonnegative=True
@@ -3391,47 +3390,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self._r_numel_reuse_replacements:
             return index
 
-        sizevars = V.graph.sizevars
-
-        def replacement(candidate: sympy.Basic) -> sympy.Symbol | None:
-            if not isinstance(candidate, sympy.Expr):
-                return None
-            if not candidate.free_symbols:
-                return None
-            if any(
-                not symbol_is_type(symbol, _R_NUMEL_REUSE_SYMBOL_TYPES)
-                for symbol in candidate.free_symbols
-            ):
-                return None
+        replacements = {}
+        for (
+            r_numel_symbol,
+            equivalent_extent_expr,
+        ) in self._r_numel_reuse_replacements.items():
             # Keep only replacements that eliminate a scalar kernel argument.
-            if not simulate and not candidate.free_symbols.intersection(
+            if simulate or equivalent_extent_expr.free_symbols.intersection(
                 self._r_numel_reuse_eliminated_symbols
             ):
-                return None
-
-            normalized_candidate = sizevars.simplify(
-                sizevars.remove_precomputed_replacements(candidate)
-            )
-            for (
-                r_numel_symbol,
-                equivalent_extent_expr,
-            ) in self._r_numel_reuse_replacements.items():
-                if (
-                    normalized_candidate == equivalent_extent_expr
-                    or sizevars.statically_known_equals(
-                        normalized_candidate, equivalent_extent_expr
-                    )
-                ):
-                    return r_numel_symbol
-            return None
-
-        # Prefer an enclosing match over nested matches: replacing the whole
-        # expression removes a superset of its children's symbol uses.
-        replacements = {
-            candidate: replacement_symbol
-            for candidate in sympy.preorder_traversal(index)
-            if (replacement_symbol := replacement(candidate)) is not None
-        }
+                replacements.setdefault(equivalent_extent_expr, r_numel_symbol)
         return index.xreplace(replacements)
 
     def index_to_str(self, index: sympy.Expr) -> str:
