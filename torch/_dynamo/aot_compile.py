@@ -180,8 +180,10 @@ class AOTCompilePickler(FunctionPicklerBase):
         self._dumps_cleanly_leaned[0] = leaned_before or leaned
         # A False reached while leaning on an in-flight short-circuit may be a
         # false negative (the seed it trusted could still resolve unpicklable),
-        # so return it for this call but do not cache it -- it is recomputed once
-        # the seed resolves. A True, or a False that leaned on nothing, is final.
+        # so it is returned for this call but not cached, so a later probe of the
+        # value recomputes rather than reusing it. (Not caching only prevents
+        # reuse; a prune this call already drove off the False still stands.) A
+        # True, or a False that leaned on nothing, is final.
         if result or not leaned:
             self._dumps_cleanly_cache[vid] = result
         return result
@@ -336,9 +338,12 @@ class AOTCompiledFunction:
             # guidance. Mutate args and re-raise rather than type(e)(msg): a
             # TypeError subclass from a user __reduce__ may take a non-message
             # constructor, so reconstructing would swap the real error for a
-            # constructor failure. AttributeError is caught too: a <locals> class
-            # in a default/kwdefault raises "Can't get local object", not
-            # PicklingError/TypeError, so without it the guidance never fired.
+            # constructor failure. AttributeError is caught too: the default C
+            # _pickle accelerator raises a bare AttributeError "Can't get local
+            # object" for a <locals> class in a default/kwdefault (only the pure-
+            # Python pickler re-wraps it as PicklingError), and some CPython
+            # versions raise PicklingError "Can't pickle local object" instead,
+            # so without AttributeError in the set that path lost its guidance.
             prefix = f"{e}\n" if str(e) else ""
             e.args = (
                 prefix + "Some value reached by the artifact is not picklable (a "
