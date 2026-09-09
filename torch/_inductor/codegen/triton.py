@@ -5661,9 +5661,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value, _, _ = final_reduction(buffer, value, result_type)
             buffer.splice(f"{result_var} = {value}")
 
-        def final_argreduce(buffer, result_var, value, index, result_kind="index"):
-            # Only the index-only kinds may take the two-pass helper.
-            suffix = "_with_first_index" if result_kind == "index" else "_with_index"
+        def final_argreduce(
+            buffer, result_var, value, index, result_kind="index", whole_tile=False
+        ):
+            # The two-pass helper pays off over a whole row tile, not on the
+            # tail of a loop, and only where the index alone is consumed.
+            two_pass = whole_tile and result_kind == "index"
+            suffix = "_with_first_index" if two_pass else "_with_index"
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
                 buffer,
@@ -5828,6 +5832,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     masked_value,
                     accumulator_index,
                     argreduce_result_kind(),
+                    whole_tile=True,
                 )
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
