@@ -32,6 +32,7 @@ class _EpilogueOps(OpsHandler[str]):
         return "acc"
 
     def constant(self, value: bool | float | int, dtype: torch.dtype) -> str:
+        # The GEMM kernel invokes the epilogue with an FP32 value.
         if isinstance(value, float) and not math.isfinite(value):
             raise NotImplementedError(
                 "FlyDSL GEMM epilogues require finite scalar constants"
@@ -49,6 +50,12 @@ class _EpilogueOps(OpsHandler[str]):
 
     def neg(self, x0: str) -> str:
         return f"-({x0})"
+
+    def lt(self, x0: str, x1: str) -> str:
+        return self._binary("<", x0, x1)
+
+    def relu(self, x0: str) -> str:
+        return f"({self.lt(x0, '0.0')}).select(0.0, {x0})"
 
 
 def materialize_flydsl_scheduler_epilogue(

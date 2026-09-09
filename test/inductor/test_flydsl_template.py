@@ -541,12 +541,13 @@ class TestFlyDSLTemplate(TestCase):
         value = ops.add(value, "1.0")
         value = ops.mul(value, "0.5")
         value = ops.sub(value, "2.0")
-        value = ops.neg(value)
+        value = ops.relu(ops.neg(value))
         source = str(value)
 
         self.assertIn("(acc + 1.0)", source)
         self.assertIn("* 0.5", source)
         self.assertIn("- 2.0", source)
+        self.assertEqual(ops.relu("t"), "((t < 0.0)).select(0.0, t)")
         self.assertEqual(ops.constant(1.5, torch.float32), "1.5")
         with self.assertRaisesRegex(NotImplementedError, "accumulator reads"):
             ops.load("bias", "0")
@@ -554,8 +555,6 @@ class TestFlyDSLTemplate(TestCase):
             ops.constant(float("inf"), torch.float32)
         with self.assertRaises(NotImplementedError):
             ops.sin(value)
-        with self.assertRaises(NotImplementedError):
-            ops.relu(value)
 
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
@@ -623,7 +622,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(result, expected)
         else:
             self.assertEqual(result, expected, atol=3e-2, rtol=3e-2)
-        return code
+        return result, code
 
     def _assert_compiled_grouped_mm(self, a, b, offs, *, expect_flydsl: bool = True):
         from torch._inductor.utils import run_and_get_code
@@ -1197,7 +1196,7 @@ class TestFlyDSLTemplate(TestCase):
 
         def fn(a, b):
             result = torch.mm(a, b.t())
-            return -(((result + 1.0) * 0.5 - 2.0) / 3.0)
+            return torch.relu(-(((result + 1.0) * 0.5 - 2.0) / 3.0))
 
         waves = 2 if use_half_tile_interleaved else 4
         gemm_config = asdict(
@@ -1208,21 +1207,31 @@ class TestFlyDSLTemplate(TestCase):
             )
         )
         a = torch.randn(m, 128, device="cuda", dtype=dtype)
-        b = torch.randn(n, 128, device="cuda", dtype=dtype)
+        a[0].fill_(float("nan"))
+        a[1].fill_(float("inf"))
+        a[2].fill_(float("-inf"))
+        a[3].fill_(3.0)
+        b = torch.full((n, 128), 1 / 128, device="cuda", dtype=dtype)
         with mock.patch.object(
             flydsl_heuristics,
             "get_gemm_configs",
             return_value=[gemm_config],
         ):
-            code = self._assert_compiled_flydsl_epilogue(fn, a, b)
+            result, code = self._assert_compiled_flydsl_epilogue(fn, a, b)
         self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
         self.assertIn("EPILOGUE_FN = lambda acc:", code)
         self.assertNotIn("triton_poi_", code)
-        self.assertNotIn("buf0 = empty_strided_cuda", code)
+        self.assertEqual(code.count(" = empty_strided_cuda("), 1)
         self.assertIn(
             f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}",
             code,
         )
+        self.assertTrue(torch.isnan(result[0]).all())
+        self.assertEqual(result[1], torch.zeros_like(result[1]))
+        self.assertFalse(torch.signbit(result[1]).any())
+        self.assertTrue(torch.isposinf(result[2]).all())
+        self.assertEqual(result[3], torch.zeros_like(result[3]))
+        self.assertTrue(torch.signbit(result[3]).all())
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -1255,7 +1264,7 @@ class TestFlyDSLTemplate(TestCase):
             ("non_identity_read", non_identity_read),
         ):
             with self.subTest(name=name):
-                code = self._assert_compiled_flydsl_epilogue(fn, a, b, scale)
+                _, code = self._assert_compiled_flydsl_epilogue(fn, a, b, scale)
                 self.assertIn("async_compile.flydsl", code)
                 self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
                 self.assertIn("triton_poi_", code)
@@ -1278,7 +1287,7 @@ class TestFlyDSLTemplate(TestCase):
             ("independent_epilogues", independent_epilogues, False),
         ):
             with self.subTest(name=name):
-                code = self._assert_compiled_flydsl_epilogue(fn, a, b)
+                _, code = self._assert_compiled_flydsl_epilogue(fn, a, b)
                 self.assertIn("async_compile.flydsl", code)
                 assertion = self.assertIn if expect_fused else self.assertNotIn
                 assertion("HAS_EPILOGUE: fx.Constexpr = True", code)

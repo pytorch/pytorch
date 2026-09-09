@@ -124,9 +124,7 @@ class FlyDSLScheduling(BaseScheduling):
             )
             return False
 
-        fused_node_names = OrderedSet(
-            (template_node.get_name(), epilogue_node.get_name(), node2.get_name())
-        )
+        fused_node_names = OrderedSet((template_node.get_name(), node2.get_name()))
         scheduler = V.graph.scheduler
         if scheduler is None or not scheduler.can_buffer_be_removed_through_fusion(
             template.get_name(), fused_node_names
