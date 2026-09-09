@@ -44,6 +44,7 @@ from .bytecode_transformation import (
     COMPILED_FN_PREFIX,
     get_code_keys,
     is_compiled_fn_name,
+    RESUME_FN_PREFIX,
 )
 from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
@@ -211,31 +212,30 @@ class FunctionPicklerBase(pickle.Pickler):
     def _unpickle_fn_from_module(
         cls,
         module: str | None,
+        scope: str | None,
         code: types.CodeType,
         qualname: str,
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # functools.wraps copies __module__, so this scope can be a different
-        # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead. A module that only
-        # existed in sys.modules at save (exec-created, transformers_modules.*)
-        # gets an empty scope. That is safe on the guard-serialization path,
-        # which reads attributes off the rebuilt function without calling it;
-        # the shared AOT path (AOTCompilePickler) does call it, so there an
-        # empty scope surfaces as a NameError at first call, not a load error.
-        f_globals: dict[str, Any]
-        # __module__ need not be an importable string (a decorator can set 42, a
-        # <locals>/exec function carries None or "", ".rel" or a module whose
-        # body raises fails import with something other than ImportError); none
-        # should fail the load: require a non-empty str, swallow any failure.
-        if isinstance(module, str) and module:
+        # `scope` is the module the code was compiled against (fn.__globals__'s
+        # __name__); functools.wraps copies __module__ from the wrappee, so the
+        # two differ for a wrapper defined in another file, and a function whose
+        # __module__ is None still has a scope. A pickler that guards __globals__
+        # sends the snapshot variant instead. A scope that only existed in
+        # sys.modules at save (exec-created, transformers_modules.*) comes back
+        # empty: safe on the guard path, which never calls the rebuilt function;
+        # AOTCompilePickler does call it, so there an empty scope surfaces as a
+        # NameError at first call, not a load error.
+        f_globals: dict[str, Any] = {}
+        # Not every __name__ is importable (".rel", a module whose body raises,
+        # a non-str a decorator set); none should fail the load: require a
+        # non-empty str and swallow any import failure into the empty scope.
+        if isinstance(scope, str) and scope:
             try:
-                f_globals = importlib.import_module(module).__dict__
+                f_globals = importlib.import_module(scope).__dict__
             except Exception:
                 f_globals = {}
-        else:
-            f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
@@ -343,27 +343,24 @@ class FunctionPicklerBase(pickle.Pickler):
         # A name served PER-INSTANCE resolves only after self is restored, i.e.
         # after pickle rebuilds the method, so getattr() at load would miss it:
         # carry func+self explicitly (an instance __dict__ monkeypatch, a __slots__
-        # member descriptor, or a __getattr__ proxy, which must not be probed --
-        # it can recurse). A type receiver (classmethod) is exempt.
+        # member, a property or a __getattr__ proxy). None of those is probed:
+        # probing runs user code, can recurse, and a property hands back the bare
+        # function. A type receiver (classmethod) is exempt.
         cls = type(method.__self__)
         self_dict = _instance_dict(method.__self__)
-        static = inspect.getattr_static(cls, name, None) if name is not None else None
         instance = not isinstance(method.__self__, type)
-        if instance and (
-            (self_dict is not None and name in self_dict)
-            or isinstance(static, types.MemberDescriptorType)
-        ):
+        if instance and self_dict is not None and name in self_dict:
             return type(self)._unpickle_bound_method, (func, method.__self__)
         # The class MRO serving the name (nn.Module methods, say) needs no
         # explicit binding; getattr_static never runs a user __getattr__.
-        if static is func:
+        if name is not None and inspect.getattr_static(cls, name, None) is func:
             return None
-        if instance and hasattr(cls, "__getattr__"):
+        if instance:
             return type(self)._unpickle_bound_method, (func, method.__self__)
         inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
             inner = inner.__func__
-        # `func is inner` proves the class MRO resolves back to this function.
+        # `func is inner` proves the class namespace resolves back to this function.
         if func is inner:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
@@ -387,6 +384,7 @@ class FunctionPicklerBase(pickle.Pickler):
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
+            args = (fn.__module__, fn.__globals__.get("__name__"), *args[1:])
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
         state = (
@@ -828,7 +826,7 @@ def _cpu_codegen_target_problem(
             "matches no available ISA width), so it cannot reproduce the target "
             "the artifact's CPU kernels were built for."
         )
-    machine, vec_isa, vec_isa_width, vec_isa_macro, _simdlen, _march = cached
+    machine, vec_isa, vec_isa_width, vec_isa_macro = cached[:4]
     if machine != current[0]:
         return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
     if (vec_isa, vec_isa_width, vec_isa_macro) != (current[1], current[2], current[3]):
@@ -1543,7 +1541,7 @@ class CompilePackage:
         # the next install -- and re-recording would persist.
         for entry in self._codes.values():
             for name in entry.function_names:
-                match = re.fullmatch(r"__resume_at_\d+_(\d+)", name)
+                match = re.fullmatch(rf"{RESUME_FN_PREFIX}_\d+_(\d+)", name)
                 if match:
                     _reserve_unique_id_through(int(match.group(1)))
         # Registered before anything is installed, so a failed install is still
