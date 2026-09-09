@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    bytes_to_scalar, parametrize, noncontiguous_like,
+    bytes_to_scalar, parametrize, instantiate_parametrized_tests, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
     IS_MACOS,
@@ -1270,16 +1270,6 @@ class TestTorchDeviceType(TestCase):
         else:
             _test_in_place_broadcastable(small2, small_expanded, large_expanded)
             _test_in_place_broadcastable(small2, small, large)
-
-    @onlyCPU
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*get_all_qint_dtypes())
-    def test_nondeterministic_resize_quantized(self, device, dtype):
-        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
-        b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
-        self.check_nondeterministic_alert(
-            lambda: b.resize_((10,)),
-            'quantized_resize_cpu_')
 
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -3443,13 +3433,6 @@ class TestTorchDeviceType(TestCase):
         y = x.as_strided([2, 1, 5], [1, 0, 2])
         self.assertEqual(y, y.clone())
 
-    def test_clone_not_memory_dense(self):
-        # github issue: https://github.com/pytorch/pytorch/issues/64176
-        x = torch.randn(10, 8).t()[::2, ::2]
-        y = x.clone()
-        # should retain permutation after densification
-        self.assertTrue(y.stride() == (1, 4))
-
     # FIXME: move to elementwise ternary test suite
     @parametrize("use_cpu_scalar", [True, False])
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
@@ -4564,17 +4547,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.CharTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
-
-    def test_tensor_type(self):
-        for t in torch._tensor_classes:
-            if 'cuda' in t.__module__:
-                self.assertEqual(t.is_cuda, True)
-            else:
-                self.assertEqual(t.is_cuda, False)
-            if 'xpu' in t.__module__:
-                self.assertEqual(t.is_xpu, True)
-            else:
-                self.assertEqual(t.is_xpu, False)
 
     # FIXME: move memory format tests to their own test class/suite
     def test_memory_format_preserved_after_permute(self, device):
@@ -6729,9 +6701,37 @@ def disable_gc():
     else:
         yield
 
+@instantiate_parametrized_tests
 class TestTorch(TestCase):
     hw_classification = HardwareClassification.GENERIC
     exact_dtype = True
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @parametrize("dtype", get_all_qint_dtypes())
+    def test_nondeterministic_resize_quantized(self, dtype):
+        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float)
+        b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
+        self.check_nondeterministic_alert(
+            lambda: b.resize_((10,)),
+            'quantized_resize_cpu_')
+
+    def test_clone_not_memory_dense(self):
+        # github issue: https://github.com/pytorch/pytorch/issues/64176
+        x = torch.randn(10, 8).t()[::2, ::2]
+        y = x.clone()
+        # should retain permutation after densification
+        self.assertTrue(y.stride() == (1, 4))
+
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
 
     def test_dir(self):
         dir(torch)
