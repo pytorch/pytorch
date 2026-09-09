@@ -563,6 +563,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             [FLAG_FINAL_VALUE], dtype=torch.int32, device=self.device
         )
 
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
+
         if rank == 0:
             # Rank 0 (the waiter)
             my_wait_until_kernel[(1,)](
@@ -689,6 +692,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             [flag_val], dtype=torch.int32, device=self.device
         )
         NVSHMEM_CMP_EQ = 0  # compare equal
+
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
 
         if rank == 0:
             my_put_with_fence_kernel[(1,)](
