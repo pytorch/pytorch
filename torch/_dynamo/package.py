@@ -111,14 +111,26 @@ class SerializedCode:
         )
 
 
-class FunctionPicklerBase(pickle.Pickler):
-    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ read through the plain slot, so a user __getattr__ on a
+    __slots__ receiver never runs; None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
 
-    Both rebuild the same kinds of objects that pickle cannot do by reference:
-    code objects, closure cells, python modules, bound methods, and functions
-    rebuilt from their code object. Each subclass keeps its own dispatch and
-    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
-    so a fix in one pickler cannot be missed in the other.
+
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers for picklers that rebuild functions from their code object.
+
+    GuardsStatePickler is the first subclass; the AOT pickler is rebuilt on this
+    base in the commit above this one. Both rebuild the same kinds of objects
+    that pickle cannot do by reference: code objects, closure cells, python
+    modules, bound methods, and functions rebuilt from their code object. Each
+    subclass keeps its own dispatch and decides what a rebuilt function carries;
+    this class fixes HOW it is rebuilt so a fix in one pickler cannot be missed
+    in the other.
 
     Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
@@ -184,9 +196,9 @@ class FunctionPicklerBase(pickle.Pickler):
         # __globals__ sends the snapshot variant instead. A module that only
         # existed in sys.modules at save (exec-created, transformers_modules.*)
         # gets an empty scope. That is safe on the guard-serialization path,
-        # which reads attributes off the rebuilt function without calling it;
-        # the shared AOT path (AOTCompilePickler) does call it, so there an
-        # empty scope surfaces as a NameError at first call, not a load error.
+        # which reads attributes off the rebuilt function without calling it; a
+        # pickler whose rebuilt function is CALLED would surface an empty scope
+        # as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
         # __module__ need not be an importable string: a decorator can set it to
         # a non-str (42), a <locals>/exec function can carry None or "" (bare
@@ -246,25 +258,14 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__globals__.update(globals_snapshot)
 
     @staticmethod
-    def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
+    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
         # pickler wants the unevaluated shape, so it takes FORWARDREF and prunes
-        # the proxies later. A caller that must SERIALIZE the annotations passes
-        # resolve=True instead: it gets real values, and an empty dict when a
-        # name will not resolve, because a ForwardRef -- even nested in
-        # list[Bar] -- is not picklable. This resolves the whole set or nothing;
-        # a caller that also needs per-value picklability filters on top.
+        # the proxies later.
         if sys.version_info >= (3, 14):
             import annotationlib
 
-            if resolve:
-                try:
-                    return annotationlib.get_annotations(
-                        obj, format=annotationlib.Format.VALUE
-                    )
-                except Exception:
-                    return {}
             return annotationlib.get_annotations(
                 obj, format=annotationlib.Format.FORWARDREF
             )
@@ -294,17 +295,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
-        # A name served PER-INSTANCE resolves only after self is restored, which
-        # is after pickle rebuilds the method, so getattr() at load would miss
-        # it: carry func+self explicitly. That covers an instance __dict__
-        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
-        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
-        # lookup we must also not probe below -- it can recurse). A type receiver
-        # (classmethod) is exempt: its namespace is restored with the class.
+        # A name served PER-INSTANCE resolves only after self is restored, i.e.
+        # after pickle rebuilds the method, so getattr() at load would miss it:
+        # carry func+self explicitly. That covers an instance __dict__ monkeypatch
+        # (m.forward = MethodType(f, m)), a __slots__ member descriptor, and a
+        # __getattr__ proxy (which must not be probed below -- it can recurse).
+        # A type receiver (classmethod) is exempt: its namespace is restored.
         cls = type(method.__self__)
-        self_dict = getattr(method.__self__, "__dict__", None)
+        self_dict = _instance_dict(method.__self__)
         instance_served = not isinstance(method.__self__, type) and (
-            (isinstance(self_dict, dict) and name in self_dict)
+            (self_dict is not None and name in self_dict)
             or (
                 name is not None
                 and isinstance(
@@ -1057,6 +1057,11 @@ class CompilePackage:
         # install()). Clear those two here, and the add_* methods refuse to
         # repopulate them once bypassed, so a later serializable recompile that
         # reuses this same entry cannot resurrect the frame.
+        # Drop this entry's compiled backends from the package-global cache
+        # before clearing backend_ids; otherwise they are stranded, pinning a
+        # dead GraphModule under an id no entry references.
+        for backend_id in self._current_entry.backend_ids:
+            self._cached_backends.pop(backend_id, None)
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
 
