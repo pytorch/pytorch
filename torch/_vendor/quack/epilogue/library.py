@@ -7,7 +7,8 @@ kernels are minted/cached per (fn source, op config, tensor metadata). Pass
 tensors via ``mod.gemm(A, B, D, C, epi_args={...}, tile_M=..., ...)``.
 
 Sections:
-  * tuple-polymorphic scalar math is shared through ``quack.epi_math``;
+  * packed-polymorphic math helpers (pexp) — raw cute.math fns are not
+    F2/Pair-aware; wrap transcendentals like this does.
   * reusable domain resources live in ``quack.epilogue``: rotary table loads
     in ``rotary`` and per-head RMSNorm statistics in ``head_rmsnorm``.
   * elementwise mods: linear/bias, residual, activation factories, RMS-fused
@@ -25,9 +26,9 @@ from __future__ import annotations
 
 import functools
 
+
 from cutlass import Int32
 
-from torch._vendor.quack import epi_math
 from torch._vendor.quack.activation import (
     act_fn_map,
     dact_fn_map,
@@ -54,7 +55,7 @@ from torch._vendor.quack.epilogue.ops import (
 from torch._vendor.quack.epilogue.head_rmsnorm import HeadRstd
 from torch._vendor.quack.epilogue.quantize_out import BlockScaleFactorStore
 from torch._vendor.quack.epilogue.rotary import rotary_cos_sin_load
-from torch._vendor.quack.epilogue.math import pack, unpack
+from torch._vendor.quack.epilogue.math import pack, pexp, unpack
 from torch._vendor.quack.epilogue.frontend import gemm_epilogue
 
 
@@ -272,7 +273,7 @@ def lse_partial_epi(acc, scale):
     """Coda LSE, per-tile flavor: sexp[m, tile] = sum_n exp(acc * scale);
     the host finalizes log(sum(partials)). NOTE: no online max — needs a
     max-combine reduce for large-logit stability (Coda's LSEReduce is online)."""
-    return {"D": acc, "sexp": epi_math.exp(acc * scale, fast=True)}
+    return {"D": acc, "sexp": pexp(acc * scale)}
 
 
 @gemm_epilogue(outs={"lse": OnlineLSEReduce("lse")})
@@ -314,12 +315,12 @@ def rstd_lse_epi(acc, rstd):
     return {"D": v, "lse": v}
 
 
-@gemm_epilogue(reduces={"amax": ColVecReduce("amax", combine="max")})
+@gemm_epilogue(reduces={"amax": ColVecReduce("amax", combine="max_abs")})
 def amax_epi(acc):
     """Per-tile column amax — the quantized-output (SFD) building block.
-    |x| >= 0, so the zero OOB accumulator lanes of a ragged last tile can't
-    corrupt the max (see VecReduce.combine note)."""
-    return {"D": acc, "amax": epi_math.abs(acc, fast=True)}
+    max_abs folds raw inputs with the fused PTX max.abs operation; OOB zeros
+    are its identity, so ragged last N tiles need no per-element mask."""
+    return {"D": acc, "amax": acc}
 
 
 def _sq_prepass(acc):
@@ -373,7 +374,6 @@ def qknorm_epi(acc, qk, w):
     },
     prepass=_sq_prepass,
     prepass_outs=("qk",),
-    prepass_mode="element",
     mode="acc_pair",
 )
 def qk_rope_epi(acc, cs, qk, w):
@@ -394,7 +394,6 @@ def qk_rope_epi(acc, cs, qk, w):
     },
     prepass=_sq_prepass,
     prepass_outs=("qk",),
-    prepass_mode="element",
     mode="acc_pair",
 )
 def qk_rope_ldg_epi(acc, cs, qk, w):
