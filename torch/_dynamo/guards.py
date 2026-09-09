@@ -1024,7 +1024,9 @@ def get_key_index_source(source: Any, index: Any) -> str:
 
 
 def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
+    # A PackageError like the sibling checks in serialize_guards: a bypass, or
+    # an error under strict_precompile, never an internal compiler error.
+    raise torch._dynamo.exc.PackageError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
@@ -4596,7 +4598,7 @@ def pickle_guards_state(
         # deliberately, since walking the object graph would recurse again off
         # an already exhausted stack.
         raise torch._dynamo.exc.PackageError(
-            "guard state exceeded the recursion limit while pickling"
+            "exceeded the recursion limit while pickling guard state"
         ) from e
     except Exception as e:
         # Deliberately broad, AssertionError included: GradScaler.__getstate__
