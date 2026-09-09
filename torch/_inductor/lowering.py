@@ -8409,6 +8409,19 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
     if len(shape) == 0:
         return clone(x), _full(0, x.get_device(), torch.int64, shape)
 
+    node = V.graph.current_node
+    if (
+        not descending
+        and node is not None
+        and node.target in (aten.sort.default, aten.sort.stable)
+        and (bound := _bounded_group_keys(x, node.args[0])) is not None
+    ):
+        from .kernel.bounded_group import bounded_group
+
+        # The counting sort keeps equal keys in input order, so it is stable.
+        V.graph.bounded_sort_keys[node] = x
+        return bounded_group(x, bound)
+
     result = _triton_sort(x, dim=dim, stable=stable, descending=descending)
     if result is None:
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
@@ -8417,18 +8430,6 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
 def sort(x, dim=-1, descending=False):
-    node = V.graph.current_node
-    if (
-        not descending
-        and dim in (-1, 0)
-        and node is not None
-        and node.target is aten.sort.default
-        and (bound := _bounded_group_keys(x, node.args[0])) is not None
-    ):
-        from .kernel.bounded_group import bounded_group
-
-        V.graph.bounded_sort_keys[node] = x
-        return bounded_group(x, bound)
     return sort_stable(x, stable=False, dim=dim, descending=descending)
 
 

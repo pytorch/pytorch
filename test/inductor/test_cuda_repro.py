@@ -3239,7 +3239,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
     @parametrize(
         "name",
-        ["reshape_chain", "cast_stops_proof", "too_many_keys", "single_key"],
+        ["reshape_chain", "stable", "cast_stops_proof", "too_many_keys", "single_key"],
     )
     def test_bounded_topk_index_group_provenance(self, name):
         def f(x):
@@ -3252,11 +3252,11 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 keys = indices.to(torch.int32).to(torch.int64).reshape(-1)
             else:
                 keys = indices.flatten()
-            return keys, *torch.sort(keys)
+            return keys, *torch.sort(keys, stable=name == "stable")
 
         shape = {"too_many_keys": (8192, 4), "single_key": (1, 1)}.get(name, (32, 8))
         x = torch.randn(shape, dtype=torch.bfloat16, device=device_type)
-        self._check_bounded_group(f, x, grouped=name == "reshape_chain")
+        self._check_bounded_group(f, x, grouped=name in ("reshape_chain", "stable"))
 
     @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
     def test_bounded_topk_index_group_backend_without_scan(self):
