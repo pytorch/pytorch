@@ -279,6 +279,19 @@ class TestNativeAotTopK(TestCase):
             mod.covered_axes(x, 64), mod.covered_axes(x, 64, -1, True, True)
         )
 
+    def test_flags_the_stub_declines_are_uncovered(self):
+        # The stub takes only dim=last, largest and sorted; coverage must agree, or such
+        # a call declines on both routes and lands on stock aten instead of the JIT one.
+        from torch._native import aot_manifest
+
+        x = torch.empty(M, 4096, dtype=torch.float32, device="cuda")
+        self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, 64), {}))
+        for kwargs in ({"dim": 0}, {"largest": False}, {"sorted": False}):
+            with self.subTest(**kwargs):
+                self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, 64), kwargs))
+        # dim spelled as the last axis is the covered case, however it is written.
+        self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, 64), {"dim": 1}))
+
     def test_manifest_covers_matches_grid(self):
         # CUDA tensors, because coverage includes the prelude's full-wave M gate, so
         # a CPU probe is always uncovered.
