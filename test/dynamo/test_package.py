@@ -260,7 +260,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertNotEqual(narrow_target, wide_target)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self):
+    @parametrize("fullgraph", (False, True))
+    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self, fullgraph):
+        # fullgraph=False takes _optimize, fullgraph=True optimize_assert; both
+        # thread native_backend and must agree.
         def fn(x):
             return x + 1
 
@@ -271,7 +274,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             "torch._dynamo.package._current_cpu_codegen_target",
             side_effect=AssertionError("toolchain probe ran for an eager backend"),
         ) as probe:
-            torch.compile(fn, backend="eager")(torch.randn(3))
+            torch.compile(fn, backend="eager", fullgraph=fullgraph)(torch.randn(3))
             (entry,) = PrecompileContext._dynamo_cache_entries.values()
         # side_effect fails at the call site, but Dynamo swallows exceptions on
         # the compile path, so assert not-called outside the patch too.
@@ -288,7 +291,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
             "torch._dynamo.package._current_cpu_codegen_target",
             return_value=sentinel,
         ):
-            torch.compile(fn, backend=custom_backend)(torch.randn(3))
+            torch.compile(fn, backend=custom_backend, fullgraph=fullgraph)(
+                torch.randn(3)
+            )
         (entry,) = PrecompileContext._dynamo_cache_entries.values()
         self.assertTrue(entry.requires_native_backend_compatibility)
         self.assertEqual(entry.system_info.cpu_codegen_target, sentinel)
@@ -1199,6 +1204,7 @@ def add(x, y):
         )
         resume_b = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
         resume_b -= resume_a
+        self.assertTrue(resume_a)
         self.assertTrue(resume_b)
 
         # pkg_a's entries stay in the default region (-1); pkg_b's land only in
@@ -1306,12 +1312,15 @@ def add(x, y):
             return x - 1
 
         self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
-        module_dict = sys.modules[fn.__module__].__dict__
-        before = set(module_dict)
+        module = sys.modules[fn.__module__]
+        module_dict = module.__dict__
         pkg, backends = ctx.load_package(fn, self.path())
         pkg.install(backends)
+        # From the package's bookkeeping, not a module-dict diff: under
+        # free-threading the capture-time CleanupHook pops the previous name
+        # late, so the install rebinds a key already present and a diff is empty.
         (name,) = [
-            k for k in set(module_dict) - before if k.startswith("__compiled_fn")
+            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
         ]
         sentinel = object()
         module_dict[name] = sentinel
@@ -1327,25 +1336,39 @@ def add(x, y):
         self.assertIs(module_dict[name], sentinel)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
-    def test_capturing_package_refuses_a_frame_another_package_serves(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_capturing_package_refuses_a_frame_another_package_serves(
+        self, caching_precompile
+    ):
         # Lookup is region-exact but not owner-exact: a fresh CompilePackage(fn)
         # compiled while a loaded package serves fn in the same region would be
         # served that package's entry, record nothing, and save a zero-guarded
         # artifact that skip_code()s the frame on install. The context refuses
-        # instead; an isolated region (or uninstalling first) is the way out.
+        # instead -- whichever of the decoration and the neighbour's install
+        # comes first, and regardless of the caching_precompile config, which
+        # only exempts the transparent cache's own (fn=None) package. An
+        # isolated region (or uninstalling first) is the way out.
+        self.enterContext(
+            torch._dynamo.config.patch(caching_precompile=caching_precompile)
+        )
         ctx = DiskDynamoStore()
 
         def fn(x):
             return x + 1
 
         self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        # Decorated before the neighbour arrives: the call-time check catches it.
+        early = torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(fn)
         pkg1, backends = ctx.load_package(fn, self.path())
         pkg1.install(backends)
         self.addCleanup(pkg1.uninstall)
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
+        refused = self.assertRaisesRegex(
             RuntimeError, "another CompilePackage is installed"
-        ):
+        )
+        with refused:
+            early(x)
+        with refused:
             torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(fn)(x)
         # pkg1 still serves the frame, untouched.
         with torch.compiler.set_stance("fail_on_recompile"):
