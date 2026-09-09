@@ -274,6 +274,41 @@ class CreateBackendTest(TestCase):
         ):
             create_backend(self._params_filestore)
 
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    def test_create_backend_closes_tempfile_descriptor(
+        self, filestore_mock, tempfile_mock, close_mock
+    ) -> None:
+        tempfile_mock.return_value = (42, "/tmp/dummy_rendezvous_file")
+        self._params_filestore.endpoint = ""
+
+        create_backend(self._params_filestore)
+
+        # The descriptor returned by mkstemp must be closed exactly once,
+        # and the path (not the descriptor) must be passed to FileStore.
+        close_mock.assert_called_once_with(42)
+        filestore_mock.assert_called_once_with("/tmp/dummy_rendezvous_file")
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    def test_create_backend_closes_tempfile_descriptor_even_if_filestore_fails(
+        self, filestore_mock, tempfile_mock, close_mock
+    ) -> None:
+        tempfile_mock.return_value = (42, "/tmp/dummy_rendezvous_file")
+        filestore_mock.side_effect = RuntimeError("test error")
+        self._params_filestore.endpoint = ""
+
+        with self.assertRaises(RendezvousConnectionError):
+            create_backend(self._params_filestore)
+
+        close_mock.assert_called_once_with(42)
+
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
     )
