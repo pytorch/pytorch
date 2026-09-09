@@ -39,7 +39,7 @@ jobs:
   # tools/setup_helpers/cmake.py.
   wheel-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 280
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -75,6 +75,8 @@ jobs:
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -224,7 +226,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-build
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
