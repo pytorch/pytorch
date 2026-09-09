@@ -64,6 +64,7 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
+from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
     _is_static_problem,
     _use_small_mm_pointwise,
@@ -350,58 +351,6 @@ def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
         inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
         lambda: "all inputs must be on the same device",
     )
-
-
-def decomposeK(a, b, k_splits):
-    m = a.shape[0]
-    n = b.shape[1]
-    k = a.shape[1]
-
-    k_parts = k // k_splits
-    B = k_splits
-    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
-    b_reshaped = b.reshape(B, k_parts, n)
-    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
-
-
-class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(
-            name="decompose_k",
-        )
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        k_split: int,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = f"decompose_k_mm_{k_split}_split"
-        description = f"{k_split=}"
-
-        with enable_python_dispatcher():
-            decompositions = select_decomp_table()
-            fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
-                decompositions,
-            )
-
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-decompose_k_subgraph_template = DecomposeKSugraphTemplate()
 
 
 class ContiguousTemplate(SubgraphTemplate):
@@ -732,12 +681,24 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
+    # Some subgraph choices must be selected and inlined before scheduling so
+    # their inner templates can participate in fusion. MultiTemplateBuffer
+    # otherwise preserves the subgraph boundary until after fusion.
+    inline_selected_subgraph = mat2.get_name() not in V.graph.graph_inputs and any(
+        isinstance(choice, SubgraphChoiceCaller) and choice.inline_after_autotune
+        for choice in choices
+    )
+    if not inline_selected_subgraph:
+        for choice in choices:
+            if isinstance(choice, SubgraphChoiceCaller):
+                choice.inline_after_autotune = False
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
+        return_multi_template=not inline_selected_subgraph,
     )
     return node
 
