@@ -915,11 +915,13 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("external_data", msg)
 
     def test_save_guidance_when_a_locals_class_default_cannot_pickle(self):
-        # A <locals> class instance in __defaults__ rides unpruned and pickles
-        # to "Can't get local object" -- an AttributeError, not a
-        # PicklingError/TypeError -- so without AttributeError in the caught set
-        # a bare AttributeError escaped with no guidance. It is caught too and
-        # gets the same external_data guidance appended.
+        # A <locals> class instance in __defaults__ rides unpruned and pickle
+        # rejects it: the default C _pickle accelerator raises AttributeError
+        # "Can't get local object" (the pure-Python pickler would re-wrap it as
+        # PicklingError; some CPython versions raise PicklingError "Can't pickle
+        # local object"). All three are caught, and the shared "local object"
+        # substring is asserted so the test does not pin one pickler's wording;
+        # it gets the external_data guidance appended.
         def outer():
             class Cfg:
                 def __init__(self):
@@ -936,7 +938,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         with self.assertRaises((AttributeError, pickle.PicklingError, TypeError)) as cm:
             compiled_fn.save_compiled_function(self.path())
         msg = str(cm.exception)
-        self.assertIn("Can't get local object", msg)
+        self.assertIn("local object", msg)
         self.assertIn("not picklable", msg)
         self.assertIn("external_data", msg)
 
