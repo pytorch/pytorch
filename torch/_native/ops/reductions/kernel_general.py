@@ -426,9 +426,10 @@ def fast_kind(
     return None
 
 
-# The one-shot stages a whole row tile (~N*itemsize), so it must fit smem; above that the
-# multi-CTA split caps each chunk's tile. Conservative, to leave the reduction buffer room.
-_SMEM_BUDGET = 192 * 1024
+# Longest row, in BYTES, that ONE block will own. A shape bound, not a capacity one: the fold
+# reads global straight into registers, and the only smem is the cross-warp merge buffer. Past
+# this the multi-CTA split owns a chunk each.
+_MAX_ROW_BYTES = 192 * 1024
 # ... and the per-thread LOAD count must stay bounded. It only runs away when the vector
 # width collapses to 1 (an odd or prime N): measured 0.08-0.17x of ATen with no bound, and
 # 1.93-2.41x once the cross-CTA split serves those instead. 64 separates every measured good
@@ -442,11 +443,11 @@ _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
 
 
-def _oneshot_ok(x):
+def _oneshot_ok(x: torch.Tensor) -> bool:
     # One-shot: does the row fit its tile (~N elements of the input dtype) AND stay inside
     # the per-thread load bound?
     N = x.shape[-1]
-    if N * x.element_size() > _SMEM_BUDGET:
+    if N * x.element_size() > _MAX_ROW_BYTES:
         return False
     from . import kernel_rowtile as rt
 
@@ -456,7 +457,9 @@ def _oneshot_ok(x):
     return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
 
 
-def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
+def _try_fast_row(
+    trait, trait_key: str, x: torch.Tensor, out_dtypes: list, nouts: int
+) -> tuple | None:
     # Fast path for the CONTIGUOUS last dim of a 2D problem; None if it is not handled. The
     # one-shot needs no index remap, so it serves index traits directly, while the cross-CTA
     # split declines them -- its reshape makes a sub-row's chunk index row % C, which is awkward
