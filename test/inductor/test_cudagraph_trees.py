@@ -2561,17 +2561,49 @@ if HAS_CUDA_AND_TRITON:
             children = next(iter(root.children.values()))
             self.assertEqual(len(children), 2)
             self.assertEqual(children[-1].cudagraph_managed_idxs, [0, 1])
-            self.assertEqual(children[-1].copy_cudagraph_managed_idxs, [])
+            self.assertEqual(children[-1].input_copy_idxs, [])
 
             run_pair(2)
             self.assertEqual(len(children), 3)
             self.assertEqual(children[-1].cudagraph_managed_idxs, [1])
-            self.assertEqual(children[-1].copy_cudagraph_managed_idxs, [0])
+            self.assertEqual(children[-1].input_copy_idxs, [0])
             self.assertEqual(children[-1].non_static_input_idx, [])
             self.assertTrue(0 in children[-1].static_input_idxs)
 
             run_pair(3)
             self.assertEqual(len(children), 3)
+
+        @torch._inductor.config.patch(
+            {
+                "triton.skip_cudagraph_warmup": True,
+                "triton.cudagraph_managed_input_rerecord_limit": 3,
+            }
+        )
+        def test_does_not_demote_stabilized_cudagraph_managed_input(self):
+            def producer(args):
+                x = args[0]
+                args.clear()
+                return tuple(x + i for i in range(6))
+
+            def consumer(args):
+                x, y = args
+                args.clear()
+                return [x + y]
+
+            inp = torch.rand(4, device="cuda")
+            producer_cg = self.cudagraphify_impl(producer, [inp], ())
+            consumer_cg = self.cudagraphify_impl(consumer, [inp, inp], ())
+            for stable, changing in ((0, 2), (1, 3), (1, 4), (1, 5)):
+                torch.compiler.cudagraph_mark_step_begin()
+                outputs = producer_cg([inp])
+                result = consumer_cg([outputs[stable], outputs[changing]])[0]
+                self.assertEqual(result, outputs[stable] + outputs[changing])
+                del result, outputs
+
+            root = next(self.get_roots())
+            children = next(iter(root.children.values()))
+            self.assertEqual(children[-1].input_copy_idxs, [1])
+            self.assertEqual(children[-1].cudagraph_managed_idxs, [0])
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._inductor.config.patch(
@@ -2650,18 +2682,24 @@ if HAS_CUDA_AND_TRITON:
                 wrapped_functions[0].cudagraph_managed_input_rerecord_action, "skip"
             )
 
-        @torch._inductor.config.patch(
-            "triton.cudagraph_initial_mempool_allocation_gb", 16 / 1024
-        )
-        def test_initial_mempool_allocation(self):
+        @parametrize("compile_options", (False, True))
+        def test_initial_mempool_allocation(self, compile_options):
             def foo(args):
                 x = args[0]
                 args.clear()
                 return [x + 1]
 
             inp = torch.rand([2 * (1 << 20)], device="cuda")
-            foo_cg = self.cudagraphify_impl(foo, [inp], ())
-            self.assertEqual(foo_cg([inp])[0], inp + 1)
+            option = {"triton.cudagraph_initial_mempool_allocation_gb": 16 / 1024}
+            if compile_options:
+                foo_cg = torch.compile(
+                    lambda x: x + 1, options={"triton.cudagraphs": True, **option}
+                )
+                self.assertEqual(foo_cg(inp), inp + 1)
+            else:
+                with torch._inductor.config.patch(option):
+                    foo_cg = self.cudagraphify_impl(foo, [inp], ())
+                    self.assertEqual(foo_cg([inp])[0], inp + 1)
 
             # The 8 MiB output should be carved out of the primed 16 MiB
             # segment rather than growing the pool with a new large segment.
@@ -2708,7 +2746,7 @@ if HAS_CUDA_AND_TRITON:
             children = next(iter(root.children.values()))
             self.assertEqual(len(children), 3)
             for child in children:
-                self.assertEqual(child.copy_cudagraph_managed_idxs, [])
+                self.assertEqual(child.input_copy_idxs, [])
                 self.assertEqual(child.non_static_input_idx, [])
                 self.assertTrue(0 in child.static_input_idxs)
 
@@ -2759,7 +2797,7 @@ if HAS_CUDA_AND_TRITON:
             children = next(iter(root.children.values()))
             self.assertEqual(len(children), 2)
             self.assertEqual(children[-1].cudagraph_managed_idxs, [0, 1])
-            self.assertEqual(children[-1].copy_cudagraph_managed_idxs, [])
+            self.assertEqual(children[-1].input_copy_idxs, [])
             self.assertEqual(children[-1].non_static_input_idx, [])
 
             run_pair(-1)
@@ -2803,7 +2841,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(len(children), 3)
                 for child in children:
                     self.assertEqual(child.cudagraph_managed_idxs, [0])
-                    self.assertEqual(child.copy_cudagraph_managed_idxs, [])
+                    self.assertEqual(child.input_copy_idxs, [])
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
