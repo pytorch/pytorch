@@ -22,9 +22,7 @@ void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
   THPObjectPtr obj(THPVariable_Wrap(tensor));
   THPObjectPtr packed(
       PyObject_CallFunctionObjArgs(pack_hook_, obj.get(), nullptr));
-  if (!packed) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(packed);
   data_ = packed.release();
   // obj is decrefed on exit, packed has their references stolen
   // pack_hook_ and data_ will be manually decrefed when the saved variable is
@@ -34,9 +32,7 @@ void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
 at::Tensor PySavedVariableHooks::call_unpack_hook() {
   py::gil_scoped_acquire acquire;
   THPObjectPtr res(PyObject_CallFunctionObjArgs(unpack_hook_, data_, nullptr));
-  if (!res) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(res);
   TORCH_CHECK_TYPE(
       THPVariable_Check(res),
       "Output of saved tensor unpack_hook expected to be a Tensor but got result of type ",

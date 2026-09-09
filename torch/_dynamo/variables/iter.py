@@ -34,7 +34,7 @@ from ..exc import (
     unimplemented,
 )
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
-from .base import GetSet, Method, ValueMutationNew, VariableTracker
+from .base import Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, pyiter_next
@@ -82,7 +82,7 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -98,17 +98,20 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def _get_from_iterable(
-        self, tx: "InstructionTranslatorBase"
+    def _from_iterable(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker | None":
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
-        if self.value is itertools.chain:
-            return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-        return None
+        if self.value is not itertools.chain:
+            return None
+        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
 
-    tp_getset = {
-        "from_iterable": GetSet(_get_from_iterable),
+    tp_methods = {
+        "from_iterable": Method(_from_iterable),
     }
 
     def call_function(
@@ -306,7 +309,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -359,13 +362,6 @@ class ChainVariable(IteratorVariable):
 
     def python_type(self) -> type:
         return itertools.chain
-
-    def _get_from_iterable(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-
-    tp_getset = {
-        "from_iterable": GetSet(_get_from_iterable),
-    }
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         if not self.is_mutable():
@@ -472,7 +468,7 @@ class RepeatIteratorVariable(IteratorVariable):
         "__length_hint__": Method(repeat_length_hint),
     }
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         item_repr = tracked_repr(tx, self.item)
         if self.times is None:
             return ConstantVariable.create(f"repeat({item_repr})")
@@ -532,10 +528,10 @@ class CountIteratorVariable(IteratorVariable):
         self.advance_count += 1
         return old_item
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
         if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().repr_impl(tx)
+            return super().tp_repr_impl(tx)
         cnt = self.item.as_python_constant()
         step = self.step.as_python_constant()
         # Suppress step in the repr when it is an integer equal to 1.

@@ -2,12 +2,21 @@
 
 import os
 import sys
+from collections.abc import Callable
+from functools import wraps
+from typing import ParamSpec, TypeVar
+from unittest import SkipTest
 
 import torch
 import torch.cuda
 import torch.cuda.nccl as nccl
 import torch.distributed as c10d
 import torch.distributed._symmetric_memory as symm_mem
+from torch.cuda._utils import (
+    _check_cuda_bindings,
+    _cuda_bindings_driver as _drv,
+    _HAS_CUDA_BINDINGS,
+)
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -15,6 +24,9 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
+    PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
 )
@@ -363,6 +375,49 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             buf = handle.get_buffer(peer, (numel,), torch.float32)
             self.assertTrue(buf.eq(peer).all())
         handle.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_barrier_channel_out_of_bounds(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+
+        num_slots = handle.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+
+        # check_channel() is shared with the CUDA backend; an over-capacity
+        # channel must be rejected host-side before the kernel launch (#191618).
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            handle.barrier(channel=max_channel)
+        handle.barrier(channel=max_channel - 1)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_signal_rank_out_of_bounds(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        handle = symm_mem.rendezvous(t, group=group_name)
+
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                handle.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                handle.wait_signal(src_rank=bad_rank)
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -1171,8 +1226,6 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
         # Confirm the intended path: a torchcomms PG + the NCCL symm-mem backend.
         self.assertEqual(c10d.get_backend(c10d.group.WORLD), self.backend_name)
         self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
-        # Publish the communicator before rendezvous looks it up.
-        c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
         t = symm_mem.empty(64, dtype=torch.float, device=self.device).fill_(self.rank)
@@ -1189,6 +1242,169 @@ class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
 
 class NCCLSymmetricMemoryNcclLazyTest(NCCLSymmetricMemoryNccl2Test):
     backend_name = "nccl-lazy"
+
+
+def _host_cft_unsupported_reason() -> str | None:
+    """Python mirror of NCCL's runtime gate for CFT logical endpoints
+    (ncclGpuCftSupport in cft_dev_runtime.cc): a Blackwell-class GPU whose
+    driver reports CUDA >= 13.3 and sets both logical-endpoint device
+    attributes. One NCCL requirement stays invisible here: libnccl itself
+    must be built with CUDA >= 13.3.
+    """
+    if torch.cuda.get_device_capability() < (10, 0):
+        return "host-side CFT requires Blackwell (sm_100+)"
+    if os.environ.get("NCCL_CFT_ENABLE", "1") == "0":
+        return "host-side CFT disabled via NCCL_CFT_ENABLE=0"
+    if not _HAS_CUDA_BINDINGS:
+        return "cuda-bindings is required to probe CFT support"
+    try:
+        _check_cuda_bindings(_drv.cuInit(0))
+        if _check_cuda_bindings(_drv.cuDriverGetVersion()) < 13030:
+            return "host-side CFT requires a driver reporting CUDA >= 13.3"
+        for name, raw in (
+            ("CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED", 153),
+            ("CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED", 154),
+        ):
+            # The enum member only exists in cuda-bindings >= 13.3; the raw
+            # value is part of the stable driver ABI.
+            attr = getattr(_drv.CUdevice_attribute, name, raw)
+            if not _check_cuda_bindings(_drv.cuDeviceGetAttribute(attr, 0)):
+                return f"device does not report {name}"
+    except Exception as e:
+        return f"failed to probe CFT support: {e}"
+    return None
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def requires_cft_support() -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    """Skip unless the GPU/driver stack can create CFT logical endpoints.
+
+    Like requires_nvls in test_nvshmem.py, but evaluated lazily inside the
+    wrapper so the CUDA probing runs in the spawned child process rather
+    than at decoration time.
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        @wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            reason = _host_cft_unsupported_reason()
+            if reason is not None:
+                raise SkipTest(reason)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm"
+)
+class SymmMemCftHandleTest(MultiProcessTestCase):
+    """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
+
+    These are the `(le_id, le_offset)` coordinates a custom kernel feeds to the
+    device-side `ncclCft` put/get/red family, so the handle only means anything
+    for the group it was rendezvoused with.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The backend has to be chosen before the child processes start.
+        # `set_backend` cannot do it: by the time a test body runs the
+        # allocator has already been handed out once and it refuses to swap.
+        # TORCH_SYMMMEM is read at static-init time instead, and spawn passes
+        # the environment down.
+        backend = "CUDA" if self._testMethodName.endswith("wrong_backend") else "NCCL"
+        os.environ["TORCH_SYMMMEM"] = backend
+        self.addCleanup(os.environ.pop, "TORCH_SYMMMEM", None)
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _init_process(self):
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        for peer in range(self.world_size):
+            if peer == self.rank:
+                continue
+            if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
+                raise SkipTest("Test requires p2p access")
+
+        torch.cuda.set_device(self.device)
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        # ncclHostCftFallback: create the CFT logical endpoints if the hardware
+        # allows, otherwise silently proceed without them. The endpoints are
+        # made during window registration, i.e. inside rendezvous, so this has
+        # to be set before the communicator exists.
+        pg_opts.config.host_cft_mode = 3
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.FileStore(self.file_name, self.world_size),
+            pg_options=pg_opts,
+            device_id=self.device,
+        )
+        self.addCleanup(c10d.destroy_process_group)
+        # The NCCL backend rendezvous looks the communicator up rather than
+        # creating it, so force it into existence first.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        t = symm_mem.empty(1024, dtype=torch.float32, device=self.device)
+        return symm_mem.rendezvous(t, group=c10d.group.WORLD.group_name)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
+    @skip_if_lt_x_gpu(2)
+    @requires_cft_support()
+    def test_get_cft_handle(self) -> None:
+        hdl = self._init_process()
+        self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
+        _, self_le_offset = hdl.get_peer_cft_handle(self.rank)
+
+        le_ids = set()
+        for peer in range(self.world_size):
+            le_id, le_offset = hdl.get_peer_cft_handle(peer)
+            self.assertNotIn(le_id, le_ids, f"peer {peer} reuses le_id {le_id}")
+            le_ids.add(le_id)
+            # Every rank maps the buffer at the same offset in the symmetric
+            # space, so only the endpoint varies from peer to peer.
+            self.assertEqual(le_offset, self_le_offset)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
+            hdl.get_peer_cft_handle(self.world_size)
+        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
+            hdl.get_peer_cft_handle(-1)
+
+        try:
+            # Collective on first call unless the endpoint was created eagerly
+            # at window registration, so every rank has to reach this.
+            _, mc_le_offset = hdl.get_multimem_cft_handle()
+            self.assertEqual(mc_le_offset, self_le_offset)
+        except RuntimeError:
+            # NCCL disables CFT multicast when NVLS is unavailable, uniformly
+            # across ranks, so nobody is left waiting in the collective above.
+            pass
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
+    @skip_if_lt_x_gpu(2)
+    def test_get_cft_handle_wrong_backend(self) -> None:
+        hdl = self._init_process()
+        self.assertEqual(symm_mem.get_backend(self.device), "CUDA")
+        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
+            hdl.get_peer_cft_handle(0)
+        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
+            hdl.get_multimem_cft_handle()
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")

@@ -275,6 +275,10 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
     return;
   }
 
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
+                              "MPS norm: tensors requiring 64-bit indexing are not supported (numel=",
+                              input.numel(),
+                              ")");
   // Number of input elements that are reduced into one output element
   uint32_t reduction_size = input.numel() / output.numel();
 
@@ -307,12 +311,12 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
         @autoreleasepool {
           id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
           auto ps = lib.getPipelineStateForFunc(kernel_name);
-          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input});
+          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input}, stream);
           [ce setComputePipelineState:ps];
           mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, 0.0f);
           [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
               threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-          getMPSProfiler().endProfileKernel(ps);
+          getMPSProfiler().endProfileKernel(ps, stream);
         }
       });
     }
@@ -338,17 +342,17 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("norm_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "norm", {input});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "norm", {input}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, input, output, params);
 
       auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, reduction_size);
-      uint32_t num_threads = output.numel() * threads_per_group;
+      const auto num_threads = static_cast<uint64_t>(output.numel()) * threads_per_group;
 
       [compute_encoder dispatchThreads:MTLSizeMake(num_threads, 1, 1)
                  threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
 
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 }
@@ -360,6 +364,14 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       StdVarType stdVarType) {
   TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
                    "std and var only support floating point and complex dtypes");
+
+  // Variance of a complex tensor is real: var(z) = var(Re z) + var(Im z).
+  // MPSGraph's varianceOfTensor computes E[(z - mu)^2] (no conjugation), so for
+  // complex input split into real/imaginary parts inside the graph and sum the
+  // two variances. The real dtype is used for the output and Bessel constant.
+  const bool is_complex = input_t.is_complex();
+  const auto out_dtype = c10::toRealValueType(input_t.scalar_type());
+
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -473,12 +485,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     }
   }
 
-  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims),
-                              input_t.scalar_type(),
-                              std::nullopt,
-                              kMPS,
-                              std::nullopt,
-                              std::nullopt);
+  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims), input_t.options().dtype(out_dtype));
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     output_t.fill_(std::numeric_limits<float>::quiet_NaN());
@@ -500,11 +507,21 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
+      MPSGraphTensor* outputVarTensor;
+      if (is_complex) {
+        MPSGraphTensor* reTensor = [mpsGraph realPartOfTensor:inputTensor name:nil];
+        MPSGraphTensor* imTensor = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
+        MPSGraphTensor* varRe = [mpsGraph varianceOfTensor:reTensor axes:wrappedAxes name:nil];
+        MPSGraphTensor* varIm = [mpsGraph varianceOfTensor:imTensor axes:wrappedAxes name:nil];
+        outputVarTensor = [mpsGraph additionWithPrimaryTensor:varRe secondaryTensor:varIm name:nil];
+      } else {
+        outputVarTensor = [mpsGraph varianceOfTensor:inputTensor axes:wrappedAxes name:nil];
+      }
       MPSGraphTensor* outputTensor = nil;
 
       if (use_correction && correction_value) {
-        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction dataType:getMPSDataType(input_t)];
+        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:bessel_correction
+                                                           dataType:getMPSDataType(out_dtype)];
         MPSGraphTensor* correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
                                                                     secondaryTensor:besselTensor
                                                                                name:nil];
@@ -712,13 +729,13 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{num_rows, row_len, 0, 0};
     mtl_setArgs(ce, in, output_t, sizes_s);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   // The outer kernel views the input as [outer_size, dim_size, inner_size]
   // through explicit strides (contiguous callers pass the contiguous
@@ -740,7 +757,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     const auto num_tg_x = c10::metal::ceil_div(inner_size, OUTER_TG_WIDTH);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
     const std::array<uint32_t, 4> strides_s{dim_stride, inner_stride, outer_stride, 0};
@@ -751,7 +768,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     [ce dispatchThreads:MTLSizeMake(
                             num_tg_x * OUTER_TG_WIDTH, (split ? num_segs : 1) * OUTER_TG_HEIGHT, split ? 1 : outer_size)
         threadsPerThreadgroup:MTLSizeMake(OUTER_TG_WIDTH, OUTER_TG_HEIGHT, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   auto encode_arg_narrow_p1 = [&](const Tensor& in,
                                   const Tensor& vals,
@@ -762,13 +779,13 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     const auto kname = fmt::format("{}_reduction_narrow_p1_{}", op_prefix, in_str);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, num_segs, 0};
     mtl_setArgs(ce, in, vals, idxs, sizes_s);
     const auto active = (NARROW_TG_SIZE / inner_size) * inner_size;
     [ce dispatchThreads:MTLSizeMake(active, num_segs, 1) threadsPerThreadgroup:MTLSizeMake(active, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   auto encode_arg_inner_p1 = [&](const Tensor& in,
                                  const Tensor& vals,
@@ -782,27 +799,27 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     const auto num_tgs = at::ceil_div(num_partials, INNER_TG_SIZE / c10::metal::simdgroup_size);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {in});
+    getMPSProfiler().beginProfileKernel(ps, func_name, {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{num_partials, seg_len, num_segs, row_len};
     mtl_setArgs(ce, in, output_t, sizes_s);
     mtl_setArgs<4>(ce, vals, idxs);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   auto encode_arg_combine = [&](const Tensor& vals, const Tensor& idxs, uint32_t num_outputs, uint32_t num_segs) {
     const auto kname = fmt::format("{}_reduction_combine_{}", op_prefix, in_str);
     const auto num_tgs = at::ceil_div(num_outputs, INNER_TG_SIZE / c10::metal::simdgroup_size);
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, func_name, {vals});
+    getMPSProfiler().beginProfileKernel(ps, func_name, {vals}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{num_outputs, num_segs, 0, 0};
     mtl_setArgs(ce, vals, output_t, sizes_s, idxs);
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   // Shared split-K driver: allocate the [num_outputs, num_segs] (value,
   // index) partials, run the layout-specific pass 1, resolve with combine.
@@ -921,6 +938,11 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     return;
   }
 
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input, 1LL << 32),
+                              func_name,
+                              ": tensors requiring 64-bit indexing are not supported on MPS (numel=",
+                              input.numel(),
+                              ")");
   const auto kernel_name = fmt::format("{}_reduction_{}_long", op_prefix, in_str);
 
   NormParams params{};
@@ -937,16 +959,16 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
       auto ps = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(ps, func_name, {input});
+      getMPSProfiler().beginProfileKernel(ps, func_name, {input}, stream);
       [ce setComputePipelineState:ps];
       mtl_setArgs(ce, input, output_view, params);
       // Pad per-TG thread count up to a full simdgroup; padding lanes load
       // Op::identity() and skip the per-thread scan, keeping the two-stage
       // SIMD reduction well-defined for all reduction sizes.
       const auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(params.reduction_size, 32u));
-      const auto num_threads = static_cast<uint32_t>(output_view.numel()) * threads_per_group;
+      const auto num_threads = static_cast<uint64_t>(output_view.numel()) * threads_per_group;
       [ce dispatchThreads:MTLSizeMake(num_threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-      getMPSProfiler().endProfileKernel(ps);
+      getMPSProfiler().endProfileKernel(ps, stream);
     }
   });
 }
@@ -1006,6 +1028,12 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
   }
 
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input_orig, 1LL << 32),
+                              "MPS ",
+                              opts.prefix,
+                              "reduction: tensors requiring 64-bit indexing are not supported (numel=",
+                              input_orig.numel(),
+                              ")");
   const uint32_t reduction_size = input_orig.numel() / output.numel();
   constexpr uint32_t NCHAINS = SUM_NCHAINS;
   MPSStream* stream = getCurrentMPSStream();
@@ -1027,7 +1055,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     const auto num_tgs = at::ceil_div(num_rows, INNER_TG_SIZE / c10::metal::simdgroup_size);
     id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner", {in});
+    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner", {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 2> sizes_s{num_rows, row_len};
     mtl_setArgs(ce, in, out, sizes_s);
@@ -1036,7 +1064,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   // The outer kernels view the input as [outer_size, dim_size, inner_size]
   // with the dim reduced: each threadgroup covers OUTER_TG_WIDTH consecutive
@@ -1068,7 +1096,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
     getMPSProfiler().beginProfileKernel(
-        ps, prefix + (is_small_dim ? "reduction_outer_small_dim" : "reduction_outer"), {in});
+        ps, prefix + (is_small_dim ? "reduction_outer_small_dim" : "reduction_outer"), {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, 1, num_segs};
     const std::array<uint32_t, 4> strides_s{dim_stride, inner_stride, outer_stride, 0};
@@ -1080,7 +1108,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     [ce dispatchThreads:MTLSizeMake(num_tg_x * OUTER_TG_WIDTH, num_segs * tg_height, outer_size)
         threadsPerThreadgroup:MTLSizeMake(OUTER_TG_WIDTH, tg_height, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   auto encode_outer = [&](const Tensor& in,
                           const Tensor& out,
@@ -1150,7 +1178,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         "{}reduction_{}_{}_{}", prefix, variant, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
     auto ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, fmt::format("{}reduction_{}", prefix, variant), {in});
+    getMPSProfiler().beginProfileKernel(ps, fmt::format("{}reduction_{}", prefix, variant), {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{dim_size, inner_size, 1, num_segs};
     mtl_setArgs(ce, in, out, sizes_s);
@@ -1162,7 +1190,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     const auto active = (NARROW_TG_SIZE / inner_size) * inner_size;
     [ce dispatchThreads:MTLSizeMake(active, num_segs, outer_size) threadsPerThreadgroup:MTLSizeMake(active, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   // Smallest power-of-two lane count keeping at most CHUNK_ELEMS_PER_LANE
   // elements per lane; the chunk kernel then packs simdgroup_size / lanes
@@ -1187,7 +1215,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     const auto num_tgs = at::ceil_div(total_simds, INNER_TG_SIZE / c10::metal::simdgroup_size);
     id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
-    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner_chunk", {in});
+    getMPSProfiler().beginProfileKernel(ps, prefix + "reduction_inner_chunk", {in}, stream);
     [ce setComputePipelineState:ps];
     const std::array<uint32_t, 4> sizes_s{num_rows, row_len, lanes, segments};
     mtl_setArgs(ce, in, out, sizes_s);
@@ -1196,7 +1224,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     }
     [ce dispatchThreads:MTLSizeMake(num_tgs * INNER_TG_SIZE, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
-    getMPSProfiler().endProfileKernel(ps);
+    getMPSProfiler().endProfileKernel(ps, stream);
   };
   // Segments per row for split-K: aim for ~SPLIT_TARGET_PARTIALS partials
   // (rows * segments) so pass 1 fills the GPU, cap so a segment keeps
@@ -1586,7 +1614,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
 
           auto ps1 = lib.getPipelineStateForFunc(p1_kernel);
-          getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input});
+          getMPSProfiler().beginProfileKernel(ps1, opts.prefix + "reduction_pass1", {input}, stream);
           [ce setComputePipelineState:ps1];
           if (use_strided) {
             mtl_setArgs(ce, input, partials, params1);
@@ -1603,15 +1631,15 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
             constexpr uint32_t TPG = 256;
             [ce dispatchThreads:MTLSizeMake(num_groups * TPG, 1, 1) threadsPerThreadgroup:MTLSizeMake(TPG, 1, 1)];
           }
-          getMPSProfiler().endProfileKernel(ps1);
+          getMPSProfiler().endProfileKernel(ps1, stream);
 
           auto ps2 = lib.getPipelineStateForFunc(p2_kernel);
-          getMPSProfiler().beginProfileKernel(ps2, opts.prefix + "reduction_pass2", {partials});
+          getMPSProfiler().beginProfileKernel(ps2, opts.prefix + "reduction_pass2", {partials}, stream);
           [ce setComputePipelineState:ps2];
           mtl_setArgs(ce, partials, output, params2);
           auto tpg2 = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(num_groups, 32u));
           [ce dispatchThreads:MTLSizeMake(tpg2, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg2, 1, 1)];
-          getMPSProfiler().endProfileKernel(ps2);
+          getMPSProfiler().endProfileKernel(ps2, stream);
         }
       });
       return;
@@ -1634,7 +1662,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     @autoreleasepool {
       id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
       auto ps = lib.getPipelineStateForFunc(kernel_name);
-      getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction", {input_orig});
+      getMPSProfiler().beginProfileKernel(ps, opts.prefix + "reduction", {input_orig}, stream);
       [ce setComputePipelineState:ps];
       mtl_setArgs(ce, input_orig, output, params);
       // Round per-TG thread count up to a full simdgroup (32 lanes). With
@@ -1643,9 +1671,9 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       // is not zero. Padding threads load Op::identity() and contribute
       // nothing to the result.
       const auto threads_per_group = std::min(MAX_THREADGROUP_SIZE, c10::metal::round_up(reduction_size, 32u));
-      uint32_t num_threads = output.numel() * threads_per_group;
+      const auto num_threads = static_cast<uint64_t>(output.numel()) * threads_per_group;
       [ce dispatchThreads:MTLSizeMake(num_threads, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_group, 1, 1)];
-      getMPSProfiler().endProfileKernel(ps);
+      getMPSProfiler().endProfileKernel(ps, stream);
     }
   });
 }

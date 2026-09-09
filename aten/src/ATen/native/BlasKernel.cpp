@@ -2,13 +2,9 @@
 #include <ATen/Context.h>
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
-#include <ATen/Parallel.h>
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
-#include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 #include <algorithm>

@@ -97,7 +97,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
                                                          idx_str,
                                                          scalarToMetalTypeString(input)));
 
-      getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid});
+      getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid}, mpsStream);
       [computeEncoder setComputePipelineState:pso];
       auto dispatch = [&](auto idx_tag) {
         using IDX_T = decltype(idx_tag);
@@ -111,7 +111,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
       }
 
       mtl_dispatch1DJob(computeEncoder, pso, num_threads);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -175,7 +175,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
                                                          idx_str,
                                                          scalarToMetalTypeString(input)));
 
-      getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
+      getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid}, mpsStream);
       [computeEncoder setComputePipelineState:pso];
       auto dispatch = [&](auto idx_tag) {
         using IDX_T = decltype(idx_tag);
@@ -189,7 +189,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       }
 
       mtl_dispatch1DJob(computeEncoder, pso, num_threads);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -233,6 +233,10 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
                                                         int64_t _padding_mode,
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("grid_sampler_2d_backward_mps");
+
   check_grid_sampler_2d_backward(input, grid, grad_output);
 
   TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
@@ -297,11 +301,12 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
             ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, idx_str, type_str)
             : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, idx_str, type_str);
         auto input_pso = lib.getPipelineStateForFunc(input_name);
-        getMPSProfiler().beginProfileKernel(input_pso, "grid_sampler_2d_backward_input", {grad_output, grid});
+        getMPSProfiler().beginProfileKernel(
+            input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
         set_args(computeEncoder, grad_input, grad_output, grid);
         mtl_dispatch1DJob(computeEncoder, input_pso, num_threads);
-        getMPSProfiler().endProfileKernel(input_pso);
+        getMPSProfiler().endProfileKernel(input_pso, mpsStream);
       }
 
       if (interpolation_mode != GridSamplerInterpolation::Nearest) {
@@ -309,11 +314,12 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
             ? fmt::format("grid_sampler_2d_backward_bicubic_grid_{}_{}_{}", pad_str, idx_str, type_str)
             : fmt::format("grid_sampler_2d_backward_bilinear_grid_{}_{}", idx_str, type_str);
         auto grid_pso = lib.getPipelineStateForFunc(grid_name);
-        getMPSProfiler().beginProfileKernel(grid_pso, "grid_sampler_2d_backward_grid", {grad_output, input, grid});
+        getMPSProfiler().beginProfileKernel(
+            grid_pso, "grid_sampler_2d_backward_grid", {grad_output, input, grid}, mpsStream);
         [computeEncoder setComputePipelineState:grid_pso];
         set_args(computeEncoder, grad_grid, grad_output, input, grid);
         mtl_dispatch1DJob(computeEncoder, grid_pso, num_threads);
-        getMPSProfiler().endProfileKernel(grid_pso);
+        getMPSProfiler().endProfileKernel(grid_pso, mpsStream);
       }
     }
   });
@@ -329,6 +335,10 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("grid_sampler_3d_backward_mps");
+
   check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
@@ -392,7 +402,8 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
       getMPSProfiler().beginProfileKernel(
           pso,
           "grid_sampler_3d_backward",
-          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid});
+          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid},
+          mpsStream);
 
       [computeEncoder setComputePipelineState:pso];
 
@@ -424,7 +435,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
       MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
       [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 

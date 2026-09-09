@@ -20,7 +20,7 @@ routes FX nodes through ``lower_view_or_reshape``,
 
 import dataclasses
 import math
-from typing import Any, cast
+from typing import Any
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
@@ -43,8 +43,10 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedSqueeze,
     NormalizedView,
 )
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    canonical_tensorssa_reduction_type,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import normalize_shape
-from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -53,6 +55,12 @@ from torch.utils._ordered_set import OrderedSet
 @dataclasses.dataclass(frozen=True)
 class GroupedTensorSSALayout(GemmReductionGeometry):
     """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
+
+    swapped: bool = False
+
+    @property
+    def tensorssa_axis(self) -> int:
+        return 1 - self.axis if self.swapped else self.axis
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
@@ -71,7 +79,7 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
     def tensorssa_shape(self, source: Any) -> str:
         fragment_group_size = self.fragment_group_size_expr(source)
         repeats = self.fragment_repeat_expr(source)
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return f"((1, {fragment_group_size}, {repeats}), 1, 1)"
         return f"(({fragment_group_size}, 1, {repeats}), 1, 1)"
 
@@ -79,12 +87,18 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
         return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
 
     @property
+    def needs_physical_callbacks(self) -> bool:
+        return GemmReductionGeometry(
+            self.group, self.tensorssa_axis
+        ).needs_physical_callbacks
+
+    @property
     def needs_physical_combine(self) -> bool:
         return self.needs_physical_callbacks
 
     @property
     def reduction_profile(self) -> str:
-        if self.axis == 1:
+        if self.tensorssa_axis == 1:
             return "((None, 1, None), 1, 1)"
         return "((1, None, None), 1, 1)"
 
@@ -285,19 +299,25 @@ def lower_view_or_reshape(
 ) -> Any | None:
     """Emit an analyzed view using grouped provenance."""
     source_node = normalized.source
-    if source_node in local_reduce_store_sources:
-        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
-        return _cute_arg(source_node, env)
     source = _cute_arg(source_node, env)
     grouped_layout = grouped_tensors.get(node)
-    if grouped_layout is not None:
-        if preserve_value_layout or grouped_layout not in active_grouped_layouts:
-            return source
+    if (
+        grouped_layout is not None
+        and not preserve_value_layout
+        and grouped_layout in active_grouped_layouts
+    ):
+        if source_node in local_reduce_store_sources:
+            local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
         return _generate_like(
             kernel,
             f"{source}.reshape({grouped_layout.tensorssa_shape(source)})",
             source,
         )
+    if source_node in local_reduce_store_sources:
+        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
+        return source
+    if grouped_layout is not None:
+        return source
     if source_node in grouped_tensors:
         return source
     return None
@@ -450,9 +470,7 @@ def lower_tensorssa_reduce(
     layout = grouped_tensors[input_node]
     if not layout.matches_reduction_dim(dim):
         raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-    reduction_name = cast(
-        ReductionType, "sum" if reduction_type == "mean" else reduction_type
-    )
+    reduction_name = canonical_tensorssa_reduction_type(reduction_type)
     desc = tensorssa_reduction(reduction_name)
     finalize_expr = f"value / {layout.group}.0" if reduction_type == "mean" else "value"
     source = _cute_arg(input_node, env)
@@ -461,7 +479,7 @@ def lower_tensorssa_reduce(
         local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
             desc.combine_expr, finalize_expr
         )
-        if layout.axis == 0:
+        if layout.tensorssa_axis == 0:
             local_reduce_store_sources[node] = source
             return source
     reduced = _generate_like(

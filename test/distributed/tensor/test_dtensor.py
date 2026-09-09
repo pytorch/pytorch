@@ -1901,8 +1901,8 @@ class TestMixedPartialTypes(TestCase):
             api()
 
         # Test redistribute_local_tensor separately (different call pattern)
-        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
-        # so we test the internal redistribute_local_tensor directly
+        # Public DTensor.redistribute() only allows Shard -> Partial(sum), so
+        # test mixed Partial targets through redistribute_local_tensor directly.
         current_spec = DTensorSpec(
             mesh,
             (Replicate(), Replicate()),

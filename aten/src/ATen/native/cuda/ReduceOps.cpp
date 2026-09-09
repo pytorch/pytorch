@@ -8,19 +8,13 @@
 
 #include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/TensorIterator.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/full.h>
 #include <ATen/ops/imag.h>
-#include <ATen/ops/kthvalue_native.h>
-#include <ATen/ops/median_native.h>
-#include <ATen/ops/nanmedian_native.h>
-#include <ATen/ops/where.h>
 #endif
 
 namespace at::native {

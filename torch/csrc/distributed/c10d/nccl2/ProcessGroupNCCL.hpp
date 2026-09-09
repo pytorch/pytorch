@@ -122,10 +122,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   using Options = ::c10d::ProcessGroupNCCL::Options;
 
-  // c10d-style constructor: the NCCL communicator is bootstrapped lazily, on
-  // the first collective (or via eagerConnectSingleDevice / bound_device_id),
-  // matching c10d's device-binding model -- unlike torchcomms which took an
-  // eager init(device).
+  // c10d-style constructor. Communicator initialization happens when c10d
+  // binds the backend to a device via setBoundDeviceId().
   ProcessGroupNCCL(
       c10::intrusive_ptr<::c10d::Store> store,
       int rank,
@@ -149,6 +147,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const ::c10d::BroadcastOptions& opts =
           ::c10d::BroadcastOptions()) override;
   c10::intrusive_ptr<::c10d::Work> allreduce(
+      std::vector<at::Tensor>& tensors,
+      const ::c10d::AllreduceOptions& opts =
+          ::c10d::AllreduceOptions()) override;
+  c10::intrusive_ptr<::c10d::Work> allreduce_sparse(
       std::vector<at::Tensor>& tensors,
       const ::c10d::AllreduceOptions& opts =
           ::c10d::AllreduceOptions()) override;
@@ -230,9 +232,17 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsCoalescing() const override {
     return true;
   }
+  bool supportsTimeEstimation() const override {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+    return true;
+#else
+    return false;
+#endif
+  }
   bool supportsSplitting() const override {
     return true;
   }
+  bool isInitialized() override;
   bool supportsShrinking() const override {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
     return true;
@@ -242,6 +252,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   void startCoalescing() override;
   c10::intrusive_ptr<::c10d::Work> endCoalescing() override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
 
   // Create a child backend over `ranks` (a subset of this group's ranks) via
   // ncclCommSplit. Collective over the parent communicator: every parent rank
@@ -259,8 +271,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
           nullptr) override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override;
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -324,12 +339,31 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+#if defined(USE_ROCM)
+  // Returns true when ptr exactly matches an ncclMemAlloc segment base on this
+  // process group's device and len does not exceed the allocation size.
+  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
+#endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
+  // On ROCm the segment must be a live ncclMemAlloc/getMemAllocator range:
+  // an ineligible segment returns ncclInvalidArgument (caller should throw),
+  // while ncclInvalidUsage stays reserved for a missing symmetric transport
+  // (caller keeps the plain registration and warns).
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
+  bool supportsAbortHooks() const override {
+    return true;
+  }
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
+
+  bool supportsCompletionHooks() const override {
+    return true;
+  }
+  void registerCompletionHook(int64_t hook_id, ::c10d::CompletionHook hook)
+      override;
+  void unregisterCompletionHook(int64_t hook_id) override;
 
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
@@ -347,21 +381,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
-    return timing_enabled_.load();
+    return event_pool_->timingEnabled();
+  }
+  const std::shared_ptr<NCCLEventPool>& getEventPool() const {
+    return event_pool_;
   }
 
   friend class WorkNCCL;
   friend class WindowNCCL;
 
  protected:
-  // Events are pooled per timing mode: an event created with timing disabled
-  // cannot serve a work that needs elapsed_time(), so `timing_enabled` must
-  // describe the work the event is taken for / returned from.
-  [[nodiscard]] std::unique_ptr<at::cuda::CUDAEvent> getEvent(
-      bool timing_enabled);
-  void returnEvent(
-      std::unique_ptr<at::cuda::CUDAEvent> event,
-      bool timing_enabled);
   void waitForNcclOperation(
       ncclResult_t status,
       std::chrono::milliseconds timeout,
@@ -455,8 +484,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     std::shared_ptr<NcclApi> nccl_api_;
   };
 
-  // Lazy, one-time bootstrap of the NCCL communicator on `device`. Subsequent
-  // calls validate the same device. Replaces torchcomms' eager init(device).
+  // One-time bootstrap of the NCCL communicator on `device`. Subsequent calls
+  // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
   void finalize();
@@ -572,13 +601,21 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
-  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
+  void enqueueWork(
+      const c10::intrusive_ptr<WorkNCCL>& work,
+      cudaStream_t stream);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
   void checkTensorDevice(const at::Tensor& tensor) const;
   void checkTensorsDevice(const std::vector<at::Tensor>& tensors) const;
   void runAbortHooks();
+  // Whether anyone is listening, so a work that completes with no hook
+  // registered does not pay for a duration measurement nobody reads.
+  bool hasCompletionHooks();
+  void runCompletionHooks(
+      uint64_t completion_key,
+      std::optional<float> duration_ms);
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -597,7 +634,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
   // ctor and refreshed from NCCL in initNcclResources). The ported engine code
   // reads/writes `rank_` directly, which resolves to that protected member.
-  size_t max_event_pool_size_{};
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
   at::DataPtr barrier_buffer_;
@@ -613,13 +649,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
+  std::unique_ptr<at::cuda::MemPool> memPool_;
 
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
-  std::mutex event_pool_mutex_;
-  const bool event_cache_enabled_;
-  // Set by enableCollectivesTiming(); mutated under event_pool_mutex_ so the
-  // pool never holds events whose timing mode disagrees with it.
-  std::atomic<bool> timing_enabled_{false};
+  std::shared_ptr<NCCLEventPool> event_pool_;
 
   WorkNCCLQueue workq_;
 
@@ -653,7 +685,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
+  using RegistrationMap = std::map<void*, RegistrationHandle, std::less<>>;
+  RegistrationMap memoryRegistrationHandles_;
+  // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
+  // inside a registered segment.
+  RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.
@@ -668,8 +704,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void registerAddressLocked(void* addr, size_t len);
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
-  // base, folded in here).
+  // base, folded in here). Guarded because the watchdog thread fires them while
+  // the owner of a hook may be un/registering on another thread -- a
+  // FlightRecorderHook unregisters from its destructor, i.e. whenever Python
+  // drops the handle.
   std::unordered_map<int64_t, ::c10d::AbortHook> abortHooks_;
+  std::mutex abort_hooks_mutex_;
+
+  // Completion hooks (c10d::Backend API). Same guarding rationale as the abort
+  // hooks: the watchdog fires them from checkStatus() while their owner may be
+  // un/registering on another thread.
+  std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
+  std::mutex completion_hooks_mutex_;
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
@@ -678,7 +724,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::unordered_map<
       unsigned long long,
-      std::vector<c10::intrusive_ptr<WorkNCCL>>>
+      std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
   std::mutex graph_capture_work_mutex_;
 

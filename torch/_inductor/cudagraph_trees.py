@@ -129,8 +129,8 @@ else:
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
-def format_inputs_log(inputs: list[Any]) -> str:
-    def format_item(i: int, inp: Any) -> str:
+def format_inputs_log(inputs: Sequence[object]) -> str:
+    def format_item(i: int, inp: object) -> str:
         if isinstance(inp, torch.Tensor):
             return (
                 f"[{i}]: Tensor(size={list(inp.size())}, stride={inp.stride()}, "
@@ -166,18 +166,15 @@ class GraphID:
 
 def clear_cublass_cache() -> None:
     """
-    Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
-    doing warmup within a CUDAGraph private pool because we do not want persistent allocations from
-    one one run to the next. When we begin a new run of a cudagraphs path (generation), all tensors
-    from the previous generation are freed. This frees them the memory pool, but not elsewhere.
-    A tensor in the cublas workspace would continue to be in use the workspace but would also get allocated
-    in the next run. The memory would be in use in two places.
+    ROCm and CUDA with TORCH_CUBLAS_WORKSPACE_CACHE=1 keep persistent workspaces for matmuls. This
+    poses a problem for warmup within a CUDAGraph private pool because persistent allocations from
+    one run must not survive into the next. When we begin a new generation, tensors from the previous
+    generation are freed to the memory pool, while a cached cuBLAS workspace would remain in use.
 
-    To solve this, we clear cublas caches before and after warming up or recording. If a workspace is required
-    it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
-    program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
+    Clear cached workspaces before and after warming up or recording. CUDA's default eager workspace
+    mode does not populate this cache, so these calls are no-ops there.
     """
-    torch.cuda._clear_cublas_workspaces()
+    torch._C._cuda_clearCublasWorkspaces()
 
 
 @contextlib.contextmanager
@@ -341,6 +338,14 @@ class MarkStepBox:
     mark_step_counter = 0
 
 
+@dataclasses.dataclass
+class _LivenessCheckState:
+    # set by check_refcount on a stale-grad_fn detach; liveness sweeps reset
+    # it per pass to decide whether the pass could have freed earlier outputs.
+    # one instance per manager, shared by all its nodes.
+    detached: bool = False
+
+
 def mark_step_begin() -> None:
     "Indicates that a new iteration of inference or training is about to begin."
 
@@ -383,7 +388,7 @@ def reset_cudagraph_trees() -> None:
     MarkStepBox.mark_step_counter = 0
 
 
-def get_obj(local: Any, attr_name: str) -> Any:
+def get_obj(local: threading.local, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
     if not torch._C._is_key_in_tls(attr_name):
@@ -824,7 +829,7 @@ class CUDAWarmupNode:
             )
 
         # sdpa returns cpu tensors when not recording cuda graph
-        def add_ref(o: Any) -> bool:
+        def add_ref(o: object) -> bool:
             return (
                 isinstance(o, torch.Tensor)
                 and o.is_cuda
@@ -950,12 +955,14 @@ class CUDAGraphNode:
         stream: torch.cuda.Stream,
         mode: CompilationMode | None,
         compile_id: CompileId | None,
+        liveness_check_state: _LivenessCheckState,
     ) -> None:
         if not isinstance(inputs, (list, tuple)):
             raise AssertionError(
                 f"expected inputs to be list or tuple, got {type(inputs)}"
             )
 
+        self.liveness_check_state = liveness_check_state
         self.wrapped_function = wrapped_function
         self.user_visible_output_idxs = wrapped_function.user_visible_output_idxs
         self.id = id
@@ -1396,11 +1403,30 @@ class CUDAGraphNode:
         self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
-        "All outputs of the path from this node to its root are dead"
-        for depth, output_index in self.live_indices_after_graph:
-            if is_live(self.path_weakrefs[depth][output_index]):
+        """All outputs of the path from this node to its root are dead.
+
+        is_live is not a pure read: check_refcount may detach_() a dead
+        output's stale grad_fn, and that detach can drop the last reference
+        to an output we already visited and counted as live this pass. If a
+        pass performed no detach it was a pure read and its result is final;
+        otherwise rescan. Every extra pass requires a detach and each detach
+        permanently clears one grad_fn, so the pass bound is defensive only;
+        hitting it reports live, the safe direction. NB: a pass must visit
+        every output even after finding a live one -- early exit would skip
+        the very checks whose detaches free it.
+        """
+        state = self.liveness_check_state
+        for _ in range(len(self.live_indices_after_graph) + 1):
+            state.detached = False
+            any_live = False
+            for depth, output_index in self.live_indices_after_graph:
+                if is_live(self.path_weakrefs[depth][output_index]):
+                    any_live = True
+            if not any_live:
+                return True
+            if not state.detached:
                 return False
-        return True
+        return False
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
@@ -1655,13 +1681,48 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
+                # NB: the refcount must be measured before binding any local
+                # reference to the tensor, or the local itself inflates it
                 refcount = self_loc.get_output_refcount(i)
-                # pyrefly: ignore
-                if self_loc.cached_tensor_outputs[i]._use_count() > 1:
-                    # c10::Tensor may also holds one reference count
-                    if refcount < 3:
-                        raise AssertionError(f"expected refcount >= 3, got {refcount}")
-                    return refcount == 3
+                cached = self_loc.cached_tensor_outputs[i]
+                if cached is None:
+                    # checks are installed only on cached entries and are
+                    # uninstalled before entries are cleared
+                    raise AssertionError(
+                        f"cached output {i} cleared while its liveness check was still installed"
+                    )
+                # TODO: under free-threaded Python sys.getrefcount is biased /
+                # imprecise; use PyUnstable_Object_IsUniquelyReferenced (or
+                # query the real refcount) for this check instead
+                if (
+                    refcount == 2
+                    and cached._use_count() == 1
+                    and cached.grad_fn is not None
+                ):
+                    # refcount == 2 is exactly the cache-only baseline (our
+                    # list entry + getrefcount's argument), so no user code
+                    # holds this tensor and detaching cannot strip a grad_fn
+                    # anyone could still call backward through. Like the
+                    # _backward_hooks reset in reconstruct_outputs, this scrubs
+                    # stale per-run autograd state off a cached tensor
+                    # (aot_autograd resets the meta on every replay-return
+                    # anyway) -- but lazily, because the stale grad_fn pins the
+                    # backward node, whose SavedVariables pin sibling cached
+                    # outputs, which would make the _use_count check below
+                    # permanently true and paths never abandonable. A genuine
+                    # pending backward survives the detach through external
+                    # edges to the node (e.g. a downstream loss tensor).
+                    cached.detach_()
+                    self_loc.liveness_check_state.detached = True
+                if cached._use_count() > 1:
+                    # a C++ holder still references this output -- after the
+                    # detach above, this is a real external holder, typically
+                    # autograd's SavedVariable for a pending backward. Treating
+                    # it as dead lets the path be abandoned mid-generation,
+                    # severing the backward from its forward's tree; later
+                    # recordings may then claim the activation memory and its
+                    # replays silently corrupt the pending backward's inputs.
+                    return False
                 else:
                     if refcount < 2:
                         raise AssertionError(f"expected refcount >= 2, got {refcount}")
@@ -2304,6 +2365,9 @@ class CUDAGraphTreeManager:
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
 
+        # shared by all this manager's nodes; see _LivenessCheckState
+        self.liveness_check_state = _LivenessCheckState()
+
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -2667,6 +2731,7 @@ class CUDAGraphTreeManager:
                 self.stream,
                 self.mode,
                 self.compile_id,
+                self.liveness_check_state,
             )
             if self.current_node is None:
                 self.roots[function_id].append(node)

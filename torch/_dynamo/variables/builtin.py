@@ -85,6 +85,9 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
+    Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -183,6 +186,7 @@ _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
+    _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
     _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
 
 
@@ -386,7 +390,7 @@ class BaseBuiltinVariable(VariableTracker):
 
     Specialized subclasses (e.g. DictBuiltinVariable) set `_fn` as a class
     attribute. BuiltinVariable stores the callable on the instance as `self.fn`
-    and overrides as_python_constant / reconstruct / getattro_impl accordingly.
+    and overrides as_python_constant / reconstruct / tp_getattro_impl accordingly.
     """
 
     _fn: Any = None
@@ -429,10 +433,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
     tp_members = {
-        "__base__": Member(_type_get_base, None),
-        "__flags__": Member(_type_get_flags, None),
+        "__base__": Member(_type_get_base, readonly_setter),
+        "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
@@ -449,7 +453,7 @@ class BaseBuiltinVariable(VariableTracker):
             raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Declarative type-attribute dispatch, mirroring the consultation at the
@@ -472,7 +476,7 @@ class BaseBuiltinVariable(VariableTracker):
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
@@ -604,7 +608,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, None),
+        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -918,7 +922,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
                 # COMPARE_OP (a == b) dispatches through generic_richcompare,
-                # which implements do_richcompare via richcompare_impl slots.
+                # which implements do_richcompare via tp_richcompare_impl slots.
                 # See object_protocol.py for details.
                 dunder = _OPERATOR_TO_DUNDER[op]
 
@@ -1554,7 +1558,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, f"vars expected at most 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
-            return args[0].getattro_impl(tx, "__dict__")
+            return args[0].tp_getattro_impl(tx, "__dict__")
         except ObservedAttributeError:
             raise_observed_exception(TypeError, tx)
 
@@ -2434,7 +2438,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
-        if isinstance(args[0], (variables.SetVariable, variables.ConstDictVariable)):
+        if isinstance(
+            args[0],
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                variables.ConstDictVariable,
+            ),
+        ):
             items = list(args[0].items.keys())
         else:
             items = unpack_iterable(tx, args[0])
@@ -2776,7 +2788,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             mutation_type=ValueMutationNew(),
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Declarative type-attribute dispatch (__name__, __bases__, __base__,
@@ -3177,6 +3189,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(a, SymNodeVariable):
+            if a.python_type() is bool:
+                return SymNodeVariable.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function", torch.sym_not, *proxy_args_kwargs([a], {})
+                    ),
+                    sym_num=None,
+                )
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3188,7 +3208,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable, SetVariable)):
+        if isinstance(
+            a,
+            (
+                ListVariable,
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                variables.DictKeySetVariable,
+            ),
+        ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
             bool_result = self.call_bool(tx, a)
@@ -3223,6 +3252,18 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+    tp_methods = {
+        "fromkeys": Method(fromkeys),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3245,11 +3286,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
-
-        if name == "fromkeys":
-            return DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, dict, *args, **kwargs
-            )
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
@@ -3361,7 +3397,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
-        if isinstance(arg, (variables.SetVariable, ConstDictVariable)):
+        if isinstance(
+            arg,
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                ConstDictVariable,
+            ),
+        ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
         if isinstance(arg, dict):
@@ -3453,7 +3497,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
-            # than propagating a graph break from getattro_impl.
+            # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
             try:
@@ -3612,7 +3656,17 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 from .builder import wrap_fx_proxy
 
                 if name == "requires_grad":
-                    # TODO(azahed98): Make it work properly
+                    dtype = obj.dtype  # type: ignore[attr-defined]
+                    if (
+                        obj.source is None
+                        and val.is_python_constant()
+                        and val.as_python_constant() is True
+                        and not obj.requires_grad  # type: ignore[attr-defined]
+                        and dtype is not None
+                        and (dtype.is_floating_point or dtype.is_complex)
+                    ):
+                        obj.method_requires_grad_(tx, val)  # type: ignore[attr-defined]
+                        return val
                     unimplemented(
                         gb_type="setattr() on Tensor.requires_grad",
                         context=f"setattr({obj}, {name}, {val})",
@@ -3742,7 +3796,9 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                 assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
 
                 try:
-                    getattr_var = obj.getattro_impl(tx, name_var.as_python_constant())
+                    getattr_var = obj.tp_getattro_impl(
+                        tx, name_var.as_python_constant()
+                    )
                 except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 
@@ -3831,14 +3887,18 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if len(args) == 1 and not kwargs:
+            if args and not kwargs:
+                # list.__new__ (PyType_GenericNew) ignores extra args -- only
+                # the first arg (the type) matters. Pass init_args=[] so
+                # reconstruction emits base_cls.__new__(cls) without extras.
+                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
-                    args[1:],
+                    [],
                     tx=tx,
                 )
 

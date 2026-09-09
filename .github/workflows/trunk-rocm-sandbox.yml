@@ -41,47 +41,45 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: amd-sandbox
 
-  linux-noble-rocm-py3_12-build:
-    name: linux-noble-rocm-py3.12-mi300
+  linux-jammy-rocm-py3_10-build:
+    name: linux-jammy-rocm-py3.10-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-noble-rocm-py3.12-mi300
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
-      # The amd-sandbox experiment routes the gfx942 test shards onto the
+      build-environment: linux-jammy-rocm-py3.10-mi350
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
       # amd-sandbox-label-type output (empty when the experiment is disabled, in
-      # which case the canonical linux.rocm.gpu.gfx942.* labels are used).
+      # which case the canonical linux.rocm.gpu.mi350.* labels are used).
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "inductor", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.gfx942.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
-  linux-noble-rocm-py3_12-test:
-    name: linux-noble-rocm-py3.12-mi300
+  linux-jammy-rocm-py3_10-test:
+    name: linux-jammy-rocm-py3.10-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-noble-rocm-py3_12-build
+      - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
