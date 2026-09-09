@@ -86,6 +86,49 @@ class TestPackage(torch._inductor.test_case.TestCase):
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
 
+    def test_bypass_drops_only_the_current_compiles_backend(self):
+        # A bypass discards what the compile that failed to serialize registered
+        # on its entry, not what earlier compiles of the same code object did.
+        def fn(x):
+            return x + 1
+
+        first_code = compiled_region_with_backend_id_for_package_test.__code__
+        (first_id,) = first_code.co_names
+        second_id = "__compiled_fn_1_00000000_0000_0000_0000_000000000000"
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", first_code)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(second_id, object())
+            package.bypass_current_compile()
+
+        entry = package.cache_entry().codes[0]
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [first_id])
+        self.assertEqual(len(entry.guarded_codes), 1)
+        self.assertNotIn(second_id, package.cached_backends)
+
+    def test_bypass_of_every_compile_marks_the_entry_bypassed(self):
+        # With nothing installable the entry must NOT look like a trivial
+        # function that install() would skip_code; a later compile that does
+        # record a guarded code makes it installable again.
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        (backend_id,) = code.co_names
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(backend_id)
+            package.bypass_current_compile()
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [])
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [backend_id])
+
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
         class MyModule(torch.nn.Module):
