@@ -166,7 +166,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled(x), mod(x))
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, use_w=True), mod(x, use_w=True))
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("named parameters" in line for line in logs.output))
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
         torch._dynamo.reset()
@@ -624,7 +624,7 @@ def add(x, y):
         expected = fn(x)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
         self.assertEqual(entry["backend_ids"], [])
         torch._dynamo.reset()
@@ -634,7 +634,7 @@ def add(x, y):
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x), expected)
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_recompile_keeps_the_frames_earlier_variants(self):
@@ -652,7 +652,7 @@ def add(x, y):
         self.assertEqual(compiled(x), expected)
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             compiled(x, UnpicklableConfig())
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
         torch._dynamo.reset()
@@ -664,7 +664,7 @@ def add(x, y):
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             cfg = UnpicklableConfig()
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
-        self.assertTrue(any("package bypass" in line for line in logs.output))
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
