@@ -701,9 +701,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
     if len(choices) == 1:
-        # A single choice skips autotuning, so overlap its kernel compile with
-        # the rest of Inductor's compilation instead of paying it at first call.
-        choices[0].precompile(wait=False)
+        # A single choice skips autotuning; compile its kernel now instead of at first call.
+        choices[0].precompile()
     structural_outs = {}
     if local_reduce_store is not None:
         structural_outs[local_reduce_store.node] = local_reduce_outs[0]

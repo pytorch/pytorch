@@ -29,7 +29,6 @@ import inspect
 import os
 import sys
 import sysconfig
-import threading
 import types
 from typing import NamedTuple, Optional
 
@@ -326,7 +325,6 @@ def module_locator(obj, fn) -> Optional[tuple]:
 # that resolves the digest. Same-digest reconstruction overwrites in place.
 TORCH_OP_EPI_MODS: dict[str, object] = {}
 TORCH_OP_TRANSFORM_MODS: dict[str, object] = {}
-_CLOUDPICKLE_BY_VALUE_LOCK = threading.Lock()
 
 
 class LocalModRegistry:
@@ -359,21 +357,7 @@ class LocalModRegistry:
 
         from torch._vendor.quack.cache.async_compile import PoolPayload
 
-        mod = self._mods[digest]
-        fn = getattr(mod, "fn", None)
-        module = sys.modules.get(getattr(fn, "__module__", None))
-        if module is None:
-            data = cloudpickle.dumps(mod)
-        else:
-            with _CLOUDPICKLE_BY_VALUE_LOCK:
-                registered = module.__name__ in cloudpickle.list_registry_pickle_by_value()
-                if not registered:
-                    cloudpickle.register_pickle_by_value(module)
-                try:
-                    data = cloudpickle.dumps(mod)
-                finally:
-                    if not registered:
-                        cloudpickle.unregister_pickle_by_value(module)
+        data = cloudpickle.dumps(self._mods[digest])
         return PoolPayload(__name__, self.installer, digest, data)
 
     def install(self, expected_digest: str, data: bytes) -> None:
