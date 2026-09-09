@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import os
+import re
 import sys
 import tempfile
 import types
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.testing._internal.inductor_utils import (
@@ -155,58 +157,79 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
             entry.check_versions()
 
-    def test_cpu_codegen_target_requires_the_host_to_pick_the_same_isa(self):
-        # The kernel source is tiled for the ISA picked at codegen and compiled
-        # with the ISA picked on the loading host, so the two must be equal. A
-        # wider host is not a superset: its masked loads zero-fill the lanes the
-        # narrower tiling never touches, and unmasked reductions read them.
-        def check(cached_target, host_target):
-            base = SystemInfo.current(cpu_codegen=False)
-            cached = dataclasses.replace(base, cpu_codegen_target=cached_target)
-            with patch(
-                "torch._dynamo.package._current_cpu_codegen_target",
-                return_value=host_target,
-            ):
-                cached.check_compatibility(SystemInfo.current())
-
-        avx2 = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
-        avx512 = ("x86_64", "avx512", 512, ("CPU_CAPABILITY_AVX512",), None, None)
-        neon = (
+    # Named codegen targets: (machine, isa, bit width, build macros, simdlen, march).
+    _CODEGEN_TARGETS = {
+        "avx2": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None),
+        "avx512": ("x86_64", "avx512", 512, ("CPU_CAPABILITY_AVX512",), None, None),
+        "neon": (
             "aarch64",
             "asimd",
             128,
             ("CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"),
             None,
             None,
+        ),
+        "sve128": ("aarch64", "asimd", 128, ("CPU_CAPABILITY_SVE128",), None, None),
+        "avx2_simdlen": ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None),
+    }
+
+    @parametrize(
+        "cached, host, error",
+        [
+            subtest(("avx2", "avx2", None), name="same_isa"),
+            subtest(
+                ("avx2", "avx512", "generated for vector ISA 'avx2'.*for 'avx512'"),
+                name="wider_host",
+            ),
+            subtest(
+                ("avx512", "avx2", "generated for vector ISA 'avx512'.*for 'avx2'"),
+                name="narrower_host",
+            ),
+            subtest(
+                ("neon", "avx2", "machine 'aarch64', this host is 'x86_64'"),
+                name="other_machine",
+            ),
+            # NEON and SVE128 share both the name "asimd" and a 128-bit width, so
+            # only the build macro tells them apart.
+            subtest(
+                ("neon", "sve128", "vector ISA 'asimd'"), name="same_name_other_macro"
+            ),
+            # simdlen and march are recorded for diagnostics but do not gate:
+            # pick_vec_isa() folds cpp.simdlen (and ATEN_CPU_CAPABILITY) into the
+            # ISA it resolves, and march never reaches it -- it only changes how
+            # the same tiled source is compiled -- so a host that lands on the
+            # same (ISA, width, macro) can rebuild the kernels whatever knob got
+            # it there. An artifact built under cpp.simdlen=256 loads on a host
+            # whose default already picks the same 256-bit ISA; gating on the raw
+            # knob would reject it and make the cpp.simdlen escape hatch trade an
+            # ISA error for a simdlen error.
+            subtest(("avx2_simdlen", "avx2", None), name="simdlen_does_not_gate"),
+            subtest(
+                ("avx2", None, "reports no CPU codegen target"), name="no_host_target"
+            ),
+        ],
+    )
+    def test_cpu_codegen_target_requires_the_host_to_pick_the_same_isa(
+        self, cached, host, error
+    ):
+        # The kernel source is tiled for the ISA picked at codegen and compiled
+        # with the ISA picked on the loading host, so the two must be equal. A
+        # wider host is not a superset: its masked loads zero-fill the lanes the
+        # narrower tiling never touches, and unmasked reductions read them.
+        base = SystemInfo.current(cpu_codegen=False)
+        cached_info = dataclasses.replace(
+            base, cpu_codegen_target=self._CODEGEN_TARGETS[cached]
         )
-        sve128 = ("aarch64", "asimd", 128, ("CPU_CAPABILITY_SVE128",), None, None)
-        check(avx2, avx2)
-        with self.assertRaisesRegex(
-            RuntimeError, "generated for vector ISA 'avx2'.*for 'avx512'"
+        host_target = None if host is None else self._CODEGEN_TARGETS[host]
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=host_target,
         ):
-            check(avx2, avx512)
-        with self.assertRaisesRegex(
-            RuntimeError, "generated for vector ISA 'avx512'.*for 'avx2'"
-        ):
-            check(avx512, avx2)
-        with self.assertRaisesRegex(
-            RuntimeError, "machine 'aarch64', this host is 'x86_64'"
-        ):
-            check(neon, avx2)
-        # NEON and SVE128 share both the name "asimd" and a 128-bit width, so
-        # only the build macro tells them apart.
-        with self.assertRaisesRegex(RuntimeError, "vector ISA 'asimd'"):
-            check(neon, sve128)
-        # simdlen and march are recorded for diagnostics but do not gate:
-        # pick_vec_isa() already folds them into the resolved ISA, so a host
-        # that lands on the same (ISA, width, macro) can rebuild the kernels
-        # whatever knob got it there. An artifact built under cpp.simdlen=256
-        # loads on a host whose default already picks the same 256-bit ISA;
-        # gating on the raw knob would reject it and make the cpp.simdlen escape
-        # hatch trade an ISA error for a simdlen error.
-        check(("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None), avx2)
-        with self.assertRaisesRegex(RuntimeError, "reports no CPU codegen target"):
-            check(avx2, None)
+            if error is None:
+                cached_info.check_compatibility(SystemInfo.current())
+            else:
+                with self.assertRaisesRegex(RuntimeError, error):
+                    cached_info.check_compatibility(SystemInfo.current())
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
         # pick_vec_isa never raises for a missing compiler; it returns
@@ -258,10 +281,17 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
         PrecompileContext.clear()
-        # A user's own callable may emit anything, so it counts as native.
-        torch.compile(fn, backend=custom_backend)(torch.randn(3))
+        # A user's own callable may emit anything, so it counts as native and
+        # the probe runs; patch it so the assertion needs no host toolchain.
+        sentinel = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            return_value=sentinel,
+        ):
+            torch.compile(fn, backend=custom_backend)(torch.randn(3))
         (entry,) = PrecompileContext._dynamo_cache_entries.values()
         self.assertTrue(entry.requires_native_backend_compatibility)
+        self.assertEqual(entry.system_info.cpu_codegen_target, sentinel)
 
     def test_loaded_eager_package_stays_exempt_on_resave(self):
         def fn(x):
@@ -944,6 +974,49 @@ def add(x, y):
         self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_failed_warm_load_is_torn_down_before_the_cold_fallback(self):
+        # The transparent cache's warm path installs the loaded package and, if
+        # install() raises partway, tears the partial install down before
+        # compiling cold. Make the SECOND entry's guard rebuild raise, so the
+        # first entry's precompile entry and renamed resume global are already
+        # bound when the handler runs.
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        arg = torch.randn(3, 2)
+        expected = fn(arg)
+        torch.compile(fn)(arg)  # noqa: UNSPECIFIED_BACKEND
+        DynamoCache.clear()
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+        original = torch._dynamo.package.load_guards_state
+        calls = []
+
+        def flaky_load_guards_state(*args, **kwargs):
+            calls.append(None)
+            if len(calls) == 2:
+                raise RuntimeError("simulated guard rebuild failure")
+            return original(*args, **kwargs)
+
+        with patch.object(
+            torch._dynamo.package, "load_guards_state", flaky_load_guards_state
+        ):
+            with self.assertLogs("torch._dynamo.eval_frame", level="WARNING") as logs:
+                warm = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(warm(arg), expected)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("Failed to load entry" in line for line in logs.output))
+        # Nothing of the partial install survives: no precompile entry and no
+        # token-suffixed resume global.
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        token_suffixed = re.compile(r"__resume_at_\d+_\d+_[0-9a-f]{32}$")
+        leaked = [k for k in set(module_dict) - before if token_suffixed.match(k)]
+        self.assertEqual(leaked, [])
+
     def test_rename_globals_rewrites_nested_code(self):
         def outer(x):
             def inner(y):
@@ -1181,6 +1254,69 @@ def add(x, y):
         pkg.uninstall()
         self.assertIs(module_dict[name], sentinel)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_finalizer_leaves_a_users_rebinding_alone(self):
+        # The GC finalizer runs the same identity-checked pop as uninstall().
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        def other_fn(x):
+            return x - 1
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        (name,) = [
+            k for k in set(module_dict) - before if k.startswith("__compiled_fn")
+        ]
+        sentinel = object()
+        module_dict[name] = sentinel
+        self.addCleanup(module_dict.pop, name, None)
+        del pkg
+        gc.collect()
+        # A finalizer may defer the pop to the next install/uninstall; drive one
+        # on an unrelated package so the check does not depend on when it runs.
+        self._save_eager_package(other_fn, ctx, (torch.randn(3, 2),))
+        other, other_backends = ctx.load_package(other_fn, self.path())
+        other.install(other_backends)
+        other.uninstall()
+        self.assertIs(module_dict[name], sentinel)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_capturing_package_refuses_a_frame_another_package_serves(self):
+        # Lookup is region-exact but not owner-exact: a fresh CompilePackage(fn)
+        # compiled while a loaded package serves fn in the same region would be
+        # served that package's entry, record nothing, and save a zero-guarded
+        # artifact that skip_code()s the frame on install. The context refuses
+        # instead; an isolated region (or uninstalling first) is the way out.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        pkg1, backends = ctx.load_package(fn, self.path())
+        pkg1.install(backends)
+        self.addCleanup(pkg1.uninstall)
+        x = torch.randn(3, 2)
+        with self.assertRaisesRegex(
+            RuntimeError, "another CompilePackage is installed"
+        ):
+            torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(fn)(x)
+        # pkg1 still serves the frame, untouched.
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        # An isolated region does not collide with pkg1's default-region entries.
+        pkg2 = CompilePackage(fn)
+        opt = torch._dynamo.optimize(
+            backend="eager", package=pkg2, isolate_recompiles=True
+        )
+        self.assertEqual(opt(fn)(x), fn(x))
+        self.assertEqual(sum(len(e.guarded_codes) for e in pkg2._codes.values()), 1)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))

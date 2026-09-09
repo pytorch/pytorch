@@ -347,36 +347,26 @@ void ExtraState::clear_in_place() {
   {
     CacheLock lock(this->cache_mutex);
     if (this->cache_python_depth > 0) {
-      // This thread is INSIDE Python run by a holder of this lock, typically
-      // lookup()'s guard evaluation (the recursive cache_mutex is how we got
-      // here, via Python run by a guard reaching reset_code): that lookup
-      // holds live iterators into these lists, so neither destroying nor even
-      // relinking their nodes is safe. Park the clear; the next depth-zero
-      // cache_mutex holder applies it. The clear landing "just after" the
-      // interrupted lookup makes reset()'s clean-slate contract asynchronous: a
-      // reset() on another thread parks here while this thread's lookup holds
-      // depth > 0 and returns with the entries still present and servable,
-      // until the next depth-zero holder drains them. lookup,
-      // _get_total_cache_entry_count and _debug_get_cache_entry_list apply
-      // pending evictions before they read, but apply_pending_evictions gates
-      // on cache_python_depth, a CROSS-thread atomic: the drain waits until no
-      // thread is inside a lookup window on this code object, not merely until
-      // the next reader. While a peer thread holds one open all three still
-      // report the parked entries as live, and reset() has by then cleared its
-      // Python-side bookkeeping (orig_code_map, torch/_dynamo/__init__.py), so
-      // a compile of this frame racing the parked CLEAR_ALL can serve a stale
-      // entry or KeyError out of Dynamo internals. Only a reader on a thread
-      // that itself sits at depth zero (the common single-threaded case) is
-      // guaranteed to see them gone. Making reset() atomic against an in-flight
-      // lookup -- wait for depth zero, or gate its Python clear on the C++
-      // clear having applied -- is deferred (tracked with
-      // pytorch/pytorch#196394). The one depth-zero op that does NOT drain
-      // first is _clear_cache_entries_for_region, which erases a single region
-      // in place; that is safe because a parked CLEAR_ALL swaps the whole map
-      // when it finally runs and does not mind that one region is already gone.
-      // This cross-thread park is new with releasing cache_mutex during guard
-      // evaluation; the old recursive mutex would have blocked the peer
-      // instead.
+      // This thread is INSIDE Python run by a holder of this lock (typically
+      // lookup()'s guard evaluation reaching reset_code through the recursive
+      // cache_mutex), so that lookup holds live iterators into these lists and
+      // neither destroying nor relinking their nodes is safe. Park the clear;
+      // the next depth-zero cache_mutex holder applies it. That makes reset()'s
+      // clean-slate contract asynchronous: cache_python_depth is a CROSS-thread
+      // atomic, so while any thread holds a lookup window open on this code
+      // object the drain waits, and lookup / _get_total_cache_entry_count /
+      // _debug_get_cache_entry_list still report the parked entries as live
+      // even though reset() has already cleared its Python-side bookkeeping
+      // (orig_code_map, torch/_dynamo/__init__.py). A compile of this frame
+      // racing the parked CLEAR_ALL can therefore serve a stale entry or
+      // KeyError out of Dynamo internals; only a reader on a thread itself at
+      // depth zero (the single-threaded case) is guaranteed to see them gone.
+      // Making reset() atomic against an in-flight lookup is deferred
+      // (pytorch/pytorch#196394). _clear_cache_entries_for_region is the one
+      // depth-zero op that does not drain first: it erases a single region in
+      // place, which a parked CLEAR_ALL (a whole-map swap) does not mind. This
+      // cross-thread park is new with releasing cache_mutex during guard
+      // evaluation; the recursive mutex alone would have blocked the peer.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
       // Split state until that holder runs: the strategy, frame state and
@@ -469,14 +459,13 @@ FrameState* extract_frame_state(
     frame_state = extra_state->frame_state.ptr();
     Py_INCREF(frame_state);
   } else {
-    // Nothing that can execute Python may run under this plain mutex. Unlike
-    // cache_mutex it has no CacheLock, so a thread that drops the GIL while
-    // holding it wedges every other GIL-holding thread that then blocks here --
-    // and operator[] default-constructs the py::dict, whose PyDict_New can
-    // trigger a gen-0 collection that runs an arbitrary __del__. So the dict
-    // for a new region is built BEFORE the lock and the lock only finds or
-    // emplaces; `fresh` outlives the lock scope so its decref, when the key
-    // already existed, also lands outside.
+    // Nothing that can execute Python may run under this plain mutex (no
+    // CacheLock: a thread that drops the GIL while holding it wedges every
+    // GIL-holding thread that then blocks here), and operator[]'s PyDict_New
+    // can trigger a gen-0 collection that runs an arbitrary __del__. So the
+    // dict for a new region is built BEFORE the lock, the lock only finds or
+    // emplaces, and `fresh` outlives the lock scope so its decref lands
+    // outside.
     py::dict fresh;
     {
       std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
@@ -605,15 +594,13 @@ void reset_extra_state(PyCodeObject* code) {
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
-  // This only rejects re-installing the SAME pointer; it still lets
-  // _PyCode_SetExtra destroy a live old state when a different non-null one is
-  // installed. What makes that unreachable is the caller: the sole path that
-  // installs a non-null state, init_and_set_extra_state, CHECKs the slot is
-  // null first, so "never free an ExtraState another thread may be parked on"
-  // is enforced there. Tightening this to reject a non-null old_extra_state
-  // outright would make the invariant structural rather than caller-enforced;
-  // that is a behavioral change deferred here (tracked with
-  // pytorch/pytorch#196394).
+  // This only rejects re-installing the SAME pointer; _PyCode_SetExtra would
+  // still destroy a live old state if a different non-null one were installed.
+  // That is unreachable because the sole installer of a non-null state,
+  // init_and_set_extra_state, CHECKs the slot is null first. Rejecting a
+  // non-null old_extra_state here outright would make "never free an
+  // ExtraState another thread may be parked on" structural rather than
+  // caller-enforced; deferred (tracked with pytorch/pytorch#196394).
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
@@ -662,11 +649,14 @@ static bool cache_entry_has_no_guards(
 // a guarded object is deallocated -- the id-reuse safety net -- so serving its
 // target would run a graph guarded by an ID_MATCH on an id that may already be
 // reused, a wrong-graph hit. invalidate_locked names its target the same way,
-// by live guard-manager identity. Guarded on has_pending_invalidations so the
-// common (nothing parked) path takes no extra lock. Only cache entries are
-// affected; invalidate_locked never touches precompile entries. Must be called
-// under cache_mutex (lock order cache_mutex -> pending_invalidation_mutex,
-// matching invalidate/drain).
+// by live guard-manager identity. Only invalidations parked BEFORE the snapshot
+// are covered: one arriving after lookup() releases cache_mutex parks and is
+// applied at the next lookup, so this in-flight lookup can still serve the
+// entry it named. Guarded on has_pending_invalidations so the common (nothing
+// parked) path takes no extra lock. Only cache entries are affected;
+// invalidate_locked never touches precompile entries. Must be called under
+// cache_mutex (lock order cache_mutex -> pending_invalidation_mutex, matching
+// invalidate/drain).
 template <typename Candidates>
 static void drop_pending_invalidated_candidates(
     ExtraState* extra_state,
@@ -723,29 +713,24 @@ void lookup(
   std::vector<ExtraState::PendingEviction> reaped_evictions;
 
   // Guard evaluation runs arbitrary Python (guard closures, backend __eq__,
-  // guard_error_hook) that can call torch._dynamo.reset()/remove_from_cache,
-  // which take convert_frame.compile_lock. Holding cache_mutex across that
-  // orders (cache_mutex, compile_lock) -- the reverse of the compile path,
-  // which holds compile_lock and then reaches cache_mutex through the
-  // _get_cache_entries_for_region / _get_total_cache_entry_count callbacks --
-  // an ABBA deadlock across threads. So snapshot the candidates under the lock,
-  // raise CachePythonDepth, RELEASE the lock, evaluate guards lock-free, and
-  // re-lock only for the structural mutation on a hit. While depth is non-zero
-  // every node destroy/free path parks (apply_pending_evictions,
-  // drain_pending_invalidations, invalidate, clear_in_place), so the raw entry
-  // pointers snapshotted below cannot be freed. A concurrent create_cache_entry
-  // inserts (front under use_lru, else back) and another thread's hit may
-  // move_to_front, but std::list splice preserves node addresses, so neither
-  // invalidates the snapshot; a newly inserted entry is simply absent from it.
-  // This covers node LIFETIME and address stability, not the mutability of a
-  // node's fields: the lock-free reads of cache_entry.backend / root_mgr /
-  // diff_guard_root_mgr below assume those members are stable. invalidate()
-  // nulls the manager pointers only under CachePythonDepth so it parks, but
-  // update_diff_guard_root_manager (bound with no lock) can overwrite
-  // diff_guard_root_mgr from guards.py while a concurrent lookup dereferences
-  // it under skip_guard_eval_unsafe. That race predates this change (base
-  // lookup() held no lock at all) and needs skip_guard_eval_unsafe plus two
-  // threads recompiling one code object.
+  // guard_error_hook) that can reach torch._dynamo.reset()/remove_from_cache
+  // and so convert_frame.compile_lock; holding cache_mutex across it orders
+  // (cache_mutex, compile_lock), the reverse of the compile path (compile_lock,
+  // then cache_mutex via _get_cache_entries_for_region /
+  // _get_total_cache_entry_count) -- an ABBA deadlock across threads. So:
+  // snapshot the candidates under the lock, raise CachePythonDepth, RELEASE the
+  // lock, evaluate guards lock-free, re-lock only for the structural mutation
+  // on a hit. While depth is non-zero every destroy/free path parks, so the raw
+  // pointers snapshotted below cannot be freed, and std::list splice keeps node
+  // addresses stable under a concurrent insert or move_to_front (a new entry is
+  // simply absent from the snapshot). That covers node LIFETIME, not field
+  // mutability: the lock-free reads of backend / root_mgr / diff_guard_root_mgr
+  // assume those are stable. invalidate() nulls the managers only under
+  // CachePythonDepth (it parks), but update_diff_guard_root_manager (bound with
+  // no lock) can overwrite diff_guard_root_mgr from guards.py while a lookup
+  // dereferences it under skip_guard_eval_unsafe -- a pre-existing race (base
+  // lookup() held no lock) needing skip_guard_eval_unsafe plus two threads
+  // recompiling one code object.
   std::optional<CachePythonDepth> python_depth;
   c10::SmallVector<const PrecompileEntry*, 8> precompile_candidates;
   struct CacheCandidate {
@@ -775,8 +760,8 @@ void lookup(
     // region does not cover. A miss is the correct outcome instead: it becomes
     // a recompile the serving path can reject loudly. So the installer must
     // register each isolated region under its own id rather than the default
-    // bucket; the region-owned install that does so lands later in the stack
-    // (every install at this commit still passes the default id -1).
+    // bucket. Installs below #195911 in this stack pass the default id -1;
+    // that commit's region-owned install registers each region under its id.
     for (const auto& entry : extra_state->precompile_entries) {
       if (entry.isolate_recompiles_id == isolate_recompiles_id) {
         precompile_candidates.push_back(&entry);
@@ -877,17 +862,13 @@ bool try_lookup_without_guard_eval(
     c10::SmallVectorImpl<char>* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
   // Mirrors lookup(): snapshot candidates under cache_mutex, raise
-  // CachePythonDepth, RELEASE the lock, then run backend_match (backend __eq__
-  // is arbitrary Python that can reach convert_frame.compile_lock through
-  // reset()/remove_from_cache) lock-free, re-locking only for the move_to_front
-  // on a hit. Holding cache_mutex across backend __eq__ would order
-  // (cache_mutex, compile_lock) against the compile path's reverse order -- the
-  // ABBA deadlock lookup() documents in full. reaped_* are declared before
-  // python_depth so they destruct AFTER depth returns to 0 and the lock is
-  // released. Depth stays raised across the lock-free window, so the
-  // snapshotted raw pointers cannot be freed (every destroy path parks) and
-  // std::list splice keeps node addresses stable under a concurrent insert or
-  // move_to_front.
+  // CachePythonDepth, RELEASE the lock, run backend_match (backend __eq__ is
+  // arbitrary Python that can reach compile_lock) lock-free, and re-lock only
+  // for the move_to_front on a hit -- the ABBA lookup() documents in full.
+  // reaped_* are declared before python_depth so they destruct AFTER depth
+  // returns to 0 and the lock is released; depth stays raised across the
+  // lock-free window, so the snapshotted pointers cannot be freed and node
+  // addresses stay stable under a concurrent insert or move_to_front.
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
@@ -1133,9 +1114,7 @@ size_t _get_cache_entry_count_for_region(
 void _clear_cache_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
   TORCH_CHECK_VALUE(
       isolate_recompiles_id >= 0, "cannot clear the default cache region");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
@@ -1186,15 +1165,12 @@ void _clear_cache_entries_for_region(
   }
   {
     // Frame state is reset unconditionally. On the parked path the strategy
-    // reset is deferred, so a region that was RUN_ONLY on entry (a
-    // recompile-limit hit) stays RUN_ONLY until its eviction drains and no
-    // compile repopulates this map before then. A region still at DEFAULT can
-    // recompile and repopulate the map before the drain, but that is benign:
-    // the map holds only per-region frame-id counters, and a fresh compile
-    // re-seeds them exactly as it would for any new region.
-    // Same rule as extract_frame_state: the dict's decref can free arbitrary
-    // Python objects, so it must not happen under the plain mutex. Move it out
-    // and let it die after the lock is released.
+    // reset is deferred, so a RUN_ONLY region (a recompile-limit hit) stays
+    // RUN_ONLY until its eviction drains; a DEFAULT region that recompiles and
+    // repopulates this map before the drain is benign, since the map holds only
+    // per-region frame-id counters that a fresh compile re-seeds anyway. Same
+    // rule as extract_frame_state: the dict's decref can free arbitrary Python
+    // objects, so it happens after the plain mutex is released.
     py::dict evicted;
     {
       std::lock_guard<std::mutex> lock(extra->region_frame_state_mutex);
@@ -1266,9 +1242,7 @@ void _reset_precompile_entries(const py::handle& code_obj) {
 void _reset_precompile_entries_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id) {
-  TORCH_CHECK_TYPE(
-      py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
-      "expected a code object!");
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
   TORCH_CHECK_VALUE(
       isolate_recompiles_id >= -1,
       "isolate_recompiles_id must be >= -1 (-1 is the default region)");
@@ -1306,7 +1280,8 @@ void _reset_precompile_entries_for_owner(
     const py::handle& owner) {
   // PyCode_Check, not py::isinstance: this runs from weakref.finalize while
   // the interpreter may be finalizing, where importing types to read CodeType
-  // can fail. Matches the sibling bindings added in this commit.
+  // can fail. The other bindings this commit adds match; the pre-existing
+  // ones keep the import form.
   TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
   // None is the "no owner" sentinel for loads that do not track ownership, and
   // Py_None is a singleton, so scoping a reset by it would match every
@@ -1384,17 +1359,15 @@ void _load_precompile_entry(
   std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
   // Drain first, then add, so a parked CLEAR_ALL / PRECOMPILE_ALL is applied
-  // before this install rather than sweeping it away with the rest. This only
-  // protects the install at depth 0: apply_pending_evictions no-ops whenever a
-  // lookup (on this or any other thread) holds cache_python_depth raised. When
-  // one does, install()'s own uninstall -> _reset_precompile_entries parks a
-  // PRECOMPILE_ALL that this drain cannot apply; the entry pushed below then
-  // lands behind it and the next depth-zero holder splices it away, leaving the
-  // package installed but serving nothing. That race -- install defeating its
-  // own install under a concurrent lookup -- is a tracked follow-up. Only
-  // evictions are drained, not pending invalidations: those relink cache
-  // entries, never precompile_entries, so a parked one cannot touch this push,
-  // and the next depth-zero holder applies it.
+  // before this install rather than sweeping it away with the rest. Only at
+  // depth 0: apply_pending_evictions no-ops while any thread holds
+  // cache_python_depth raised, so a PRECOMPILE_ALL parked by a raw
+  // _reset_precompile_entries + push sequence still splices the pushed entry
+  // away at the next depth-zero holder, leaving an install serving nothing.
+  // CompilePackage avoids that by keying uninstall's eviction by owner token
+  // (#195911; test_reinstall_survives_an_eviction_parked_by_uninstall); the
+  // raw sequence is tracked in pytorch/pytorch#196394. Pending invalidations
+  // are not drained: they relink cache entries, never precompile_entries.
   extra->apply_pending_evictions(
       reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));

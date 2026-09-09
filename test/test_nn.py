@@ -39,7 +39,8 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
+    skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -49,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    expectedFailureMPSPre27, skipMeta, get_all_device_types
+    expectedFailureMPSPre27, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -75,6 +76,18 @@ if TEST_SCIPY:
 
 if TEST_NUMPY:
     import numpy as np
+
+
+def _graph_node_names(grad_fn):
+    names, stack, seen = set(), [grad_fn], set()
+    while stack:
+        node = stack.pop()
+        if node is None or node in seen:
+            continue
+        seen.add(node)
+        names.add(node.name())
+        stack.extend(nxt for nxt, _ in node.next_functions)
+    return names
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -8629,9 +8642,9 @@ class TestNNDeviceType(NNTestCase):
                     msg=lambda msg: f"{msg}\ndbeta mismatch: N={N} C={C} G={G} dtype={dtype}",
                 )
 
-    @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
@@ -8661,9 +8674,9 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
-    @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
@@ -9269,6 +9282,84 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn(0, 7, device=device)
         _test_module_empty_input(self, mod, inp)
 
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipMPS
+    @parametrize_test('shape', [
+        subtest((6, 8), name='2d'),
+        subtest((2, 3, 8), name='3d'),
+        subtest((2, 3, 4, 8), name='4d'),
+        subtest((0, 3, 8), name='zeroBatch'),
+        subtest((2, 3, 0), name='zeroFeatures'),
+    ])
+    def test_linear_inplace_activation(self, device, shape):
+        # The nD contiguous+bias fast path flattens, calls addmm and reshapes back.
+        # A plain view there makes the result a differentiable view, so a following
+        # in-place op rebases history onto CopySlices and copies in backward.
+        x = torch.randn(*shape, device=device, dtype=torch.double, requires_grad=True)
+        w = torch.randn(16, shape[-1], device=device, dtype=torch.double, requires_grad=True)
+        b = torch.randn(16, device=device, dtype=torch.double, requires_grad=True)
+
+        y = F.linear(x, w, b)
+        y.relu_()
+
+        nodes = _graph_node_names(y.grad_fn)
+        self.assertFalse([n for n in nodes if 'CopySlices' in n or 'AsStrided' in n], nodes)
+        # 2D returns the addmm result directly, without any reshape
+        if len(shape) > 2:
+            self.assertIn('UnsafeViewBackward0', nodes)
+
+        # matmul path, which does not go through _flatten_nd_linear
+        expected = (x @ w.t() + b).relu()
+        self.assertEqual(y, expected)
+
+        grads = torch.autograd.grad(y.sum(), [x, w, b])
+        grads_expected = torch.autograd.grad(expected.sum(), [x, w, b])
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
+
+        if x.numel() > 0:
+            def fn(x, w, b):
+                return F.linear(x, w, b).relu_()
+            # dynamo_wrapped runs backward through compiled autograd, which freezes
+            # double backward's gradient accumulation into torch.add nodes. Those
+            # cannot take the None cotangent the undefined-grad probe feeds them,
+            # while eager just treats it as zero.
+            undef = not TEST_WITH_TORCHDYNAMO
+            self.assertTrue(gradcheck(fn, (x, w, b), check_undefined_grad=undef))
+            self.assertTrue(gradgradcheck(fn, (x, w, b), check_undefined_grad=undef))
+
+    @skipIfTorchDynamo("compiled autograd hits an IndexError in pgo.is_stride_dynamic wrapping the sparse weight")
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipMPS
+    @skipCUDAIfNoSparseGeneric
+    @parametrize_test('weight_layout', [
+        subtest(torch.sparse_coo, name='weightCOO'),
+        subtest(torch.sparse_csr, name='weightCSR'),
+        subtest(torch.sparse_csc, name='weightCSC'),
+    ])
+    def test_linear_sparse_inplace_activation(self, device, weight_layout):
+        # Sparse weights reach the same fast path via a transpose of the addmm
+        # result, which is equally a non-escaping temporary
+        x = torch.randn(2, 3, 8, device=device, dtype=torch.double, requires_grad=True)
+        wd = torch.randn(16, 8, device=device, dtype=torch.double)
+        b = torch.randn(16, device=device, dtype=torch.double, requires_grad=True)
+        w = wd.to_sparse(layout=weight_layout).requires_grad_()
+
+        y = F.linear(x, w, b)
+        y.relu_()
+
+        nodes = _graph_node_names(y.grad_fn)
+        self.assertFalse([n for n in nodes if 'CopySlices' in n or 'AsStrided' in n], nodes)
+        self.assertIn('UnsafeViewBackward0', nodes)
+
+        expected = (x @ wd.t() + b).relu()
+        self.assertEqual(y, expected)
+        for g, ge in zip(torch.autograd.grad(y.sum(), [x, b]),
+                         torch.autograd.grad(expected.sum(), [x, b])):
+            self.assertEqual(g, ge)
+
     def test_one_hot(self, device):
         # cpu raises synchronously; mps reports the bad index from its scatter
         # kernel asynchronously, surfaced on the next sync. xla still ignores.
@@ -9634,7 +9725,6 @@ class TestNNDeviceType(NNTestCase):
             expected_out = in_t.repeat_interleave(2, dim=-1)
             self.assertEqual(out_t, expected_out)
 
-    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact1d_correctness(self, device, isize, osize):
         # Here we check if output matches Scikit-Image/Scipy-like result
@@ -9742,7 +9832,6 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
-    @skipIfMPS  # Partially passes https://github.com/pytorch/pytorch/issues/134430
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact2d_correctness(self, device, memory_format, isize, osize):
@@ -10000,8 +10089,6 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out.expand([*shape[:2], 2, 2]), t_out)
 
-    # Partially passes. NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
-    @skipIfMPS
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
     @parametrize_test("antialias", [True, False])
@@ -10011,6 +10098,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
+    @skipIfMPS
     def test_upsamplingBiMode2d_consistency(
         self,
         device,
@@ -13506,7 +13594,6 @@ if __name__ == '__main__':
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
-    @skipIfMPS  # RuntimeError: foreach=True was passed, but can't use the foreach API on mps tensors
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -13536,7 +13623,6 @@ if __name__ == '__main__':
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @skipIfMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
