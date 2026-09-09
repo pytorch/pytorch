@@ -23,7 +23,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
-#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -120,11 +119,6 @@ static thread_local int total_depth = 0;
 // queue_callback() to find the target GraphTask to append final callbacks.
 C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 #define current_graph_task (tls_current_graph_task.get())
-
-C10_DEFINE_TLS_static(
-    std::optional<c10::Stream>,
-    tls_current_node_execution_stream);
-#define current_node_execution_stream (tls_current_node_execution_stream.get())
 
 // Every autograd worker thread is associated with a ready queue, which
 // specifies the stream of work of this thread to do. This shared_ptr is a
@@ -444,8 +438,13 @@ variable_list get_current_input_grad_buffers(Node* node) {
       "input_grad_buffers does not support hooks registered on the producing "
       "autograd node");
 
+  TORCH_CHECK(
+      !at::globalContext().overrideStaleCaptureStream(),
+      "input_grad_buffers does not support "
+      "set_override_stale_capture_stream(True)");
+
   const auto producer_device = node->device();
-  const auto opt_producer_stream = current_node_execution_stream;
+  const auto opt_producer_stream = node->stream();
 
   variable_list result(node->next_edges().size());
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
@@ -1181,11 +1180,6 @@ void Engine::evaluate_function(
       ? inputs.opt_overridden_consumer_stream
       : func->stream();
 
-  auto previous_execution_stream =
-      std::exchange(current_node_execution_stream, opt_parent_stream);
-  auto execution_stream_guard = c10::make_scope_exit([&] {
-    current_node_execution_stream = std::move(previous_execution_stream);
-  });
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   // Ensure that the incoming gradients are ready

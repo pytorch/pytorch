@@ -116,14 +116,10 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
   }
 }
 
-bool is_direct_accumulation_compatible(const Variable& v) {
+bool can_accumulate_inplace(const Variable& v) {
   return !(at::isTensorSubclassLike(v) || v._is_zerotensor() ||
            v.is_nested()) &&
-      v.is_non_overlapping_and_dense() && v.has_storage();
-}
-
-bool can_accumulate_inplace(const Variable& v) {
-  return is_direct_accumulation_compatible(v) &&
+      v.is_non_overlapping_and_dense() && v.has_storage() &&
       impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
       v.storage().use_count() == 1;
 }
