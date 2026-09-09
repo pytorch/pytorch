@@ -70,8 +70,9 @@ class _ProbeState:
     # Ids being probed right now, for cycle-breaking.
     inflight: set[int] = dataclasses.field(default_factory=set)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
-    # returned but not cached.
+    # not cached as final but parked for the rest of the probe tree.
     leaned: bool = False
+    parked: dict[int, bool] = dataclasses.field(default_factory=dict)
 
 
 class AOTCompilePickler(FunctionPicklerBase):
@@ -105,7 +106,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
                 return reduced
-        elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
+        elif inspect.isfunction(obj) and not self._fqn_resolves(obj):
             # The runtime env has to RUN this function, so unlike the guard
             # pickler nothing it holds is pruned -- except annotations, type
             # params, __doc__, and __dict__ entries that will not pickle. The runtime
@@ -145,6 +146,8 @@ class AOTCompilePickler(FunctionPicklerBase):
         state = self._probe_state
         vid = id(value)
         cached = state.cache.get(vid)
+        if cached is None and state.inflight:
+            cached = state.parked.get(vid)
         if cached is not None:
             return cached
         if vid in state.inflight:
@@ -178,11 +181,18 @@ class AOTCompilePickler(FunctionPicklerBase):
         leaned = state.leaned
         # A caller that consulted this value also leaned on whatever we did.
         state.leaned = leaned_before or leaned
-        # A False that leaned on an in-flight True may be a false negative:
-        # return it but do not cache it. A True, or a False that leaned on
-        # nothing, is final.
+        # A False that leaned on an in-flight True may be a false negative, so
+        # it is not cached as final. It is parked for the rest of this probe
+        # tree -- re-deriving it is exponential on a cyclic cluster -- and
+        # dropped when the tree finishes, so the real dump never consults it
+        # (a stale park can only over-prune inside a probe, which never flips a
+        # probe verdict). A True, or a False that leaned on nothing, is final.
         if result or not leaned:
             state.cache[vid] = result
+        else:
+            state.parked[vid] = result
+        if not state.inflight:
+            state.parked.clear()
         return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
