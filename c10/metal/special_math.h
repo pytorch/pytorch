@@ -152,6 +152,15 @@ inline T chbevl(T x, const float array[], const int len) {
   return T{0.5} * (b0 - b2);
 }
 
+template <typename T>
+inline T polevl(T x, const float array[], const int len) {
+  T result = 0;
+  for (int i = 0; i <= len; ++i) {
+    result = result * x + array[i];
+  }
+  return result;
+}
+
 // Copied from
 // https://github.com/pytorch/pytorch/blob/58b661cda2c002a8e1ac3bee494bfe1f7420437c/aten/src/ATen/native/cuda/Math.cuh#L502
 
@@ -2284,10 +2293,10 @@ inline float ndtri(T y0) {
     return NAN;
   }
 
-  /* 0.1353... = exp(-2) */
   bool negate = true;
   float y = y0f;
 
+  /* 0.13533528323661269189 = exp(-2) */
   if (y > 1.0 - 0.13533528323661269189) {
     y = 1.0 - y;
     negate = false;
@@ -2296,40 +2305,21 @@ inline float ndtri(T y0) {
   if (y > 0.13533528323661269189) {
     y = y - 0.5;
     const float y2 = y * y;
-
-    float p = 0.0;
-    for (auto index = 0; index <= 4; index++) {
-      p = p * y2 + P0[index];
-    }
-
-    float q = 0.0;
-    for (auto index = 0; index <= 8; index++) {
-      q = q * y2 + Q0[index];
-    }
-
-    return (y + y * (y2 * p / q)) * s2pi;
+    return (y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8))) * s2pi;
   }
 
   float x = ::metal::precise::sqrt(-2.0 * ::metal::precise::log(y));
   const float x0 = x - ::metal::precise::log(x) / x;
   const float z = 1.0 / x;
 
-  float p = 0.0;
-  float q = 0.0;
-
+  float x1;
   if (x < 8.0) { /* y > exp(-32) = 1.2664165549e-14 */
-    for (auto index = 0; index <= 8; index++) {
-      p = p * z + P1[index];
-      q = q * z + Q1[index];
-    }
+    x1 = z * polevl(z, P1, 8) / polevl(z, Q1, 8);
   } else {
-    for (auto index = 0; index <= 8; index++) {
-      p = p * z + P2[index];
-      q = q * z + Q2[index];
-    }
+    x1 = z * polevl(z, P2, 8) / polevl(z, Q2, 8);
   }
 
-  x = x0 - z * p / q;
+  x = x0 - x1;
 
   return negate ? -x : x;
 } // ndtri(T y0)
