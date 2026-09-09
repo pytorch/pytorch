@@ -5013,6 +5013,16 @@
       ]
     }
   ],
+  "GB8503": [
+    {
+      "Gb_type": "missing tp_new",
+      "Context": "tp_new_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0298": [
     {
       "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
