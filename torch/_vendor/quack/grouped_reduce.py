@@ -40,7 +40,7 @@ instead of silently reducing the wrong elements.
   (left-to-right, broadcast within the group), then one leader lane stores.
 * axis=1, ``group > cols``: fold each fragment, then combine the
   ``group // cols`` consecutive epi-N subtiles of a group in ascending order
-  (the oracle's "temporal" combine) at the last subtile of the group.
+  at the last subtile of the group.
 * axis=0 (M groups), ``group <= lanes_m``: butterfly across the group's row
   lanes (halving offsets), so every lane holds the group value.
 * axis=0, ``group > lanes_m``: butterfly within each warp, then stitch
@@ -48,18 +48,15 @@ instead of silently reducing the wrong elements.
   epilogue barrier.
 
 Every fold order is fixed and data-independent, so results are bitwise
-reproducible run to run. Two intentional deviations from the legacy FlexGEMM
-reducer (the behavior oracle):
+reproducible run to run. Two semantic notes:
 
-* The oracle receives axis-1 groups that fit one fragment already reduced by
-  generated TensorSSA code and only compresses the store (``combine=None``
-  here does that). With a ``combine``, this module folds the fragment itself in
-  a fixed left-to-right order; TensorSSA's ``reduce`` may use a different
-  association, so f32 sums can differ by rounding (tolerance-level, not a
-  contract change).
-* The oracle's 4-wide vectorized f32 store fast path for axis=0 is not ported;
-  stores are scalar (one element per group leader). Pure throughput, no
-  semantics.
+* Axis-1 groups that fit one fragment may arrive already reduced by generated
+  TensorSSA code, in which case ``combine=None`` only compresses the store. With
+  a ``combine``, this module folds the fragment itself in a fixed left-to-right
+  order; TensorSSA's ``reduce`` may use a different association, so f32 sums
+  can differ by rounding (tolerance-level, not a contract change).
+* Stores are scalar (one element per group leader); there is no vectorized
+  f32 store fast path for axis=0. Pure throughput, no semantics.
 
 Tails and dynamic group counts
 ------------------------------
@@ -67,8 +64,8 @@ The store is predicated on the *runtime* extents of the compressed tensor
 (``limit_groups``) and of the GEMM output (``limit_m`` / ``limit_n``), so a
 ragged last tile writes fewer groups without host-side padding. Groups must not
 straddle the GEMM boundary: ``group`` has to divide both the CTA tile and the
-grouped GEMM dimension (:func:`validate_grouped_reduce_out` checks the latter
-host-side; the tile divisibility is asserted at compile time). OOB accumulator
+grouped GEMM dimension (``GroupedReduceBase.host_validate`` checks both host-side
+and the tile divisibility is asserted again at compile time). OOB accumulator
 lanes are zero, which is the identity for ``add`` only — with ``mul``/``max``/
 ``min`` a partially OOB group would be wrong, and the divisibility rule is what
 makes that unrepresentable.
@@ -291,38 +288,6 @@ class GroupedLocalReduceOutputLayout:
             semantic_value_key(self.supports_config_fn, set(), force_source=True),
             semantic_value_key(self.validate_carrier_fn, set(), force_source=True),
         )
-
-
-def validate_grouped_reduce_out(
-    name: str,
-    out,
-    m: int,
-    n: int,
-    group: int,
-    axis: int,
-    batch: int | None = None,
-    tile_M: int | None = None,
-    tile_N: int | None = None,
-) -> None:
-    """Fail-closed host check of a compressed aux buffer against the reduce plan.
-
-    ``EpiMod`` only shape-checks sinks that look like :class:`VecReduce`
-    partials, so callers (or a parent-side hook in ``EpiMod.gemm``'s sink loop)
-    call this to reject group/shape combinations the kernel cannot express:
-    a group that straddles the GEMM boundary would fold zero-padded elements,
-    and a mismatched or non-contiguous buffer would corrupt memory.
-    """
-    tile = tile_M if axis == 0 else tile_N
-    dim = m if axis == 0 else n
-    if dim % group:
-        raise ValueError(f"{name}: group {group} must divide the grouped dim {dim} (axis={axis})")
-    if tile is not None and (tile % group or group > tile):
-        raise ValueError(f"{name}: group {group} must divide the CTA tile extent {tile}")
-    expected = grouped_reduce_out_shape(m, n, group, axis, batch)
-    if tuple(out.shape) != expected:
-        raise ValueError(f"{name}: expected compressed shape {expected}, got {tuple(out.shape)}")
-    if out.stride(-1) != 1:
-        raise ValueError(f"{name}: compressed aux buffer must be contiguous in its last dim")
 
 
 class _GroupGeometry(NamedTuple):
@@ -1216,8 +1181,7 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
     def reduce_broadcast(self, value, geom):
         """Group reduction of one register value, broadcast to the group's row
         lanes. The primitive the apply port calls per element, and the entry
-        point a hand-written mixin uses in place of the oracle's
-        ``grouped_rowvec_reduce_value`` (loop it over the fragment)."""
+        point for a hand-written mixin (loop it over the fragment)."""
         combine_fn = const_expr(self.combine_fn)
         rows = const_expr(self.group // 2)
         while rows > 0:
