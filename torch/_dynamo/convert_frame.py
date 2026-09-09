@@ -1963,10 +1963,10 @@ def _compile(
                 cache_entries=cache_entries,
             )
 
-        # bypass_package sets output.package to None when this entry's guards
-        # could not be serialized (the local `package` still holds the object).
-        # Skip the whole block in that case: a bypassed compile contributes none
-        # of its guards, inlined source, or device type to the package.
+        # bypass_package sets output.package to None when this compile cannot be
+        # packaged (the local `package` still holds the object). Skip the whole
+        # block in that case: a bypassed compile contributes none of its guards,
+        # inlined source, or device type to the package.
         if output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
