@@ -114,7 +114,12 @@ class AOTCompilePickler(FunctionPicklerBase):
                     k: v for k, v in obj.__dict__.items() if self._dumps_cleanly(v)
                 },
                 annotations=self._pickleable_annotations(obj),
-                doc=obj.__doc__,
+                # __doc__ is the one reduced value the runtime never reads back
+                # (_apply_function_state assigns it, nothing forces it), so an
+                # unpicklable docstring must not fail the whole dump -- drop it
+                # like the pruned attributes above. __kwdefaults__ stays unpruned:
+                # a function cannot be called without it.
+                doc=obj.__doc__ if self._dumps_cleanly(obj.__doc__) else None,
                 type_params=self._pickleable_type_params(obj),
             )
 
