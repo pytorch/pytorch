@@ -7502,6 +7502,15 @@ def meta_scaled_addmm(
         not isinstance(alpha, complex) and not isinstance(beta, complex),
         lambda: "torch._scaled_addmm only supports real alpha and beta values",
     )
+    torch._check(
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        ),
+        lambda: "torch._scaled_addmm only supports contraction_dim=(1, 0)",
+    )
     result = meta_scaled_mm_v2(
         mat1,
         mat2,

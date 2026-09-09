@@ -407,10 +407,11 @@ _scaled_gemm(
     out.copy_(*effective_accumulator);
     effective_accumulator = out;
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+  TORCH_CHECK(
       !effective_accumulator ||
           (effective_accumulator->stride(0) == args.result_ld &&
-           effective_accumulator->scalar_type() == out_dtype_));
+           effective_accumulator->scalar_type() == out_dtype_),
+      "scaled_addmm: input and output must have the same dtype and leading dimension");
 // ROCM enables the TunableOp path only
 // but can fallback to at::cuda::blas::scaled_gemm
 #ifdef USE_ROCM
