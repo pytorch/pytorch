@@ -105,6 +105,11 @@ class BoundMethodNameGuardModule(torch.nn.Module):
         return x * 2
 
 
+class _RefusalModule(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
@@ -414,7 +419,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         )
         package = CompilePackage(fn)
         with package.code_context(fn.__code__):
+            package.add_backend_id("__compiled_fn_0_bypassed", object())
             package.bypass_current_entry()
+            self.assertEqual(package.cached_backends, {})
             package.add_guarded_code(
                 b"", compiled_region_with_backend_id_for_package_test.__code__
             )
@@ -1344,6 +1351,11 @@ def add(x, y):
         entries = _debug_get_precompile_entries(fn.__code__)
         self.assertEqual(sum(e.isolate_recompiles_id == -1 for e in entries), count)
         self.assertEqual(sum(e.isolate_recompiles_id == region for e in entries), count)
+        # Ownership is per (code, region), not per code.
+        self.assertTrue(pkg_a.owns_install_on(fn.__code__, -1))
+        self.assertFalse(pkg_a.owns_install_on(fn.__code__, region))
+        self.assertTrue(pkg_b.owns_install_on(fn.__code__, region))
+        self.assertFalse(pkg_b.owns_install_on(fn.__code__, -1))
 
         # Poison pkg_a's resume globals: fn graph-breaks, so the served entry
         # LOAD_GLOBALs a renamed resume function. If pkg_a's default-region
@@ -1444,6 +1456,12 @@ def add(x, y):
             return x - 1
 
         self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        # Saved up front, to its own path: _save_eager_package ends with
+        # torch._dynamo.reset(), which would clear the entries regardless of
+        # the finalizer if it ran after the install below.
+        other_path = self.path() + "_other"
+        with patch.object(self, "path", return_value=other_path):
+            self._save_eager_package(other_fn, ctx, (torch.randn(3, 2),))
         module = sys.modules[fn.__module__]
         module_dict = module.__dict__
         pkg, backends = ctx.load_package(fn, self.path())
@@ -1463,8 +1481,7 @@ def add(x, y):
         gc.collect()
         # A finalizer may defer the pop to the next install/uninstall; drive one
         # on an unrelated package so the check does not depend on when it runs.
-        self._save_eager_package(other_fn, ctx, (torch.randn(3, 2),))
-        other, other_backends = ctx.load_package(other_fn, self.path())
+        other, other_backends = ctx.load_package(other_fn, other_path)
         other.install(other_backends)
         other.uninstall()
         self.assertIs(module_dict[name], sentinel)
@@ -1478,41 +1495,67 @@ def add(x, y):
         # compiled while a loaded package serves fn in the same region would be
         # served that package's entry, record nothing, and save a zero-guarded
         # artifact that skip_code()s the frame on install. The context refuses
-        # instead -- whichever of the decoration and the neighbour's install
-        # comes first, and regardless of the caching_precompile config, which
-        # only exempts the transparent cache's own (fn=None) package. An
-        # isolated region (or uninstalling first) is the way out.
-        self.enterContext(
-            torch._dynamo.config.patch(caching_precompile=caching_precompile)
-        )
+        # instead -- at decoration or at the call, whichever finds the neighbour
+        # first, and regardless of caching_precompile, which only exempts the
+        # transparent cache's own (fn=None) package. An isolated region (or
+        # uninstalling first) is the way out.
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            ctx = DiskDynamoStore()
+
+            def fn(x):
+                return x + 1
+
+            self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+            # Decorated before the neighbour arrives: the call-time check catches it.
+            early = torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(
+                fn
+            )
+            pkg1, backends = ctx.load_package(fn, self.path())
+            pkg1.install(backends)
+            self.addCleanup(pkg1.uninstall)
+            x = torch.randn(3, 2)
+            refused = self.assertRaisesRegex(
+                RuntimeError, "another CompilePackage is installed"
+            )
+            with refused:
+                early(x)
+            # Decorated after: refused at decoration, before any call.
+            opt = torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))
+            with refused:
+                opt(fn)
+            # pkg1 still serves the frame, untouched.
+            with torch.compiler.set_stance("fail_on_recompile"):
+                self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+            # An isolated region does not collide with pkg1's default-region entries.
+            pkg2 = CompilePackage(fn)
+            opt2 = torch._dynamo.optimize(
+                backend="eager", package=pkg2, isolate_recompiles=True
+            )
+            self.assertEqual(opt2(fn)(x), fn(x))
+            self.assertEqual(sum(len(e.guarded_codes) for e in pkg2._codes.values()), 1)
+
+    def test_capturing_package_refuses_a_module_frame_another_package_serves(self):
+        # An nn.Module compiles through OptimizedModule, whose context receives
+        # the module's bound __call__ (a skipfile); the refusal resolves the
+        # frame Dynamo intercepts, forward, where the entries live.
         ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x + 1
-
-        self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
-        # Decorated before the neighbour arrives: the call-time check catches it.
-        early = torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(fn)
-        pkg1, backends = ctx.load_package(fn, self.path())
+        mod = _RefusalModule()
+        x = torch.randn(3, 2)
+        self._save_eager_package(mod.forward, ctx, (x,))
+        pkg1, backends = ctx.load_package(mod.forward, self.path())
         pkg1.install(backends)
         self.addCleanup(pkg1.uninstall)
-        x = torch.randn(3, 2)
-        refused = self.assertRaisesRegex(
+        with self.assertRaisesRegex(
             RuntimeError, "another CompilePackage is installed"
-        )
-        with refused:
-            early(x)
-        with refused:
-            torch._dynamo.optimize(backend="eager", package=CompilePackage(fn))(fn)(x)
-        # pkg1 still serves the frame, untouched.
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
-        # An isolated region does not collide with pkg1's default-region entries.
-        pkg2 = CompilePackage(fn)
+        ):
+            torch._dynamo.optimize(
+                backend="eager", package=CompilePackage(mod.forward)
+            )(mod)(x)
+        pkg2 = CompilePackage(mod.forward)
         opt = torch._dynamo.optimize(
             backend="eager", package=pkg2, isolate_recompiles=True
-        )
-        self.assertEqual(opt(fn)(x), fn(x))
+        )(mod)
+        self.assertEqual(opt(x), mod(x))
         self.assertEqual(sum(len(e.guarded_codes) for e in pkg2._codes.values()), 1)
 
     def test_system_info_is_read_once_per_package(self):
