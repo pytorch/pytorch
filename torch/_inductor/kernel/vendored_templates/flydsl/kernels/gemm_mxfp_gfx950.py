@@ -21,6 +21,7 @@ from flydsl.expr import const_expr, range_constexpr, rocdl
 from flydsl.expr.typing import Vector as Vec
 
 from .gemm_gfx950 import (
+    __barrier,
     AsyncLoadContext,
     AsyncLoadOperand,
     BlockSwizzle,
@@ -57,16 +58,6 @@ def _make_transposed_lds_layout(rows, inner_extent, granule_bits):
             fx.static(fx.SwizzleType.get(2, granule_bits, 4)), base_layout
         )
     return base_layout
-
-
-def _waitcnt_barrier(vmcnt=0):
-    llvm.InlineAsmOp(
-        None,
-        [],
-        f"s_waitcnt vmcnt({vmcnt})\n\ts_barrier",
-        "",
-        has_side_effects=True,
-    )
 
 
 def _permlane_swap(width, old, src):
@@ -1145,7 +1136,7 @@ def gemm_mxfp_gfx950_kernel(
         k_tile = fx.Int32(kt)
         current_stage = k_tile % fx.Int32(stages)
         write_stage = (current_stage + fx.Int32(stages - 1)) % fx.Int32(stages)
-        _waitcnt_barrier((stages - 2) * d.ldg_wait_count)
+        __barrier((stages - 2) * d.ldg_wait_count)
         next_tile = k_tile + fx.Int32(stages - 1)
         async_load_b(next_tile, write_stage)
         async_load_a(next_tile, write_stage)
@@ -1155,7 +1146,7 @@ def gemm_mxfp_gfx950_kernel(
     current_stage = fx.Int32(main_loop_end % stages)
     for s in range_constexpr(stages - 1):
         k_tile = fx.Int32(main_loop_end + s)
-        _waitcnt_barrier((stages - 2 - s) * d.ldg_wait_count)
+        __barrier((stages - 2 - s) * d.ldg_wait_count)
         mma_stage(k_tile, current_stage)
         current_stage = (current_stage + fx.Int32(1)) % fx.Int32(stages)
 
