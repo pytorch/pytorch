@@ -6903,6 +6903,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue.clear()
         self.prologue_cache.clear()
 
+    def reduction_loop_range(self, prefix: str, loop_start: str, loop_end: str) -> str:
+        """Return the reduction iterator expression used by generated kernels.
+
+        Backends may override this to select a different loop primitive while
+        preserving the scheduler-provided bounds and reduction block size.
+        """
+        # Conditionalize pipelining on HIP for Triton due to reports of
+        # numerical inaccuracies on older Triton.
+        if torch.version.hip and get_triton_version() > (3, 2):
+            num_stages = ", num_stages = 2"
+        else:
+            num_stages = ""
+        return f"tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages})"
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -7008,15 +7022,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
-                    # Conditionalize pipelining on HIP for Triton due to
-                    # reports of numerical inaccuracies on older Triton
-                    if torch.version.hip and get_triton_version() > (3, 2):
-                        num_stages = ", num_stages = 2"
-                    else:
-                        num_stages = ""
-                    self.body.writeline(
-                        f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
-                    )
+                    loop = self.reduction_loop_range(prefix, loop_start, loop_end)
+                    self.body.writeline(f"for {prefix}offset in {loop}:")
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
 
@@ -8767,13 +8774,23 @@ class TritonScheduling(SIMDScheduling):
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
+        if not config.triton.multi_kernel:
+            return [kernel]
+        return self.add_multi_kernel_choices(
+            kernel,
+            kernel_args,
+            kernel_kwargs,
+            V.choices.get_extra_triton_kernel_choices(
+                kernel_type, kernel_features, kernel_args, kernel_kwargs
+            ),
+        )
 
     def add_multi_kernel_choices(
         self,
         kernel: TritonKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
+        extra_kernels: list[TritonKernel] | None = None,
     ) -> list[TritonKernel]:
         kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
@@ -8814,6 +8831,7 @@ class TritonScheduling(SIMDScheduling):
                         )
                     )
 
+        kernels.extend(extra_kernels or ())
         if len(kernels) > 1:
             for kernel2 in kernels[1:]:
                 # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments

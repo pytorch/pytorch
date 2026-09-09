@@ -423,6 +423,21 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
+    def get_extra_triton_kernel_choices(
+        self,
+        kernel_cls: type[TritonKernel],
+        features: SIMDKernelFeatures,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
+        """Return extra candidates for multi-kernel benchmarking.
+
+        This is called only when multi-kernel generation is enabled.  Returned
+        kernels participate in the same argument sharing and ordering as the
+        built-in persistent and cooperative reduction candidates.
+        """
+        return []
+
     def override_best_choice(
         self,
         best_choice: ChoiceCaller,

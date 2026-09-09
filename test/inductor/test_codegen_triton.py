@@ -28,6 +28,7 @@ from torch._inductor.codegen.triton import (
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonScheduling,
     TritonSymbols,
 )
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
@@ -343,6 +344,73 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    def test_extra_kernel_choices_follow_multi_kernel_contract(self):
+        features = SimpleNamespace(
+            contains_op=lambda name: False,
+            scheduler_nodes=lambda: (),
+            reduction_numel=sympy.Integer(1),
+        )
+
+        class FakeKernel:
+            @classmethod
+            def apply_feature_required_overrides(cls, features, kwargs):
+                pass
+
+            def __init__(self, *args, **kwargs):
+                self.persistent_reduction = kwargs.get(
+                    "override_persistent_reduction", True
+                )
+                self.cooperative_reduction = False
+                self.must_keep_buffers = set()
+                self.features = features
+
+            def python_argdefs(self):
+                return tuple(sorted(self.must_keep_buffers))
+
+        class ExtraKernelChoices(InductorChoices):
+            def __init__(self):
+                self.calls = 0
+
+            def get_extra_triton_kernel_choices(
+                self, kernel_cls, kernel_features, kernel_args, kernel_kwargs
+            ):
+                self.calls += 1
+                return [
+                    kernel_cls(
+                        *kernel_args,
+                        **kernel_kwargs,
+                        override_persistent_reduction=False,
+                    )
+                ]
+
+        scheduling = object.__new__(TritonScheduling)
+        scheduling.kernel_type = FakeKernel
+        choices = ExtraKernelChoices()
+        with V.set_choices_handler(choices), inductor_config.patch(
+            "triton.multi_kernel", 1
+        ):
+            kernels = scheduling.create_kernel_choices(features, [], {})
+
+        self.assertEqual(choices.calls, 1)
+        self.assertEqual(
+            [kernel.persistent_reduction for kernel in kernels],
+            [False, False, True],
+        )
+        kernels[0].must_keep_buffers.add("workspace")
+        self.assertEqual(
+            [kernel.python_argdefs() for kernel in kernels],
+            [("workspace",)] * 3,
+        )
+
+        choices.calls = 0
+        with V.set_choices_handler(choices), inductor_config.patch(
+            "triton.multi_kernel", 0
+        ):
+            kernels = scheduling.create_kernel_choices(features, [], {})
+
+        self.assertEqual(choices.calls, 0)
+        self.assertEqual(len(kernels), 1)
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
