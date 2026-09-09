@@ -2102,6 +2102,27 @@ TORCH_IMPL_FUNC(gather_out)
   if (index.numel() == 0)
     return;
   dim = at::maybe_wrap_dim(dim, self.dim());
+
+#if defined(USE_ROCM)
+  // GPU hardware fault on OOB (no device-side assert on ROCm).
+  // Check index bounds on host to prevent SIGSEGV.
+  if (result.device().type() == DeviceType::CUDA) {
+    auto max_idx = index.max().item<int64_t>();
+    auto dim_size = self.size(dim);
+    TORCH_CHECK(
+        max_idx < dim_size,
+        "gather(): index ", max_idx,
+        " out of bounds for dimension ", dim,
+        " with size ", dim_size);
+    auto min_idx = index.min().item<int64_t>();
+    TORCH_CHECK(
+        min_idx >= 0,
+        "gather(): index ", min_idx,
+        " out of bounds for dimension ", dim,
+        " with size ", dim_size);
+  }
+#endif
+
   if (can_use_expanded_index_path(
           result, dim, index, self, /*is_scatter_like=*/false)) {
     gather_expanded_index_stub(result.device().type(), result, self, index);
