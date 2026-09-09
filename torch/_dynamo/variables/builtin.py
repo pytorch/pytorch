@@ -3566,7 +3566,12 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
         obj, attr = args
         if not attr.is_python_constant():
             raise_observed_exception(TypeError, tx)
-        result = obj.call_obj_hasattr(tx, attr.as_python_constant())
+        attr_name = attr.as_python_constant()
+        if not isinstance(attr_name, str):
+            raise_type_error(
+                tx, f"attribute name must be string, not '{type(attr_name).__name__}'"
+            )
+        result = obj.call_obj_hasattr(tx, attr_name)
         if result is None:
             unimplemented(
                 gb_type="hasattr() on unsupported type",
@@ -3607,6 +3612,13 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 3 or kwargs:
             raise_observed_exception(TypeError, tx)
         obj, name_var, val = args
+        if name_var.is_python_constant() and not isinstance(
+            name_var.as_python_constant(), str
+        ):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{type(name_var.as_python_constant()).__name__}'",
+            )
         result = self._call_setattr(tx, obj, name_var, val)
         if result is not None:
             return result
