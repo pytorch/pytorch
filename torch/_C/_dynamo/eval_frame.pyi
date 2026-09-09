@@ -41,7 +41,7 @@ class _CacheEntry:
     compile_id: CompileId
     # If we run into circular issues, just use object
     guard_manager: GuardManagerWrapper
-    backend: Callable
+    backend: object
     isolate_recompiles_id: int
     trace_annotation: str
 
