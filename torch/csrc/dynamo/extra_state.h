@@ -125,9 +125,15 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // independently of the default scope. That also makes the frame_compile_id
   // fallback in exceeds_recompile_limit (cache_size.py) per-region: it caps
   // frame_compile_id at accumulated_recompile_limit to catch a cache that
-  // stops growing, and a per-region counter gives each region its own cap
-  // instead of one global cap. The primary accumulated check stays global
-  // (total_cache_entries_all_regions).
+  // stops growing. The accumulated check (total_cache_entries_all_regions)
+  // stays global, but it only fires when the cache GROWS; the non-growing
+  // recompile case (invalidated guard managers) is caught ONLY by this
+  // frame_compile_id cap, so making it per-region takes that ceiling from N
+  // compiles per code object to N per region with nothing global behind it.
+  // Two consequences: FRAME_COUNTER is consumed once per (code object, region)
+  // rather than per code object, and FRAME_COMPILE_COUNTER -- cleared only by
+  // torch._dynamo.reset() -- grows one entry per pair, so a factory pattern
+  // minting a fresh region per torch.compile() call grows both without bound.
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
   // Guards frame_state and region_frame_state_map alike: the module runs
   // without the GIL on free-threaded builds, so the default dict's move in

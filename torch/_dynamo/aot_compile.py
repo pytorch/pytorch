@@ -101,6 +101,13 @@ class AOTCompilePickler(FunctionPicklerBase):
         # Memoize _dumps_cleanly by object id so probing nested functions is not
         # exponential in nesting depth; shared into probe picklers below.
         self._dumps_cleanly_cache: dict[int, bool] = {}
+        # Ids currently being probed (cycle-breaking, replaces an optimistic
+        # cache seed) and a shared flag recording whether any probe short-
+        # circuited on one; both are shared into probe picklers so a False
+        # computed while leaning on an in-flight id is not cached. See
+        # _dumps_cleanly.
+        self._dumps_cleanly_inflight: set[int] = set()
+        self._dumps_cleanly_leaned: list[bool] = [False]
 
     def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
@@ -160,21 +167,31 @@ class AOTCompilePickler(FunctionPicklerBase):
         # pickler of this exact class keeps external_data/persistent_id behaviour
         # identical to the real dump. A recursion overflow counts as unpicklable
         # (the value is pruned) rather than re-raising, matching the guard side.
-        cached = self._dumps_cleanly_cache.get(id(value))
+        vid = id(value)
+        cached = self._dumps_cleanly_cache.get(vid)
         if cached is not None:
             return cached
+        if vid in self._dumps_cleanly_inflight:
+            # A value whose annotations reach back to itself (mutually-
+            # referencing <locals> annotation classes) re-enters here mid-probe.
+            # Report picklable to break the cycle -- pickle's own memo handles
+            # the reference -- but do NOT cache it: an earlier version seeded the
+            # cache with this optimistic True, which then leaked into a
+            # dependent's real dump and cached a WRONG False for a picklable
+            # value, silently pruning it and detonating at call time.
+            self._dumps_cleanly_leaned[0] = True
+            return True
         probe = type(self)(self.external_data, io.BytesIO())
         # Share one cache across the probe tree: probing a nested function
         # re-probes its own annotations, so without this the probe count is
         # exponential in nesting depth. The probed values stay alive for the
         # whole dump, so id reuse within a pass is not a concern.
         probe._dumps_cleanly_cache = self._dumps_cleanly_cache
-        # Seed optimistically so a value whose annotations reach back to itself
-        # (mutually-referencing <locals> annotation classes) short-circuits the
-        # re-entrant probe instead of recursing forever; pickle's own memo
-        # handles the actual reference cycle. Overwritten with the real result
-        # below.
-        self._dumps_cleanly_cache[id(value)] = True
+        probe._dumps_cleanly_inflight = self._dumps_cleanly_inflight
+        probe._dumps_cleanly_leaned = self._dumps_cleanly_leaned
+        self._dumps_cleanly_inflight.add(vid)
+        leaned_before = self._dumps_cleanly_leaned[0]
+        self._dumps_cleanly_leaned[0] = False
         try:
             probe.dump(value)
         except Exception:
@@ -185,7 +202,18 @@ class AOTCompilePickler(FunctionPicklerBase):
             # treat it as unpicklable so it is pruned now instead of failing the
             # whole dump later.
             result = not probe.errors
-        self._dumps_cleanly_cache[id(value)] = result
+        finally:
+            self._dumps_cleanly_inflight.discard(vid)
+        leaned = self._dumps_cleanly_leaned[0]
+        # Propagate upward: a caller that consulted this value also leaned on
+        # whatever we leaned on.
+        self._dumps_cleanly_leaned[0] = leaned_before or leaned
+        # A False reached while leaning on an in-flight short-circuit may be a
+        # false negative (the seed it trusted could still resolve unpicklable),
+        # so return it for this call but do not cache it -- it is recomputed once
+        # the seed resolves. A True, or a False that leaned on nothing, is final.
+        if result or not leaned:
+            self._dumps_cleanly_cache[vid] = result
         return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
@@ -386,16 +414,18 @@ class AOTCompiledFunction:
         pickler = AOTCompilePickler(external_data or {}, buf)
         try:
             pickler.dump(state)
-        except (pickle.PicklingError, TypeError) as e:
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
             # Preserve the original exception object -- callers and tests match
             # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
             # guidance. Mutate args and re-raise rather than type(e)(msg): a
             # TypeError subclass from a user __reduce__ may take a non-message
             # constructor, so reconstructing would swap the real error for a
-            # constructor failure.
+            # constructor failure. AttributeError is caught too: a <locals> class
+            # in a default/kwdefault raises "Can't get local object", not
+            # PicklingError/TypeError, so without it the guidance never fired.
+            prefix = f"{e}\n" if str(e) else ""
             e.args = (
-                f"{e}\n"
-                "Some value reached by the artifact is not picklable (a "
+                prefix + "Some value reached by the artifact is not picklable (a "
                 "closure cell, a default/kwdefault, or the top-level function's "
                 "own signature annotations, which ride unpruned, are the common "
                 "sources). Mark it as external data by using "
@@ -693,6 +723,12 @@ class AOTCompiledModel:
             except Exception as e:
                 kind = type(e).__name__
                 detail = str(e).replace("\n", " ")
+                # A guard that RAISES a missing-global error still names the
+                # global; feed that into the same detection the non-raising
+                # branch uses so the footer points at the real cause instead of
+                # the generic "add a ModelInput" hint.
+                if "KeyError on G[" in detail or "G['" in detail:
+                    missing_global = True
                 lines.append(f"  [{i}] <guard check raised {kind}: {detail}>")
                 continue
             parts = reason.verbose_code_parts or [str(reason)]
