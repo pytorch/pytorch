@@ -30,11 +30,13 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+    LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_MIXED_MATCH_ERROR,
     LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
     LOCAL_REDUCE_STORE_ARG_NAME,
+    LOCAL_REDUCE_UNPLANNED_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     GroupedTensorSSALayout,
@@ -327,6 +329,27 @@ def output_plan(
     return GemmOutputPlan(output_value) if feed_main_plan is None else feed_main_plan
 
 
+def reject_unplanned_reductions(
+    local_reduce: GemmLocalReduceAnalysis, outputs: GemmOutputPlan
+) -> None:
+    """Every matched grouped reduction must belong to the planned local reduce."""
+    planned = (
+        OrderedSet()
+        if outputs.local_reduce is None
+        else OrderedSet(
+            local_reduce.physical_reduction_nodes(outputs.local_reduce.match)
+        )
+    )
+    for node in local_reduce.matches:
+        if (
+            isinstance(
+                local_reduce.graph.normalized_nodes.get(node), NormalizedReduction
+            )
+            and node not in planned
+        ):
+            raise NotImplementedError(LOCAL_REDUCE_UNPLANNED_ERROR)
+
+
 def validate_output_storage_transforms(
     graph: GemmEpilogueGraph,
     outputs: GemmOutputPlan,
@@ -371,6 +394,7 @@ class FlexGemmEpilogueAnalysis:
         local_reduce = GemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
         validate_output_storage_transforms(local_reduce.graph, outputs)
+        reject_unplanned_reductions(local_reduce, outputs)
         if outputs.indexed_output is not None and outputs.output_storage_nodes:
             raise NotImplementedError(
                 "FlexGEMM indexed outputs do not compose with terminal dtype views"
@@ -1121,6 +1145,11 @@ class FlexGemmEpiModEmitter:
                     self.local_reduce.store.value_node,
                     sink_aliases | prepass_aliases,
                 )
+                if any(
+                    node.op == "placeholder"
+                    for node in self.local_reduce_finalize_nodes
+                ):
+                    raise NotImplementedError(LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR)
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
