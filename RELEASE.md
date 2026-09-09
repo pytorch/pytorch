@@ -36,6 +36,7 @@
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
   - [Accelerator Software](#accelerator-software)
+    - [Release gating requirements for accelerator versions](#release-gating-requirements-for-accelerator-versions)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
 - [Submitting Tutorials](#submitting-tutorials)
@@ -457,8 +458,20 @@ See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for 
 
 ## Accelerator Software
 
-For accelerator software like CUDA and ROCm we will typically use the following criteria:
+For accelerator software like CUDA, ROCm and XPU we will typically use the following criteria:
 * Support latest 2 minor versions
+
+### Release gating requirements for accelerator versions
+
+These apply to every accelerator we publish binaries for -- CUDA, ROCm, XPU and any backend added later. They generalize the CUDA policy in
+[RFC-0039](https://github.com/pytorch/rfcs/blob/master/RFC-0039-cuda-support.md#release-gating-principles).
+
+1. **We do not release anything that is not tested in CI.** A version qualifies for a release, including as Experimental, only once it has build *and* test jobs in CI,
+   with failures tracked and either fixed or explicitly accepted before branch cut. CD shows that a version builds; CI shows that it works. A version present only in
+   the nightly build matrix is not eligible for the release matrix.
+2. **We do not cut an RC for anything we are not planning to promote.** The release matrix is fixed before branch cut, and only those versions are built in the RC.
+3. **Promotion from Experimental to Stable needs more than green CI.** The full CI and CD matrix must be running and stable, benchmarks must show no unresolved
+   regressions against the current Stable version, and downstream consumers must have tested the version and be ready to switch.
 
 ### Special support cases
 
