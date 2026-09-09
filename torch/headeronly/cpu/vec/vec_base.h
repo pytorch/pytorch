@@ -1567,3 +1567,26 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 #include <torch/headeronly/cpu/vec/vec_convert.h>
 #include <torch/headeronly/cpu/vec/vec_mask.h>
 #include <torch/headeronly/cpu/vec/vec_n.h>
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, vec)
+
+// Keep architecture specializations owned by at::vec while exposing the
+// migrated API through the header-only namespace.
+using at::vec::Vectorized;
+using at::vec::cast;
+using at::vec::clamp;
+using at::vec::clamp_max;
+using at::vec::clamp_min;
+using at::vec::convert;
+using at::vec::flip;
+using at::vec::is_floating_point;
+using at::vec::is_floating_point_v;
+using at::vec::is_reduced_floating_point;
+using at::vec::is_reduced_floating_point_v;
+using at::vec::is_vec_specialized_for;
+using at::vec::is_vec_specialized_for_v;
+using at::vec::maximum;
+using at::vec::minimum;
+using at::vec::transpose_mxn;
+
+HIDDEN_NAMESPACE_END(torch, headeronly, vec)

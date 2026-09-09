@@ -31,7 +31,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typetraits.cpp
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_base.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_zmath.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_native_math.cpp
@@ -41,6 +41,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
 # You may think test_vec.cpp needs to be in there, but it does not.
 set(AOTI_ABI_CHECK_VEC_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec128_float_neon.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_zmath.cpp
 )
 
