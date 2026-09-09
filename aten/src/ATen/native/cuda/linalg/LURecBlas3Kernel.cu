@@ -826,12 +826,41 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
   });
 }
 
+template <typename scalar_t, int BS>
+__global__ void __launch_bounds__(BS)
+ldl_diagonal_panel_fused_kernel(
+  scalar_t* __restrict__ dLD, int n, int lda,
+  int curr_step, int* dcurr_step,
+  int* dipiv, int* dinfo
+) {
+}
+
 template <typename scalar_t>
 void ldl_diagonal_panel(
   scalar_t* dLD, int n, int lda,
   int curr_step, int* dcurr_step,
   int* dipiv, int* dinfo
 ) {
+  constexpr int PANEL_THRESHOLD = 512;
+  constexpr int LARGE_PANEL_NTHREADS = 1024;
+  constexpr int SMALL_PANEL_NTHREADS = 256;
+  // TODO: can be easily extended to the batched case
+  auto grid = dim3(1, 1, 1);
+
+  auto problem_dim = n - curr_step;
+  if (problem_dim > PANEL_THRESHOLD) {
+    ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS><<<grid, LARGE_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+      dLD, n, lda,
+      curr_step, dcurr_step,
+      dipiv, dinfo
+    );
+  } else {
+    ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS><<<grid, SMALL_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+      dLD, n, lda,
+      curr_step, dcurr_step,
+      dipiv, dinfo
+    );
+  }
 }
 
 void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
