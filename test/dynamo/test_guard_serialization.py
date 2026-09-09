@@ -427,6 +427,57 @@ class GuardedDefaultsTupleModule(torch.nn.Module):
         return x + 2
 
 
+def keep_dict_attribute(func):
+    func.tag = 2.0
+    func.cache = threading.Lock()  # unpicklable and unguarded
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__dict__["tag"] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDictAttributeForwardModule(torch.nn.Module):
+    @keep_dict_attribute
+    def forward(self, x):
+        return x * 2
+
+
+def keep_defaults_element(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDefaultsElementForwardModule(torch.nn.Module):
+    @keep_defaults_element
+    def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
+        return x * scale
+
+
+def keep_none_default(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] is None:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedNoneDefaultForwardModule(torch.nn.Module):
+    @keep_none_default
+    def forward(self, x, cfg=None, junk=threading.Lock()):  # guarded slot is None
+        return x * 2
+
+
 # A module-level lambda's qualname is "<lambda>", which resolves to nothing.
 GLOBAL_LAMBDA = lambda x: x * 2  # noqa: E731
 GLOBAL_LAMBDA.scale_flag = 2.0
@@ -968,6 +1019,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__dict__["tag"], 2.0)
         self.assertIsInstance(out.__dict__["cache"], _Missing)
 
+    def test_a_whole_tuple_guard_keeps_defaults_verbatim(self):
+        # A __defaults__ tuple that carries a whole-tuple guard (the tuple is in
+        # guard_tree_values) while one element is _keep for an UNRELATED reason
+        # (interned, shared, reachable elsewhere) but is NOT a child of the tuple
+        # must stay verbatim: pruning the unguarded sibling to _Missing would
+        # rebake the whole-tuple guard against a value it can never match at load.
+        def base(x, a="alpha", b="beta"):
+            return x
+
+        d = base.__defaults__
+        gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
+        buf = io.BytesIO()
+        # No container->element edge: the kept element is not guarded THROUGH
+        # this tuple, so the whole-tuple guard governs and the tuple stays whole.
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(out.__defaults__, ("alpha", "beta"))
+
+    def test_an_element_guarded_through_its_container_still_prunes_siblings(self):
+        # When a guard IS rooted at an element through the container (a
+        # GetItemSource records the container->element edge), the container is
+        # pruned per value so an unguarded sibling is dropped.
+        def base(x, a="alpha", b="beta"):
+            return x
+
+        d = base.__defaults__
+        gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
+        children = {id(d): {id(d[1])}}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf, guard_tree_children=children).dump(
+            {"fn": base}
+        )
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__defaults__[0], _Missing)
+        self.assertEqual(out.__defaults__[1], "beta")
+
     def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
         # after reload; rebuilding every cell silently unshares them.
@@ -1433,6 +1520,56 @@ class TestGuardSerialization(TestGuardSerializationBase):
         mod.fn.__defaults__ = (2.0, 1.0)
         mod.fn.__kwdefaults__ = {"c": 4.0}
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, False)
+
+    def test_fqn_mismatched_function_prunes_unpicklable_dict_attributes(self):
+        # A guard through __dict__ registers the dict itself, which used to be
+        # carried verbatim: one unpicklable unguarded attribute then bypassed
+        # the whole package. The guarded attribute must still round-trip.
+        mod = DecoratedDictAttributeForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        inner.tag = 3.0
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.tag = 2.0
+
+    def test_fqn_mismatched_function_prunes_unpicklable_defaults(self):
+        # A guard through __defaults__[0] registers the tuple itself. Carrying
+        # it verbatim would drag the unpicklable unguarded sibling default into
+        # the pickle; pruning per value keeps the guarded slot and drops the
+        # sibling. The guarded default must still round-trip.
+        mod = DecoratedDefaultsElementForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        original = inner.__defaults__
+        inner.__defaults__ = (3.0, original[1])
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__defaults__ = original
+
+    def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):
+        # The container->element edge is recorded on the source, not the
+        # element's value, so a guard rooted at a None-valued default still
+        # prunes the tuple per value and drops the unpicklable sibling. Gating
+        # the edge on `value is not None` would carry the tuple verbatim and
+        # bypass the whole package on this ordinary `cfg=None` shape.
+        mod = DecoratedNoneDefaultForwardModule()
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        original = inner.__defaults__
+        inner.__defaults__ = (3.0, original[1])
+        try:
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__defaults__ = original
 
     def test_guard_rooted_at_a_lambda(self):
         # A module-level lambda is an fqn mismatch too (see GLOBAL_LAMBDA) and
