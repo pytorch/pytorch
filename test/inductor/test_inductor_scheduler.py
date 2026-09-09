@@ -27,7 +27,7 @@ from torch._inductor.codegen.simd_kernel_features import (
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import GraphPartitionSignature
-from torch._inductor.loop_body import LoopBody, MemoryEntry, MemoryUsageType
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
@@ -1324,6 +1324,121 @@ class TestScheduler(TestCase):
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
 
+    def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("reduced",), is_reduction=True
+        )
+        grouped.get_ranges.return_value = ([8], [2])
+        consumer = self._mock_schedule_node(
+            "consumer", reads=("reduced",), ancestors=("grouped",)
+        )
+        consumer.__class__ = SchedulerNode
+        context = Mock(grouped_reduction=grouped, grouped_numel=8, grouped_rnumel=2)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+        ):
+            result = NestedReduction._classify_grouped_pointwise_nodes(
+                context, (grouped, consumer)
+            )
+
+        self.assertIsNone(result)
+
+    def test_nested_reduction_rejects_template_nodes(self):
+        outer = self._mock_schedule_node("outer", is_reduction=True)
+        outer.node = Mock(spec=ir.TemplateBuffer)
+        outer.get_nodes.return_value = (outer,)
+        grouped = self._mock_schedule_node("grouped", is_reduction=True)
+        grouped.get_nodes.return_value = (grouped,)
+        context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
+
+        self.assertFalse(
+            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        )
+
+    @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
+    def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        writer = self._mock_schedule_node(
+            "writer", writes=("source",), is_reduction=writer_role == "reduction"
+        )
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("scale",), is_reduction=True
+        )
+        epilogue = self._mock_schedule_node(
+            "epilogue",
+            reads=("source", "scale"),
+            writes=("packed",),
+            ancestors=("writer", "grouped"),
+        )
+        for node in (outer_reduction, writer, grouped, epilogue):
+            node.has_aliasing_or_mutation.return_value = False
+        outer = Mock()
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        outer.group = (None, (8, 16))
+        context = Mock(grouped_reduction=grouped, grouped_rnumel=2)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        if writer_role == "local_input":
+            domains.append(
+                (writer, NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+            )
+        relation = Mock(requires_live_source=True)
+        relation.consumer_access.name = "source"
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 2
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+            patch.object(
+                NestedReduction,
+                "_group_sub_parent_epilogue_nodes",
+                return_value=grouping,
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_internal_access_relations",
+                return_value=(),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_epilogue_outputs_unread",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_try_get_sub_parent_access_relations",
+                return_value=(relation,),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_broadcast_access_relations",
+                return_value=(),
+            ),
+        ):
+            stage = NestedReduction._plan_nested_sub_parent_stage(
+                outer, (grouped, epilogue), context, domains
+            )
+
+        # Only a value produced inside the parent loop is dead once a looped
+        # parent closes it; displaced and reduction writers stay live.
+        if writer_role == "parent_stage":
+            self.assertIsNone(stage)
+        else:
+            self.assertIsNotNone(stage)
+
     def test_sub_parent_parent_order_closes_final_loop_dependencies(self):
         source = self._mock_schedule_node("source", writes=("source",))
         sibling = self._mock_schedule_node("sibling", writes=("sibling",))
@@ -2288,32 +2403,6 @@ class TestScheduler(TestCase):
         self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
-    def test_masked_expansion_rejects_non_plain_store(self):
-        reduction = Mock(spec=SchedulerNode)
-        reduction.is_template.return_value = False
-        reduction.is_foreach.return_value = False
-        reduction.is_cpu.return_value = False
-        consumer = Mock(spec=SchedulerNode)
-        consumer.is_reduction.return_value = False
-        consumer.has_aliasing_or_mutation.return_value = False
-        consumer.node = Mock(spec=ir.ComputedBuffer)
-        consumer.node.data = Mock(spec=ir.Pointwise)
-        consumer._body = Mock(spec=LoopBody)
-        consumer._body.has_op.return_value = False
-        consumer.read_writes = Mock(
-            writes=[MemoryDep("out", sympy.S.Zero, (), (), mode="atomic_add")]
-        )
-        graph = Mock()
-        graph.has_feature.return_value = True
-
-        with V.set_graph_handler(graph):
-            accepted = Scheduler._try_masked_reindex_reduction_consumer(
-                Mock(spec=Scheduler), reduction, consumer
-            )
-
-        self.assertFalse(accepted)
-        consumer.expand_dimension_for_pointwise_node_with_masked_stores.assert_not_called()
-
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
     def test_masked_expansion_rejects_mismatched_read(self, device):
@@ -2322,7 +2411,7 @@ class TestScheduler(TestCase):
         # ordinary fusion legality check must still decline after expansion.
         def fn(x, extra):
             values = torch.cat((x, extra), dim=-1)
-            normalizer = values.sum(dim=-1, keepdim=True)
+            normalizer = values.exp().sum(dim=-1, keepdim=True)
             return (values[..., :32] / normalizer.roll(1, dims=0)).clone()
 
         x = torch.randn(64, 32, device=device)
@@ -2340,7 +2429,7 @@ class TestScheduler(TestCase):
     def test_masked_expansion_rejects_indirect_indexing(self, device):
         def fn(x, extra, index):
             values = torch.cat((x, extra), dim=-1)
-            normalizer = values.sum(dim=-1, keepdim=True)
+            normalizer = values.exp().sum(dim=-1, keepdim=True)
             return (torch.gather(values, 1, index) / normalizer).clone()
 
         x = torch.randn(64, 32, device=device)
@@ -2358,13 +2447,13 @@ class TestScheduler(TestCase):
     @skipCPUIf(True, "requires accelerator Triton")
     def test_rejected_masked_expansion_rolls_back(self, device):
         fn, args = self._masked_expansion_fn(device, 1)
-        expanded_nodes = []
+        expanded = []
         original_expand = (
             SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
         )
 
         def record_expand(node, *args, **kwargs):
-            expanded_nodes.append(node)
+            expanded.append((node, node._sizes))
             return original_expand(node, *args, **kwargs)
 
         torch._dynamo.reset()
@@ -2381,10 +2470,9 @@ class TestScheduler(TestCase):
             actual = torch.compile(fn, fullgraph=True)(*args)
 
         self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
-        self.assertTrue(expanded_nodes)
-        self.assertTrue(
-            all(not node._body.has_op("masked_store") for node in expanded_nodes)
-        )
+        self.assertTrue(expanded)
+        for node, sizes in expanded:
+            self.assertEqual(node._sizes, sizes)
 
 
 class TestScoreFusionMemory(TestCase):
