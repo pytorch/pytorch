@@ -279,6 +279,23 @@ class DecoratedUnpicklableGuardedDefaultForwardModule(torch.nn.Module):
         return x * 2
 
 
+class RecursingGuardedDefault:
+    flag = 2.0
+
+    def __init__(self, inner=None):
+        self.inner = inner
+
+    def __reduce__(self):
+        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        return type(self), (type(self)(),)
+
+
+class DecoratedRecursingGuardedDefaultForwardModule(torch.nn.Module):
+    @keep_default_attribute
+    def forward(self, x, cfg=RecursingGuardedDefault()):
+        return x * 2
+
+
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
     def wrapper(x):
@@ -1141,6 +1158,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # crash. strict_precompile is on for this class, so it re-raises.
         mod = DecoratedUnpicklableGuardedDefaultForwardModule()
         with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
+            self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+
+    @torch._dynamo.config.patch(strict_precompile=True)
+    def test_recursing_guarded_value_overflow_is_a_package_error(self):
+        # A recursion overflow while pickling a guarded value -- here a
+        # pathological __reduce__ that never memoizes -- is a serialization
+        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
+        # without strict_precompile), never a raw RecursionError that hard-fails
+        # a program that compiled fine before.
+        mod = DecoratedRecursingGuardedDefaultForwardModule()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.PackageError, "exceeded the recursion limit"
+        ):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
