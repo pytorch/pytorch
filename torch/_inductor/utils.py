@@ -5095,6 +5095,18 @@ def tlx_only_cuda_options() -> list[str]:
         return []
 
 
+@lru_cache
+def tlx_only_hip_options() -> list[str]:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
+
+        return tlx_only_hip_options
+
+    except ImportError:
+        return []
+
+
 def _round_up(x: int, y: int) -> int:
     """Round x up to the nearest multiple of y."""
     return ((x + y - 1) // y) * y

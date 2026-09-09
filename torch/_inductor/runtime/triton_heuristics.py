@@ -47,6 +47,7 @@ from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -5098,7 +5099,7 @@ def template(
         )
 
     if torch.version.hip:
-        for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
+        for k in tlx_only_hip_options():
             if k in triton_meta:
                 config_kwargs[k] = triton_meta[k]
 
