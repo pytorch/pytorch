@@ -189,6 +189,10 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void legendre_polynomial_p_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "legendre_polynomial_p");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -403,6 +407,7 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
+REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)

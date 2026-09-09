@@ -534,6 +534,7 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
             "laguerre_polynomial_l",
+            "legendre_polynomial_p",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
