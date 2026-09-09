@@ -310,7 +310,12 @@ class SuperVariable(VariableTracker):
                 user_cls_vt = variables.UserDefinedClassVariable(
                     user_cls, source=user_cls_source
                 )
-            return user_cls_vt.call_method(tx, "__new__", args, kwargs)
+            # `args[0]` (== `cls` in `super().__new__(cls, ...)`) is not a
+            # receiver, so this must go through the tp_new slot, not
+            # call_method (whose generic unbound-method-forwarding blocks,
+            # e.g. for set/frozenset/list/tuple, assume args[0] is a receiver
+            # instance and would misdispatch cls as one).
+            return user_cls_vt.tp_new_impl(tx, args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):

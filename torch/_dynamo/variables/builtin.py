@@ -1818,6 +1818,61 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.fn is object and len(args) == 1:
+            if len(kwargs) != 0:
+                raise AssertionError(
+                    f"object.__new__ expects no kwargs, got {len(kwargs)}"
+                )
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], args[1:], tx=tx
+            )
+
+        if self.fn is tuple and len(args) == 2 and not kwargs:
+            if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+                init_args = unpack_iterable(tx, args[1])
+                return variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
+                )
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], args[1:], tx=tx
+            )
+
+        if self.fn in (set, frozenset) and args and not kwargs:
+            is_exact_type = (
+                isinstance(args[0], BuiltinVariable) and args[0].fn is self.fn
+            )
+            if self.fn is set:
+                # set.__new__ (tp_new) ignores extra args -- population
+                # happens later via __init__, called separately after
+                # __new__ returns. Mirrors DictBuiltinVariable/
+                # ListBuiltinVariable's own __new__ handling.
+                if is_exact_type:
+                    return SetVariable([], mutation_type=ValueMutationNew())
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self, args[0], [], tx=tx
+                )
+            else:
+                # frozenset is immutable: frozenset.__new__ (tp_new)
+                # populates contents directly from the iterable, since
+                # frozenset.__init__ is a no-op. Unlike set above, the
+                # iterable must be kept, mirroring tuple's handling above.
+                if is_exact_type:
+                    init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
+                    return FrozensetVariable(
+                        init_args, mutation_type=ValueMutationNew()
+                    )
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self, args[0], args[1:], tx=tx
+                )
+
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1843,33 +1898,8 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
-        if name == "__new__":
-            # Supported __new__ methods
-            if self.fn is object and len(args) == 1:
-                if len(kwargs) != 0:
-                    raise AssertionError(
-                        f"object.__new__ expects no kwargs, got {len(kwargs)}"
-                    )
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
-                )
-
-            if self.fn is tuple and len(args) == 2 and not kwargs:
-                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = unpack_iterable(tx, args[1])
-                    return variables.TupleVariable(
-                        init_args, mutation_type=ValueMutationNew()
-                    )
-
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
-                )
+        if name == "__new__" and self.fn in (object, tuple, set, frozenset):
+            return self.tp_new_impl(tx, args, kwargs)
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
             if all(a.is_python_constant() for a in args) and all(
@@ -3279,6 +3309,25 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         "fromkeys": Method(fromkeys),
     }
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if args:
+            # dict.__new__ (tp_new) ignores extra args — only the first
+            # arg (the type) matters.  Pass init_args=[] so reconstruction
+            # emits base_cls.__new__(cls) without extras.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
+            dict_vt = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            if isinstance(args[0], DictBuiltinVariable):
+                return dict_vt
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], [], tx=tx
+            )
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3287,20 +3336,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if args:
-                # dict.__new__ (tp_new) ignores extra args — only the first
-                # arg (the type) matters.  Pass init_args=[] so reconstruction
-                # emits base_cls.__new__(cls) without extras.
-                # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
-                dict_vt = ConstDictVariable({}, mutation_type=ValueMutationNew())
-                if isinstance(args[0], DictBuiltinVariable):
-                    return dict_vt
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
-                )
+            return self.tp_new_impl(tx, args, kwargs)
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
@@ -3904,6 +3940,25 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         lst.call_method(tx, "extend", [args[0]], {})
         return lst
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if args and not kwargs:
+            # list.__new__ (PyType_GenericNew) ignores extra args -- only
+            # the first arg (the type) matters. Pass init_args=[] so
+            # reconstruction emits base_cls.__new__(cls) without extras.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
+            list_vt = ListVariable([], mutation_type=ValueMutationNew())
+            if isinstance(args[0], ListBuiltinVariable):
+                return list_vt
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], [], tx=tx
+            )
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3912,20 +3967,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if args and not kwargs:
-                # list.__new__ (PyType_GenericNew) ignores extra args -- only
-                # the first arg (the type) matters. Pass init_args=[] so
-                # reconstruction emits base_cls.__new__(cls) without extras.
-                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
-                list_vt = ListVariable([], mutation_type=ValueMutationNew())
-                if isinstance(args[0], ListBuiltinVariable):
-                    return list_vt
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
-                )
+            return self.tp_new_impl(tx, args, kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
