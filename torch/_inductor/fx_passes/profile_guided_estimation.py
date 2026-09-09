@@ -1,9 +1,10 @@
 """
 Profile-Guided Estimation (PGE) for overlap scheduling.
 
-Parses a Chrome Trace JSON (from torch.profiler) and builds lookup tables
-for kernel runtimes (collectives, matmuls, attention, custom ops, etc.).
-Used as a custom_runtime_estimation hook in the overlap scheduler.
+Parses one or more Chrome Trace JSON files (from torch.profiler) and builds
+lookup tables for kernel runtimes (collectives, matmuls, attention, custom
+ops, etc.). Multiple same-capture rank profiles remove collective arrival
+skew before aggregation.
 
 When the same profile is loaded on all ranks, estimates are deterministic
 and no cross-rank synchronization is needed.
@@ -15,8 +16,10 @@ import functools
 import json
 import logging
 import math
+import os
+import statistics
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -65,12 +68,20 @@ class CollectiveRecord:
     """A single collective kernel observation from the profile."""
 
     collective_name: str  # "all_gather_into_tensor", "reduce_scatter_tensor", etc.
+    pg_name: str
+    pg_desc: str
     pg_ranks: tuple[int, ...]  # sorted rank tuple
     group_size: int
     in_nelems: int  # "In msg nelems" from profile
     out_nelems: int  # "Out msg nelems" from profile
     dtype: str  # "Float", "BFloat16", etc.
     duration_us: float
+    start_us: float | None = None
+    rank: int | None = None
+    sequence: int | None = None
+    comms_id: str | None = None
+    kernel_name: str = ""
+    clock_domain: str | None = None
 
 
 @dataclass
@@ -98,6 +109,7 @@ class ProfileData:
     collectives: list[CollectiveRecord] = field(default_factory=list)
     ops: list[OpRecord] = field(default_factory=list)
     pg_configs: dict[str, tuple[int, ...]] = field(default_factory=dict)
+    pg_descriptions: dict[str, str] = field(default_factory=dict)
 
     # Lookup indices built after loading
     _collective_index: dict[
@@ -108,6 +120,11 @@ class ProfileData:
     # E.g. (0,2,4,6) and (1,3,5,7) both have stride=2, size=4 → same mesh dim.
     _collective_index_by_mesh_dim: dict[
         tuple[str, int, int, str], list[tuple[int, float]]
+    ] = field(default_factory=dict)
+    # Index by logical process-group description. DeviceMesh gives every
+    # parallel subgroup for one mesh axis the same description.
+    _collective_index_by_pg_desc: dict[
+        tuple[str, str, int, str], list[tuple[int, float]]
     ] = field(default_factory=dict)
     # Count of distinct PGs per mesh dimension (stride, group_size) — used for
     # ambiguity check (skip fallback if multiple PGs share the same mesh dim).
@@ -126,29 +143,99 @@ class ProfileData:
     _pg_peak_bw: dict[tuple[int, ...], float] = field(default_factory=dict)
     # Mesh-dimension fallback: (stride, group_size) -> peak BW (GB/s)
     _mesh_dim_peak_bw: dict[tuple[int, int], float] = field(default_factory=dict)
+    # Logical process-group fallback: (description, group_size) -> peak BW (GB/s)
+    _pg_desc_peak_bw: dict[tuple[str, int], float] = field(default_factory=dict)
+    profile_count: int = 0
+    arrival_corrected_collectives: int = 0
+    arrival_clock_fallback_collectives: int = 0
+    arrival_incomplete_collectives: int = 0
+    collective_record_count: int = 0
+    op_record_count: int = 0
 
-    def load(self, trace_path: str) -> None:
-        """Load and parse a Chrome Trace JSON file."""
-        import os
+    def load(self, trace_path: str | list[str]) -> None:
+        """Load and parse one or more Chrome Trace JSON files."""
+        paths = [trace_path] if isinstance(trace_path, str) else list(trace_path)
+        trace_paths = [os.path.realpath(path) for path in paths]
+        if not trace_paths:
+            raise ValueError("PGE requires at least one trace file")
+        if len(OrderedSet(trace_paths)) != len(trace_paths):
+            raise ValueError("PGE trace file list contains duplicate paths")
 
-        if not os.path.isfile(trace_path):
-            raise FileNotFoundError(
-                f"PGE trace file not found: {trace_path}. "
-                f"Check config.aten_distributed_optimizations.profile_guided_estimations_profile_path"
-            )
-        with open(trace_path) as f:
-            data = json.load(f)
+        capture_ids: list[tuple[str, str | None, str | None] | None] = []
+        world_sizes: list[int | None] = []
+        profile_ranks: list[int | None] = []
+        for index, path in enumerate(trace_paths):
+            if not os.path.isfile(path):
+                raise FileNotFoundError(
+                    f"PGE trace file not found: {path}. "
+                    f"Check config.aten_distributed_optimizations.profile_guided_estimations_profile_path"
+                )
+            with open(path) as f:
+                data = json.load(f)
 
-        self._parse_pg_configs(data)
-        self._parse_events(data)
+            capture_ids.append(self._capture_id(data))
+            dist_info = data.get("distributedInfo", {})
+            rank = dist_info.get("rank")
+            profile_ranks.append(rank if isinstance(rank, int) else None)
+            world_size = dist_info.get("world_size")
+            world_sizes.append(world_size if isinstance(world_size, int) else None)
+            self._parse_pg_configs(data)
+            self._parse_events(data, parse_ops=index == 0)
+
+        self.profile_count = len(trace_paths)
+        if self.profile_count > 1:
+            known_capture_ids = [item for item in capture_ids if item is not None]
+            if known_capture_ids and (
+                len(known_capture_ids) != self.profile_count
+                or len(OrderedSet(known_capture_ids)) != 1
+            ):
+                raise ValueError(
+                    "PGE rank profiles must identify the same profiler capture"
+                )
+            known_world_sizes = [size for size in world_sizes if size is not None]
+            if len(OrderedSet(known_world_sizes)) > 1:
+                raise ValueError("PGE rank profiles must have the same world size")
+            if None in profile_ranks or len(OrderedSet(profile_ranks)) != len(
+                profile_ranks
+            ):
+                raise ValueError(
+                    "PGE rank profiles must have distinct distributed ranks"
+                )
+            self._correct_collective_arrival_delays()
+        self.collective_record_count = len(self.collectives)
+        self.op_record_count = len(self.ops)
         self._build_indices()
+        self.collectives.clear()
+        self.ops.clear()
 
         log.info(
-            "PGE loaded: %d collectives, %d op records (%d distinct shapes), %d PGs",
-            len(self.collectives),
-            len(self.ops),
+            "PGE loaded %d profiles: %d collectives, %d op records "
+            "(%d distinct shapes), %d PGs; corrected=%d, clock_fallback=%d, "
+            "incomplete=%d",
+            self.profile_count,
+            self.collective_record_count,
+            self.op_record_count,
             len(self._op_index),
             len(self.pg_configs),
+            self.arrival_corrected_collectives,
+            self.arrival_clock_fallback_collectives,
+            self.arrival_incomplete_collectives,
+        )
+
+    @staticmethod
+    def _capture_id(data: dict[str, Any]) -> tuple[str, str | None, str | None] | None:
+        """Return job capture metadata when the profiler exported it."""
+        job_name = data.get("PT_PROFILER_JOB_NAME", data.get("mast_job_name"))
+        if job_name is None:
+            return None
+        job_version = data.get("PT_PROFILER_JOB_VERSION", data.get("mast_job_version"))
+        attempt = data.get(
+            "PT_PROFILER_JOB_ATTEMPT_INDEX", data.get("mast_job_attempt")
+        )
+        return (
+            str(job_name),
+            str(job_version) if job_version is not None else None,
+            str(attempt) if attempt is not None else None,
         )
 
     def _parse_pg_configs(self, data: dict[str, Any]) -> None:
@@ -161,39 +248,59 @@ class ProfileData:
                 ranks = pg_info.get("ranks", [])
                 if ranks:
                     self.pg_configs[pg_name] = tuple(sorted(ranks))
+                pg_desc = pg_info.get("pg_desc")
+                if isinstance(pg_desc, str):
+                    self.pg_descriptions[pg_name] = pg_desc
         elif isinstance(pg_config, dict):
             for pg_name, pg_info in pg_config.items():
                 ranks = pg_info.get("ranks", [])
                 if ranks:
                     self.pg_configs[pg_name] = tuple(sorted(ranks))
+                pg_desc = pg_info.get("pg_desc")
+                if isinstance(pg_desc, str):
+                    self.pg_descriptions[pg_name] = pg_desc
 
-    def _parse_events(self, data: dict[str, Any]) -> None:
+    def _parse_events(self, data: dict[str, Any], parse_ops: bool = True) -> None:
         events = data.get("traceEvents", [])
-        # Reuse profile_analysis's External id -> CPU op mapping
-        try:
-            extern_mapping = _create_extern_mapping(data)
-        except (ParseException, KeyError):
-            # Malformed trace (e.g. duplicate External ids, missing traceEvents)
-            extern_mapping = defaultdict(list)
-            for ev in events:
-                if (
-                    isinstance(ev, dict)
-                    and ev.get("cat") == "cpu_op"
-                    and "args" in ev
-                    and "External id" in ev["args"]
-                ):
-                    extern_mapping[ev["args"]["External id"]].append(ev)
-
-        # Build External id -> total GPU kernel duration
+        rank = data.get("distributedInfo", {}).get("rank")
+        if not isinstance(rank, int):
+            rank = None
+        host_name = data.get("host_name")
+        base_time_ns = data.get("baseTimeNanoseconds")
+        has_time_base = isinstance(base_time_ns, int | float)
+        base_time_us = float(base_time_ns) / 1e3 if has_time_base else 0.0
+        clock_domain = (
+            str(host_name)
+            if has_time_base and isinstance(host_name, str) and host_name
+            else None
+        )
+        extern_mapping = {}
         gpu_dur: dict[int, float] = defaultdict(float)
-        for ev in events:
-            if not isinstance(ev, dict) or ev.get("cat") != "kernel":
-                continue
-            args = ev.get("args", {})
-            eid = args.get("External id")
-            dur = ev.get("dur", 0.0)
-            if eid is not None and dur > 0:
-                gpu_dur[eid] += dur
+        if parse_ops:
+            # Reuse profile_analysis's External id -> CPU op mapping
+            try:
+                extern_mapping = _create_extern_mapping(data)
+            except (ParseException, KeyError):
+                # Malformed trace (e.g. duplicate External ids, missing traceEvents)
+                extern_mapping = defaultdict(list)
+                for ev in events:
+                    if (
+                        isinstance(ev, dict)
+                        and ev.get("cat") == "cpu_op"
+                        and "args" in ev
+                        and "External id" in ev["args"]
+                    ):
+                        extern_mapping[ev["args"]["External id"]].append(ev)
+
+            # Build External id -> total GPU kernel duration
+            for ev in events:
+                if not isinstance(ev, dict) or ev.get("cat") != "kernel":
+                    continue
+                args = ev.get("args", {})
+                eid = args.get("External id")
+                dur = ev.get("dur", 0.0)
+                if eid is not None and dur > 0:
+                    gpu_dur[eid] += dur
 
         # Parse collectives from GPU kernel events directly
         # (NCCL kernels carry collective metadata in args)
@@ -213,18 +320,37 @@ class ProfileData:
             dur = ev.get("dur", 0.0)
             if dur <= 0:
                 continue
+            start_us = ev.get("ts")
+            if not isinstance(start_us, int | float):
+                start_us = None
+            else:
+                start_us += base_time_us
+            sequence = args.get("Seq")
+            if not isinstance(sequence, int):
+                sequence = None
+            comms_id = args.get("Comms Id")
+            if comms_id is not None:
+                comms_id = str(comms_id)
 
             pg_ranks = self._parse_ranks(pg_ranks_str, pg_name)
 
             self.collectives.append(
                 CollectiveRecord(
                     collective_name=coll_name,
+                    pg_name=str(pg_name),
+                    pg_desc=self.pg_descriptions.get(str(pg_name), ""),
                     pg_ranks=pg_ranks,
                     group_size=group_size,
                     in_nelems=in_nelems,
                     out_nelems=out_nelems,
                     dtype=dtype,
                     duration_us=dur,
+                    start_us=start_us,
+                    rank=rank,
+                    sequence=sequence,
+                    comms_id=comms_id,
+                    kernel_name=ev.get("name", ""),
+                    clock_domain=clock_domain,
                 )
             )
 
@@ -238,8 +364,102 @@ class ProfileData:
             cpu_ev = cpu_evs[0]
             self._parse_op(cpu_ev.get("name", ""), cpu_ev.get("args", {}), total_dur)
 
-    def _parse_ranks(self, ranks_str: str, pg_name: str) -> tuple[int, ...]:
+    def _correct_collective_arrival_delays(self) -> None:
+        """Replace complete cross-rank observations with post-arrival durations."""
+        grouped: defaultdict[tuple[Any, ...], list[CollectiveRecord]] = defaultdict(
+            list
+        )
+        ungrouped: list[CollectiveRecord] = []
+        for rec in self.collectives:
+            if rec.comms_id is not None:
+                key = ("comms_id", rec.comms_id, rec.pg_ranks)
+            elif rec.sequence is not None and rec.pg_ranks:
+                key = ("sequence", rec.pg_name, rec.pg_ranks, rec.sequence)
+            else:
+                ungrouped.append(rec)
+                continue
+            grouped[key].append(rec)
+
+        corrected = list(ungrouped)
+        for records in grouped.values():
+            expected_ranks = OrderedSet(records[0].pg_ranks)
+            observed_ranks = OrderedSet(
+                [rec.rank for rec in records if rec.rank is not None]
+            )
+            signatures = OrderedSet(
+                [
+                    (
+                        self._normalize_collective_name(rec.collective_name),
+                        rec.pg_name,
+                        rec.pg_ranks,
+                        rec.group_size,
+                        rec.in_nelems,
+                        rec.out_nelems,
+                        rec.dtype,
+                        rec.kernel_name,
+                    )
+                    for rec in records
+                ]
+            )
+            if (
+                not expected_ranks
+                or observed_ranks != expected_ranks
+                or len(signatures) != 1
+                or any(rec.start_us is None for rec in records)
+            ):
+                self.arrival_incomplete_collectives += 1
+                corrected.extend(records)
+                continue
+
+            intervals_by_rank: defaultdict[int, list[tuple[float, float]]] = (
+                defaultdict(list)
+            )
+            for rec in records:
+                rank = rec.rank
+                start_us = rec.start_us
+                if rank is None or start_us is None:
+                    continue
+                intervals_by_rank[rank].append((start_us, start_us + rec.duration_us))
+            intervals = [
+                (
+                    min(start for start, _ in rank_intervals),
+                    max(end for _, end in rank_intervals),
+                )
+                for rank_intervals in intervals_by_rank.values()
+            ]
+            last_arrival = max(start for start, _ in intervals)
+            first_completion = min(end for _, end in intervals)
+            clock_domains = OrderedSet([rec.clock_domain for rec in records])
+            if (
+                len(clock_domains) == 1
+                and None not in clock_domains
+                and last_arrival <= first_completion
+            ):
+                # A collective cannot complete before its final rank starts. When
+                # clocks agree, measure from that arrival to the final completion.
+                duration_us = max(end for _, end in intervals) - last_arrival
+                self.arrival_corrected_collectives += 1
+            else:
+                # Cross-host clocks are not sufficiently aligned. The shortest
+                # rank duration is the clock-independent approximation.
+                duration_us = min(end - start for start, end in intervals)
+                self.arrival_clock_fallback_collectives += 1
+
+            corrected.append(
+                replace(
+                    records[0],
+                    duration_us=duration_us,
+                    start_us=last_arrival,
+                    rank=None,
+                )
+            )
+
+        self.collectives = corrected
+
+    def _parse_ranks(self, ranks_str: str | list[int], pg_name: str) -> tuple[int, ...]:
         """Parse rank list from profile string or fall back to pg_configs."""
+        if isinstance(ranks_str, list):
+            return tuple(sorted(ranks_str))
         if isinstance(ranks_str, str) and ranks_str.startswith("["):
             try:
                 ranks = json.loads(ranks_str)
@@ -292,6 +512,9 @@ class ProfileData:
         coll_idx_by_mesh_dim: dict[
             tuple[str, int, int, str], list[tuple[int, float]]
         ] = defaultdict(list)
+        coll_idx_by_pg_desc: dict[
+            tuple[str, str, int, str], list[tuple[int, float]]
+        ] = defaultdict(list)
         # Track distinct PG rank sets per mesh dimension for ambiguity check
         pg_sets_by_mesh_dim: dict[tuple[int, int], OrderedSet[tuple[int, ...]]] = (
             defaultdict(OrderedSet)
@@ -302,18 +525,28 @@ class ProfileData:
             coll_idx[(norm_name, rec.pg_ranks, rec.dtype)].append(
                 (rec.out_nelems, rec.duration_us)
             )
+            if rec.pg_desc and rec.pg_desc != "undefined":
+                coll_idx_by_pg_desc[(norm_name, rec.pg_desc, gs, rec.dtype)].append(
+                    (rec.out_nelems, rec.duration_us)
+                )
             stride = _rank_stride(rec.pg_ranks)
             if stride is not None:
                 coll_idx_by_mesh_dim[(norm_name, stride, gs, rec.dtype)].append(
                     (rec.out_nelems, rec.duration_us)
                 )
                 pg_sets_by_mesh_dim[(stride, gs)].add(rec.pg_ranks)
-        # Sort by nelems for interpolation
+        # Aggregate repeated observations so lookup is not determined by whichever
+        # iteration happened to occur first in the trace.
         self._collective_index = {
-            k: sorted(v, key=lambda x: x[0]) for k, v in coll_idx.items()
+            k: self._aggregate_collective_samples(v) for k, v in coll_idx.items()
         }
         self._collective_index_by_mesh_dim = {
-            k: sorted(v, key=lambda x: x[0]) for k, v in coll_idx_by_mesh_dim.items()
+            k: self._aggregate_collective_samples(v)
+            for k, v in coll_idx_by_mesh_dim.items()
+        }
+        self._collective_index_by_pg_desc = {
+            k: self._aggregate_collective_samples(v)
+            for k, v in coll_idx_by_pg_desc.items()
         }
         self._pg_count_by_mesh_dim = {
             k: len(pgs) for k, pgs in pg_sets_by_mesh_dim.items()
@@ -344,6 +577,9 @@ class ProfileData:
         mesh_dim_bw_samples: dict[tuple[int, int], list[tuple[int, float]]] = (
             defaultdict(list)
         )
+        pg_desc_bw_samples: dict[tuple[str, int], list[tuple[int, float]]] = (
+            defaultdict(list)
+        )
         for rec in self.collectives:
             if rec.out_nelems <= 0 or rec.duration_us <= 0:
                 continue
@@ -352,6 +588,8 @@ class ProfileData:
             total_bytes = rec.out_nelems * elem_bytes
             bw_gbps = total_bytes / (rec.duration_us * 1e-6) / 1e9  # GB/s
             pg_bw_samples[rec.pg_ranks].append((total_bytes, bw_gbps))
+            if rec.pg_desc and rec.pg_desc != "undefined":
+                pg_desc_bw_samples[(rec.pg_desc, gs)].append((total_bytes, bw_gbps))
             stride = _rank_stride(rec.pg_ranks)
             if stride is not None:
                 mesh_dim_bw_samples[(stride, gs)].append((total_bytes, bw_gbps))
@@ -375,6 +613,24 @@ class ProfileData:
             for key, samples in mesh_dim_bw_samples.items()
             if samples
         }
+        self._pg_desc_peak_bw = {
+            key: _peak_bw_from_samples(samples)
+            for key, samples in pg_desc_bw_samples.items()
+            if samples
+        }
+
+    @staticmethod
+    def _aggregate_collective_samples(
+        entries: list[tuple[int, float]],
+    ) -> list[tuple[int, float]]:
+        samples_by_size: defaultdict[int, list[float]] = defaultdict(list)
+        for nelems, duration_us in entries:
+            samples_by_size[nelems].append(duration_us)
+
+        aggregated = []
+        for nelems, samples in samples_by_size.items():
+            aggregated.append((nelems, statistics.median(samples)))
+        return sorted(aggregated, key=lambda x: x[0])
 
     def get_collective_keys(self) -> list[tuple[str, tuple[int, ...], str]]:
         """Return the collective index keys: (name, pg_ranks, dtype)."""
@@ -421,18 +677,34 @@ class ProfileData:
         pg_ranks: tuple[int, ...],
         nelems: int,
         dtype: str,
+        *,
+        pg_desc: str | None = None,
     ) -> float | None:
         """Estimate collective duration using peak observed bandwidth for this PG.
 
         Used when the target size exceeds the extrapolation cap. Returns ms or None.
         """
-        bw_gbps = self._pg_peak_bw.get(pg_ranks)
-        if bw_gbps is None or bw_gbps <= 0:
-            # Try mesh-dimension fallback
+        gs = len(pg_ranks)
+        bw_gbps: float | None = None
+        if pg_desc and pg_desc != "undefined":
+            bw_gbps = self._pg_desc_peak_bw.get((pg_desc, gs))
+        if (bw_gbps is None or bw_gbps <= 0) and self.profile_count > 1:
+            # Rank-specific samples from multiple profiles can produce different
+            # schedules. Use a shared mesh estimate only when it is unambiguous.
             stride = _rank_stride(pg_ranks)
-            gs = len(pg_ranks)
-            if stride is not None:
+            if (
+                stride is not None
+                and self._pg_count_by_mesh_dim.get((stride, gs), 0) == 1
+            ):
                 bw_gbps = self._mesh_dim_peak_bw.get((stride, gs))
+            else:
+                bw_gbps = None
+        elif bw_gbps is None or bw_gbps <= 0:
+            bw_gbps = self._pg_peak_bw.get(pg_ranks)
+            if bw_gbps is None or bw_gbps <= 0:
+                stride = _rank_stride(pg_ranks)
+                if stride is not None:
+                    bw_gbps = self._mesh_dim_peak_bw.get((stride, gs))
         if bw_gbps is None or bw_gbps <= 0:
             return None  # fall through to analytical
         elem_bytes = self._dtype_elem_bytes(dtype)
@@ -446,26 +718,31 @@ class ProfileData:
         pg_ranks: tuple[int, ...],
         nelems: int,
         dtype: str,
+        *,
+        pg_desc: str | None = None,
     ) -> tuple[float, str] | None:
         """Look up collective duration in ms. Returns (duration_ms, source) or None.
 
         ``source`` is ``"profile"`` for exact/interpolated matches, or
         ``"pg_bandwidth"`` when bandwidth-based extrapolation was used.
 
-        Tries exact rank match first, then falls back to mesh-dimension match
-        (e.g. (0,2,4,6) and (1,3,5,7) both have stride=2, size=4 → same mesh dim).
+        A process-group description identifies equivalent DeviceMesh subgroups.
+        Multiple profiles use only description- or mesh-based aggregate estimates,
+        because rank-specific estimates can make distributed schedules diverge.
 
         When the target size exceeds EXTRAPOLATION_CAP * max_observed, uses
         bandwidth-based estimation from peak observed bandwidth instead of
         linear extrapolation (which overestimates for large messages).
         """
         norm_name = self._normalize_collective_name(collective_name)
-        # Try exact rank match first
-        key = (norm_name, pg_ranks, dtype)
-        entries = self._collective_index.get(key)
-        if not entries:
-            # Fall back to mesh-dimension match
-            gs = len(pg_ranks)
+        gs = len(pg_ranks)
+        entries: list[tuple[int, float]] | None = None
+        if pg_desc and pg_desc != "undefined":
+            desc_key = (norm_name, pg_desc, gs, dtype)
+            entries = self._collective_index_by_pg_desc.get(desc_key)
+        if not entries and self.profile_count > 1:
+            # Never choose an exact-rank estimate from a multi-profile input.
+            # Only an unambiguous shared estimate can preserve rank invariance.
             stride = _rank_stride(pg_ranks)
             if (
                 stride is not None
@@ -473,8 +750,21 @@ class ProfileData:
             ):
                 mesh_dim_key = (norm_name, stride, gs, dtype)
                 entries = self._collective_index_by_mesh_dim.get(mesh_dim_key)
+            else:
+                entries = None
+        elif not entries:
+            key = (norm_name, pg_ranks, dtype)
+            entries = self._collective_index.get(key)
             if not entries:
-                return None
+                stride = _rank_stride(pg_ranks)
+                if (
+                    stride is not None
+                    and self._pg_count_by_mesh_dim.get((stride, gs), 0) == 1
+                ):
+                    mesh_dim_key = (norm_name, stride, gs, dtype)
+                    entries = self._collective_index_by_mesh_dim.get(mesh_dim_key)
+        if not entries:
+            return None
 
         # Exact match
         for n, dur in entries:
@@ -485,7 +775,9 @@ class ProfileData:
         # use bandwidth-based model instead of log-log extrapolation
         max_observed = max((n for n, _ in entries if n > 0), default=0)
         if max_observed > 0 and nelems > max_observed * self.EXTRAPOLATION_CAP:
-            est = self._estimate_with_pg_bandwidth(pg_ranks, nelems, dtype)
+            est = self._estimate_with_pg_bandwidth(
+                pg_ranks, nelems, dtype, pg_desc=pg_desc
+            )
             if est is not None:
                 return (est, "pg_bandwidth")
             # Fall through to log-log if no BW data available
@@ -628,6 +920,16 @@ def _get_node_input_shapes_and_strides(
     return tuple(shapes), tuple(strides)
 
 
+@functools.lru_cache(maxsize=8)
+def _load_profile_data(
+    profile_files: tuple[tuple[str, int, int], ...],
+) -> ProfileData:
+    trace_paths = tuple(path for path, _, _ in profile_files)
+    profile = ProfileData()
+    profile.load(trace_paths[0] if len(trace_paths) == 1 else list(trace_paths))
+    return profile
+
+
 def _is_collective_node(node: fx.Node) -> bool:
     """Check if node is a collective communication op."""
     return (
@@ -640,8 +942,8 @@ def _is_collective_node(node: fx.Node) -> bool:
 
 def _get_collective_info(
     node: fx.Node,
-) -> tuple[str, tuple[int, ...], int, str] | None:
-    """Extract (collective_name, pg_ranks, nelems, dtype) from collective node."""
+) -> tuple[str, tuple[int, ...], str, int, str] | None:
+    """Extract collective identity, size, and dtype from a collective node."""
     import torch.distributed as c10d
     from torch.fx.operator_schemas import normalize_function
 
@@ -672,6 +974,7 @@ def _get_collective_info(
 
         pg = _resolve_process_group(group_name)
         pg_ranks = tuple(sorted(get_process_group_ranks(pg)))
+        pg_desc = pg.group_desc
     except (RuntimeError, KeyError, ValueError):
         log.debug(
             "PGE: failed to resolve process group for %s", node.name, exc_info=True
@@ -699,7 +1002,7 @@ def _get_collective_info(
         else:
             return None
 
-    return (collective_name, pg_ranks, nelems, dtype)
+    return (collective_name, pg_ranks, pg_desc, nelems, dtype)
 
 
 class ProfileGuidedEstimator:
@@ -710,16 +1013,26 @@ class ProfileGuidedEstimator:
 
     Handles collectives via interpolation (latency + bandwidth model) and all
     other ops (matmul, SDPA, custom ops, etc.) via exact shape match from the
-    profile trace.
+    profile trace. When given multiple same-capture rank profiles, collective
+    durations are corrected for rank-arrival skew. The first profile supplies
+    non-collective measurements.
     """
 
     def __init__(
         self,
-        trace_path: str,
+        trace_path: str | list[str],
         diagnostics_gm: torch.fx.GraphModule | None = None,
     ) -> None:
-        self.profile = ProfileData()
-        self.profile.load(trace_path)
+        if isinstance(trace_path, str):
+            trace_paths = (trace_path,)
+        else:
+            trace_paths = tuple(trace_path)
+        canonical_paths = tuple(os.path.realpath(path) for path in trace_paths)
+        profile_files = []
+        for path in canonical_paths:
+            stat = os.stat(path)
+            profile_files.append((path, stat.st_mtime_ns, stat.st_size))
+        self.profile = _load_profile_data(tuple(profile_files))
         self._log_profile_vs_analytical_comparison(diagnostics_gm)
 
     def _log_profile_vs_analytical_comparison(
@@ -774,9 +1087,18 @@ class ProfileGuidedEstimator:
                 diagnostics.append(entry)
 
         payload: dict[str, Any] = {
-            "collective_count": len(profile.collectives),
+            "collective_count": profile.collective_record_count,
+            "op_record_count": profile.op_record_count,
             "op_count": profile.op_count,
             "op_entries": op_entries,
+            "profile_count": profile.profile_count,
+            "arrival_correction": {
+                "corrected_collectives": profile.arrival_corrected_collectives,
+                "clock_fallback_collectives": (
+                    profile.arrival_clock_fallback_collectives
+                ),
+                "incomplete_collectives": profile.arrival_incomplete_collectives,
+            },
         }
         if diagnostics:
             payload["diagnostics"] = diagnostics
@@ -801,7 +1123,7 @@ class ProfileGuidedEstimator:
         info = _get_collective_info(node)
         if info is None:
             return None
-        coll_name, pg_ranks, nelems, dtype = info
+        coll_name, pg_ranks, pg_desc, nelems, dtype = info
         val = node.meta.get("val")
         if override_size is not None:
             if override_size == 0:
@@ -810,7 +1132,9 @@ class ProfileGuidedEstimator:
                 elem_size = val.element_size()
                 if elem_size > 0:
                     nelems = override_size // elem_size
-        result = self.profile.lookup_collective(coll_name, pg_ranks, nelems, dtype)
+        result = self.profile.lookup_collective(
+            coll_name, pg_ranks, nelems, dtype, pg_desc=pg_desc
+        )
         if result is not None:
             return result[0]
         return None

@@ -1342,8 +1342,9 @@ class aten_distributed_optimizations:
     # In deterministic mode, this setting is ignored and "analytical" is used.
     compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
 
-    # Chrome Trace JSON path for profile-guided runtime estimation.
-    profile_guided_estimations_profile_path: str | None = None
+    # Chrome Trace JSON path, or same-capture rank paths, for profile-guided
+    # runtime estimation. The first path supplies non-collective measurements.
+    profile_guided_estimations_profile_path: str | list[str] | None = None
 
     # Maximum memory increase above baseline for prefetch operations
     # Uses maximum of absolute cap and ratio of baseline
