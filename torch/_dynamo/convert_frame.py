@@ -1965,7 +1965,7 @@ def _compile(
 
         # bypass_package sets output.package to None when this entry's guards
         # could not be serialized (the local `package` still holds the object).
-        # Skip the whole block in that case: a bypassed entry contributes none
+        # Skip the whole block in that case: a bypassed compile contributes none
         # of its guards, inlined source, or device type to the package.
         if output.package is not None:
             if check_fn.guards_state is None:
