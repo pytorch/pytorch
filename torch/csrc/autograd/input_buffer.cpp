@@ -176,16 +176,32 @@ void InputBuffer::validate_direct_accumulation(
     const at::Device& device,
     const std::optional<c10::Stream>& opt_producer_stream,
     const std::optional<c10::Stream>& opt_consumer_stream) const {
-  if (!direct_accumulation_info_ ||
-      !direct_accumulation_info_[pos].has_value()) {
+  if (!direct_accumulation_threads_ ||
+      !direct_accumulation_threads_[pos].has_value()) {
     return;
   }
 
-  const auto& info = *direct_accumulation_info_[pos];
+  TORCH_INTERNAL_ASSERT(buffer[pos].defined());
   TORCH_CHECK(
-      info.thread_id == std::this_thread::get_id() && info.device == device &&
-          info.stream == opt_producer_stream &&
-          info.stream == opt_consumer_stream,
+      buffer[pos].device() == device,
+      "After an InputBuffer is exposed for direct accumulation, all producers "
+      "must use the same engine thread, device, and stream");
+
+  bool same_stream = false;
+  if (at::accelerator::isAccelerator(device.type())) {
+    TORCH_INTERNAL_ASSERT(
+        opt_producer_stream && opt_consumer_stream &&
+        pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
+        pos < ready_streams.size() && ready_streams[pos]);
+    same_stream = *opt_producer_stream == *opt_consumer_stream &&
+        *opt_producer_stream == *opt_accum_streams[pos] &&
+        *opt_producer_stream == *ready_streams[pos];
+  } else {
+    same_stream = !opt_producer_stream && !opt_consumer_stream;
+  }
+  TORCH_CHECK(
+      *direct_accumulation_threads_[pos] == std::this_thread::get_id() &&
+          same_stream,
       "After an InputBuffer is exposed for direct accumulation, all producers "
       "must use the same engine thread, device, and stream");
 }
@@ -202,9 +218,7 @@ Variable InputBuffer::get_for_direct_accumulation(
     return {};
   }
 
-  if ((!direct_accumulation_info_ ||
-       !direct_accumulation_info_[pos].has_value()) &&
-      !can_accumulate_inplace(var)) {
+  if (!can_accumulate_inplace(var)) {
     return {};
   }
 
@@ -215,12 +229,10 @@ Variable InputBuffer::get_for_direct_accumulation(
       "consumer to use the same device");
 
   if (at::accelerator::isAccelerator(device.type())) {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         opt_producer_stream && opt_consumer_stream &&
-            pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
-            pos < ready_streams.size() && ready_streams[pos],
-        "Direct InputBuffer accumulation requires a known execution, "
-        "accumulation, and readiness stream");
+        pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
+        pos < ready_streams.size() && ready_streams[pos]);
     TORCH_CHECK(
         *opt_producer_stream == *opt_consumer_stream &&
             *opt_producer_stream == *opt_accum_streams[pos] &&
@@ -234,22 +246,16 @@ Variable InputBuffer::get_for_direct_accumulation(
         "producer or consumer for a CPU buffer");
   }
 
-  if (!direct_accumulation_info_) {
-    direct_accumulation_info_ =
-        std::make_unique<std::optional<DirectAccumulationInfo>[]>(
-            buffer.size());
+  if (!direct_accumulation_threads_) {
+    direct_accumulation_threads_ =
+        std::make_unique<std::optional<std::thread::id>[]>(buffer.size());
   }
-  auto& info = direct_accumulation_info_[pos];
-  if (info.has_value()) {
+  auto& thread = direct_accumulation_threads_[pos];
+  if (thread.has_value()) {
     validate_direct_accumulation(
         pos, device, opt_producer_stream, opt_consumer_stream);
-    TORCH_CHECK(
-        is_direct_accumulation_compatible(var),
-        "An InputBuffer exposed for direct accumulation is no longer safely "
-        "mutable");
   } else {
-    info.emplace(DirectAccumulationInfo{
-        std::this_thread::get_id(), device, opt_producer_stream});
+    thread.emplace(std::this_thread::get_id());
   }
   return var;
 }
@@ -328,7 +334,7 @@ void InputBuffer::add(
   // Non-accelerator case
   //
   if (!is_accelerator) {
-    if (C10_UNLIKELY(direct_accumulation_info_ != nullptr)) {
+    if (C10_UNLIKELY(direct_accumulation_threads_ != nullptr)) {
       validate_direct_accumulation(
           pos, device, opt_producer_stream_, opt_consumer_stream_);
     }
@@ -366,7 +372,7 @@ void InputBuffer::add(
   }
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
-  if (C10_UNLIKELY(direct_accumulation_info_ != nullptr)) {
+  if (C10_UNLIKELY(direct_accumulation_threads_ != nullptr)) {
     validate_direct_accumulation(
         pos, device, opt_producer_stream, opt_consumer_stream);
   }

@@ -18487,13 +18487,17 @@ class TestInputGradBuffers(TestCase):
 
     def test_retained_buffer_may_become_stale(self, device):
         retained_buffers = []
+        reexposed_buffers = []
 
         def retain(buffers, _grad_input):
             self.assertIsNotNone(buffers[0])
             retained_buffers.append(buffers[0])
 
+        def observe(buffers, _grad_input):
+            reexposed_buffers.append(buffers[0])
+
         x = torch.randn(4, device=device, requires_grad=True)
-        last = _InputGradBufferProducer.apply(x, 1, False, None)
+        last = _InputGradBufferProducer.apply(x, 1, True, observe)
         direct = _InputGradBufferProducer.apply(x, 2, True, retain)
         first = _InputGradBufferProducer.apply(x, 3, False, None)
         grad_outputs = tuple(torch.ones_like(out) for out in (last, direct, first))
@@ -18501,6 +18505,7 @@ class TestInputGradBuffers(TestCase):
 
         self.assertEqual(x.grad, torch.full_like(x, 6))
         self.assertEqual(retained_buffers, [torch.full_like(x, 5)])
+        self.assertEqual(reexposed_buffers, [None])
 
     def test_aliased_buffer_is_not_exposed(self, device):
         producer_grad = []
@@ -18623,6 +18628,36 @@ class TestInputGradBuffers(TestCase):
                         out.sum().backward()
             else:
                 out.sum().backward()
+
+    @onlyCUDA
+    def test_user_stream_switch_does_not_change_execution_stream(self, device):
+        observed_buffers = []
+        other_stream = torch.cuda.Stream()
+
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x, direct):
+                ctx.direct = direct
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                if ctx.direct:
+                    with torch.cuda.stream(other_stream):
+                        buffer = ctx.input_grad_buffers[0]
+                    observed_buffers.append(buffer is not None)
+                    if buffer is not None:
+                        buffer.add_(grad_output)
+                        return None, None
+                return grad_output.clone(), None
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        direct = Producer.apply(x, True)
+        first = Producer.apply(x, False)
+        torch.autograd.backward((direct, first), (torch.ones_like(x),) * 2)
+
+        self.assertEqual(observed_buffers, [True])
+        self.assertEqual(x.grad, torch.full_like(x, 2))
 
     @onlyCUDA
     def test_different_stream_errors(self, device):
