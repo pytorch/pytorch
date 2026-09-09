@@ -10350,6 +10350,7 @@ class KernelProfileNumelScopeTest(TestCase):
     """
 
     hw_classification = HardwareClassification.GENERIC
+
     def _wrapper(self):
         # CppWrapperCpu.__init__ emits the whole C++ preamble and needs a live
         # GraphLowering; only the numel bookkeeping is under test here.
@@ -10793,8 +10794,11 @@ class AOTInductorCompileTimeTests(TestCase):
             metadata={"compile_id": None},
             log_level=CompileEventLogLevel.PT2_COMPILE,
         )
+
+
 class TestCheckUpperboundConfig(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_check_upperbound_codegen(self):
         """
         Test that check_upperbound config controls upperbound check codegen.
