@@ -2489,7 +2489,12 @@ class TestTorchDeviceType(TestCase):
             observed = np.bincount(np.minimum(samples, k + 1), minlength=k + 2)[1:]
             expected = np.append(geom.pmf(np.arange(1, k + 1)), geom.sf(k)) * size
             res = stats.chisquare(observed, expected)
-            self.assertGreater(res.pvalue, 1e-6)
+            # Under H0 the p-value is uniform, so this only needs to be small
+            # enough not to flake. The seed is fixed, and the smallest p-value
+            # this actually produces across all tested dtypes is ~0.10 on CUDA
+            # and ~0.046 on CPU, so 1e-3 leaves a wide margin while still
+            # rejecting a generator whose distribution is materially wrong.
+            self.assertGreater(res.pvalue, 1e-3)
 
     # FIXME: find test suite for pdist and cdist
     def test_pairwise_distance_empty(self, device):
