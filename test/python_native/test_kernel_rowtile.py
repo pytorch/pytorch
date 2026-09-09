@@ -100,7 +100,7 @@ class TestKernelRowTile(TestCase):
         widened = 0
         for n in (32, 64, 96, 100, 128, 200, 400, 1024, 2048, 4096, 16384, 1 << 20):
             for bits in (16, 32, 64):
-                cfg = rt.single_row_config(n, bits, 1)
+                cfg = rt.single_row_config(n, bits)
                 if (
                     cfg is None
                 ):  # the ladder's own pick stands, or the row cannot feed a warp
@@ -116,12 +116,12 @@ class TestKernelRowTile(TestCase):
                     self.assertIn(cfg.tpr, rt._TPR_RUNGS)
                     self.assertLessEqual(cfg.tpr, cfg.nt)
                     self.assertEqual(cfg.nt % cfg.tpr, 0, "nt must hold whole rows")
-                    self.assertGreater(cfg.tpr, rt.row_config(n, bits, 1).tpr)
+                    self.assertGreater(cfg.tpr, rt.row_config(n, bits).tpr)
         self.assertGreater(
             widened, 0, "nothing was widened -- the sweep has gone stale"
         )
         # A row too narrow to feed one warp keeps the ladder's pick.
-        self.assertIsNone(rt.single_row_config(32, 32, 1))
+        self.assertIsNone(rt.single_row_config(32, 32))
 
     def test_oneshot_gate_bounds_loads_not_just_smem(self):
         # _oneshot_ok is what keeps a row that FITS smem but needs a huge per-thread load count

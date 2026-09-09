@@ -107,7 +107,9 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             nrows,
             q,
             Int32(npar),
-            None,  # rvals, kvals, in_base, limit: the general axis's decode
+            None,  # the general axis's decode: exts, strides, in_base, limit
+            None,
+            None,
             None,
             None,
             None,
@@ -126,6 +128,8 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         nrows,
         q,
         Int32(npar),
+        None,
+        None,
         None,
         None,
         None,
@@ -172,7 +176,9 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             Int32(R),
             None,  # q
             Int32(npar),
-            None,  # rvals, kvals, in_base, limit
+            None,  # the general axis's decode
+            None,
+            None,
             None,
             None,
             None,
@@ -190,6 +196,8 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         Int32(R),
         None,
         Int32(npar),
+        None,
+        None,
         None,
         None,
         None,
