@@ -4,6 +4,7 @@
 #include <ATen/ceil_div.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -77,7 +78,8 @@ __global__ void ChooseQuantizationParamsKernelImpl(
     // to be a middle value between qmin and qmax.
     // If either min or max is 0, then we just use 0 as zero_point.
     if (min_val < 0 && max_val > 0 && preserve_sparsity) {
-      initial_zero_point = static_cast<double>(qmin + qmax) / 2;
+      initial_zero_point = c10::cuda::compat::midpoint(
+          static_cast<double>(qmin), static_cast<double>(qmax));
     }
     // Now we need to nudge the zero point to be an integer
     // (our zero points are integer, and this is motivated by the
