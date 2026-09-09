@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
 import gc
 import importlib
 import os
@@ -57,6 +58,37 @@ class UnpicklableConfig:
 
     def __reduce__(self):
         raise RuntimeError("config cannot pickle")
+
+
+def _bound_method_guard_target(self, x):
+    return x
+
+
+@functools.wraps(_bound_method_guard_target)
+def _bound_method_guard_wrapper(self, x):
+    return x * 3
+
+
+class _BoundMethodGuardRecv:
+    pass
+
+
+class BoundMethodNameGuardModule(torch.nn.Module):
+    # self.other and self.cb wrap the SAME (fqn-mismatched) function, and
+    # self.other is inserted first, so the pickle reaches the function before
+    # the bound method. Unless the method's __func__ is seeded into
+    # guard_tree_values when its guard manager is built, the function memoizes
+    # as an fqn-mismatch _Missing that the method's __func__ then loads back as,
+    # so the __name__ guard AttributeErrors at load.
+    def __init__(self):
+        super().__init__()
+        self.other = _bound_method_guard_wrapper
+        self.cb = types.MethodType(_bound_method_guard_wrapper, _BoundMethodGuardRecv())
+
+    def forward(self, x):
+        if self.cb.__name__ == "_bound_method_guard_target":
+            x = x + 1
+        return x * 2
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -774,6 +806,29 @@ def add(x, y):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled(x, other_cache)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_bound_method_name_guard_survives_func_reached_first(self):
+        # Regression: a guard on a bound method's __name__ where the method's
+        # __func__ is ALSO reachable (self.other) and inserted first, so the
+        # pickle memoizes the fqn-mismatched function as _Missing before it
+        # reaches the method. Seeding the method's __func__ into
+        # guard_tree_values makes the save order-independent; without it the
+        # method's __func__ loads back as _Missing and the __name__ guard
+        # AttributeErrors at torch.compile() wrap time in the reloading process.
+        mod = BoundMethodNameGuardModule()
+        x = torch.randn(3)
+        expected = mod(x)
+        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = BoundMethodNameGuardModule.forward.__code__
+        self.assertGreater(len(_debug_get_precompile_entries(code)), 0)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), expected)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):

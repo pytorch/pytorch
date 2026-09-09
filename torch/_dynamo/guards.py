@@ -1722,6 +1722,16 @@ class GuardBuilder(GuardBuilderBase):
         if source_name != "":
             example_value = self.get(source)
             self.guard_tree_values[id(example_value)] = example_value
+            # A guard rooted at a bound method reduces through method.__func__
+            # (FunctionPicklerBase), so the func must be registered before pickle
+            # can reach it -- otherwise an unseeded func reduces to _Missing and
+            # the load AttributeErrors on it. Seed it here, where every method a
+            # guard is rooted at is already known, so pickle ordering cannot beat
+            # it. Save-path only (read only by the serializer).
+            if self.save_guards and inspect.ismethod(example_value):
+                self.guard_tree_values.setdefault(
+                    id(example_value.__func__), example_value.__func__
+                )
 
         guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -1743,10 +1753,28 @@ class GuardBuilder(GuardBuilderBase):
             # source_name, the same condition that populated example_value above:
             # a guard rooted at a None-valued element still records its edge, so
             # an unpicklable sibling in the same container is still pruned.
-            if source_name != "":
+            if source_name != "" and self.save_guards:
                 self.guard_tree_children.setdefault(id(base_example_value), set()).add(
                     id(example_value)
                 )
+                # The generic edge above keys on id(base_example_value); an
+                # attribute read as obj.attr records its edge on the OBJECT, not
+                # on obj.__dict__/obj.__annotations__. But a guard that reads a
+                # whole such mapping makes _keep(mapping) True (DunderDictVariable
+                # registers AttrSource(base, "__dict__")), so without an edge on
+                # the mapping itself _keep_container_verbatim would carry it
+                # verbatim and drag an unpicklable sibling. Mirror the
+                # DefaultsSource repair below: record the edge on the instance
+                # mapping that actually holds this attribute.
+                if isinstance(source, AttrSource):
+                    for mapping in (
+                        getattr(base_example_value, "__dict__", None),
+                        getattr(base_example_value, "__annotations__", None),
+                    ):
+                        if isinstance(mapping, dict) and source.member in mapping:
+                            self.guard_tree_children.setdefault(id(mapping), set()).add(
+                                id(example_value)
+                            )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -1988,7 +2016,7 @@ class GuardBuilder(GuardBuilderBase):
             # real container too, so _keep_container_verbatim can prune an
             # unpicklable sibling default instead of carrying the whole container
             # verbatim on the ordinary call-site binding shape.
-            if source_name != "":
+            if source_name != "" and self.save_guards:
                 container = (
                     base_example_value.__kwdefaults__
                     if source.is_kw
@@ -4428,15 +4456,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         value INSIDE a plain container it is pruned per value -- else an unguarded
         unpicklable sibling (a threading.Lock a decorator stashed) fails the dump.
 
-        The verbatim and per-value cases are not framed as mutually exclusive by
-        accident: for every plain-container guard shape emitted today, at most
-        one holds. A whole-container EQUALS_MATCH/length guard records no
-        child->element edge (so the container stays verbatim), and a dict
-        EQUALS_MATCH decomposes into per-element guards that each register their
-        value (so pruning stays lossless). A future guard that both reads a plain
-        container whole AND roots an edge at one of its elements would fall here
-        and prune it -- a silent cache miss, not an error; a tracked limitation
-        should such a shape ever be added.
+        The verbatim and per-value cases coexist by construction: a
+        whole-container EQUALS_MATCH/length guard reads only keys/identity and a
+        pruned value preserves both, while a guard rooted at an element records a
+        child->element edge that forces per-value pruning. The one shape that is
+        emitted today AND reads a plain container whole while also rooting an
+        edge at one of its elements is a function's __dict__/__annotations__: a
+        DunderDict guard keeps the mapping whole and an attribute guard reads an
+        element through it. get_guard_manager_from_source records the edge on the
+        mapping itself (next to the DefaultsSource repair) so that shape prunes
+        per value here rather than carrying an unpicklable sibling verbatim.
         """
         if not self._keep(container):
             return False
