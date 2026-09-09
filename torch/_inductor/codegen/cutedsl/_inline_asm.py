@@ -2,11 +2,9 @@
 
 Each assembly invocation consumes `pack` adjacent fragment elements. LLVM
 constraints select the physical register type for every operand, so inputs are
-bitcast into those registers rather than numerically converted. TensorSSA
-fragments and two-lane tuple values share the same packed lowering. Multiple
-outputs are returned as an LLVM struct and extracted before rebuilding the
-input representation. Partial packs are zero-padded, and outputs for padded
-elements are discarded.
+bitcast into those registers rather than numerically converted. Multiple outputs
+are returned as an LLVM struct and extracted before rebuilding the fragment.
+Partial packs are zero-padded, and outputs for padded elements are discarded.
 
 Integer register results are narrowed to the requested element width. E8M0 codes
 1 through 254 map directly to the matching Float32 exponent bits; codes 0 and 255
@@ -105,21 +103,14 @@ def convert_output(
 
 
 def fragment_element(source, index: int) -> ir.Value:
-    """Extract one lane from a TensorSSA, tuple pair, or scalar value."""
+    """Extract element `index` from a TensorSSA, or unwrap a scalar value."""
     if isinstance(source, cute.TensorSSA):
         return vector.extract(source.ir_value(), [], [index])
-    if isinstance(source, tuple):
-        return fragment_element(source[index], 0)
     if isinstance(source, ir.Value):
         return source
     if isinstance(source, (int, float)):
         return cutlass.Float32(source).ir_value()
     return source.ir_value()
-
-
-def rebuild_pair(template, lanes):
-    """Rebuild a tuple-like lane bundle without importing its owning frontend."""
-    return tuple(lanes) if type(template) is tuple else type(template)(*lanes)
 
 
 def zero_for_constraint(letter: str) -> ir.Value:
@@ -219,12 +210,6 @@ def inline_asm_elementwise_intrinsic(
         for source, is_scalar in zip(sources, scalar_sources)
         if isinstance(source, cute.TensorSSA) and not is_scalar
     ]
-    pairs = [
-        source
-        for source, is_scalar in zip(sources, scalar_sources)
-        if isinstance(source, tuple) and not is_scalar
-    ]
-    pair_template = None
     if fragments:
         shape = fragments[0].shape
         if any(source.shape != shape for source in fragments[1:]):
@@ -241,16 +226,6 @@ def inline_asm_elementwise_intrinsic(
             if isinstance(source, cute.TensorSSA) and not is_scalar
         )
         count = math.prod(ir.VectorType(first_fragment.ir_value().type).shape)
-        if any(len(source) != count for source in pairs):
-            raise ValueError(
-                "inline asm tuple sources must match the TensorSSA fragment size"
-            )
-    elif pairs:
-        pair_template = pairs[0]
-        count = len(pair_template)
-        if any(len(source) != count for source in pairs[1:]):
-            raise ValueError("inline asm tuple sources must have equal lane counts")
-        shape = None
     else:
         count = 1
         shape = None
@@ -290,11 +265,7 @@ def inline_asm_elementwise_intrinsic(
 
     results = []
     for values, compute_type in zip(converted, compute_types):
-        if pair_template is not None:
-            results.append(
-                rebuild_pair(pair_template, (compute_type(value) for value in values))
-            )
-        elif shape is None:
+        if shape is None:
             results.append(compute_type(values[0]))
         else:
             vector_type = ir.VectorType.get([count], compute_type.mlir_type)
