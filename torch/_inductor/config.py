@@ -992,6 +992,10 @@ loop_reindexing_after_fusion: bool = (
     os.environ.get("TORCHINDUCTOR_LOOP_REINDEXING_AFTER_FUSION", "1") == "1"
 )
 
+# Maximum static expansion of a pointwise iteration domain when fusing it into
+# a reduction. Non-positive values and benchmark_fusion disable it.
+masked_expansion_max_ratio: float = 0.1
+
 
 # When trying to fuse two nodes, one with:
 # a[contiguous_writes] = fn(...)
