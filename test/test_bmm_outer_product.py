@@ -10,6 +10,7 @@ from torch._native.ops.bmm_outer_product.triton_impl import (
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
     skipCUDAIfNotRocm,
@@ -85,6 +86,24 @@ class TestBmmOuterProductDevice(TestCase):
         a = torch.randn(1, 64, 1, device=device)
         b = torch.randn(1, 1, 128, device=device)
         self.assertEqual(torch.bmm(a, b), a @ b)
+
+    @onlyAccelerator
+    @largeTensorTest("6GB")
+    def test_offsets_past_int32_max(self, device):
+        # The Triton kernel computed its element offsets in int32. With
+        # (batch, M, N) = (512, 8209, 512) the last batch matrix starts at
+        # 511 * 8209 * 512 = 2_147_737_088 > INT32_MAX, so those batches were
+        # written ~4 GiB (bf16) before the output and read back uninitialised
+        # (or faulted). batch = 8208 rows was the last size that worked.
+        batch, m, n = 512, 8209, 512
+        self.assertGreater((batch - 1) * m * n, torch.iinfo(torch.int32).max)
+        a = torch.randn(batch, m, 1, device=device, dtype=torch.bfloat16)
+        b = torch.randn(batch, 1, n, device=device, dtype=torch.bfloat16)
+        out = torch.bmm(a, b)
+        # The broadcast product is the reference: `a @ b` would dispatch to
+        # the kernel under test, and a full reference is another 4 GiB.
+        for i in (0, batch - 2, batch - 1):
+            self.assertEqual(out[i], a[i] * b[i])
 
     @onlyAccelerator
     def test_m_one_n_one(self, device):

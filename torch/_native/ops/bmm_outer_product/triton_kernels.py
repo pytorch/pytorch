@@ -47,7 +47,11 @@ def _bmm_outer_product_kernel(
     grid_n = tl.cdiv(N, BLOCK_N)
     tiles_per_batch = grid_m * grid_n
 
-    pid_b = pid // tiles_per_batch
+    # Offsets are computed in int64: program ids and int32-range strides are
+    # i32, and pid_b * stride_ob alone passes INT32_MAX once
+    # (batch - 1) * M * N > 2**31 - 1 (e.g. (512, 8209, 512)), which used to
+    # wrap and write the last batch matrices ~8 GiB before the output buffer.
+    pid_b = (pid // tiles_per_batch).to(tl.int64)
     pid_mn = pid % tiles_per_batch
     pid_m = pid_mn // grid_n
     pid_n = pid_mn % grid_n
@@ -58,14 +62,19 @@ def _bmm_outer_product_kernel(
     mask_m = rm < M
     mask_n = rn < N
 
-    a = tl.load(A_ptr + pid_b * stride_ab + rm * stride_am, mask=mask_m, other=0.0)
-    b = tl.load(B_ptr + pid_b * stride_bb + rn * stride_bn, mask=mask_n, other=0.0)
+    rm64 = rm.to(tl.int64)
+    rn64 = rn.to(tl.int64)
+    a = tl.load(A_ptr + pid_b * stride_ab + rm64 * stride_am, mask=mask_m, other=0.0)
+    b = tl.load(B_ptr + pid_b * stride_bb + rn64 * stride_bn, mask=mask_n, other=0.0)
 
     out = a[:, None] * b[None, :]
 
     mask = mask_m[:, None] & mask_n[None, :]  # pyrefly: ignore[bad-index]
     tl.store(
-        OUT_ptr + pid_b * stride_ob + rm[:, None] * stride_om + rn[None, :] * stride_on,
+        OUT_ptr
+        + pid_b * stride_ob
+        + rm64[:, None] * stride_om
+        + rn64[None, :] * stride_on,
         out,
         mask=mask,
     )
