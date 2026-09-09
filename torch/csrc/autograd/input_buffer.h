@@ -5,12 +5,14 @@
 // values in-place (adding an input twice will accumulate the result).
 // This behaviour is needed and used only in backward graphs.
 
+#include <memory>
+#include <optional>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <c10/core/Stream.h>
 #include <torch/csrc/autograd/variable.h>
-#include <optional>
 
 namespace torch::autograd {
 
@@ -57,6 +59,13 @@ struct InputBuffer {
       const std::optional<c10::Stream>& opt_consumer_stream,
       Node* fn);
 
+  TORCH_API Variable get_for_direct_accumulation(
+      size_t pos,
+      const at::Device& producer_device,
+      const std::optional<c10::Stream>& opt_producer_stream,
+      const at::Device& consumer_device,
+      const std::optional<c10::Stream>& opt_consumer_stream);
+
   Variable operator[](size_t pos) {
     return buffer[pos];
   }
@@ -83,6 +92,24 @@ struct InputBuffer {
   // is nullopt and Engine::evaluate_function falls back to the node's
   // func->stream().
   std::optional<c10::Stream> opt_overridden_consumer_stream;
+
+ private:
+  struct DirectAccumulationInfo {
+    std::thread::id thread_id;
+    at::Device device;
+    std::optional<c10::Stream> stream;
+  };
+
+  void validate_direct_accumulation(
+      size_t pos,
+      const at::Device& device,
+      const std::optional<c10::Stream>& opt_producer_stream,
+      const std::optional<c10::Stream>& opt_consumer_stream) const;
+
+  // add() validates later producers before they touch an exposed buffer.
+  // Keep the per-slot state out of the common allocation path.
+  std::unique_ptr<std::optional<DirectAccumulationInfo>[]>
+      direct_accumulation_info_;
 };
 
 } // namespace torch::autograd
