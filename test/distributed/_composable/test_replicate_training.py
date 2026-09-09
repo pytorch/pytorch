@@ -406,13 +406,13 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -435,12 +435,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
                         torch.get_device_module(device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
                         torch.get_device_module(device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
 
                 for param in ref_model.parameters():
@@ -488,7 +488,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
         root_loss = model(inp).sum()
         root_loss.backward()
-        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(
+            int(100 * get_cycles_per_ms(device_type.type))
+        )
         optim.step()
         optim.zero_grad()
         nonroot_loss = model[0](inp).sum()
@@ -642,7 +644,9 @@ class TestReplicate1DTrainingCore(FSDPTest):
             optim.step()
             # Sleep after the optimizer step to allow CPU to run ahead into the
             # next iteration's forward, exercising the post-optim stream sync
-            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms()))
+            torch.get_device_module(device_type)._sleep(
+                int(25 * get_cycles_per_ms(device_type.type))
+            )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 
