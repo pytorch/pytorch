@@ -15,7 +15,9 @@ from torch._inductor.ir import (
     Buffer,
     FixedLayout,
     ir_node_to_tensor,
+    IRNode,
     Layout,
+    Operation,
     StorageBox,
     TensorBox,
 )
@@ -254,13 +256,13 @@ def _extract_tensor_inputs(
     ]
 
     for i, arg in enumerate(args):
-        if isinstance(arg, (TensorBox, Buffer, StorageBox)):
+        if isinstance(arg, _TensorInput):
             tensor_inputs.append(arg)
         else:
             non_tensor_kwargs[param_names[i]] = arg
 
     for key, value in kwargs.items():
-        if isinstance(value, (TensorBox, Buffer, StorageBox)):
+        if isinstance(value, _TensorInput):
             tensor_inputs.append(value)
         else:
             non_tensor_kwargs[key] = value
@@ -291,7 +293,7 @@ def _adapt_user_input_gen_fns(
     inputs: Sequence[object],
     op_overload: torch._ops.OpOverload,
     user_input_gen_fns: Mapping[str, Callable[[torch.Tensor], torch.Tensor]],
-) -> dict[int, Callable[[Buffer], torch.Tensor]]:
+) -> dict[int, Callable[[IRNode], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
     Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
@@ -310,11 +312,11 @@ def _adapt_user_input_gen_fns(
 
     def create_internal_input_gen_fn(
         user_function: Callable[[torch.Tensor], torch.Tensor], arg_name: str
-    ) -> Callable[[Buffer], torch.Tensor]:
-        """Create internal input generator that converts IR buffer to user's fake tensor."""
+    ) -> Callable[[IRNode], torch.Tensor]:
+        """Create internal input generator that converts an IR node to a fake tensor."""
 
-        def internal_input_gen_fn(ir_buffer: Buffer) -> torch.Tensor:
-            fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
+        def internal_input_gen_fn(ir_node: IRNode) -> torch.Tensor:
+            fake_tensor = ir_node_to_tensor(ir_node, replace_symbols_with_hints=True)
             if fake_tensor is None:
                 raise AssertionError("ir_node_to_tensor returned None")
             return user_function(fake_tensor)
@@ -516,7 +518,7 @@ def autotune_custom_op(
         )
 
     # Convert user input generation functions BEFORE creating choices
-    input_gen_fns: dict[int, Callable[[Buffer], torch.Tensor]] = {}
+    input_gen_fns: dict[int, Callable[[IRNode], torch.Tensor]] = {}
     if user_input_gen_fns:
         input_gen_fns = _adapt_user_input_gen_fns(
             inputs, op_overload, user_input_gen_fns
@@ -668,7 +670,7 @@ def _generate_dynamic_configs(
 def _prepare_configs_and_decompositions(
     processed_configs: list[CustomOpConfig] | None,
     config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]] | None,
-    tensor_inputs: list[_TensorInput],
+    tensor_inputs: Sequence[_TensorInput],
     default_impl: Callable[..., Any],
     op_overload: torch._ops.OpOverload,
     runtime_kwargs: Mapping[str, object],
@@ -714,7 +716,7 @@ def _standard_lowering_fn(
     name: str,
     op_overload: torch._ops.OpOverload,
     input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]] | None,
-    tensor_inputs: list[_TensorInput],
+    tensor_inputs: Sequence[_TensorInput],
     runtime_kwargs: Mapping[str, object],
     config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     | None = None,
@@ -745,8 +747,7 @@ def _standard_lowering_fn(
     result, _ = autotune_custom_op(
         name=name,
         decompositions=decompositions,
-        # pyrefly: ignore[bad-argument-type]  # TODO: Fix the public input type.
-        inputs=tensor_inputs,
+        inputs=cast(list[torch.fx.Node], list(tensor_inputs)),
         non_tensor_args=non_tensor_args,
         config_patches_list=config_patches_list,
         op_overload=op_overload,
@@ -760,11 +761,13 @@ def _standard_lowering_fn(
 
 
 def _apply_config_patches_recursive(
-    operations: list,
+    operations: Sequence[Operation],
     config_patches: Mapping[str, object],
 ) -> None:
     """Apply config_patches to operations, including those inside subgraphs."""
     for op in operations:
+        if not isinstance(op, IRNode):
+            raise AssertionError(f"Expected IRNode operation, got {type(op)}")
         if hasattr(op, "set_config_patches"):
             op.set_config_patches(dict(config_patches))
 
@@ -780,7 +783,7 @@ def _lower_single_impl(
     impl: Callable[..., Any],
     impl_kwargs: Mapping[str, object],
     runtime_kwargs: Mapping[str, object],
-    tensor_inputs: list[_TensorInput],
+    tensor_inputs: Sequence[_TensorInput],
     name: str,
     config_patches: Mapping[str, object] | None = None,
 ) -> TensorBox | None:
@@ -834,7 +837,9 @@ def _lower_single_impl(
 
     log.info("Inlining implementation: %s", impl.__name__)
     ops_before = len(V.graph.operations)
-    result = cast(TensorBox, inline_subgraph_to_ir_nodes(impl_gm, tensor_inputs, name))
+    result = inline_subgraph_to_ir_nodes(impl_gm, list(tensor_inputs), name)
+    if not isinstance(result, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(result)}")
 
     if config_patches:
         _apply_config_patches_recursive(V.graph.operations[ops_before:], config_patches)
@@ -852,7 +857,7 @@ def _range_based_lowering_fn(
     tensor_name: str,
     dim_index: int,
     ranges: list[tuple[int, int | float]],
-    tensor_inputs: list[_TensorInput],
+    tensor_inputs: Sequence[_TensorInput],
     runtime_kwargs: Mapping[str, object],
     range_upper_bound: int,
     config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
@@ -901,8 +906,7 @@ def _range_based_lowering_fn(
         autotuned_result, winning_choice = autotune_custom_op(
             name=range_name,
             decompositions=decompositions,
-            # pyrefly: ignore[bad-argument-type]  # TODO: Fix the public input type.
-            inputs=tensor_inputs,
+            inputs=cast(list[torch.fx.Node], list(tensor_inputs)),
             non_tensor_args=non_tensor_args,
             op_overload=op_overload,
             user_input_gen_fns=range_input_gen_fns,
@@ -1060,10 +1064,11 @@ def _range_based_lowering_fn(
             raise
 
     ops_before = len(V.graph.operations)
-    result = cast(
-        TensorBox,
-        inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch"),
+    result = inline_subgraph_to_ir_nodes(
+        dispatch_gm, list(tensor_inputs), f"{name}_dispatch"
     )
+    if not isinstance(result, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(result)}")
 
     # Apply config_patches from all impl groups to inlined operations
     # TODO - consider conflicting patches
