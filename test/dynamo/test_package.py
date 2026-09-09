@@ -86,6 +86,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
 
+    def test_bypassed_entry_refuses_new_registrations(self):
+        def fn(x):
+            return x + 1
+
+        (backend_id,) = (
+            compiled_region_with_backend_id_for_package_test.__code__.co_names
+        )
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.bypass_current_entry()
+            package.add_guarded_code(
+                b"", compiled_region_with_backend_id_for_package_test.__code__
+            )
+            package.add_backend_id(backend_id)
+            package.add_import_source("alias", "os")
+
+        entry = package.cache_entry().codes[0]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [])
+        self.assertEqual(entry.guarded_codes, [])
+        self.assertEqual(entry.import_sources, {})
+
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
         class MyModule(torch.nn.Module):
