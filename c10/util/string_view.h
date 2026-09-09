@@ -57,6 +57,14 @@ inline std::basic_ostream<CharT>& operator<<(
 using string_view = std::string_view;
 using c10_string_view = basic_string_view<char>;
 
+struct TransparentStringHash {
+  using is_transparent = void;
+
+  size_t operator()(std::string_view value) const noexcept {
+    return std::hash<std::string_view>{}(value);
+  }
+};
+
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
 [[nodiscard]] constexpr bool starts_with(
     const std::string_view s,
