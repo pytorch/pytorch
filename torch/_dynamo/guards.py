@@ -199,7 +199,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     GuardCheckGetMetadataFn = Callable[[Guard, Any], Any]
     GuardCheckEvalFn = Callable[[Any, Any], bool]
@@ -1381,6 +1381,8 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
+        # Container id -> ids of elements a guard source is rooted at THROUGH it.
+        self.guard_tree_children: dict[int, set[int]] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1728,6 +1730,16 @@ class GuardBuilder(GuardBuilderBase):
             base_guard_manager_enum = self.get_guard_manager_type(
                 source.base, base_example_value
             )
+            # Record the container->element edge so _keep_container_verbatim can
+            # tell an element guarded THROUGH this container from one that merely
+            # shares an id() with an unrelated guarded value elsewhere. Gate on
+            # source_name, the same condition that populated example_value above:
+            # a guard rooted at a None-valued element still records its edge, so
+            # an unpicklable sibling in the same container is still pruned.
+            if source_name != "" and self.save_guards:
+                self.guard_tree_children.setdefault(id(base_example_value), set()).add(
+                    id(example_value)
+                )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -4159,12 +4171,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
+        guard_tree_children: dict[int, set[int]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
+        # Container id -> ids of the elements a guard is rooted at THROUGH it.
+        # Absent for the pickler-level unit tests, which never root a guard at a
+        # kept container, so an empty map keeps their containers verbatim.
+        self.guard_tree_children = guard_tree_children or {}
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4319,6 +4336,36 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _prune(self, value: object, reason: str) -> object:
         return value if self._keep(value) else self._missing(reason)
 
+    def _keep_container_verbatim(
+        self, container: object, values: Collection[object]
+    ) -> bool:
+        """Whether a function container (__defaults__/__dict__/...) is carried whole.
+
+        A dict/tuple SUBCLASS is always verbatim: its type/identity must survive
+        for the guard reading the slot. A plain dict/tuple is verbatim only when
+        no element is individually guarded (a whole-container EQUALS_MATCH/length
+        guard reads it, which pruning would break). When a guard is rooted at a
+        value INSIDE a plain container it is pruned per value -- else an unguarded
+        unpicklable sibling (a threading.Lock a decorator stashed) fails the dump.
+
+        The verbatim and per-value cases coexist by construction: a plain
+        container carried whole is read by a keys/identity (dict) or length
+        (tuple) guard that a pruned value preserves, while a whole-value
+        EQUALS_MATCH -- which does bake tuple values -- keeps its container
+        verbatim instead; a guard rooted at an element records a child->element
+        edge that forces per-value pruning.
+        """
+        if not self._keep(container):
+            return False
+        if type(container) in (dict, tuple):
+            # Prune per value only when a guard is rooted at an element THROUGH
+            # this container; an element that is _keep for an unrelated reason
+            # (interned, shared, reachable elsewhere) must not force a prune that
+            # would then break a whole-container guard reading this same slot.
+            children = self.guard_tree_children.get(id(container), ())
+            return not any(id(v) in children for v in values)
+        return True
+
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
         """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
@@ -4361,24 +4408,28 @@ class GuardsStatePickler(FunctionPicklerBase):
         if self._keep(obj.__globals__):
             snapshot = self._globals_snapshot(obj.__globals__)
         # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
-        # is carried whole; an unkept one is pruned per value. See the Note.
+        # is carried whole or pruned per value; see _keep_container_verbatim.
         defaults = obj.__defaults__
-        if defaults is not None and not self._keep(defaults):
+        if defaults is not None and not self._keep_container_verbatim(
+            defaults, defaults
+        ):
             reason = "unguarded function default"
             defaults = tuple(self._prune(v, reason) for v in defaults)
 
         kwdefaults = obj.__kwdefaults__
-        if kwdefaults is not None and not self._keep(kwdefaults):
+        if kwdefaults is not None and not self._keep_container_verbatim(
+            kwdefaults, kwdefaults.values()
+        ):
             reason = "unguarded function kwdefault"
             kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
 
         closure = obj.__closure__
         if closure is not None:
-            # No verbatim gate like the other containers: a cell is never a
-            # literal a value guard could keep whole, and _prune_cell is
-            # length-preserving, so pruning every cell is always safe.
+            # No _keep_container_verbatim gate like the other containers: a cell
+            # is never a literal a value guard could keep whole, and _prune_cell
+            # is length-preserving, so pruning every cell is always safe.
             closure = tuple(self._prune_cell(cell) for cell in closure)
-        if self._keep(obj.__dict__):
+        if self._keep_container_verbatim(obj.__dict__, obj.__dict__.values()):
             attributes = obj.__dict__
         else:
             attributes = {
@@ -4388,7 +4439,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # An unguarded annotation/type param may be an unpicklable local class;
         # prune it. (On 3.14 __annotations__ is a fresh dict, so always pruned.)
         raw_annotations = self._read_raw_annotations(obj)
-        if self._keep(raw_annotations):
+        if self._keep_container_verbatim(raw_annotations, raw_annotations.values()):
             annotations = raw_annotations
         else:
             annotations = {
@@ -4396,7 +4447,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in raw_annotations.items()
             }
         type_params = getattr(obj, "__type_params__", None)
-        if type_params is not None and not self._keep(type_params):
+        if type_params is not None and not self._keep_container_verbatim(
+            type_params, type_params
+        ):
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
@@ -4679,7 +4732,13 @@ def pickle_guards_state(
             # TODO See if we have lift this branch as the first one.
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+    pickler = GuardsStatePickler(
+        guard_tree_values,
+        empty_values,
+        missing_values,
+        buf,
+        guard_tree_children=builder.guard_tree_children,
+    )
 
     if all(
         torch.compiler.keep_portable_guards_unsafe(
