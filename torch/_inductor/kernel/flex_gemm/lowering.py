@@ -8,6 +8,7 @@ is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any, TYPE_CHECKING
 
@@ -21,12 +22,13 @@ from torch._higher_order_ops.flex_gemm import (
     FLEX_GEMM_OP_SPECS,
 )
 from torch._inductor import config
+from torch._logging import warning_once
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
-from ...utils import _IntLike, ceildiv, has_free_symbols
+from ...utils import _IntLike, ceildiv, has_free_symbols, is_bf16x9_matmul
 from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
@@ -59,6 +61,9 @@ from .output_layout import FlexGemmOutputStorageLayout, output_layout_supports_c
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+
+log = logging.getLogger(__name__)
 
 
 def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
@@ -799,12 +804,40 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
-    if backend == "NVGEMM":
-        decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
+    if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
+        mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
+        if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
+            mat1.get_device_or_error().type, mat1.get_dtype()
         ):
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+            warning_once(
+                log,
+                f"FlexGEMM {backend} does not support bfx9 precision; using ATen/cuBLAS instead.",
+            )
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
+    if backend == "NVGEMM":
+        unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+            ("backend", "tuned")
+        )
+        if unsupported_options:
+            raise NotImplementedError(
+                f"Unsupported NVGEMM FlexGEMM options: {unsupported_options}"
+            )
+        tuned = kernel_options.get("tuned", False)
+        if not isinstance(tuned, bool):
+            raise NotImplementedError("NVGEMM FlexGEMM tuned must be a bool")
+        decompose_nvgemm_additive_gemm(subgraph.graph_module)
+        nvgemm_config: dict[str, Any] = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "NVGEMM",
+        }
+        if tuned:
+            nvgemm_config.update(
+                nvgemm_max_profiling_configs=None,
+                nvgemm_supplement_configs=True,
+                nvgemm_swap_ab=True,
+            )
+        with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "QUACK":
         return lower_quack_flex_gemm(
