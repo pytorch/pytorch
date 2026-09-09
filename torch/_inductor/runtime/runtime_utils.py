@@ -170,7 +170,7 @@ def blue_text(msg: str) -> str:
     return _color_text(msg, "blue")
 
 
-def get_first_attr(obj: Any, *attrs: str) -> Any:
+def get_first_attr(obj: object, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """

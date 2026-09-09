@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #pragma once
 // @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
 #ifdef USE_VULKAN_API
@@ -11,32 +10,35 @@
 #include <ATen/native/vulkan/api/StringUtil.h>
 #include <ATen/native/vulkan/api/vk_api.h>
 
-#define VK_CHECK(function)                                       \
-  do {                                                           \
-    const VkResult result = (function);                          \
-    if (VK_SUCCESS != result) {                                  \
-      throw ::at::native::vulkan::api::Error(                    \
-          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-          ::at::native::vulkan::api::concat_str(                 \
-              #function, " returned ", result));                 \
-    }                                                            \
+#define VK_CHECK(function)                                                    \
+  do {                                                                        \
+    const VkResult result = (function);                                       \
+    if (VK_SUCCESS != result) {                                               \
+      /* @allow-raw-throw: ExecuTorch vendors this header, see Allocator.h */ \
+      throw ::at::native::vulkan::api::Error(                                 \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},              \
+          ::at::native::vulkan::api::concat_str(                              \
+              #function, " returned ", result));                              \
+    }                                                                         \
   } while (false)
 
-#define VK_CHECK_COND(cond, ...)                                 \
-  do {                                                           \
-    if (!(cond)) {                                               \
-      throw ::at::native::vulkan::api::Error(                    \
-          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-          #cond,                                                 \
-          ::at::native::vulkan::api::concat_str(__VA_ARGS__));   \
-    }                                                            \
+#define VK_CHECK_COND(cond, ...)                                              \
+  do {                                                                        \
+    if (!(cond)) {                                                            \
+      /* @allow-raw-throw: ExecuTorch vendors this header, see Allocator.h */ \
+      throw ::at::native::vulkan::api::Error(                                 \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},              \
+          #cond,                                                              \
+          ::at::native::vulkan::api::concat_str(__VA_ARGS__));                \
+    }                                                                         \
   } while (false)
 
-#define VK_THROW(...)                                          \
-  do {                                                         \
-    throw ::at::native::vulkan::api::Error(                    \
-        {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-        ::at::native::vulkan::api::concat_str(__VA_ARGS__));   \
+#define VK_THROW(...)                                                       \
+  do {                                                                      \
+    /* @allow-raw-throw: ExecuTorch vendors this header, see Allocator.h */ \
+    throw ::at::native::vulkan::api::Error(                                 \
+        {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},              \
+        ::at::native::vulkan::api::concat_str(__VA_ARGS__));                \
   } while (false)
 
 namespace at {
