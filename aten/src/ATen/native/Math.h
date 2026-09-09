@@ -1,5 +1,32 @@
 #pragma once
 
+// polevl and calc_ndtri below are also compiled by the Metal shader compiler,
+// see aten/src/ATen/native/mps/kernels/SpecialOps.metal. The rest of this
+// header depends on host-only facilities (<cmath>, <limits>, c10::Half, ...)
+// and is guarded out for Metal, which also keeps its names from colliding with
+// the c10::metal ones a shader pulls in via `using namespace c10::metal`.
+// The macros mirror those in ATen/native/Distributions.h and are undefined at
+// the bottom of this file so they do not leak into includers.
+#if defined(__METAL_VERSION__)
+#include <metal_stdlib>
+#define C10_HOST_DEVICE
+#define STATIC_IF_NOT_METAL
+#define METAL_THREAD thread
+#define compat_log ::metal::precise::log
+#define compat_sqrt ::metal::precise::sqrt
+#define compat_infinity(T) INFINITY
+#define compat_nan(T) NAN
+#else
+#define STATIC_IF_NOT_METAL static
+#define METAL_THREAD
+#define compat_log ::log
+#define compat_sqrt ::sqrt
+#define compat_infinity(T) std::numeric_limits<T>::infinity()
+#define compat_nan(T) std::numeric_limits<T>::quiet_NaN()
+#endif
+
+#if !defined(__METAL_VERSION__)
+
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
@@ -308,6 +335,8 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
   return static_cast<scalar_t>(s);
 }
 
+#endif // !defined(__METAL_VERSION__)
+
 /*
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
@@ -324,13 +353,15 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
  *            N                   0
  */
 template <typename T>
-C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
+C10_HOST_DEVICE inline T polevl(const T x, const METAL_THREAD T A[], size_t len) {
   T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
   }
   return result;
 }
+
+#if !defined(__METAL_VERSION__)
 
 inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double sign = +1;
@@ -1548,6 +1579,8 @@ inline c10::BFloat16 calc_i1e(c10::BFloat16 a) { return calc_i1e(static_cast<flo
 inline c10::Half calc_i1e(c10::Half a) { return calc_i1e(static_cast<float>(a)); }
 
 
+#endif // !defined(__METAL_VERSION__)
+
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
@@ -1564,7 +1597,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   constexpr T zero = 0;
 
   /* approximation for 0 <= |y - 0.5| <= 3/8 */
-  static const T P0[5] = {
+  STATIC_IF_NOT_METAL const T P0[5] = {
       -5.99633501014107895267E1,
       9.80010754185999661536E1,
       -5.66762857469070293439E1,
@@ -1572,7 +1605,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       -1.23916583867381258016E0,
   };
 
-  static const T Q0[9] = {
+  STATIC_IF_NOT_METAL const T Q0[9] = {
       1.00000000000000000000E0,
       1.95448858338141759834E0,
       4.67627912898881538453E0,
@@ -1587,7 +1620,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
   * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
   */
-  static const T P1[9] = {
+  STATIC_IF_NOT_METAL const T P1[9] = {
       4.05544892305962419923E0,
       3.15251094599893866154E1,
       5.71628192246421288162E1,
@@ -1599,7 +1632,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       -8.57456785154685413611E-4,
   };
 
-  static const T Q1[9] = {
+  STATIC_IF_NOT_METAL const T Q1[9] = {
       1.00000000000000000000E0,
       1.57799883256466749731E1,
       4.53907635128879210584E1,
@@ -1615,7 +1648,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
   */
 
-  static const T P2[9] = {
+  STATIC_IF_NOT_METAL const T P2[9] = {
       3.23774891776946035970E0,
       6.91522889068984211695E0,
       3.93881025292474443415E0,
@@ -1627,7 +1660,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
       6.23974539184983293730E-9,
   };
 
-  static const T Q2[9] = {
+  STATIC_IF_NOT_METAL const T Q2[9] = {
       1.00000000000000000000E0,
       6.02427039364742014255E0,
       3.67983563856160859403E0,
@@ -1640,13 +1673,13 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   };
 
   if (y0 == zero) {
-    return -std::numeric_limits<T>::infinity();
+    return -compat_infinity(T);
   }
   if (y0 == one) {
-    return std::numeric_limits<T>::infinity();
+    return compat_infinity(T);
   }
   if (y0 < zero || y0 > one) {
-    return std::numeric_limits<T>::quiet_NaN();
+    return compat_nan(T);
   }
   bool code = true;
   T y = y0;
@@ -1662,8 +1695,8 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
     return (x * s2pi);
   }
 
-  T x = ::sqrt(T{-2.0} * ::log(y));
-  const T x0 = x - ::log(x) / x;
+  T x = compat_sqrt(T{-2.0} * compat_log(y));
+  const T x0 = x - compat_log(x) / x;
 
   const T z = one / x;
   T x1;
@@ -1679,6 +1712,8 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   }
   return x;
 }
+
+#if !defined(__METAL_VERSION__)
 
 /* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
@@ -3925,3 +3960,14 @@ inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 } // T spherical_bessel_j0_forward(T x)
 
 C10_CLANG_DIAGNOSTIC_POP()
+#endif // !defined(__METAL_VERSION__)
+
+#if defined(__METAL_VERSION__)
+#undef C10_HOST_DEVICE
+#endif
+#undef STATIC_IF_NOT_METAL
+#undef METAL_THREAD
+#undef compat_log
+#undef compat_sqrt
+#undef compat_infinity
+#undef compat_nan
