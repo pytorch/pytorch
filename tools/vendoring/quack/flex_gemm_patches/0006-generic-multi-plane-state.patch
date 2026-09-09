@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 99d1b63..0865129 100644
+index f108578..6a4c151 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -61,2 +61,3 @@ guesses about vectorization.
@@ -203,10 +203,10 @@ index 953ef2f..ede70e7 100644
 +                    for plane, value in zip(vfrags, values):
 +                        plane[i] = value
 diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
-index 2c39d57..8b3a369 100644
+index f9861a1..a698fae 100644
 --- a/quack/gemm_runtime/identity.py
 +++ b/quack/gemm_runtime/identity.py
-@@ -122,0 +123,7 @@ def semantic_value_key(value, seen, *, force_source=False):
+@@ -121,0 +122,7 @@ def semantic_value_key(value, seen, *, force_source=False):
 +        if force_source and not (
 +            value.__module__ == "quack" or value.__module__.startswith("quack.")
 +        ):
@@ -214,7 +214,7 @@ index 2c39d57..8b3a369 100644
 +                f"cannot fingerprint callable class {value!r}; use a function wrapper "
 +                "or a callable instance implementing __quack_semantic_key__"
 +            )
-@@ -124,0 +132,6 @@ def semantic_value_key(value, seen, *, force_source=False):
+@@ -123,0 +131,6 @@ def semantic_value_key(value, seen, *, force_source=False):
 +        if callable(value) and not (
 +            type(value).__module__ == "quack" or type(value).__module__.startswith("quack.")
 +        ):
