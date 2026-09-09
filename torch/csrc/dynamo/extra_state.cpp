@@ -308,13 +308,12 @@ void ExtraState::invalidate(
     if (!lock.owns_lock() || this->cache_python_depth > 0) {
       // NEVER block on cache_mutex here: invalidate is reached from
       // weakref.finalize, which GC can fire during guard evaluation while
-      // ANOTHER ExtraState's cache_mutex is held. Two threads doing that
-      // against each other's states would deadlock -- CacheLock releases only
-      // the GIL, not the peer's lock. Park the request instead; the next
-      // holder of cache_mutex (lookup, or a later invalidate) applies it.
-      // Park too when the recursive mutex admits this call from Python run BY
-      // this state's in-flight lookup: move_to_back would relink the list that
-      // lookup is iterating.
+      // ANOTHER ExtraState's cache_mutex is held; two threads doing that
+      // against each other's states would deadlock (CacheLock releases only the
+      // GIL, not the peer's lock). Park the request for the next cache_mutex
+      // holder (lookup, or a later invalidate) -- also when the recursive mutex
+      // admits this call from Python run BY this state's own in-flight lookup,
+      // whose list move_to_back would relink under it.
       std::lock_guard<std::mutex> pending_lock(
           this->pending_invalidation_mutex);
       this->pending_invalidations.emplace_back(
@@ -357,16 +356,14 @@ void ExtraState::clear_in_place() {
       // object the drain waits, and lookup / _get_total_cache_entry_count /
       // _debug_get_cache_entry_list still report the parked entries as live
       // even though reset() has already cleared its Python-side bookkeeping
-      // (orig_code_map, torch/_dynamo/__init__.py). A compile of this frame
-      // racing the parked CLEAR_ALL can therefore serve a stale entry or
-      // KeyError out of Dynamo internals; only a reader on a thread itself at
-      // depth zero (the single-threaded case) is guaranteed to see them gone.
-      // Making reset() atomic against an in-flight lookup is deferred
+      // (orig_code_map, torch/_dynamo/__init__.py), so a compile of this frame
+      // racing the parked CLEAR_ALL can serve a stale entry or KeyError out of
+      // Dynamo internals; only a reader itself at depth zero (the
+      // single-threaded case) is guaranteed to see them gone. Making reset()
+      // atomic against an in-flight lookup is deferred
       // (pytorch/pytorch#196394). _clear_cache_entries_for_region is the one
-      // depth-zero op that does not drain first: it erases a single region in
-      // place, which a parked CLEAR_ALL (a whole-map swap) does not mind. This
-      // cross-thread park is new with releasing cache_mutex during guard
-      // evaluation; the recursive mutex alone would have blocked the peer.
+      // depth-zero op that does not drain first: it erases one region in place,
+      // which a parked CLEAR_ALL (a whole-map swap) does not mind.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
       // Split state until that holder runs: the strategy, frame state and
@@ -643,20 +640,17 @@ static bool cache_entry_has_no_guards(
 }
 
 // Drop candidates named by an invalidation this state accepted but could not
-// yet drain: drain_pending_invalidations no-ops when cache_python_depth != 0,
-// and depth is a cross-thread atomic, so ANOTHER thread's in-flight lookup can
-// keep an invalidation parked here. invalidate fires from weakref.finalize when
-// a guarded object is deallocated -- the id-reuse safety net -- so serving its
-// target would run a graph guarded by an ID_MATCH on an id that may already be
-// reused, a wrong-graph hit. invalidate_locked names its target the same way,
-// by live guard-manager identity. Only invalidations parked BEFORE the snapshot
-// are covered: one arriving after lookup() releases cache_mutex parks and is
-// applied at the next lookup, so this in-flight lookup can still serve the
-// entry it named. Guarded on has_pending_invalidations so the common (nothing
-// parked) path takes no extra lock. Only cache entries are affected;
-// invalidate_locked never touches precompile entries. Must be called under
-// cache_mutex (lock order cache_mutex -> pending_invalidation_mutex, matching
-// invalidate/drain).
+// yet drain: drain_pending_invalidations no-ops while cache_python_depth != 0,
+// a cross-thread atomic, so ANOTHER thread's in-flight lookup can keep one
+// parked here. invalidate fires from weakref.finalize when a guarded object is
+// deallocated (the id-reuse safety net), so serving its target would run a
+// graph guarded by an ID_MATCH on a possibly reused id: a wrong-graph hit.
+// Only invalidations parked BEFORE the snapshot are covered: one arriving after
+// lookup() releases cache_mutex parks and is applied at the next lookup, so
+// this in-flight lookup can still serve the entry it named. Guarded on
+// has_pending_invalidations (no extra lock when nothing is parked); cache
+// entries only (invalidate_locked never touches precompile entries); call under
+// cache_mutex (order cache_mutex -> pending_invalidation_mutex).
 template <typename Candidates>
 static void drop_pending_invalidated_candidates(
     ExtraState* extra_state,
@@ -1416,11 +1410,13 @@ bool _has_precompile_entries(
     return false;
   }
   // Region exact, matching lookup(): an entry from another region never serves
-  // this one, so a second artifact installed on the same code object is not
-  // coverage for the first. A loaded artifact runs this on every served call,
-  // hence no py::list and no Python executed under the lock -- the wait inside
-  // CacheLock is the only place the GIL can drop.
-  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  // this one, so a second artifact on the same code object is not coverage for
+  // the first. A loaded artifact runs this on every served call, hence no
+  // py::list and no Python under the lock (CacheLock's wait is the only GIL
+  // drop while it is held). Like every reader it drains parked evictions first
+  // -- a parked CLEAR_ALL empties the cache here -- and the reaped nodes die
+  // AFTER the lock releases (locals declared before it), where ~CacheEntry /
+  // ~PrecompileEntry drop py::objects and can run arbitrary Python.
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
