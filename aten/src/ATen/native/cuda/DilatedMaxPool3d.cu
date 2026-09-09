@@ -143,17 +143,11 @@ void max_pool3d_with_indices_out_frame(
   bool channels_last)
 {
   int offsetZ = 0;
-  // The 32-wide x dimension is a CUDA warp assumption, and any output narrower
-  // than 32 leaves most of each x row idle. 16x16 keeps the same 256 threads
-  // while wasting one lane per row instead of seventeen, and is faster on both
-  // ROCm architectures at narrow outputs -- but it *loses* once the output is
-  // 32 or wider, where 32x8 stops wasting anything. Hence the gate rather than
-  // a replaced constant.
-  //
-  // Measured, mirrored-pair A/B, output widths 8 / 15 / 32 / 64:
-  //   gfx950  (MI350X): 1.196x / 1.131x / 0.930x / 0.996x
-  //   gfx1250 (MI450):  1.218x / 1.049x / 0.861x / 0.968x
-  // See operator_benchmark_shortlist_analysis/maxpool_operators/.
+  // The 32-wide x dimension assumes a 32-lane warp, so an output narrower than
+  // 32 leaves most of each x row idle. 16x16 keeps the same 256 threads and
+  // doubles the output rows a warp covers, which measures faster at narrow
+  // outputs but loses once the output is 32 or wider. Hence the gate rather
+  // than a replaced constant.
   int threadX = 32;
   int threadY = 8;
   if (owidth < 32) {
