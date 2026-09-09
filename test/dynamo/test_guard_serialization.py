@@ -471,18 +471,8 @@ class DecoratedWholeDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
-def keep_defaults_element(func):
-    @functools.wraps(func)
-    def wrapper(self, x):
-        if func.__defaults__[0] == 2.0:
-            x = x + 1
-        return func(self, x)
-
-    return wrapper
-
-
 class DecoratedDefaultsElementForwardModule(torch.nn.Module):
-    @keep_defaults_element
+    @keep_default_value
     def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
         return x * scale
 
@@ -651,6 +641,16 @@ class SlottedLoudGetattr:
         if name == "__dict__":
             raise RuntimeError("user __getattr__ ran for '__dict__'")
         raise AttributeError(name)
+
+
+class PropertyProxy:
+    # Serves the bound function's name through a property; probing would run it.
+    calls = 0
+
+    @property
+    def global_add(self):
+        type(self).calls += 1
+        return global_add
 
 
 def _global_func_wrong_fqn(x):
@@ -1037,7 +1037,74 @@ class _PipelineWithSetstate:
         self.n = len(self.stages)
 
 
+class _AttrHolder:
+    pass
+
+
+class _RebuiltFromNewargs:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs__(self):
+        return (self.a,)
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    def test_an_unguarded_interned_singleton_is_not_pruned(self):
+        # Pruning is keyed by id(); an unguarded attribute holding torch.float32
+        # would register the one dtype object as missing and poison every
+        # tensor's reducer payload with it.
+        holder = _AttrHolder()
+        holder.dt = torch.float32
+        holder.dev = torch.device("cpu")
+        t = torch.randn(2)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(holder): holder, id(t): t}, {}, {}, buf).dump(
+            {"h": holder, "t": t}
+        )
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
+        self.assertIs(out["h"].dt, torch.float32)
+        self.assertEqual(out["h"].dev, torch.device("cpu"))
+        self.assertEqual(out["t"].dtype, torch.float32)
+
+    def test_loader_rejects_a_foreign_persistent_id(self):
+        class Foreign(pickle.Pickler):
+            def persistent_id(self, obj):
+                return "foo" if obj == "X" else None
+
+        buf = io.BytesIO()
+        Foreign(buf).dump(["X"])
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
+        ):
+            torch._dynamo.package.load_guards_state(buf.getvalue())
+
+    def test_object_rebuilt_from_newargs_is_pickled_whole(self):
+        # __getnewargs__ feeds cls.__new__ through the same pickler, so a pruned
+        # attribute it returns would arrive as the sentinel.
+        obj = _RebuiltFromNewargs([1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, buf).dump({"o": obj})
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["o"]
+        self.assertEqual(out.a, [1])
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_unguarded_process_group_backend_is_pruned(self):
+        # FakeProcessGroup is a c10d Backend, not a ProcessGroup; both are
+        # unsupported and prune to the sentinel rather than failing the dump.
+        import torch.distributed as dist
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        dist.init_process_group("fake", rank=0, world_size=2, store=FakeStore())
+        self.addCleanup(dist.destroy_process_group)
+        holder = _AttrHolder()
+        holder.pg = dist.group.WORLD._get_backend(torch.device("cpu"))
+        self.assertIsInstance(holder.pg, torch._C._distributed_c10d.Backend)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(holder): holder}, {}, {}, buf).dump({"h": holder})
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["h"]
+        self.assertIsInstance(out.pg, _Missing)
+
     def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
         # Attribute pruning assumes the default pickle protocol; a __setstate__
         # that recomputes a field from an unguarded one would read _Missing.
@@ -1102,9 +1169,13 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d = base.__defaults__
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
-        # No container->element edge: the kept element is not guarded THROUGH
-        # this tuple, so the whole-tuple guard governs and the tuple stays whole.
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        # The child edge alone would prune the sibling; the whole-tuple record
+        # (EQUALS_MATCH baked the tuple) wins and keeps it verbatim.
+        edges, whole = {id(d): {id(d[1])}}, {id(d): d}
+        pickler = GuardsStatePickler(
+            gtv, {}, {}, buf, guard_tree_children=edges, guard_tree_verbatim=whole
+        )
+        pickler.dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__defaults__, ("alpha", "beta"))
 
@@ -1322,6 +1393,25 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__doc__, _Missing)
 
+    def test_retained_grad_non_leaf_survives_pickle(self):
+        # .grad is dropped from the pickle for plain non-leafs (reading it
+        # warns and is None), but a RETAINED-grad non-leaf -- which torch.optim
+        # explicitly permits as a param -- has a real .grad that a guard can
+        # chain through; dropping it breaks such a load with an AttributeError.
+        base = torch.randn(4, requires_grad=True)
+        x = base * 1
+        x.retain_grad()
+        x.sum().backward()
+        grad = x.grad
+        self.assertIsNotNone(grad)
+        buf = io.BytesIO()
+        gtv = {id(x): x, id(grad): grad}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump(x)
+        out = pickle.loads(buf.getvalue())
+        self.assertIsNotNone(out.grad)
+        self.assertEqual(out.grad.shape, grad.shape)
+
     def test_function_reaching_itself_through_its_dict(self):
         # wrapper.me = wrapper, and wrapper is its own free variable; identity
         # has to survive the round trip through both.
@@ -1362,25 +1452,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, SlottedByName)
 
-    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
-        # self defines __getattr__, so probing getattr(self, name) to check
-        # resolution would run user code and can recurse. _reduce_bound_method
-        # carries the function and self explicitly instead of probing.
-        m = types.MethodType(global_add, GetattrProxy())
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
-        self.assertIs(out.__func__, global_add)
-        self.assertIsInstance(out.__self__, GetattrProxy)
-
-    def test_bound_method_on_a_slotted_getattr_proxy_is_not_probed(self):
-        # No instance __dict__: the receiver probe must read the slot, not getattr.
-        m = types.MethodType(global_add, SlottedLoudGetattr())
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
-        self.assertIs(out.__func__, global_add)
-        self.assertIsInstance(out.__self__, SlottedLoudGetattr)
+    def test_bound_method_on_an_instance_served_name_is_not_probed(self):
+        # self serves the name per instance (__getattr__, slots, a property):
+        # probing getattr(self, name) runs user code, can recurse, and a property
+        # hands back the bare function; the reducer carries (func, self) instead.
+        for recv in (GetattrProxy(), SlottedLoudGetattr(), PropertyProxy()):
+            with self.subTest(type(recv).__name__):
+                m = types.MethodType(global_add, recv)
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+                out = pickle.loads(buf.getvalue())["m"]
+                self.assertIs(out.__func__, global_add)
+                self.assertIsInstance(out.__self__, type(recv))
+        self.assertEqual(PropertyProxy.calls, 0)
 
     def test_unpicklable_value_error_names_the_attribute_path(self):
         # A type alone ("cannot pickle 'generator' object") is not actionable in
@@ -2846,7 +2930,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, _ = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             # Ensure guards state loading is not affected by the current global grad mode.
-            guards_state = pickle.loads(self._cached_guards_state)
+            guards_state = torch._dynamo.package.load_guards_state(
+                self._cached_guards_state
+            )
             check_fn_manager = CheckFunctionManager(
                 self._cached_f_code,
                 guards_state.output_graph,
