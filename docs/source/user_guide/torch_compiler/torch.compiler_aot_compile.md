@@ -193,9 +193,19 @@ Kernels tiled for one ISA are not run on another, even a wider one. To load on
 such a host, make it resolve the recorded ISA before loading, with the
 `ATEN_CPU_CAPABILITY` environment variable or the global
 `torch._inductor.config.cpp.simdlen`; `torch.compile(options={"cpp.simdlen":
-...})` does not apply at load time. `"eager"` and `"aot_eager"` artifacts, and
-a backend declaring `emits_native_code = False`, bake no generated code and are
-not subject to this check.
+...})` does not apply at load time. The target is recorded and checked only
+when the graph names a CPU device (a pure accelerator graph emits no CPU
+kernels). `"eager"`, `"aot_eager"` and the rest of the eager family (the
+`_NO_NATIVE_CODE_BACKENDS` set in `torch/_dynamo/package.py`) bake no
+generated code and are not subject to this check, and neither is a user
+backend that declares the plain attribute `emits_native_code = False` (any
+other value, including a method, counts as native). The attribute is read off
+the callable handed to `torch.compile`, or off that callable's `compiler_fn`
+when it is a wrapper, so for `aot_autograd(fw_compiler=...)` set it on the
+object `aot_autograd` returns. Declaring it on a backend that does emit
+native code disables the only check standing between a mis-targeted artifact
+and a crash or wrong result at first call; opt out only a backend whose
+artifacts hold no compiled kernels.
 
 ## Handling closures and external references
 
