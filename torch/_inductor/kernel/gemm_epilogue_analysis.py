@@ -632,7 +632,7 @@ class GemmLocalReduceAnalysis:
             return None
         reduction = self.graph.normalized_nodes.get(value)
         if isinstance(reduction, NormalizedReduction):
-            if reduction.source is not grouped_source:
+            if not self.same_grouped_view(reduction.source, grouped_source):
                 if self.graph.depends_on(reduction.source, grouped_source):
                     if not (
                         layout.axis == 1
@@ -662,13 +662,30 @@ class GemmLocalReduceAnalysis:
             matches, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
         )
 
+    def same_grouped_view(self, node: Any, grouped_source: torch.fx.Node) -> bool:
+        """True for the grouped view itself or a sibling view of the same source and shape."""
+        if node is grouped_source:
+            return True
+        if not isinstance(node, torch.fx.Node):
+            return False
+        this = self.graph.normalized_nodes.get(node)
+        other = self.graph.normalized_nodes.get(grouped_source)
+        return (
+            isinstance(this, NormalizedView)
+            and isinstance(other, NormalizedView)
+            and this.source is other.source
+            and self.grouped_tensors.get(node) is not None
+            and self.grouped_tensors.get(node)
+            == self.grouped_tensors.get(grouped_source)
+        )
+
     def validate_hidden_feed_main_reduction_input(
         self,
         input_node: Any,
         grouped_source: torch.fx.Node,
     ) -> None:
         """Reject reduction inputs that would need another physical feed-main value."""
-        if input_node is grouped_source:
+        if self.same_grouped_view(input_node, grouped_source):
             raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
         if not isinstance(input_node, torch.fx.Node):
             return
@@ -753,7 +770,7 @@ class GemmLocalReduceAnalysis:
                 and bool(reduction.keepdim)
                 and layout.matches_reduction_dim(reduction.dim)
                 and (
-                    reduction.source is grouped_source
+                    self.same_grouped_view(reduction.source, grouped_source)
                     or self.graph.depends_on(reduction.source, grouped_source)
                 )
             )
