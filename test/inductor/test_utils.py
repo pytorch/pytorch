@@ -350,6 +350,24 @@ class TestUtils(TestCase):
         ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
 
+    @xfailIfNoAcceleratorTriton
+    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    def test_get_device_tflops_triton_fallback_magnitude(self):
+        # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
+        # helpers, which are dimensioned in kHz. Getting that wrong under-reports
+        # peak throughput by 1000x, which a type-only assertion cannot catch, so
+        # pin the magnitude too: every GPU that reaches this path is well above
+        # 1 TFLOPS, and every pre-fix value was well below it.
+        get_device_tflops.cache_clear()
+        try:
+            with mock.patch.object(inductor_utils, "datasheet_tops", return_value=None):
+                ret = get_device_tflops(torch.float16)
+        finally:
+            # get_device_tflops is functools.cache'd; do not leak the fallback
+            # value into later tests.
+            get_device_tflops.cache_clear()
+        self.assertGreater(ret, 1.0)
+
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
