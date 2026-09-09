@@ -662,6 +662,14 @@ def _resume_global_renames(
         if not entry.install_to_global:
             continue
         for name in entry.function_names:
+            # Two entries in one package sharing a capture-time name would
+            # collapse onto one token-suffixed global (second wins). The token
+            # separates packages, not entries within a package, so make the
+            # collision loud here rather than silently rebinding.
+            if name in renames:
+                raise AssertionError(
+                    f"duplicate resume-function name {name!r} within one package"
+                )
             renames[name] = f"{name}_{package_token}"
     return renames
 
