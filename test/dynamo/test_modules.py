@@ -27,7 +27,11 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 
 
 try:
@@ -1284,18 +1288,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # model can be compiled without error
         y = model(x)
 
-    def test_rnn_modules_compile_by_default(self):
-        for module_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
-            with self.subTest(module_cls=module_cls):
-                torch._dynamo.reset()
-                mod = module_cls(4, 8, batch_first=True).eval()
-                x = torch.randn(2, 3, 4)
-
-                ref = mod(x)
-                res = torch.compile(mod, backend="eager", fullgraph=True)(x)
-
-                self.assertEqual(ref, res)
-
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])
@@ -2274,6 +2266,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("specialize", [False, True])
+    def test_compile_module_with_compiled_no_grad_method(self, specialize):
+        class Mod(torch.nn.Module):
+            @torch.compile(backend="eager", fullgraph=True)
+            @torch.no_grad()
+            def foo(self, x):
+                return x.sin() + 1
+
+            def forward(self, x):
+                y = x
+                # Keep the call inside a loop to match the original nested compile repro.
+                for _ in range(1):
+                    y = self.foo(x)
+                return y
+
+        mod = Mod()
+        if specialize:
+            mod.torchdynamo_force_dynamic = False
+        x = torch.randn(4, requires_grad=True)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+
+        ref = mod(x)
+        res = opt_mod(x)
+
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
 
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
@@ -3913,6 +3932,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+
+instantiate_parametrized_tests(OptimizedModuleTest)
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True

@@ -612,15 +612,25 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     return decorator
 
 
+def _rocm_version_tuple():
+    """ROCm release version as an int tuple.
+
+    torch.version.hip is the HIP runtime version, which tracks the ROCm release
+    version on shipped ROCm but not on preview builds, so it is only a fallback
+    for builds whose torch/version.py never recorded torch.version.rocm.
+    """
+    rocm_version = str(getattr(torch.version, "rocm", None) or torch.version.hip)
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
+
+
 def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     """Skips a test for ROCm based on ROCm ver - multiprocess UTs"""
 
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if (
                 rocm_version_tuple is None
                 or version is None
@@ -639,9 +649,7 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
     def decorator(func):
         reason = None
         if TEST_WITH_ROCM:
-            rocm_version = str(torch.version.hip)
-            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
-            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            rocm_version_tuple = _rocm_version_tuple()
             if version is not None and rocm_version_tuple >= tuple(version):
                 reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
 
@@ -1914,6 +1922,11 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
+        # Some tests override _init_pg and oversubscribe before per-test skips run.
+        backend = cls.backend_str()
+        is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
+        if is_nccl and world_size > torch.accelerator.device_count():
+            os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
         init_skip_reason = None
         try:
             cls._init_pg(rank, world_size, rdvz_file)

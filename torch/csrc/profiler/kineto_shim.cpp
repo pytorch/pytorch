@@ -65,6 +65,7 @@ const ActivityTypeMap kMtiaTypes{
     {libkineto::ActivityType::MTIA_RUNTIME,          "MTIA_RUNTIME"},
     {libkineto::ActivityType::MTIA_INSIGHT,          "MTIA_INSIGHT"},
     {libkineto::ActivityType::MTIA_COUNTERS,         "MTIA_COUNTERS"},
+    {libkineto::ActivityType::COLLECTIVE_COMM,       "COLLECTIVE_COMM"},
 };
 
 const ActivityTypeMap kHpuTypes{
@@ -329,6 +330,11 @@ void prepareTrace(
 
   const bool has_cpu_activity =
       activities.contains(torch::autograd::profiler::ActivityType::CPU);
+  const bool has_mtia_activity =
+      activities.contains(torch::autograd::profiler::ActivityType::MTIA);
+  const bool has_mtia_activity_filter =
+      activity_filter.contains(torch::autograd::profiler::ActivityType::MTIA);
+  const bool has_collectives_profiler = collectivesProfilerExists();
 
   if (has_cpu_activity) {
     insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
@@ -366,11 +372,16 @@ void prepareTrace(
       insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
     }
   }
-  if (activities.contains(torch::autograd::profiler::ActivityType::MTIA)) {
-    if (config.custom_profiler_config.empty()) {
+  if (has_mtia_activity) {
+    TORCH_CHECK(
+        !has_mtia_activity_filter || config.custom_profiler_config.empty(),
+        "`custom_profiler_config` cannot be combined with an MTIA "
+        "`activity_filter`; use only one to select MTIA activities.");
+    if (has_mtia_activity_filter || config.custom_profiler_config.empty()) {
       insertActivities(
           torch::autograd::profiler::ActivityType::MTIA, kMtiaTypes);
     } else {
+      k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
       if (config.custom_profiler_config.find("disable_runtime_events") ==
           std::string::npos) {
         k_activities.insert(libkineto::ActivityType::MTIA_RUNTIME);
@@ -396,6 +407,9 @@ void prepareTrace(
         LOG(INFO) << "Disabling MTIA counter events";
       }
     }
+    if (!has_collectives_profiler) {
+      k_activities.erase(libkineto::ActivityType::COLLECTIVE_COMM);
+    }
   }
   if (activities.contains(torch::autograd::profiler::ActivityType::HPU)) {
     insertActivities(torch::autograd::profiler::ActivityType::HPU, kHpuTypes);
@@ -407,7 +421,7 @@ void prepareTrace(
       k_activities.insert(libkineto::ActivityType::CUDA_SYNC);
     }
   }
-  if (collectivesProfilerExists()) {
+  if (!has_mtia_activity && has_collectives_profiler) {
     k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
   if (activities.contains(

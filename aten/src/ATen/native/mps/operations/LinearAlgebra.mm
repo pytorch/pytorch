@@ -463,8 +463,14 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
-    return do_metal_mm(self, other, output);
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. Lower to a plain
+  // mm (skipping the bias) and scale by alpha in place only for the uncommon alpha != 1.
+  if (beta.toComplexDouble() == 0.0) {
+    do_metal_mm(self, other, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
@@ -512,10 +518,22 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
                                    const Scalar& beta,
                                    Tensor& output,
                                    bool is_baddbmm) {
-  // Handle conjugated inputs by creating resolved copies
+  // beta == 0 means bias is ignored, so nan/inf in it must not propagate. baddbmm then
+  // lowers to a plain bmm (skipping the bias) with an in-place alpha scale for alpha != 1.
+  if (is_baddbmm && beta.toComplexDouble() == 0.0) {
+    do_metal_bmm(batch1, batch2, output);
+    if (alpha.toComplexDouble() != 1.0) {
+      output.mul_(alpha);
+    }
+    return output;
+  }
+
+  // Handle conjugated inputs by creating resolved copies. addbmm still needs its batch
+  // reduction, so when beta == 0 feed the kernel a broadcast scalar zero for the bias.
   auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
   auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  auto bias_src = beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : bias;
+  auto bias_ = bias_src.is_conj() ? bias_src.resolve_conj() : bias_src;
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -670,37 +688,45 @@ static void lu_factor_panel_encode(const Tensor& LU,
                                    int64_t B,
                                    bool transposeResult) {
   auto stream = getCurrentMPSStream();
-  const bool useMpp = has_mpp();
+  // complex64 runs the same blocked schedule through the float2 kernel
+  // instantiations; the float pipeline behavior is unchanged.
+  const bool isComplex = LU.scalar_type() == kComplexFloat;
+  const auto tname = mps::scalarToMetalTypeString(LU);
+  const bool useMpp = has_mpp() && !isComplex;
 
-  auto factorW32PSO = lib.getPipelineStateForFunc("factorPanelLU_1_32");
-  auto factorW16PSO = lib.getPipelineStateForFunc("factorPanelLU_2_16");
-  auto factorW8PSO = lib.getPipelineStateForFunc("factorPanelLU_4_8");
-  auto streamUpdatePSO = lib.getPipelineStateForFunc("luStreamUpdate");
-  auto streamPivotPSO = lib.getPipelineStateForFunc("luStreamPivot");
-  auto laswpPSO = lib.getPipelineStateForFunc("laswpGatherLU");
-  auto trsm8PSO = lib.getPipelineStateForFunc("trsmPanelLU_8");
-  auto trsm16PSO = lib.getPipelineStateForFunc("trsmPanelLU_16");
-  auto trsm32PSO = lib.getPipelineStateForFunc("trsmPanelLU_32");
+  auto factorW32PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_1_32", tname));
+  auto factorW16PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_2_16", tname));
+  auto factorW8PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_4_8", tname));
+  auto streamUpdatePSO = lib.getPipelineStateForFunc(fmt::format("luStreamUpdate_{}", tname));
+  auto streamPivotPSO = lib.getPipelineStateForFunc(fmt::format("luStreamPivot_{}", tname));
+  auto laswpPSO = lib.getPipelineStateForFunc(fmt::format("laswpGatherLU_{}", tname));
+  auto trsm8PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_8", tname));
+  auto trsm16PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_16", tname));
+  auto trsm32PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_32", tname));
   uint32_t maxG = static_cast<uint32_t>(std::min({factorW32PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW16PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW8PSO.maxTotalThreadsPerThreadgroup}));
   maxG = std::max(32u, maxG / 32 * 32);
+  // simdgroup_matrix and MPP matmul2d are float-only hardware paths, so the
+  // complex Schur update routes to the threadgroup-tiled scalar kernel.
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
-  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
-  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc("transposeInPlaceLU") : nil;
+  auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
+  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc(fmt::format("gemmTiledLU_{}", tname)) : nil;
+  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc(fmt::format("transposeInPlaceLU_{}", tname)) : nil;
 
   const auto uM = static_cast<uint32_t>(M);
   const auto uN = static_cast<uint32_t>(N);
   const auto uB = static_cast<uint32_t>(B);
   const uint32_t mn = std::min(uM, uN);
   const uint32_t NBo = mn <= 1024 ? 32 : mn <= 2048 ? 64 : 128;
-  // panels taller than this use the streaming kernels (kLUStreamNT argmax
-  // partials and the 32-float U row per batch in scratch)
+  // panels taller than this use the streaming kernels; scratch is one
+  // LUStreamScratch<T> slice per batch, bound untyped as a raw byte buffer.
   const uint32_t kStreamMinRows = 4 * maxG;
   Tensor scratch;
   if (uM > kStreamMinRows) {
-    scratch = at::empty({B, 2 * kLUStreamNT + 32}, LU.options());
+    const int64_t perBatch = isComplex ? sizeof(LUStreamScratch<c10::complex<float>>) : sizeof(LUStreamScratch<float>);
+    scratch = at::empty({B * perBatch}, LU.options().dtype(kByte));
   }
 
   @autoreleasepool {
@@ -726,11 +752,15 @@ static void lu_factor_panel_encode(const Tensor& LU,
         if (W == 0) {
           return;
         }
+        // column-chunk width staged per threadgroup: 64 floats, 32 float2
+        // (matches CW in the laswpGatherLU instantiations)
+        const uint32_t lcw = isComplex ? 32 : 64;
         setP5(cs0, ce0, cs1, ce1);
         [enc setComputePipelineState:laswpPSO];
         for (uint32_t s0 = 0; s0 < nb; s0 += 32) {
           setP4(d0 + s0, std::min(32u, nb - s0), 0, 0);
-          [enc dispatchThreadgroups:MTLSizeMake((W + 63) / 64, uB, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+          [enc dispatchThreadgroups:MTLSizeMake((W + lcw - 1) / lcw, uB, 1)
+              threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
         }
       };
       auto trsm = [&](uint32_t d0, uint32_t cs, uint32_t ce, id<MTLComputePipelineState> pso, uint32_t nr) {
@@ -750,6 +780,12 @@ static void lu_factor_panel_encode(const Tensor& LU,
         setP5(kc, kw, 0, 0);
         const uint32_t Tm = re - rs;
         const uint32_t Tn = ce - cs;
+        if (isComplex) {
+          [enc setComputePipelineState:gemmTiledPSO];
+          [enc dispatchThreadgroups:MTLSizeMake((Tn + 15) / 16, (Tm + 15) / 16, uB)
+              threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+          return;
+        }
         if (!useMpp) {
           [enc setComputePipelineState:gemmSimdPSO];
           [enc dispatchThreadgroups:MTLSizeMake((Tn + 63) / 64, (Tm + 31) / 32, uB)
@@ -868,8 +904,9 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool check_errors) {
   using namespace mps;
 
-  TORCH_CHECK(A.scalar_type() == kFloat && LU.scalar_type() == kFloat,
-              "linalg.lu_factor(): MPS doesn't support complex types.");
+  TORCH_CHECK((A.scalar_type() == kFloat || A.scalar_type() == kComplexFloat) && LU.scalar_type() == A.scalar_type(),
+              "linalg.lu_factor(): MPS supports float32 and complex64 inputs, got ",
+              A.scalar_type());
   TORCH_CHECK(pivot, "linalg.lu_factor(): MPS doesn't allow pivot == False.");
 
   int64_t aRows = A.size(-2);
@@ -919,18 +956,25 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
 static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, int64_t k, int64_t Bnum, bool adjoint) {
   auto stream = getCurrentMPSStream();
-  const auto useMpp = has_mpp();
+  // simdgroup_matrix and MPP matmul2d are float-only hardware paths, so the
+  // complex Schur update routes to the threadgroup-tiled scalar kernel.
+  const bool isComplex = c10::isComplexType(W.scalar_type());
+  const auto tname = mps::scalarToMetalTypeString(W);
+  const auto useMpp = has_mpp() && !isComplex;
   const auto un = static_cast<uint32_t>(n);
   const auto uk = static_cast<uint32_t>(k);
   const auto uB = static_cast<uint32_t>(Bnum);
   const auto N = un + uk;
 
-  auto pivotPSO = lib.getPipelineStateForFunc("luApplyPivotsRHS");
-  auto fwdPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_lower_nonunit" : "trsmDiagSolveLU_lower_unit");
-  auto backPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_upper_unit" : "trsmDiagSolveLU_upper_nonunit");
+  auto pivotPSO = lib.getPipelineStateForFunc(fmt::format("luApplyPivotsRHS_{}", tname));
+  auto fwdPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "lower_nonunit" : "lower_unit"));
+  auto backPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "upper_unit" : "upper_nonunit"));
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
-  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
+  auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
+  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc(fmt::format("gemmTiledLU_{}", tname)) : nil;
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -963,6 +1007,12 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
         const auto Tm = re - rs;
         setP4(rs, re, un, N);
         setP5(kc, kw, 0, 0);
+        if (isComplex) {
+          [enc setComputePipelineState:gemmTiledPSO];
+          [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, 16u), at::ceil_div(Tm, 16u), uB)
+              threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+          return;
+        }
         if (!useMpp) {
           [enc setComputePipelineState:gemmSimdPSO];
           [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, 64u), at::ceil_div(Tm, 32u), uB)
@@ -1001,7 +1051,9 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
 
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
-  TORCH_CHECK(LU.scalar_type() == kFloat, "linalg.lu_solve(): MPS only supports float32.");
+  TORCH_CHECK(LU.scalar_type() == kFloat || LU.scalar_type() == kComplexFloat,
+              "linalg.lu_solve(): MPS only supports float32 and complex64, got ",
+              LU.scalar_type());
   if (B.numel() == 0) {
     return;
   }
@@ -1203,7 +1255,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
   }
 
-  MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
 
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -1312,7 +1364,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   // Inner dimension is 0
   // Early out as some paths in the code below do not handle this case correctly
   if (self.size(1) == 0) {
-    if (beta.toDouble() == 0.0) {
+    if (beta.toComplexDouble() == 0.0) {
       output.zero_();
     } else {
       output.copy_(*bias_);
@@ -1326,7 +1378,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     return output;
   }
 
-  if (use_metal_mm(self, other, output)) {
+  // Complex addmm must use the Metal kernel (like bmm/baddbmm): the MPSGraph-based fallback
+  // for real types below encodes alpha/beta as real (double) constants via toDouble(), which
+  // throws for a complex scalar and drops its imaginary part.
+  if (use_metal_mm(self, other, output) || c10::isComplexType(self.scalar_type())) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 
@@ -1634,18 +1689,76 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   return result;
 }
 
+// Complex triangular solve runs a custom Metal substitution kernel because
+// MPSMatrixSolveTriangular is float-only. conjugate selects adjoint (A^H)
+// instead of plain transpose (A^T) when transpose is set; it is a no-op for
+// real inputs.
+static void triangular_solve_metal(const Tensor& A_,
+                                   const Tensor& B_,
+                                   bool upper,
+                                   bool transpose,
+                                   bool left,
+                                   bool unitriangular,
+                                   bool conjugate,
+                                   const Tensor& out) {
+  using namespace mps;
+  const uint64_t batchSize =
+      std::accumulate(A_.sizes().begin(), A_.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
+  const uint64_t n = A_.size(-1);
+  const uint64_t k = left ? B_.size(-1) : B_.size(-2);
+
+  TriangularSolveParams params;
+  params.nbatch = safe_downcast<uint32_t, uint64_t>(batchSize);
+  params.n = safe_downcast<uint32_t, uint64_t>(n);
+  params.k = safe_downcast<uint32_t, uint64_t>(k);
+  params.upper = upper;
+  params.left = left;
+  params.transpose = transpose;
+  params.conj = conjugate;
+  params.unit = unitriangular;
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
+      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, A_, B_, out, params);
+      mtl_dispatch1DJob(encoder, pso, batchSize * k);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
 static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 const Tensor& B,
                                                 bool upper,
                                                 bool transpose,
                                                 bool left,
                                                 bool unitriangular,
-                                                Tensor& out) {
+                                                Tensor& out,
+                                                bool conjugate = false) {
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
-  TORCH_CHECK(A.scalar_type() == kFloat && B.scalar_type() == kFloat,
-              "linalg.solve.triangular(); Only float is supported!");
+  const auto scalar_type = A.scalar_type();
+  TORCH_CHECK(scalar_type == kFloat || scalar_type == kComplexFloat,
+              "linalg.solve_triangular(): MPS only supports float32 and complex64, got ",
+              scalar_type);
+  TORCH_CHECK(A.scalar_type() == B.scalar_type(), "linalg.solve_triangular(): A and B must have the same dtype");
+  // MPS ops get no generated device check and the solvers write into out= directly,
+  // so its device and dtype have to be validated here.
+  TORCH_CHECK(out.device() == A.device(),
+              "linalg.solve_triangular(): Expected out tensor on ",
+              A.device(),
+              " but got ",
+              out.device());
+  TORCH_CHECK(out.scalar_type() == scalar_type,
+              "linalg.solve_triangular(): Expected out tensor of dtype ",
+              scalar_type,
+              " but got ",
+              out.scalar_type());
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());
@@ -1655,17 +1768,31 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     return out;
   }
 
-  Tensor A_ = A_t;
-  Tensor B_ = B_t;
-  if (!A_t.is_contiguous()) {
-    A_ = A_t.clone(at::MemoryFormat::Contiguous);
+  // The substitution kernel reads raw elements, so materialize conjugated views.
+  Tensor A_ = A_t.is_conj() ? A_t.resolve_conj() : A_t;
+  Tensor B_ = B_t.is_conj() ? B_t.resolve_conj() : B_t;
+  if (!A_.is_contiguous()) {
+    A_ = A_.clone(at::MemoryFormat::Contiguous);
   }
-  if (!B_t.is_contiguous()) {
-    B_ = B_t.clone(at::MemoryFormat::Contiguous);
+  if (!B_.is_contiguous()) {
+    B_ = B_.clone(at::MemoryFormat::Contiguous);
   }
+
+  // Both solvers write a dense row-major solution, so a strided out needs a temporary.
+  // It is fully overwritten, hence empty rather than a copy of out.
+  Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
+
+  if (scalar_type == kComplexFloat) {
+    triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out_);
+    if (!out_.is_same(out)) {
+      out.copy_(out_);
+    }
+    return out;
+  }
+
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> bBuffer = getMTLBufferStorage(B_);
-  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out_);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -1681,43 +1808,41 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       uint64_t aElemSize = A_.element_size();
       uint64_t bElemSize = B_.element_size();
 
-      MPSMatrixSolveTriangular* filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
-                                                                                     right:!left
-                                                                                     upper:upper
-                                                                                 transpose:transpose
-                                                                                      unit:unitriangular
-                                                                                     order:left ? bRows : bCols
-                                                                    numberOfRightHandSides:left ? bCols : bRows
-                                                                                     alpha:1.0f] autorelease];
+      auto filter = [[[MPSMatrixSolveTriangular alloc] initWithDevice:device
+                                                                right:!left
+                                                                upper:upper
+                                                            transpose:transpose
+                                                                 unit:unitriangular
+                                                                order:left ? bRows : bCols
+                                               numberOfRightHandSides:left ? bCols : bRows
+                                                                alpha:1.0f] autorelease];
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_}, mpsStream);
 
-      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                                    columns:aCols
-                                                                                   matrices:batchSize
-                                                                                   rowBytes:aCols * aElemSize
-                                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                                   dataType:getMPSDataType(A_)];
-      MPSMatrixDescriptor* rightHandSideMatrixDesc =
-          [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
-                                                columns:bCols
-                                               matrices:batchSize
-                                               rowBytes:bCols * bElemSize
-                                            matrixBytes:bRows * bCols * bElemSize
-                                               dataType:getMPSDataType(B_)];
+      auto sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                    columns:aCols
+                                                                   matrices:batchSize
+                                                                   rowBytes:aCols * aElemSize
+                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                   dataType:getMPSDataType(A_)];
+      auto rightHandSideMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
+                                                                           columns:bCols
+                                                                          matrices:batchSize
+                                                                          rowBytes:bCols * bElemSize
+                                                                       matrixBytes:bRows * bCols * bElemSize
+                                                                          dataType:getMPSDataType(B_)];
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
-        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
-                                                          descriptor:sourceMatrixDesc] autorelease];
-        MPSMatrix* rightHandSideMatrix =
-            [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B_.storage_offset() + bBatchOffset) * bElemSize
-                                    descriptor:rightHandSideMatrixDesc] autorelease];
-        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                                offset:(out.storage_offset() + bBatchOffset) * bElemSize
-                                                            descriptor:rightHandSideMatrixDesc] autorelease];
+        auto sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                        offset:(A_.storage_offset() + aBatchOffset) * aElemSize
+                                                    descriptor:sourceMatrixDesc] autorelease];
+        auto rightHandSideMatrix = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                               offset:(B_.storage_offset() + bBatchOffset) * bElemSize
+                                                           descriptor:rightHandSideMatrixDesc] autorelease];
+        auto solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
+                                                          offset:(out_.storage_offset() + bBatchOffset) * bElemSize
+                                                      descriptor:rightHandSideMatrixDesc] autorelease];
 
         [filter encodeToCommandBuffer:commandBuffer
                          sourceMatrix:sourceMatrix
@@ -1727,6 +1852,9 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       getMPSProfiler().endProfileKernel(filter, mpsStream);
     }
   });
+  if (!out_.is_same(out)) {
+    out.copy_(out_);
+  }
   return out;
 }
 
@@ -1994,16 +2122,18 @@ static void svd_kernel_mps(const Tensor& A,
   const int64_t v_staging_bytes = k * k * elem_size;
   const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
   const bool too_large = (staging_bytes > tg_limit);
-  const bool too_small = (batch * m * n < 8192);
 
-  if (too_large || too_small) {
-    if (too_large) {
-      TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
-                      staging_bytes,
-                      " > ",
-                      tg_limit,
-                      " bytes); falling back to CPU.");
-    }
+  // Only matrices too big to stage in threadgroup memory fall back to CPU. The
+  // native kernel wins at every batch size for a tensor already on-device: the
+  // CPU fallback pays two data transfers on top of the linalg.svd convergence
+  // check's mandatory device->host sync, so gating small inputs to CPU was 3-6x
+  // slower, not faster.
+  if (too_large) {
+    TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
+                    staging_bytes,
+                    " > ",
+                    tg_limit,
+                    " bytes); falling back to CPU.");
     auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
     if (compute_uv) {
       const_cast<Tensor&>(U).copy_(U_cpu.to(at::kMPS));
@@ -2017,7 +2147,9 @@ static void svd_kernel_mps(const Tensor& A,
   // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
   // params.transposed tells the kernel to swap left/right into the right outputs.
   const int64_t wm = transposed ? n : m;
-  Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
+  // Kernel reads the raw buffer and ignores is_conj; resolve it, since
+  // .contiguous() keeps the bit when the mH view is already contiguous.
+  Tensor in = (transposed ? A.mH() : A).resolve_conj().contiguous().reshape({batch, wm, k});
 
   auto opts = A.options();
   const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());
@@ -2521,20 +2653,24 @@ Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool uppe
   const bool first_transpose = upper;
   const bool second_transpose = !upper;
 
+  // A = L L^H (lower) or U^H U (upper); the transposed solve is against the
+  // conjugate-transpose factor, so it must be adjoint (no-op for real inputs).
   mps::linalg_solve_triangular_mps_impl(A,
                                         self,
                                         upper,
                                         first_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out);
+                                        out,
+                                        /*conjugate=*/first_transpose);
   mps::linalg_solve_triangular_mps_impl(A,
                                         out,
                                         upper,
                                         second_transpose,
                                         /*left=*/true,
                                         /*unitriangular=*/false,
-                                        out);
+                                        out,
+                                        /*conjugate=*/second_transpose);
   return out;
 }
 
