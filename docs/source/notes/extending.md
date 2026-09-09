@@ -136,6 +136,39 @@ the autograd engine.
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
 
+During a first-order {meth}`~torch.Tensor.backward` call without an ``inputs``
+argument, ``ctx.input_grad_buffers`` provides a tuple aligned with the inputs to
+{meth}`~Function.forward`. Each entry is either ``None`` or the autograd engine's
+current accumulation buffer for that input. A custom backward kernel can accumulate
+its contribution directly into a non-``None`` buffer and return ``None`` for that
+input instead of returning a separate gradient tensor::
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (buffer,) = ctx.input_grad_buffers
+        if buffer is not None:
+            custom_backward_kernel(grad_output, out=buffer, accumulate=True)
+            return None
+        return custom_backward_kernel(grad_output)
+
+Each input is independent: for example, a fused linear backward may write
+``grad_input`` into its available buffer while returning ``grad_weight`` normally.
+Buffer availability depends on backward execution order, so the ``None`` fallback is
+required. The first producer normally receives ``None``; a later producer can receive
+the partial sum produced so far. The buffer may only be used synchronously while that
+custom ``backward`` method is running. Do not retain it: later producers may replace
+the engine's buffer, making a retained tensor stale. All producers that use or
+subsequently update an exposed buffer must execute on the same device, engine thread,
+and stream. PyTorch diagnoses engine-visible violations, but a custom function that
+launches work on another thread or stream is responsible for synchronizing it before
+returning.
+
+This interface is unavailable with {func}`torch.autograd.grad`, the ``inputs``
+argument to ``backward``, ``create_graph=True``, anomaly detection, or a post-hook on
+the producing autograd node. It only exposes the engine's per-backward ``InputBuffer``;
+for a leaf, the completed buffer still passes through ``AccumulateGrad`` and its normal
+tensor and post-accumulate hooks before becoming ``.grad``.
+
 In addition to ``ctx`` methods, the {class}`~Function` class supports the following
 class attributes:
 

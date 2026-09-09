@@ -116,17 +116,16 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
   }
 }
 
+bool is_direct_accumulation_compatible(const Variable& v) {
+  return !(at::isTensorSubclassLike(v) || v._is_zerotensor() ||
+           v.is_nested()) &&
+      v.is_non_overlapping_and_dense() && v.has_storage();
+}
+
 bool can_accumulate_inplace(const Variable& v) {
-  return (
-      // `v` is a "vanilla" Tensor
-      !(at::isTensorSubclassLike(v) || v._is_zerotensor() || v.is_nested()) &&
-
-      // with a favorable memory layout
-      v.is_non_overlapping_and_dense() &&
-
-      // and we hold the last reference
+  return is_direct_accumulation_compatible(v) &&
       impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
-      v.has_storage() && v.storage().use_count() == 1);
+      v.storage().use_count() == 1;
 }
 } // anonymous namespace
 
@@ -170,6 +169,89 @@ static void accumulate(
   } else {
     buffer[pos] = old_var + var;
   }
+}
+
+void InputBuffer::validate_direct_accumulation(
+    size_t pos,
+    const at::Device& device,
+    const std::optional<c10::Stream>& opt_producer_stream,
+    const std::optional<c10::Stream>& opt_consumer_stream) const {
+  if (!direct_accumulation_info_ ||
+      !direct_accumulation_info_[pos].has_value()) {
+    return;
+  }
+
+  const auto& info = *direct_accumulation_info_[pos];
+  TORCH_CHECK(
+      info.thread_id == std::this_thread::get_id() && info.device == device &&
+          info.stream == opt_producer_stream &&
+          info.stream == opt_consumer_stream,
+      "After an InputBuffer is exposed for direct accumulation, all producers "
+      "must use the same engine thread, device, and stream");
+}
+
+Variable InputBuffer::get_for_direct_accumulation(
+    size_t pos,
+    const at::Device& producer_device,
+    const std::optional<c10::Stream>& opt_producer_stream,
+    const at::Device& consumer_device,
+    const std::optional<c10::Stream>& opt_consumer_stream) {
+  TORCH_INTERNAL_ASSERT(pos < buffer.size());
+  auto& var = buffer[pos];
+  if (!var.defined()) {
+    return {};
+  }
+
+  if ((!direct_accumulation_info_ ||
+       !direct_accumulation_info_[pos].has_value()) &&
+      !can_accumulate_inplace(var)) {
+    return {};
+  }
+
+  const auto device = var.device();
+  TORCH_CHECK(
+      device == producer_device && device == consumer_device,
+      "Direct InputBuffer accumulation requires the producer, buffer, and "
+      "consumer to use the same device");
+
+  if (at::accelerator::isAccelerator(device.type())) {
+    TORCH_CHECK(
+        opt_producer_stream && opt_consumer_stream &&
+            pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
+            pos < ready_streams.size() && ready_streams[pos],
+        "Direct InputBuffer accumulation requires a known execution, "
+        "accumulation, and readiness stream");
+    TORCH_CHECK(
+        *opt_producer_stream == *opt_consumer_stream &&
+            *opt_producer_stream == *opt_accum_streams[pos] &&
+            *opt_producer_stream == *ready_streams[pos],
+        "Direct InputBuffer accumulation requires the producer, buffer, and "
+        "consumer to use the same stream");
+  } else {
+    TORCH_CHECK(
+        !opt_producer_stream && !opt_consumer_stream,
+        "Direct InputBuffer accumulation does not support an accelerator "
+        "producer or consumer for a CPU buffer");
+  }
+
+  if (!direct_accumulation_info_) {
+    direct_accumulation_info_ =
+        std::make_unique<std::optional<DirectAccumulationInfo>[]>(
+            buffer.size());
+  }
+  auto& info = direct_accumulation_info_[pos];
+  if (info.has_value()) {
+    validate_direct_accumulation(
+        pos, device, opt_producer_stream, opt_consumer_stream);
+    TORCH_CHECK(
+        is_direct_accumulation_compatible(var),
+        "An InputBuffer exposed for direct accumulation is no longer safely "
+        "mutable");
+  } else {
+    info.emplace(DirectAccumulationInfo{
+        std::this_thread::get_id(), device, opt_producer_stream});
+  }
+  return var;
 }
 
 // Note: [Stream sync contract when dealing with multi-deviced-ness]
@@ -246,6 +328,10 @@ void InputBuffer::add(
   // Non-accelerator case
   //
   if (!is_accelerator) {
+    if (C10_UNLIKELY(direct_accumulation_info_ != nullptr)) {
+      validate_direct_accumulation(
+          pos, device, opt_producer_stream_, opt_consumer_stream_);
+    }
     if (!buffer[pos].defined()) {
       buffer[pos] = std::move(var);
     } else {
@@ -280,6 +366,10 @@ void InputBuffer::add(
   }
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
+  if (C10_UNLIKELY(direct_accumulation_info_ != nullptr)) {
+    validate_direct_accumulation(
+        pos, device, opt_producer_stream, opt_consumer_stream);
+  }
 
   // Handle producer/consumer stream mismatch. Two independent cases:
   //   1. Producer is capturing but the consumer holds a stale non-capturing

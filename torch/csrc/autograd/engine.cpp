@@ -411,6 +411,67 @@ int get_current_graph_task_id() {
   return current_graph_task ? current_graph_task->id_ : -1;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+variable_list get_current_input_grad_buffers(Node* node) {
+  auto graph_task = current_graph_task;
+  TORCH_CHECK(
+      graph_task,
+      "input_grad_buffers can only be accessed while autograd is executing "
+      "backward()");
+  auto current_node = get_current_node();
+  TORCH_CHECK(
+      current_node && current_node.get() == node,
+      "input_grad_buffers can only be accessed from the currently executing "
+      "autograd.Function backward()");
+  TORCH_CHECK(
+      graph_task->exec_info_.empty(),
+      "input_grad_buffers is only supported by backward() without the inputs "
+      "argument");
+  TORCH_CHECK(
+      !at::GradMode::is_enabled(),
+      "input_grad_buffers does not support backward(create_graph=True)");
+  TORCH_CHECK(
+      !AnomalyMode::is_enabled(),
+      "input_grad_buffers does not support anomaly detection");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support hooks registered on the producing "
+      "autograd node");
+
+  const auto producer_device = node->device();
+  auto opt_producer_stream = node->stream();
+  if (opt_producer_stream.has_value()) {
+    opt_producer_stream =
+        at::accelerator::getCurrentStream(producer_device.index());
+  }
+
+  variable_list result(node->next_edges().size());
+  std::lock_guard<std::mutex> lock(graph_task->mutex_);
+  for (const auto i : c10::irange(node->next_edges().size())) {
+    const auto& next = node->next_edge(i);
+    if (!next.is_valid()) {
+      continue;
+    }
+    auto input_buffer_it = graph_task->not_ready_.find(next.function.get());
+    if (input_buffer_it == graph_task->not_ready_.end()) {
+      continue;
+    }
+
+    auto& input_buffer = input_buffer_it->second;
+    const auto opt_consumer_stream =
+        input_buffer.opt_overridden_consumer_stream.has_value()
+        ? input_buffer.opt_overridden_consumer_stream
+        : next.function->stream();
+    result[i] = input_buffer.get_for_direct_accumulation(
+        next.input_nr,
+        producer_device,
+        opt_producer_stream,
+        next.function->device(),
+        opt_consumer_stream);
+  }
+  return result;
+}
+
 bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
