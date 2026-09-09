@@ -142,6 +142,11 @@ def reset() -> None:
     makes it good for testing scenarios where you want to behave as if you started
     a new process.  It does NOT affect any file system caches.
 
+    NB: if another thread is inside a Dynamo cache lookup on a code object when
+    reset() runs, that code object's C++ cache entries are cleared by the next
+    depth-zero cache holder rather than before reset() returns (see
+    clear_in_place in torch/csrc/dynamo/extra_state.cpp).
+
     NB: this does NOT reset logging state.  Don't use this to test logging
     initialization/reinitialization.
     """
