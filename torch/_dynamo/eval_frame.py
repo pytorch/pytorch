@@ -951,6 +951,10 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        # The transparent cache hands _optimize an uninitialized package (fn=None)
+        # that this context loads and installs itself, so what it finds on the
+        # frame is its own; a user-built CompilePackage(fn) arrives initialized.
+        self._user_package = package is not None and package.is_initialized()
         self._hooks = hooks
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
@@ -1079,23 +1083,28 @@ class _TorchDynamoContext:
         # entries serve this frame in this context's region, Dynamo never
         # reaches this context's callback, so a capturing package records
         # nothing and a later save writes a zero-guarded artifact whose install
-        # skip_code()s the frame. Refuse up front on the explicit
-        # CompilePackage(fn) path; the transparent cache installs and captures
-        # through this same context, so what it finds is its own.
-        if (
-            self._package is not None
-            and not config.caching_precompile
-            and hasattr(fn, "__code__")
-            and not self._package.owns_install_on(
-                fn.__code__, self._isolate_recompiles_id
-            )
-            and _has_precompile_entries(fn.__code__, self._isolate_recompiles_id)
-        ):
-            raise RuntimeError(
-                f"another CompilePackage is installed on {fn.__code__.co_name} in "
-                "this compile region; uninstall it first or compile with "
-                "isolate_recompiles=True"
-            )
+        # skip_code()s the frame. Refuse when a user-supplied package does not
+        # own the entries serving the frame -- at decoration and again on each
+        # call, since the neighbour can be installed in either order. The
+        # transparent cache's package is exempt: a hit installs its own entries
+        # and a miss records and writes nothing.
+        user_package = self._package if self._user_package else None
+        code = getattr(fn, "__code__", None)
+
+        def refuse_if_another_package_serves() -> None:
+            if (
+                user_package is not None
+                and code is not None
+                and not user_package.owns_install_on(code, self._isolate_recompiles_id)
+                and _has_precompile_entries(code, self._isolate_recompiles_id)
+            ):
+                raise RuntimeError(
+                    f"another CompilePackage is installed on {code.co_name} in "
+                    "this compile region; uninstall it first or compile with "
+                    "isolate_recompiles=True"
+                )
+
+        refuse_if_another_package_serves()
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
@@ -1307,6 +1316,7 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
+                refuse_if_another_package_serves()
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
