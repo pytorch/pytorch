@@ -20,7 +20,10 @@ from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import WARP
 from . import tile
-from .tile import _magic
+
+
+# (extent, element-stride) pairs from TensorIterator, fastest dim first.
+Pairs = list[tuple[int, int]]
 
 
 class ReduceBlock:
@@ -46,8 +49,7 @@ class ReduceBlock:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
-        # The magic-division decode (_magic) is exact only for linear indices
-        # < 2^31; r spans count and o spans num_o, both Int32 in the kernel.
+        # The decode runs in Int32: r spans count and o spans num_o.
         if not (count < 2**31 and num_o < 2**31):
             raise AssertionError(
                 f"decode needs count and num_o < 2^31, got {count} and {num_o}"
@@ -123,41 +125,41 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts):
+def _fakes(ts: list[torch.Tensor]) -> list:
     # Compile-time descriptors. Every operand is a 1D flat view whose extent is DYNAMIC, so one
     # structural kernel serves any length -- required, since the grid reads a shape live.
     return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
 
 
-def _operands(ts, read_only=False):
+def _operands(ts: list[torch.Tensor], read_only: bool = False) -> list:
     # The real tensors, as the compiled callable takes them. INPUTS go through read_only(), or a COW
     # input is materialized on export.
     return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
-def _quads(pairs):
-    # (extent, stride) pairs -> the flat quad list _decode_offset consumes. Runs once per NEW
-    # geometry (the boxed result is memoized), so the divide cost is off the repeat path.
-    out = []
-    for ext, strd in pairs:
-        m, sh = _magic(ext)
-        out += [Int64(m), Int64(sh), Int64(ext), Int64(strd)]
-    return out
+def _exts(pairs: Pairs) -> list:
+    # Extents for the decode's divisors, which the launch turns into FastDivmod objects inside
+    # the traced region (they need an MLIR context, so they cannot be built here).
+    return [Int32(ext) for ext, _ in pairs]
+
+
+def _strides(pairs: Pairs) -> list:
+    return [Int64(strd) for _, strd in pairs]
 
 
 def _geom_args(op):
-    # The RUNTIME geometry of a launch: magic-division quads for the two decodes plus the scalar
-    # bounds, all of which used to be baked const_exprs. The magic form needs indices < 2**31,
-    # which count/num_o assert. Unused row/col args are None, not dummies: an unused Int32 kernel
-    # parameter is not free (see tile.TileReduce.kernel).
+    # The RUNTIME geometry of a launch: the two decodes' extents and strides plus the scalar
+    # bounds, all of which used to be baked const_exprs.
     return (
         Int32(op.count),
         None,
         Int64(op.project_n),
         None,
         None,
-        _quads(op.red_pairs),
-        _quads(op.kept_pairs),
+        _exts(op.red_pairs),
+        _strides(op.red_pairs),
+        _exts(op.kept_pairs),
+        _strides(op.kept_pairs),
         Int64(op.in_base),
         Int64(op.limit),
     )
@@ -182,7 +184,7 @@ def _launch(op, key, ins, outs):
     fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream())
 
 
-def _ti_pairs(x, out):
+def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
     """Input addressing for ``reduce x into out``, off TensorIterator: a dim is REDUCED iff the
     output stride along it is 0. Returns (red_pairs, kept_pairs) of (extent, input stride).
 
@@ -200,9 +202,11 @@ def _ti_pairs(x, out):
     return red, [(e, s) for e, s, _ in kept]
 
 
-def _probe(x, red_axes):
+def _probe(x: torch.Tensor, red_axes: set[int]) -> torch.Tensor:
     # A dummy output with the reduced dims set to 1, as reduce_op expects (it reads shapes and
-    # strides only). Shared by the classifier and the fallback so both see one TI decode.
+    # strides only). Shared by the classifier and the fallback so both see one TI decode. It must
+    # be its OWN allocation, not a view of x: TI takes an output's writable pointer, which would
+    # materialize a COW input.
     return torch.empty(
         [1 if i in red_axes else s for i, s in enumerate(x.shape)],
         device=x.device,
@@ -210,7 +214,7 @@ def _probe(x, red_axes):
     )
 
 
-def _flat(x):
+def _flat(x: torch.Tensor) -> torch.Tensor:
     # A 1D stride-1 view over x's ENTIRE storage: TI's element strides are storage-relative, and
     # x.reshape(-1) on a non-contiguous x would copy and break the stride math.
     n = max(x.untyped_storage().nbytes() // x.element_size(), 1)
@@ -221,7 +225,7 @@ def _flat(x):
 # runs on the TI-decomposed pairs, so it sees POST-coalesce geometry. ---
 
 
-def fast_kind(red_pairs, kept_pairs, nouts):
+def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
     """Which fast kernel serves this TI-decomposed reduction, or None for the general one.
 
     BOTH axes must coalesce to a single run, so the reduction is a dense 2D view; the stride-1
@@ -266,7 +270,7 @@ def _oneshot_ok(x):
 
     width = x.element_size() * 8
     vec = math.gcd(N, 128 // width)
-    tpr = max(WARP, rt.row_config(N, width, 1).tpr)
+    tpr = max(WARP, rt.row_config(N, width).tpr)
     return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
 
 
@@ -325,7 +329,7 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
-def _as_shape(out, out_shape):
+def _as_shape(out: torch.Tensor, out_shape: list[int]) -> torch.Tensor:
     # Give the flat output its n-D shape WITHOUT leaving it a view: the kernels allocate their own
     # buffer, and an aten reduction never aliases -- OpInfo's python-ref tests check that.
     if tuple(out.shape) == tuple(out_shape):
@@ -364,7 +368,7 @@ def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
 
     # Stage 1: one output per (row, chunk). The chunk pair is FASTEST-varying, which is what lets
-    # the ragged clamp read its magic quad from the front of kvals.
+    # the ragged clamp take its chunk index from the front of the kept lists.
     s1 = ReduceBlock(
         trait,
         count=s_chunk,
@@ -464,7 +468,7 @@ def reduce_dim2(trait, trait_key, x, dims, out_dtypes, block=_K0_BLOCK):
     return _reduce(trait, trait_key, x, dims, list(out_dtypes), 2, block=block)
 
 
-def _grid_size(L, block, sm_count, grid_mult=4):
+def _grid_size(L: int, block: int, sm_count: int, grid_mult: int = 4) -> int:
     # G = stage-1 chunks. Fill the device to grid_mult waves, capped by the work available: more
     # chunks means more stage-1 parallelism but a larger stage-2 fold.
     by_work = (L + block - 1) // block
@@ -496,7 +500,7 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
 
         # The launch is ONE row, so the ladder's row-packing tpr would leave the device on a fraction
         # of one CTA. rt.single_row_config returns None when the ladder's pick already stands.
-        cfg = rt.single_row_config(L, x.element_size() * 8, trait.nfields)
+        cfg = rt.single_row_config(L, x.element_size() * 8)
         kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
         outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
         return tuple(_as_shape(o, ()) for o in outs)
