@@ -48,6 +48,34 @@ class RunTest(TestCase):
         )
         self.assertEqual(args.signals_to_handle, "SIGTERM,SIGUSR1,SIGUSR2")
 
+    def test_training_script_args_not_shadowed_by_abbreviation(self):
+        """Test that abbreviated args don't get misinterpreted as torchrun flags.
+        Regression test for https://github.com/pytorch/pytorch/issues/120601."""
+        args = run.parse_args(["dummy_script.py", "--r=16"])
+        self.assertEqual(args.training_script, "dummy_script.py")
+        self.assertEqual(args.training_script_args, ["--r=16"])
+
+        args = run.parse_args(
+            ["--nnodes=2", "dummy_script.py", "--r=16", "--standalone"]
+        )
+        self.assertEqual(args.nnodes, "2")
+        self.assertEqual(args.training_script, "dummy_script.py")
+        self.assertEqual(args.training_script_args, ["--r=16", "--standalone"])
+
+    def test_own_flag_abbreviation_still_works(self):
+        """Test abbreviating one of torchrun's flags (before the script)"""
+        args = run.parse_args(["--nnod=2", "dummy_script.py"])
+        self.assertEqual(args.nnodes, "2")
+        self.assertEqual(args.training_script, "dummy_script.py")
+        args = run.parse_args(["--nnod=2", "dummy_script.py", "--r=16"])
+        self.assertEqual(args.nnodes, "2")
+        self.assertEqual(args.training_script, "dummy_script.py")
+        self.assertEqual(args.training_script_args, ["--r=16"])
+        args = run.parse_args(["--nnod=2", "dummy_script.py", "--nnod=16"])
+        self.assertEqual(args.nnodes, "2")
+        self.assertEqual(args.training_script, "dummy_script.py")
+        self.assertEqual(args.training_script_args, ["--nnod=16"])
+
     def test_config_from_args_signals_to_handle(self):
         """Test that the signals_to_handle argument is correctly passed to LaunchConfig."""
         parser = run.get_args_parser()
