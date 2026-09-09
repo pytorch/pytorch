@@ -297,7 +297,7 @@ class LoopBody:
         )
 
     def expand_dimension_for_pointwise_node_with_masked_stores(
-        self, dimension: int, new_range: int
+        self, dimension: int, new_range: sympy.Expr | int
     ) -> LoopBody:
         """
         Expand `dimension` to `new_range` by running the whole body inside an
@@ -311,24 +311,12 @@ class LoopBody:
             raise AssertionError(
                 f"masked expansion is not legal for a body with {illegal}"
             )
-        if V.graph.sizevars.statically_known_equals(
-            self.sizes[0][dimension], new_range
-        ):
-            return self
         return self._expand_dimension_for_pointwise_node(
             dimension, new_range, mask_stores=True
         )
 
-    def has_masked_stores(self) -> bool:
-        """A store under an ops.masked predicate only partially defines its buffer."""
-        return any(
-            node.target == "store"
-            for block in self.subblocks.values()
-            for node in block.graph.nodes
-        )
-
     def _expand_dimension_for_pointwise_node(
-        self, dimension: int, new_range: int, *, mask_stores: bool
+        self, dimension: int, new_range: sympy.Expr | int, *, mask_stores: bool
     ) -> LoopBody:
         old_body = self
         old_sizes = self.sizes

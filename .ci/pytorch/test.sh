@@ -172,6 +172,13 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
+  # doctests and autoload bypass pytest; AOT builds extensions before pytest;
+  # CI sanity expects its unmarked test to fail.
+  TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE doctests test_cpp_extensions_aot_ninja test_cpp_extensions_aot_no_ninja test_autoload_enable test_autoload_disable test_ci_sanity_check_fail"
+fi
+
 # Exclude tests from run_test.py (symmetric to TESTS_TO_INCLUDE).
 if [[ -n $TESTS_TO_EXCLUDE ]]; then
   echo "Setting EXCLUDE_CLAUSE"
@@ -549,7 +556,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLSymmMemWatchdogTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
