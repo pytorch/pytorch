@@ -91,16 +91,16 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // _get_total_cache_entry_count)
   size_t total_cache_entry_count{0};
   // Lock ordering: a thread that needs both convert_frame.compile_lock and
-  // this cache_mutex must take compile_lock FIRST (reset()/remove_from_cache
-  // do). cache_mutex is recursive and drops the GIL while waiting. This is
-  // sound because lookup() releases cache_mutex before guard evaluation (see
-  // extra_state.cpp), so the hot path runs no Python under the lock EXCEPT a
-  // parked-invalidation drain at cache_python_depth 0, whose decrefs of the
-  // entry's code/backend/old guard_manager can fire a user __del__ under the
-  // lock. A __del__ that takes compile_lock is a residual ABBA this design
-  // accepts (a hot-path drain is rare); create_cache_entry, which holds
-  // cache_mutex but no compile_lock after the callback returns, has the same
-  // accepted residual (compile time, __del__ only). The other sites
+  // this cache_mutex must take compile_lock FIRST (reset(), reset_code and
+  // remove_from_cache do). cache_mutex is recursive and drops the GIL while
+  // waiting. This is sound because lookup() releases cache_mutex before guard
+  // evaluation (see extra_state.cpp), so the hot path runs no Python under the
+  // lock EXCEPT a parked-invalidation drain at cache_python_depth 0, whose
+  // decrefs of the entry's code/backend/old guard_manager can fire a user
+  // __del__ under the lock. A __del__ that takes compile_lock is a residual
+  // ABBA this design accepts (a hot-path drain is rare); create_cache_entry,
+  // which holds cache_mutex but no compile_lock after the callback returns, has
+  // the same accepted residual (compile time, __del__ only). The other sites
   // that run Python under cache_mutex (the _debug_get_cache_entry_list drain,
   // the CacheEntry ctor; try_lookup_without_guard_eval releases like lookup())
   // run only at compile/debug time. A second cycle needs no compile_lock:
@@ -121,10 +121,9 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // the cache GROWS; the non-growing case (invalidated guard managers) is
   // caught ONLY by the frame_compile_id cap, so it goes from N compiles per
   // code object to N per region with nothing global behind it
-  // (pytorch/pytorch#196495). FRAME_COUNTER is consumed and
-  // FRAME_COMPILE_COUNTER (cleared only by torch._dynamo.reset()) grows once
-  // per (code object, region), so a factory minting a fresh region per
-  // torch.compile() call grows both without bound.
+  // (pytorch/pytorch#196495). FRAME_COUNTER and FRAME_COMPILE_COUNTER
+  // (cleared only by reset()) grow once per (code object, region): a
+  // region-per-call factory grows both unbounded.
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
   // Guards frame_state and region_frame_state_map alike: the module runs
   // without the GIL on free-threaded builds, so the default dict's move in
@@ -333,16 +332,13 @@ void destroy_extra_state(void* obj);
 // Python-side snapshot of this code's cache entries) must additionally hold
 // convert_frame.compile_lock, as torch._dynamo.reset() and remove_from_cache
 // do; this function only makes the reset safe against concurrent lookups.
-// Caveat: a clear parked behind cache_python_depth > 0 drains -- destroying
-// its nodes -- on whichever thread next reaches depth zero, with no
-// compile_lock, so the ordering above does not cover it. Two non-owning
-// handouts used after cache_mutex releases at depth 0 can race that drain:
-// _get_cache_entries_for_region's py::cast wrappers (even on the compiling
-// thread, whose prologue drains) and extract_cache_entry's borrowed
-// CacheEntry*. Both need owning references like lookup()/create_cache_entry;
-// pytorch/pytorch#196394.
-// Ownership contract
-// args
+// Caveat: a clear parked behind cache_python_depth > 0 drains (destroying its
+// nodes) on whichever thread next reaches depth zero, with no compile_lock, so
+// the ordering above does not cover it; the non-owning handouts used after
+// cache_mutex releases at depth 0 (_get_cache_entries_for_region's py::cast
+// wrappers, extract_cache_entry's borrowed CacheEntry*) can race that drain and
+// need owning references like lookup()/create_cache_entry:
+// pytorch/pytorch#196394. Ownership contract args
 //  - code: Borrowed
 void reset_extra_state(PyCodeObject* code);
 
