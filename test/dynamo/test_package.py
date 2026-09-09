@@ -64,12 +64,12 @@ class _BoundMethodGuardRecv:
 
 
 class BoundMethodNameGuardModule(torch.nn.Module):
-    # self.other and self.cb wrap the SAME (fqn-mismatched) function, and
-    # self.other is inserted first, so the pickle reaches the function before
-    # the bound method. Unless the method's __func__ is seeded into
-    # guard_tree_values when its guard manager is built, the function memoizes
-    # as an fqn-mismatch _Missing that the method's __func__ then loads back as,
-    # so the __name__ guard AttributeErrors at load.
+    # self.cb binds an fqn-mismatched function; the guard reads through its
+    # __func__. Unless that function is seeded into guard_tree_values when the
+    # method's guard manager is built, it is pruned to an fqn-mismatch _Missing
+    # and the __name__ guard AttributeErrors at load. self.other reaches the
+    # same function first, so the seed cannot wait for the reducer to see the
+    # method: pickle has memoized the function by then.
     def __init__(self):
         super().__init__()
         self.other = _bound_method_guard_wrapper
@@ -79,6 +79,17 @@ class BoundMethodNameGuardModule(torch.nn.Module):
         if self.cb.__name__ == "_bound_method_guard_target":
             x = x + 1
         return x * 2
+
+
+class StaticParamModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(3))
+
+    def forward(self, x, use_w=False):
+        if use_w:
+            return (x * self.w).sin()
+        return x.sin()
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -170,6 +181,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
             package.add_guarded_code(b"", code)
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
+
+    @torch._dynamo.config.patch(
+        caching_precompile=True, strict_precompile=False, prepare_freezing=True
+    )
+    def test_bypass_before_guards_keeps_the_frames_earlier_variant(self):
+        # A bypass raised before guards are built (a graph holding a named
+        # parameter under prepare_freezing) drops only that compile. It also
+        # pins that convert_frame reads the package off the output graph, which
+        # the bypass cleared: reading its own local instead records the bypassed
+        # compile's guarded code and a backend id nothing cached, and the save
+        # then fails or drops the whole frame.
+        mod = StaticParamModule()
+        torch._dynamo.mark_static_address(mod.w, guard=False)
+        x = torch.randn(3)
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled(x), mod(x))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, use_w=True), mod(x, use_w=True))
+        self.assertTrue(any("package bypass" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = StaticParamModule.forward.__code__
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), mod(x))
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -632,9 +671,6 @@ def add(x, y):
         # A guarded value that cannot be pickled is a package bypass, not a
         # compile failure: the frame still compiles and runs, and its entry is
         # saved bypassed with no backend, so nothing is installed on reload.
-        # convert_frame used to assert on the missing guards_state because it
-        # checked the package it was handed, not the one the bypass had
-        # cleared on the output graph.
         def fn(x, cfg=UnpicklableConfig()):
             if cfg.flag == 2.0:
                 x = x + 1
