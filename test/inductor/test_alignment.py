@@ -196,22 +196,33 @@ class CommonTemplate:
         self.assertEqual(out, fn(x))
         FileCheck().check_not(", 16, 'input')").run(code)
 
-    @config.patch(alignment_asserts_inputs=True)
-    def test_input_alignment_assert_fires_instead_of_clone(self):
+    @parametrize("wrapper", ("python", "fx", "cudagraphs", "cudagraph_partition"))
+    def test_input_alignment_assert_fires_instead_of_clone(self, wrapper):
         if not torch._inductor.utils.is_gpu(self.device):
             raise unittest.SkipTest("alignment asserts are GPU-only")
 
         def fn(x):
             return x + 1
 
-        fn_c = torch.compile(fn)
+        fn_c = torch.compile(
+            fn,
+            options={
+                "alignment_asserts_inputs": True,
+                "fx_wrapper": wrapper == "fx",
+                "triton.cudagraphs": wrapper in ("cudagraphs", "cudagraph_partition"),
+                "graph_partition": wrapper == "cudagraph_partition",
+            },
+        )
         # compile with an aligned input so the graph assumes aligned inputs
         x = torch.randn(1024, device=self.device)
-        self.assertEqual(fn_c(x), fn(x))
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.assertEqual(fn_c(x), fn(x))
 
         # storage_offset is not guarded on, so a misaligned input hits the
         # same graph; in strict mode it errors instead of being cloned
         y = torch.randn(1025, device=self.device)[1:]
+        torch.compiler.cudagraph_mark_step_begin()
         with self.assertRaisesRegex(AssertionError, "bytes aligned"):
             fn_c(y)
 
