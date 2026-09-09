@@ -445,7 +445,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     # the same process to trigger.
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_ROCM,
-        "RCCL hangs in ncclRmaCeInit's bootstrap barrier on subgroup rendezvous",
+        "RCCL hangs in ncclRmaCeInit's bootstrap barrier on subgroup "
+        "rendezvous (ROCm/rccl#TBD)",
     )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_symmetric_memory_device_API

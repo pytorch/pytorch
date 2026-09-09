@@ -356,6 +356,10 @@ class TORCH_API NCCLDevCommManager {
           for (auto& [_, devcomm] : group_map) {
             // Destroy the device communicator using the host communicator
 #ifdef USE_ROCM
+            // RCCL 2.30.7 ncclDevCommDestroy leaves the calling thread in
+            // Relaxed capture mode whether or not a capture is active, and
+            // invalidates an active one. The balanced guard restores the
+            // caller's mode on exit. See ROCm/rccl#TBD.
             c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
                 cudaStreamCaptureModeRelaxed};
 #endif
