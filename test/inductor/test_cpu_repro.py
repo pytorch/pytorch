@@ -4005,6 +4005,28 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_internal_copy_source_depends_on_destination(self):
+        def fn(x):
+            destination = torch.ops._inductor_test.realize(x + 1)
+            before = torch.as_strided(
+                destination,
+                destination.shape,
+                destination.stride(),
+            ).clone()
+            source = torch.ops._inductor_test.realize(before + 1)
+            destination.copy_(source)
+            after = torch.as_strided(
+                destination,
+                destination.shape,
+                destination.stride(),
+            ).clone()
+            return before, destination, after
+
+        x = torch.randn(16)
+        gm = make_fx(fn)(x)
+        compiled = compile_fx_inner(gm, [x])
+        self.assertEqual(fn(x), compiled([x]))
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
