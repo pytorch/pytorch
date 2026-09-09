@@ -13,16 +13,11 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import (
-    ComputedBuffer,
-    ExternKernel,
-    FixedLayout,
-    freeze_storage_layout,
-    TensorBox,
-)
+from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -133,19 +128,26 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
-def get_float32_precision():
-    if (
-        (
-            torch.backends.cuda.matmul.fp32_precision == "ieee"
-            if torch.backends.cuda.matmul.fp32_precision != "none"
-            else torch.get_float32_matmul_precision() == "highest"
+def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if precision == "none":
+        precision = (
+            "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
         )
-        or torch.version.hip
-        or torch.mtia.is_available()
-    ):
-        return "'ieee'"
-    else:
-        return "'tf32'"
+    if dtype == torch.float32 and precision == "bfx9":
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        warning_once(
+            log,
+            "FP32 FlexAttention does not support bfx9 precision; using IEEE precision instead.",
+        )
+        kernel_options["FLOAT32_PRECISION"] = "'ieee'"
+        return
+    precision = (
+        "ieee"
+        if precision == "ieee" or torch.version.hip or torch.mtia.is_available()
+        else "tf32"
+    )
+    kernel_options.setdefault("FLOAT32_PRECISION", repr(precision))
 
 
 flex_attention_template = TritonTemplate(
@@ -279,7 +281,7 @@ def flex_attention(
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
@@ -375,7 +377,7 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
     if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
         raise AssertionError("Query length must be greater than 0")
@@ -391,11 +393,8 @@ def flex_attention(
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
-    # NB it is okay that the v_head_dim is different
-    # We are using these to match fill order of the output.
-    freeze_storage_layout(query)
-    q_strides = query.get_stride()
-    # Construct output layout with strides matching the query.
+    # The independent output only uses the query's stride order as a preference.
+    q_strides = query.get_stride_hint()
     out_size = [B, Hq, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
 
@@ -448,9 +447,6 @@ def flex_attention(
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -578,21 +574,6 @@ def flex_attention(
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + list(score_mod_other_buffers)
-        + list(mask_mod_other_buffers)
-    )
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -603,9 +584,8 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Autotuning materializes benchmark tensors. Scalar shape captures stay
-        # in subgraph_inps below for dependency tracking and codegen.
-        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -820,7 +800,7 @@ def flex_attention_backward(*args, **kwargs):
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
@@ -843,7 +823,7 @@ def flex_attention_backward(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
@@ -946,10 +926,9 @@ def flex_attention_backward(*args, **kwargs):
             dq_kv_order_spt=dq_kv_order_spt,
         )
 
-    # Construct layout with stride order matching K
+    # Independently allocated gradients only use input stride order as a preference.
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
-    freeze_storage_layout(key)
-    key_strides = infer_dense_strides(key_size, key.get_stride())
+    key_strides = infer_dense_strides(key_size, key.get_stride_hint())
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
@@ -974,8 +953,7 @@ def flex_attention_backward(*args, **kwargs):
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
-    freeze_storage_layout(query)
-    grad_query_strides = infer_dense_strides(query_size, query.get_stride())
+    grad_query_strides = infer_dense_strides(query_size, query.get_stride_hint())
     grad_query = empty_strided(
         query_size,
         stride=[sympy.sympify(s) for s in grad_query_strides],
@@ -983,10 +961,8 @@ def flex_attention_backward(*args, **kwargs):
         device=query.get_device(),
     )
 
-    # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
-    freeze_storage_layout(value)
-    value_strides = infer_dense_strides(value_size, value.get_stride())
+    value_strides = infer_dense_strides(value_size, value.get_stride_hint())
 
     broadcasted_grad_value = empty_strided(
         value_size,

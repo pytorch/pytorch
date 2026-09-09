@@ -15,7 +15,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
-from ...ir import Buffer, ExternKernel, FixedLayout, freeze_storage_layout, TensorBox
+from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -274,10 +274,9 @@ def lower_cpu(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     B = Bq
 
-    # Construct output layout with strides matching the query.
+    # The independent output only uses the query's stride order as a preference.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    freeze_storage_layout(query)
-    out_strides = infer_dense_strides(out_size, query.get_stride())
+    out_strides = infer_dense_strides(out_size, query.get_stride_hint())
 
     layout = FixedLayout(
         query.get_device(),

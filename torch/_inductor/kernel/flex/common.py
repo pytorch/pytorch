@@ -31,6 +31,7 @@ from ...ir import (
     InputBuffer,
     IRNode,
     MutationLayoutSHOULDREMOVE,
+    NonOwningLayout,
     Scatter,
     StorageBox,
     Subgraph,
@@ -450,10 +451,17 @@ def create_num_blocks_fake_generator(sparse_indices):
 def contiguous_last_dim(x):
     """Ensure that realized IR node has a contiguous stride in the last dimension."""
     strides = x.maybe_get_stride_hint()
-    if strides and strides[-1] != 1:
-        contiguous_stride_order = list(reversed(range(len(x.get_size()))))
-        return ExternKernel.require_stride_order(x, contiguous_stride_order)
-    return x
+    if strides and strides[-1] == 1:
+        if isinstance(x.maybe_get_layout(), (FixedLayout, NonOwningLayout)):
+            return x
+    else:
+        sizes = x.get_size()
+        strides = (
+            infer_dense_strides(sizes, strides)
+            if strides
+            else FlexibleLayout.contiguous_strides(sizes)
+        )
+    return ExternKernel.require_exact_strides(x, strides, allow_padding=True)
 
 
 def set_head_dim_values(
