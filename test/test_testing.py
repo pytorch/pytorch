@@ -25,9 +25,9 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName,
+    TemporaryFileName, getRocmVersion,
 )
-from torch.testing._internal.common_cuda import has_device_side_assert
+from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -554,6 +554,28 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
+
+    def test_rocm_version_uses_sdk_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
+            self.assertEqual(getRocmVersion(), (10, 1, 0))
+
+    def test_rocm_version_falls_back_to_hip_version(self):
+        with (
+            unittest.mock.patch(
+                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
+            ),
+            unittest.mock.patch.object(torch.version, "rocm", None),
+            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
+        ):
+            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
+            self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
