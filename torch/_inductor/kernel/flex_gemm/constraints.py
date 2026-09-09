@@ -57,6 +57,15 @@ LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR = (
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
 )
+LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR = (
+    "FlexGEMM captured tensors cannot be read while finalizing a compressed grouped "
+    "reduction; apply them to the returned partials outside flex_gemm or to the main output"
+)
+LOCAL_REDUCE_UNPLANNED_ERROR = (
+    "FlexGEMM grouped reductions must be returned as an auxiliary output or feed the "
+    "main output through a recognized broadcast (x - r, x * r, x / r, ...); other "
+    "consumers of the reduced value are not supported"
+)
 LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR = (
     "FlexGEMM physical local-reduce feed-main source expressions require "
     "two-phase local-reduce source lowering"

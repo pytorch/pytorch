@@ -2556,6 +2556,28 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
 
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_generated_captured_arg_rejects_reduction_finalizer_read(self):
+        m = 64
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: (acc, acc.float().view(m, -1, 16).sum(-1) * scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 32, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
+        scale = torch.full((1, 1), 2.0, device="cuda")
+        with self.assertRaisesRegex(
+            Exception, "cannot be read while finalizing a compressed grouped reduction"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
+
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_generated_captured_arg_rejects_addmm_scope(self):
         def fn(bias, a, b, scale):
@@ -2636,6 +2658,30 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             actual = compiled(a, b)
         torch.cuda.current_stream().wait_stream(stream)
         self.assertEqual(actual, (a @ b).relu())
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("view_dtype", (torch.float16, torch.int16))
+    def test_mm_terminal_dtype_view_reinterprets_bits(self, view_dtype):
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+
+        def epilogue_fn(acc):
+            return acc.view(view_dtype)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(flex_gemm, backend="inductor", fullgraph=True),
+            torch.mm,
+            (a, b),
+            epilogue_fn,
+            kernel_options={"backend": "QUACK"},
+        )
+
+        self.assertEqual(actual.dtype, view_dtype)
+        # The kernel stores bf16 and the result is re-viewed, not converted.
+        FileCheck().check("flex_gemm_runtime(").run(code)
+        self.assertEqual(actual.view(torch.bfloat16), a @ b, atol=0, rtol=0)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5411,34 +5457,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         "case",
         (
             (
-                "m_reduce_feeds_main",
-                lambda acc: (
-                    acc.float().view(-1, 4, 8)
-                    * (acc.float().view(-1, 4, 8).sum(1, keepdim=True) + 1.0)
-                ).view(4, 8),
-                (4, 8),
-                "one generated physical reduction",
-            ),
-            (
-                "m_reduce_feeds_same_shape_aux",
-                lambda acc: (
-                    acc.relu(),
-                    (
-                        acc.float().view(-1, 4, 8)
-                        * (acc.float().view(-1, 4, 8).mean(1, keepdim=True) + 1.0)
-                    ).view(4, 8),
-                ),
-                (4, 8),
-                "one generated physical reduction",
-            ),
-            (
                 "large_n_reduce_feeds_main",
                 lambda acc: (
                     acc.float().view(4, -1, 64)
                     * (acc.float().view(4, -1, 64).sum(-1, keepdim=True) + 1.0)
                 ).view(4, 128),
                 (4, 128),
-                "unsupported FlexGEMM epilogue op",
+                "larger than one TensorSSA fragment",
             ),
             (
                 "large_n_reduce_feeds_same_shape_aux",
@@ -5450,7 +5475,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                     ).view(4, 128),
                 ),
                 (4, 128),
-                "unsupported FlexGEMM epilogue op",
+                "larger than one TensorSSA fragment",
             ),
             (
                 "m_then_n",
@@ -6782,6 +6807,45 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             if consumer == "main":
                 return normalized
             return acc.relu(), normalized
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertMatchesEpilogue(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            a.shape[1],
+        )
+        self.assertPhysicalFeedMainCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("consumer", ("main", "aux"))
+    def test_mm_local_m_reduce_feed_main_supports_sibling_views(self, consumer):
+        # The grouped view and the reduction's view are separate FX nodes of one shape.
+        m, n, group = 128, 64, 8
+
+        def epilogue_fn(acc):
+            x = acc.float()
+            scaled = x.view(-1, group, n) * (
+                x.view(-1, group, n).sum(1, keepdim=True) + 1.0
+            )
+            if consumer == "main":
+                return scaled.view(m, n)
+            return acc.relu(), scaled.view(m, n)
 
         def fn(a, b):
             return flex_gemm(
@@ -10172,7 +10236,11 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertEqual(code.count("flex_gemm_runtime("), 1)
         self.assertIn("_scaled_mm", code)
         self.assertNotIn("@triton.jit", code)
-        self.assertIn("torch.ops.aten._scaled_mm_v2.default(buf1,", code)
+        # nvfp4 stores packed uint8 and hands the scaled GEMM a zero-copy dtype view.
+        self.assertRegex(
+            code,
+            r"torch\.ops\.aten\._scaled_mm_v2\.default\((aten\.view\.dtype\()?buf1",
+        )
         self.assertNotIn(
             f"empty_strided_cuda(({m}, {hidden}), ({hidden}, 1), torch.bfloat16)",
             code,
