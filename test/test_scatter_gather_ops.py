@@ -15,6 +15,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
