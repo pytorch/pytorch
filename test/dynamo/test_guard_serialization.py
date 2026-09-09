@@ -82,8 +82,6 @@ def _cell_is_empty(cell):
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
     def wrapper(x):
-        if func.__name__ == "renamed":
-            x = x + 1
         if x is None:
             return unset
         return func(x)
@@ -99,6 +97,17 @@ def _empty_cell_base(x):
 
 
 EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
+
+
+class RecursingGuardedDefault:
+    flag = 2.0
+
+    def __init__(self, inner=None):
+        self.inner = inner
+
+    def __reduce__(self):
+        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        return type(self), (type(self)(),)
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -511,12 +520,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # through a capture, so none of TestGuardSerialization's setup applies.
 
     def test_reducer_handles_an_empty_cell_reached_directly(self):
-        # _prune_cell only sees cells of a reconstructed function. A cell
-        # reached directly -- a guarded __closure__ tuple, or the cell itself
-        # -- goes through reducer_override's CellType branch, which read
-        # cell_contents unguarded and raised ValueError out of the pickler.
-        # Pickler-level because a guard cannot root at a raw cell through a
-        # capture: CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
+        # reducer_override's CellType branch read cell_contents unguarded and
+        # raised ValueError out of the pickler for an empty cell. Pickler-level
+        # because a guard cannot root at a raw cell through a capture:
+        # CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
         empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
@@ -537,7 +544,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         cell = fn.__closure__[0]
         buf = io.BytesIO()
-        GuardsStatePickler({id(fn): fn, id(cell): cell}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
@@ -553,6 +560,44 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_empty_closure_cell_of_a_traced_local_function(self):
+        # A local function reached through a capture is pickled with its whole
+        # __closure__, so a sibling cell left empty beside the guarded one has to
+        # round-trip as an empty cell rather than fail the dump.
+        def make(captured):
+            def fn(x):
+                if x is None:
+                    return unset
+                return x + captured
+
+            if captured is None:
+                unset = 1  # never runs, so the cell fn closes over stays EMPTY
+
+            return fn
+
+        def foo(f, x):
+            return f(x)
+
+        f = make(torch.randn(3))
+        self.assertEqual(sum(_cell_is_empty(c) for c in f.__closure__), 1)
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", foo, f, x)
+        self._test_check_fn(ref, loaded, {"f": f, "x": x}, True)
+
+    def test_recursing_guarded_value_overflow_is_a_package_error(self):
+        # A recursion overflow while pickling a guarded value -- here a
+        # pathological __reduce__ that never memoizes -- is a serialization
+        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
+        # without strict_precompile, which this class turns on), never a raw
+        # RecursionError that hard-fails a program that compiled fine before.
+        def fn(x, cfg=RecursingGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "exceeded the recursion limit"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
