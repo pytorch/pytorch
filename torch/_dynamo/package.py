@@ -112,10 +112,12 @@ class SerializedCode:
 
 
 class FunctionPicklerBase(pickle.Pickler):
-    """Reducers shared by the picklers that rebuild objects pickle cannot do by
-    reference: code objects, python modules, and bound methods. Each subclass
-    keeps its own dispatch; this class fixes HOW they are rebuilt so a fix in
-    one pickler cannot be missed in the other.
+    """Reducers for objects pickle cannot rebuild by reference: code objects,
+    python modules, and bound methods.
+
+    GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
+    own copies of these reducers and is moved onto this base separately, so
+    that a fix to how an object is rebuilt cannot be missed in one pickler.
     """
 
     @classmethod
@@ -248,7 +250,8 @@ class _DynamoCodeCacheEntry:
          it was bypassed (its guards could not be serialized), or a backend was
          missing at load. install() then leaves the frame to be traced fresh
          rather than skipping it as trivial. Cleared once a compile records a
-         guarded code.
+         guarded code. (The load-time writer still flags the whole entry and
+         keeps the stale guarded codes; see PrecompileCacheEntry.from_cache_entry.)
     """
 
     python_code: SerializedCode
@@ -797,6 +800,7 @@ class CompilePackage:
         finally:
             entry.has_compile_id = True
             self._current_entry = None
+            self._current_backend_ids = []
 
     def add_guarded_code(
         self,
@@ -829,8 +833,8 @@ class CompilePackage:
         """Drop what the current compile registered on its entry.
 
         Only this compile is lost: its guarded code is never recorded
-        (convert_frame skips add_guarded_code once bypass_package clears
-        output.package) and the backend ids it registered go with it. Guarded
+        (convert_frame consults output.package, which bypass_package clears,
+        before add_guarded_code) and the backend ids it registered go with it. Guarded
         codes an earlier compile of the same code object recorded stay
         installable, so a reload keeps them and only re-traces the inputs that
         would have matched the dropped one. An entry left with no guarded code
