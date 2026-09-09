@@ -115,7 +115,7 @@ def validate_any_geometry(_geometry: Any) -> None:
 def transposed_cutedsl_callbacks() -> tuple[Callable[..., Any], Callable[..., Any]]:
     """Return transposed-layout tensor and fake-shape callbacks."""
     cutedsl = output_layout_cutedsl()
-    return cutedsl.transposed_output_tensor, cutedsl.transposed_fake_shape
+    return cutedsl.transposed_output_tensor, transposed_carrier_shape
 
 
 def transposed_carrier_shape(batch: Any, rows: Any, cols: Any) -> tuple[Any, ...]:

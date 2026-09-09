@@ -557,9 +557,20 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
-    explicit_swap_ab = (
-        explicit_config is not None and explicit_config.get("swap_ab") is True
-    )
+    config_constraints = {} if explicit_config is None else dict(explicit_config)
+    if config_constraints:
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        config_fields = OrderedSet(
+            field.name for field in dataclasses.fields(GemmConfig)
+        )
+        unknown_fields = OrderedSet(config_constraints) - config_fields
+        if unknown_fields:
+            raise NotImplementedError(
+                f"unknown GemmConfig constraint {sorted(unknown_fields)}; "
+                f"choose one of {', '.join(config_fields)}"
+            )
+    explicit_swap_ab = config_constraints.get("swap_ab") is True
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -876,20 +887,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             indices_index=indexed_index_input_indices[0],
         )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce,
-        local_reduce_out_index,
-        combine=epimod_source.local_reduce_combine,
-        finalize=epimod_source.local_reduce_finalize,
-        store_finalize=epimod_source.local_reduce_store_finalize,
-        prepass_combine=epimod_source.local_reduce_prepass_combine,
-        prepass_finalize=epimod_source.local_reduce_prepass_finalize,
-        reduce_planes=epimod_source.local_reduce_planes,
-        fragment_reduced=epimod_source.local_reduce_fragment_reduced,
+        outputs.local_reduce, local_reduce_out_index, epimod_source
     )
-    quack_config_constraints = {} if explicit_config is None else dict(explicit_config)
     if epimod_source.local_reduce_fragment_reduced:
         # Fragment partials are lowered for the unswapped accumulator geometry.
-        quack_config_constraints["swap_ab"] = False
+        config_constraints["swap_ab"] = False
     template_config = FlexGemmEpilogueConfig(
         epilogue_name=epimod_source.name,
         epilogue_source=epimod_source.source,
@@ -903,7 +905,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 blockscaled.format, *gemm_input_indices[2:]
             )
         ),
-        quack_config_constraints=tuple(sorted(quack_config_constraints.items())),
         quack_config=None,
         cu_seqlens_index=gemm_input_indices[2] if grouped_mm else None,
         epilogue_arg_indices=epilogue_arg_indices,
@@ -921,6 +922,20 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     legal_configs = flex_gemm_quack_configs(
         flex_gemm_epilogue_template, template_kwargs, template_config
     )
+    if config_constraints:
+        legal_configs = tuple(
+            config
+            for config in legal_configs
+            if all(
+                dict(config)[name] == value
+                for name, value in config_constraints.items()
+            )
+        )
+        if not legal_configs:
+            raise NotImplementedError(
+                "no supported GemmConfig matches "
+                f"config_constraints={config_constraints!r} for this call"
+            )
     quack_configs = (
         flex_gemm_search_space(legal_configs, varlen=grouped_mm)
         if tuned
@@ -935,11 +950,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     for quack_config in quack_configs:
         error = flex_gemm_epilogue_template.maybe_append_choice(
             choices,
-            config=dataclasses.replace(
-                template_config,
-                quack_config=quack_config,
-                quack_config_constraints=(),
-            ),
+            config=dataclasses.replace(template_config, quack_config=quack_config),
             **template_kwargs,
         )
         if error is not None:
