@@ -5538,6 +5538,31 @@ def get_scheduler_node_symbol_uses(
     return free_symbol_uses
 
 
+def _has_dynamic_input_shapes(node: BaseSchedulerNode) -> bool:
+    """
+    Check if a scheduler node reads from any input with dynamic shapes.
+
+    get_scheduler_node_symbol_uses only captures symbols from a node's own
+    operations and output layouts.  ExternKernel / FallbackKernel nodes that
+    consume a dynamically-shaped tensor but produce a statically-shaped output
+    (e.g. median on a dynamic tensor returning a scalar) will report no
+    symbols, even though their execution depends on the dynamic dimension.
+    This helper fills that gap by inspecting the input layouts directly.
+    """
+    if isinstance(node, FusedSchedulerNode):
+        return any(_has_dynamic_input_shapes(snode) for snode in node.snodes)
+    ir_node = node.node
+    if ir_node is None:
+        return False
+    if not isinstance(ir_node, ir.InputsKernel):
+        return False
+    for inp in ir_node.inputs:
+        if isinstance(inp, ir.IRNode):
+            if get_layout_symints(inp):
+                return True
+    return False
+
+
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     """Check per-template flag, fall back to global config."""
     tb = template_node.get_template_node()
@@ -11231,6 +11256,8 @@ class Scheduler:
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if get_scheduler_node_symbol_uses(node):
+                return "dynamic shape ops"
+            if _has_dynamic_input_shapes(node):
                 return "dynamic shape ops"
 
         return None
