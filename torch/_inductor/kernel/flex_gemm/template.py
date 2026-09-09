@@ -18,11 +18,10 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmOutputContraction,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
-    local_reduce_needs_physical_callbacks,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
-from torch._inductor.kernel.gemm_epilogue_analysis import GemmOutputLocalReducePlan
+from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
 
@@ -34,47 +33,36 @@ log = logging.getLogger(__name__)
 class FlexGemmEpilogueLocalReduceConfig:
     """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
-    geometry: FlexGemmLocalReduceGeometry
+    plan: GemmReductionPlan
     out_index: int | None = None
     output_layout: FlexGemmOutputStorageLayout | None = None
-    feeds_main: bool = False
     swap_ab: bool = False
 
     @classmethod
-    def from_output_plan(
+    def from_plan(
         cls,
-        local_reduce: GemmOutputLocalReducePlan | None,
+        plan: GemmReductionPlan | None,
         out_index: int | None,
         *,
         output_layout: FlexGemmOutputStorageLayout | None = None,
         swap_ab: bool = False,
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Bind analyzed local-reduction consumers to FlexGEMM's runtime ABI."""
-        if local_reduce is None:
+        """Bind the shared reduction plan to FlexGEMM template metadata."""
+        if plan is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            geometry=FlexGemmLocalReduceGeometry(
-                local_reduce.match.geometry.group,
-                local_reduce.match.geometry.axis,
-            ),
+            plan=plan,
             out_index=out_index,
             output_layout=output_layout,
-            feeds_main=local_reduce.feeds_main,
             swap_ab=swap_ab,
         )
 
     @property
-    def group(self) -> int:
-        return self.geometry.group
-
-    @property
-    def axis(self) -> int:
-        return self.geometry.axis
-
-    @property
     def needs_physical_callbacks(self) -> bool:
-        tensorssa_axis = 1 - self.axis if self.swap_ab else self.axis
-        return local_reduce_needs_physical_callbacks(tensorssa_axis, self.group)
+        tensorssa_axis = 1 - self.plan.axis if self.swap_ab else self.plan.axis
+        return FlexGemmLocalReduceGeometry(
+            self.plan.group, tensorssa_axis
+        ).needs_physical_callbacks
 
 
 @dataclasses.dataclass(frozen=True)
@@ -260,7 +248,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         """Render the shared grouped M/N local-reduce geometry."""
         return (
             "FlexGemmLocalReduceGeometry("
-            f"group={local_reduce.group!r}, axis={local_reduce.axis!r})"
+            f"group={local_reduce.plan.group!r}, axis={local_reduce.plan.axis!r})"
         )
 
     def _local_reduce_expr(
@@ -281,9 +269,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 ", output_layout="
                 f"FlexGemmOutputStorageLayout.{local_reduce.output_layout.name}"
             )
-        if local_reduce.feeds_main:
+        if local_reduce.plan.feeds_main:
             plan += ", feeds_main=True"
-        if local_reduce.feeds_main or local_reduce.needs_physical_callbacks:
+        if local_reduce.plan.feeds_main or local_reduce.needs_physical_callbacks:
             plan += f", callbacks={self._local_reduce_callbacks(epilogue_name)}"
         return f"{plan})"
 
