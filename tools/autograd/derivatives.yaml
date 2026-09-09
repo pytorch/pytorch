@@ -848,6 +848,9 @@
     AutogradCUDA:
       self: grad * at::_igamma_grad_a(self, other)
       other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradNestedTensor:
+      self: grad * at::_igamma_grad_a(self, other)
+      other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: igammac(Tensor self, Tensor other) -> Tensor
   dispatch:
@@ -858,6 +861,9 @@
       self: -grad * at::_igamma_grad_a(self, other)
       other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
     AutogradCUDA:
+      self: -grad * at::_igamma_grad_a(self, other)
+      other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+    AutogradNestedTensor:
       self: -grad * at::_igamma_grad_a(self, other)
       other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
