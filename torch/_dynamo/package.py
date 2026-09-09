@@ -373,22 +373,33 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE resolves only after self is restored, which
+        # is after pickle rebuilds the method, so getattr() at load would miss
+        # it: carry func+self explicitly. That covers an instance __dict__
+        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
+        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
+        # lookup we must also not probe below -- it can recurse). A type receiver
+        # (classmethod) is exempt: its namespace is restored with the class.
+        cls = type(method.__self__)
+        self_dict = getattr(method.__self__, "__dict__", None)
+        instance_served = not isinstance(method.__self__, type) and (
+            (isinstance(self_dict, dict) and name in self_dict)
+            or (
+                name is not None
+                and isinstance(
+                    inspect.getattr_static(cls, name, None),
+                    types.MemberDescriptorType,
+                )
+            )
+            or hasattr(cls, "__getattr__")
+        )
+        if instance_served:
+            return type(self)._unpickle_bound_method, (func, method.__self__)
         inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
             inner = inner.__func__
-        # `func is inner` proves resolution NOW, but a name satisfied only by a
-        # per-instance __dict__ will NOT resolve at load: self.__dict__ is
-        # restored AFTER the method is rebuilt, so an instance monkeypatch
-        # (m.forward = MethodType(f, m)) would round-trip to the class default.
-        # A class namespace (when __self__ is itself a type, e.g. a classmethod)
-        # is restored with the class, so it is exempt.
-        self_dict = getattr(method.__self__, "__dict__", None)
-        in_instance_dict = (
-            not isinstance(method.__self__, type)
-            and isinstance(self_dict, dict)
-            and name in self_dict
-        )
-        if func is inner and not in_instance_dict:
+        # `func is inner` proves the class MRO resolves back to this function.
+        if func is inner:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
 
@@ -1312,7 +1323,7 @@ def _cleanup_dead_packages(blocking: bool) -> None:
             current = module.__dict__.get(name, _ABSENT_GLOBAL)
             if survivor is _ABSENT_GLOBAL:
                 if current is installed_global.value:
-                    del module.__dict__[name]
+                    module.__dict__.pop(name, None)
             elif current is not survivor and (
                 current is installed_global.value or current is _ABSENT_GLOBAL
             ):
@@ -1722,6 +1733,13 @@ class CompilePackage:
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
         return self._current_entry
 
+    def current_entry_bypassed(self) -> bool:
+        # A frame bypassed once stays bypassed (the flag is never reset and
+        # code_context reuses the entry), so a later serializable recompile must
+        # not re-pay guard serialization only to have add_guarded_code discard
+        # it. convert_frame gates `save` on this.
+        return self._current_entry is not None and self._current_entry.bypassed
+
     def mark_current_entry_truncated(self) -> None:
         """
         Record that this frame hit the recompile limit, so callers building an
@@ -1790,6 +1808,11 @@ class CompilePackage:
         # install()). Clear those two here, and the add_* methods refuse to
         # repopulate them once bypassed, so a later serializable recompile that
         # reuses this same entry cannot resurrect the frame.
+        # Drop this entry's compiled backends from the package-global cache
+        # before clearing backend_ids; otherwise they are stranded, pinning a
+        # dead GraphModule under an id no entry references.
+        for backend_id in self._current_entry.backend_ids:
+            self._cached_backends.pop(backend_id, None)
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
         if reason is not None and len(reason) > _BYPASS_REASON_MAX_CHARS:
@@ -1949,7 +1972,7 @@ class CompilePackage:
                     # Nobody left. Remove it only if what is bound is still
                     # ours; anything else belongs to whoever wrote it.
                     if current is installed_global.value:
-                        del module.__dict__[name]
+                        module.__dict__.pop(name, None)
                 elif current is not survivor and (
                     current is installed_global.value or current is _ABSENT_GLOBAL
                 ):
