@@ -984,6 +984,23 @@ def to_dtype(
 
 register_pointwise_op("to_dtype")
 
+# Reached through custom lowerings or codegen itself rather than
+# register_pointwise; they commute with broadcasting all the same.
+for _pointwise_name in (
+    "where",
+    "pow",
+    "floor",
+    "round",
+    "trunc",
+    "fmod",
+    "remainder",
+    "identity",
+    "isnan",
+    "isinf",
+    "signbit",
+):
+    register_pointwise_op(_pointwise_name)
+
 
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
