@@ -1,4 +1,5 @@
-"""Tuple-polymorphic pointwise math for :mod:`quack.epilogue.frontend` functions.
+# mypy: allow-untyped-defs
+"""Tuple-polymorphic pointwise math for generated FlexGEMM epilogue callbacks.
 
 Values are Float32 scalars or two-lane tuple values such as ``F2`` and ``Pair``.
 The default transcendental path requests precise Cute math; ``fast=True`` opts
@@ -164,7 +165,9 @@ def eq(a, b):
     """Elementwise equality comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) == _lane(b, 0), _lane(a, 1) == _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) == _lane(b, 0), _lane(a, 1) == _lane(b, 1)
+        )
     return a == b
 
 
@@ -172,7 +175,9 @@ def ne(a, b):
     """Elementwise inequality comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) != _lane(b, 0), _lane(a, 1) != _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) != _lane(b, 0), _lane(a, 1) != _lane(b, 1)
+        )
     return a != b
 
 
@@ -180,7 +185,9 @@ def lt(a, b):
     """Elementwise less-than comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) < _lane(b, 0), _lane(a, 1) < _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) < _lane(b, 0), _lane(a, 1) < _lane(b, 1)
+        )
     return a < b
 
 
@@ -188,7 +195,9 @@ def le(a, b):
     """Elementwise less-than-or-equal comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) <= _lane(b, 0), _lane(a, 1) <= _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) <= _lane(b, 0), _lane(a, 1) <= _lane(b, 1)
+        )
     return a <= b
 
 
@@ -196,7 +205,9 @@ def gt(a, b):
     """Elementwise greater-than comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) > _lane(b, 0), _lane(a, 1) > _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) > _lane(b, 0), _lane(a, 1) > _lane(b, 1)
+        )
     return a > b
 
 
@@ -204,7 +215,9 @@ def ge(a, b):
     """Elementwise greater-than-or-equal comparison."""
     if const_expr(isinstance(a, tuple) or isinstance(b, tuple)):
         template = a if isinstance(a, tuple) else b
-        return _pair_like(template, _lane(a, 0) >= _lane(b, 0), _lane(a, 1) >= _lane(b, 1))
+        return _pair_like(
+            template, _lane(a, 0) >= _lane(b, 0), _lane(a, 1) >= _lane(b, 1)
+        )
     return a >= b
 
 
@@ -218,8 +231,16 @@ def logical_not(x):
 @cute.jit
 def where(condition, a, b):
     """Select ``a`` where ``condition`` is true and ``b`` otherwise."""
-    if const_expr(isinstance(condition, tuple) or isinstance(a, tuple) or isinstance(b, tuple)):
-        template = condition if isinstance(condition, tuple) else a if isinstance(a, tuple) else b
+    if const_expr(
+        isinstance(condition, tuple) or isinstance(a, tuple) or isinstance(b, tuple)
+    ):
+        template = (
+            condition
+            if isinstance(condition, tuple)
+            else a
+            if isinstance(a, tuple)
+            else b
+        )
         return _pair_like(
             template,
             _lane(a, 0) if _lane(condition, 0) else _lane(b, 0),
