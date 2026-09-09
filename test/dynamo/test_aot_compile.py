@@ -1462,6 +1462,20 @@ from user code:
         self.assertEqual(len(message.splitlines()), 4)
         self.assertIn("Add a ModelInput", message)
 
+    def test_aot_compile_module_wrong_arity_raises_type_error(self):
+        # A call the signature cannot bind is a caller error, not a guard miss:
+        # it surfaces as the TypeError the plain module would raise, not as a
+        # no-match report telling the user to add a ModelInput.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="inductor")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(TypeError, "too many positional arguments"):
+            model(x, x)
+        with self.assertRaisesRegex(TypeError, "missing a required argument: 'x'"):
+            model()
+
     def test_no_match_message_survives_a_raising_guard(self):
         # __call__ has already established that nothing matched; re-evaluating
         # the guards to say WHY must not replace that answer with a secondary
