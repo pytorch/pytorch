@@ -23,6 +23,7 @@ import logging
 import os
 import pickle
 import platform
+import re
 import shutil
 import sys
 import types
@@ -39,6 +40,7 @@ from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
+    _reserve_unique_id_through,
     COMPILED_FN_PREFIX,
     get_code_keys,
     is_compiled_fn_name,
@@ -223,12 +225,10 @@ class FunctionPicklerBase(pickle.Pickler):
         # the shared AOT path (AOTCompilePickler) does call it, so there an
         # empty scope surfaces as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
-        # __module__ need not be an importable string: a decorator can set it to
-        # a non-str (42), a <locals>/exec function can carry None or "" (bare
-        # globals with no __name__), and a relative name (".rel") or a module
-        # whose body raises fails import with something other than ImportError.
-        # None of those should fail the load, so require a non-empty str and
-        # swallow any import failure into the empty scope.
+        # __module__ need not be an importable string (a decorator can set 42, a
+        # <locals>/exec function carries None or "", ".rel" or a module whose
+        # body raises fails import with something other than ImportError); none
+        # should fail the load: require a non-empty str, swallow any failure.
         if isinstance(module, str) and module:
             try:
                 f_globals = importlib.import_module(module).__dict__
@@ -281,6 +281,17 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__globals__.update(globals_snapshot)
 
     @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (module + qualname) finds fn itself."""
+        module = fn.__module__
+        if "<locals>" in fn.__qualname__ or not isinstance(module, str):
+            return False
+        resolved: Any = sys.modules.get(module)
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
     def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
@@ -331,24 +342,23 @@ class FunctionPicklerBase(pickle.Pickler):
         name = getattr(func, "__name__", None)
         # A name served PER-INSTANCE resolves only after self is restored, i.e.
         # after pickle rebuilds the method, so getattr() at load would miss it:
-        # carry func+self explicitly. That covers an instance __dict__ monkeypatch
-        # (m.forward = MethodType(f, m)), a __slots__ member descriptor, and a
-        # __getattr__ proxy (which must not be probed below -- it can recurse).
-        # A type receiver (classmethod) is exempt: its namespace is restored.
+        # carry func+self explicitly (an instance __dict__ monkeypatch, a __slots__
+        # member descriptor, or a __getattr__ proxy, which must not be probed --
+        # it can recurse). A type receiver (classmethod) is exempt.
         cls = type(method.__self__)
         self_dict = _instance_dict(method.__self__)
-        instance_served = not isinstance(method.__self__, type) and (
+        static = inspect.getattr_static(cls, name, None) if name is not None else None
+        instance = not isinstance(method.__self__, type)
+        if instance and (
             (self_dict is not None and name in self_dict)
-            or (
-                name is not None
-                and isinstance(
-                    inspect.getattr_static(cls, name, None),
-                    types.MemberDescriptorType,
-                )
-            )
-            or hasattr(cls, "__getattr__")
-        )
-        if instance_served:
+            or isinstance(static, types.MemberDescriptorType)
+        ):
+            return type(self)._unpickle_bound_method, (func, method.__self__)
+        # The class MRO serving the name (nn.Module methods, say) needs no
+        # explicit binding; getattr_static never runs a user __getattr__.
+        if static is func:
+            return None
+        if instance and hasattr(cls, "__getattr__"):
             return type(self)._unpickle_bound_method, (func, method.__self__)
         inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
@@ -372,10 +382,8 @@ class FunctionPicklerBase(pickle.Pickler):
         globals_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         # annotations/type_params/doc are passed in rather than read off fn: the
-        # guard pickler prunes what no guard reads, so an unpicklable local class
-        # in an annotation -- or a __doc__ reassigned to an unpicklable object --
-        # cannot fail the whole dump (a failure there silently bypasses the
-        # package). The AOT pickler passes them through verbatim.
+        # guard pickler prunes what no guard reads (an unpicklable annotation or
+        # __doc__ must not bypass the package); the AOT pickler passes them on.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
@@ -1255,7 +1263,8 @@ class CompilePackage:
     3. `package.install(backends) which will handle all the side-effectful global scope
         updates with compiled functions and resume functions. The install is tied
         to the package's lifetime by a finalizer, so a caller that installs must
-        retain the package; dropping it undoes these updates.
+        retain the package; dropping it undoes these updates (the frame skip a
+        zero-guarded entry writes is restored from #195915 on).
     """
 
     def __init__(
@@ -1347,6 +1356,11 @@ class CompilePackage:
             self._installed_precompile_region_id == isolate_recompiles_id
             and id(code) in self._installed_precompile_codes
         )
+
+    def has_guarded_codes_for(self, code: types.CodeType) -> bool:
+        """True once a compile of this frame was recorded into the package."""
+        entry = self._codes.get(code)
+        return entry is not None and bool(entry.guarded_codes)
 
     @property
     def serialization_guard_filter_fn(
@@ -1648,14 +1662,12 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        # install() still imports this entry's import_sources and global names,
-        # but skips its backends and guarded codes (the entry.bypassed check in
-        # install()). Clear those two here, and the add_* methods refuse to
-        # repopulate them once bypassed, so a later serializable recompile that
-        # reuses this same entry cannot resurrect the frame.
-        # Drop this entry's compiled backends from the package-global cache
-        # before clearing backend_ids; otherwise they are stranded, pinning a
-        # dead GraphModule under an id no entry references.
+        # install() still imports this entry's import_sources and global names
+        # but skips its backends and guarded codes (entry.bypassed). Clear both
+        # here, and the add_* methods refuse to repopulate them once bypassed, so
+        # a later serializable recompile reusing this entry cannot resurrect the
+        # frame. Pop the compiled backends before clearing backend_ids, or a dead
+        # GraphModule stays pinned under an id no entry references.
         for backend_id in self._current_entry.backend_ids:
             self._cached_backends.pop(backend_id, None)
         self._current_entry.backend_ids.clear()
@@ -1778,6 +1790,16 @@ class CompilePackage:
         # mint. Every reference to them lives in some frame's dynamo bytecode,
         # remapped below.
         renames = _resume_global_renames(self._codes.values(), self._resume_name_token)
+        # A loaded artifact's __resume_at_<offset>_<n> names came from another
+        # process's counter; reserve their n so a compile in this process (a
+        # branch the artifact never took) cannot mint the same name for a
+        # different code object, which _resume_global_renames would reject at
+        # the next install -- and re-recording would persist.
+        for entry in self._codes.values():
+            for name in entry.function_names:
+                match = re.fullmatch(r"__resume_at_\d+_(\d+)", name)
+                if match:
+                    _reserve_unique_id_through(int(match.group(1)))
         # Registered before anything is installed, so a failed install is still
         # torn down when the package dies. The callback must not capture self
         # (it would never fire); it works off the containers the loop below
@@ -1853,8 +1875,11 @@ class CompilePackage:
                 # a live neighbour, and since lookup is region-exact the
                 # neighbour cannot be served by what is left. This package's own
                 # stale entries are already gone: install() runs uninstall()
-                # first, which removes exactly the ones it owns.
-                self._installed_precompile_codes[id(target_code)] = target_code
+                # first, which removes exactly the ones it owns. A zero-guarded
+                # entry installs no precompile entry (it skips the frame below),
+                # so it is not recorded as owned.
+                if entry.guarded_codes:
+                    self._installed_precompile_codes[id(target_code)] = target_code
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
