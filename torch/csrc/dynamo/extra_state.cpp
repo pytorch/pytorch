@@ -642,9 +642,8 @@ static bool cache_entry_has_no_guards(
 // Drop candidates named by an invalidation this state accepted but could not
 // yet drain: drain_pending_invalidations no-ops while cache_python_depth != 0,
 // a cross-thread atomic, so ANOTHER thread's in-flight lookup can keep one
-// parked here. invalidate fires from weakref.finalize when a guarded object is
-// deallocated (the id-reuse safety net), so serving its target would run a
-// graph guarded by an ID_MATCH on a possibly reused id: a wrong-graph hit.
+// parked here. invalidate fires when a guarded object dies, so serving its
+// target would pass an ID_MATCH on a reused id: a wrong-graph hit.
 // Only invalidations parked BEFORE the snapshot are covered: one arriving after
 // lookup() releases cache_mutex parks and is applied at the next lookup, so
 // this in-flight lookup can still serve the entry it named. Guarded on
@@ -701,7 +700,8 @@ void lookup(
     bool is_skip_guard_eval_unsafe) {
   // reaped_* are declared before python_depth so they destruct AFTER it: depth
   // returns to 0 and cache_mutex is released before any reaped node runs its
-  // Python destructor.
+  // Python destructor. On the guard-error returns below that Python runs with
+  // e.restore()'s exception set (pytorch/pytorch#196394).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
@@ -1359,9 +1359,8 @@ void _load_precompile_entry(
   // _reset_precompile_entries + push sequence still splices the pushed entry
   // away at the next depth-zero holder, leaving an install serving nothing.
   // CompilePackage avoids that by keying uninstall's eviction by owner token
-  // (#195911; test_reinstall_survives_an_eviction_parked_by_uninstall); the
-  // raw sequence is tracked in pytorch/pytorch#196394. Pending invalidations
-  // are not drained: they relink cache entries, never precompile_entries.
+  // (#195911); the raw sequence is tracked in pytorch/pytorch#196394. Pending
+  // invalidations are not drained: they relink cache entries only.
   extra->apply_pending_evictions(
       reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));
@@ -1414,9 +1413,9 @@ bool _has_precompile_entries(
   // the first. A loaded artifact runs this on every served call, hence no
   // py::list and no Python under the lock (CacheLock's wait is the only GIL
   // drop while it is held). Like every reader it drains parked evictions first
-  // -- a parked CLEAR_ALL empties the cache here -- and the reaped nodes die
-  // AFTER the lock releases (locals declared before it), where ~CacheEntry /
-  // ~PrecompileEntry drop py::objects and can run arbitrary Python.
+  // (a parked CLEAR_ALL empties the cache here); the reaped nodes die AFTER the
+  // lock releases, where ~CacheEntry / ~PrecompileEntry can run arbitrary
+  // Python.
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
