@@ -140,6 +140,8 @@ if((NOT BLAS_LIBRARIES)
   FIND_PACKAGE(vecLib)
   if(vecLib_FOUND)
     SET(BLAS_INFO "veclib")
+    SET(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
+    SET(BLAS_INCLUDE_DIR ${vecLib_INCLUDE_DIR})
   else()
     check_fortran_libraries(
       BLAS_LIBRARIES
