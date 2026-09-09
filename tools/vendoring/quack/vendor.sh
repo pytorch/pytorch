@@ -84,7 +84,6 @@ FILES=(
     dsl/mixed_constexpr_if.py
     dsl/smem_struct.py
     dsl/torch_library_op.py
-    epi_math.py
     epilogue/__init__.py
     epilogue/frontend.py
     epilogue/head_rmsnorm.py
@@ -113,7 +112,6 @@ FILES=(
     gemm_sm90.py
     gemm_symmetric.py
     gemm_tvm_ffi_utils.py
-    grouped_reduce.py
     layout_utils.py
     nvmmh_heuristic.py
     operand_transform/__init__.py
