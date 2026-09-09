@@ -121,14 +121,17 @@ class FunctionPicklerBase(pickle.Pickler):
     keeps its own copies of these reducers and is moved onto this base
     separately, so that a fix here cannot be missed in one pickler.
 
-    Defaults, __doc__, __dict__, __annotations__ and __type_params__ travel as
-    pickle STATE, applied after memoization, so `wrapper.me = wrapper` cycles
-    end. A closure cell is a reduce
-    ARGUMENT: a function closing over itself is reduced twice, and
-    save_reduce's recursive-object fallback (present in both the C and the
-    pure-Python pickler) drops the outer copy.
+    Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
+    travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
+    cycles end. A closure cell is a reduce ARGUMENT: a function closing over
+    itself is reduced twice, and save_reduce's recursive-object fallback
+    (present in both the C and the pure-Python pickler) drops the outer copy.
     """
 
+    # The reducers stay classmethods: pickle reduces a bound classmethod to
+    # getattr(owner, name), so an artifact names the subclass and resolves the
+    # reducer through its MRO. A staticmethod would pickle by __qualname__ and
+    # change the artifact.
     @classmethod
     def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
         return SerializedCode.to_code_object(serialized_code)
@@ -226,8 +229,9 @@ class FunctionPicklerBase(pickle.Pickler):
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. Take the
-        # unevaluated FORWARDREF shape instead; a ForwardRef proxy is not
-        # picklable, so the caller prunes any it does not need.
+        # unevaluated FORWARDREF shape instead; a ForwardRef proxy carries its
+        # owner and may not pickle (it does not for a local function), so the
+        # caller prunes any it does not need.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -271,22 +275,28 @@ class FunctionPicklerBase(pickle.Pickler):
         # an instance __dict__ monkeypatch (m.forward = MethodType(f, m)), and a
         # __slots__ member descriptor. A type receiver (classmethod) is exempt:
         # its namespace is restored with the class.
-        if isinstance(receiver, type):
-            instance_served = False
-        elif hasattr(cls, "__getattr__"):
-            instance_served = True
-        else:
+        explicit = (type(self)._unpickle_bound_method, (func, receiver))
+        if not isinstance(receiver, type) and hasattr(cls, "__getattr__"):
+            return explicit
+        try:
             self_dict = getattr(receiver, "__dict__", None)
-            instance_served = (isinstance(self_dict, dict) and name in self_dict) or (
-                name is not None
-                and isinstance(
-                    inspect.getattr_static(cls, name, None),
-                    types.MemberDescriptorType,
+            if not isinstance(receiver, type) and (
+                (isinstance(self_dict, dict) and name in self_dict)
+                or (
+                    name is not None
+                    and isinstance(
+                        inspect.getattr_static(cls, name, None),
+                        types.MemberDescriptorType,
+                    )
                 )
-            )
-        if instance_served:
-            return type(self)._unpickle_bound_method, (func, receiver)
-        inner = getattr(receiver, name, None) if name is not None else None
+            ):
+                return explicit
+            inner = getattr(receiver, name, None) if name is not None else None
+        except Exception:
+            # A probe that raises anything -- a __getattribute__ override, a
+            # metaclass __getattr__, a property -- falls back to the explicit
+            # reduce, which is always correct.
+            return explicit
         # Only a method BOUND to this receiver over this function proves the
         # class MRO resolves back to it. getattr can also hand back the raw
         # function (a staticmethod under that name), and pickle's default
@@ -297,7 +307,7 @@ class FunctionPicklerBase(pickle.Pickler):
             and inner.__self__ is receiver
         ):
             return None
-        return type(self)._unpickle_bound_method, (func, receiver)
+        return explicit
 
     def _reduce_function(
         self,
@@ -307,8 +317,8 @@ class FunctionPicklerBase(pickle.Pickler):
         kwdefaults: dict[str, Any] | None,
         closure: tuple[types.CellType, ...] | None,
         attributes: dict[str, Any],
-        annotations: dict[str, Any],
         doc: Any,
+        annotations: dict[str, Any],
         type_params: tuple[Any, ...] | None,
     ) -> tuple[Any, ...]:
         # Everything is passed in rather than read off fn: the subclass decides
