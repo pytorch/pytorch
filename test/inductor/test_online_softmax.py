@@ -709,6 +709,14 @@ class TestScalarAccumulators(TestCase):
         _, code = self.check_codegen(f, x, marker=self.HINT)
         self.assertEqual(code.count("tl.full([XBLOCK, 1], "), 3)
 
+    def test_narrow_int_sum_beside_softmax(self):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x.float(), -1)
+            return xmax, xsum, x.sum(-1, dtype=torch.uint8), x.amax(-1)
+
+        x = torch.randint(0, 256, (16, 8200), device=GPU_TYPE, dtype=torch.uint8)
+        self.check_codegen(f, x, marker=self.HINT)
+
     @parametrize("dtype", [torch.int32, torch.int64, torch.bfloat16])
     def test_reductions_beside_softmax(self, dtype):
         def f(x):

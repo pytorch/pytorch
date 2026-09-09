@@ -6130,9 +6130,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 chunk_expr, chunk_dtype, chunk_shape = final_reduction(
                     self.compute, masked, None
                 )
+                # tl.sum widens sub-32-bit ints; keep the loop-carried type.
                 chunk = self.cse.generate(
                     self.compute,
-                    chunk_expr,
+                    f"({chunk_expr}).to({acc_type})",
                     dtype=chunk_dtype,
                     shape=chunk_shape,
                 )
