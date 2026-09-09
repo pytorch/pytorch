@@ -36,6 +36,7 @@ from torch.testing._internal.common_optimizers import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
+    HardwareClassification,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -90,6 +91,7 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
 class TestTorchDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # TODO: move all tensor creation to common ops
@@ -6707,6 +6709,7 @@ class TestTorchDeviceType(TestCase):
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # FIXME: move to indexing test suite
@@ -6941,6 +6944,7 @@ def disable_gc():
         yield
 
 class TestTorch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     exact_dtype = True
 
     def test_dir(self):
@@ -11356,10 +11360,11 @@ def add_neg_dim_tests():
 # TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
 
 class TestTensorDeviceOps(TestCase):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
+
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
