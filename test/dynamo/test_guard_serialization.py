@@ -89,22 +89,23 @@ def keep_defaults(func):
     return wrapper
 
 
-def keep_kwdefaults(func):
+def keep_qualname(func):
     @functools.wraps(func)
     def wrapper(self, x):
-        if func.__kwdefaults__["scale"] == 2.0:
+        if func.__qualname__ == "DecoratedQualnameForwardModule.forward":
             x = x + 1
         return func(self, x)
 
     return wrapper
 
 
-def keep_attribute(func):
-    func.scale_flag = 2.0
+THIS_MODULE = __name__
 
+
+def keep_module_name(func):
     @functools.wraps(func)
     def wrapper(self, x):
-        if func.scale_flag == 2.0:
+        if func.__module__ == THIS_MODULE:
             x = x + 1
         return func(self, x)
 
@@ -118,21 +119,6 @@ def keep_renamed_name(func):
     @functools.wraps(func)
     def wrapper(self, x):
         if func.__name__ == "renamed_forward":
-            x = x + 1
-        return func(self, x)
-
-    return wrapper
-
-
-def keep_annotations(func):
-    # A guard reading an annotation value reads through the __annotations__
-    # dict and bakes an ID_MATCH on the value, so the by-value function
-    # reconstruction must restore __annotations__.
-    func.__annotations__ = {"x": int}
-
-    @functools.wraps(func)
-    def wrapper(self, x):
-        if func.__annotations__["x"] is int:
             x = x + 1
         return func(self, x)
 
@@ -154,14 +140,14 @@ class DecoratedForwardModule(torch.nn.Module):
         return x * scale + shift
 
 
-class DecoratedKwdefaultsForwardModule(torch.nn.Module):
-    @keep_kwdefaults
-    def forward(self, x, *, scale=2.0):
-        return x * scale
+class DecoratedQualnameForwardModule(torch.nn.Module):
+    @keep_qualname
+    def forward(self, x):
+        return x * 2
 
 
-class DecoratedAttributeForwardModule(torch.nn.Module):
-    @keep_attribute
+class DecoratedModuleNameForwardModule(torch.nn.Module):
+    @keep_module_name
     def forward(self, x):
         return x * 2
 
@@ -170,32 +156,6 @@ class DecoratedRenamedNameForwardModule(torch.nn.Module):
     @keep_renamed_name
     def forward(self, x):
         return x * 2
-
-
-class DecoratedAnnotationsForwardModule(torch.nn.Module):
-    @keep_annotations
-    def forward(self, x):
-        return x * 2
-
-
-def self_referencing_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(x):
-        # Reaches itself through both a closure cell and __dict__["me"].
-        if wrapper.flag == 2.0:
-            x = x + 1
-        return func(x)
-
-    wrapper.flag = 2.0
-    wrapper.me = wrapper
-    return wrapper
-
-
-def _self_referencing_base(x):
-    return x * 2
-
-
-SELF_REFERENCING_WRAPPED = self_referencing_wrapper(_self_referencing_base)
 
 
 def none_cell_wrapper(func):
@@ -217,27 +177,9 @@ def _none_cell_base(x):
 NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
-def _doc_base(x):
-    """base doc"""
-    return x * 2
-
-
-def doc_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(x):
-        return func(x)
-
-    return wrapper
-
-
-DOC_WRAPPED = doc_wrapper(_doc_base)
-
-
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
     def wrapper(x):
-        if func.__name__ == "renamed":
-            x = x + 1
         if x is None:
             return unset
         return func(x)
@@ -271,27 +213,6 @@ class DecoratedDefaultValueForwardModule(torch.nn.Module):
         return x * scale
 
 
-class GuardedDefaultsTupleModule(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        def fn(x, a=2.0, b=1.0, *, c=3.0):
-            return x * a + b + c
-
-        self.fn = fn
-
-    def forward(self, x):
-        # EQUALS_MATCH on the containers themselves, with no per-element source.
-        if self.fn.__defaults__ == (2.0, 1.0) and self.fn.__kwdefaults__ == {"c": 3.0}:
-            x = x + 1
-        return x + 2
-
-
-# A module-level lambda's qualname is "<lambda>", which resolves to nothing.
-GLOBAL_LAMBDA = lambda x: x * 2  # noqa: E731
-GLOBAL_LAMBDA.scale_flag = 2.0
-
-
 def keep_fn_name(func):
     @functools.wraps(func)
     def wrapper(x):
@@ -300,6 +221,17 @@ def keep_fn_name(func):
         return func(x)
 
     return wrapper
+
+
+class RecursingGuardedDefault:
+    flag = 2.0
+
+    def __init__(self, inner=None):
+        self.inner = inner
+
+    def __reduce__(self):
+        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        return type(self), (type(self)(),)
 
 
 def global_add(obj, x):
@@ -317,36 +249,16 @@ FQN_MISMATCH_CASES = [
         name="default_value",
     ),
     subtest(
-        (
-            "EQUALS_MATCH",
-            DecoratedKwdefaultsForwardModule,
-            ("__kwdefaults__", {"scale": 3.0}),
-        ),
-        name="kwdefaults",
-    ),
-    subtest(
-        (
-            "EQUALS_MATCH",
-            DecoratedKwdefaultsForwardModule,
-            ("__kwdefaults__", {"other": 2.0}),
-        ),
-        name="kwdefaults_keys",
-    ),
-    subtest(
-        ("EQUALS_MATCH", DecoratedAttributeForwardModule, ("scale_flag", 3.0)),
-        name="attribute",
-    ),
-    subtest(
         ("EQUALS_MATCH", DecoratedRenamedNameForwardModule, ("__name__", "forward")),
         name="renamed_name",
     ),
     subtest(
-        (
-            "ID_MATCH",
-            DecoratedAnnotationsForwardModule,
-            ("__annotations__", {"x": str}),
-        ),
-        name="annotations",
+        ("EQUALS_MATCH", DecoratedQualnameForwardModule, ("__qualname__", "other")),
+        name="qualname",
+    ),
+    subtest(
+        ("EQUALS_MATCH", DecoratedModuleNameForwardModule, ("__module__", "other")),
+        name="module_name",
     ),
 ]
 
@@ -396,6 +308,11 @@ class SlottedByName:
     # A slot named for the function it will hold: a method bound under that name
     # has a class-level member descriptor but no instance __dict__ to inspect.
     __slots__ = ("global_add",)
+
+
+class StaticHolder:
+    # getattr(self, "global_add") returns the raw function, not a bound method.
+    global_add = staticmethod(global_add)
 
 
 class GetattrProxy:
@@ -776,12 +693,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # through a capture, so none of TestGuardSerialization's setup applies.
 
     def test_reducer_handles_an_empty_cell_reached_directly(self):
-        # _prune_cell only sees cells of a reconstructed function. A cell
-        # reached directly -- a guarded __closure__ tuple, or the cell itself
-        # -- goes through reducer_override's CellType branch, which read
-        # cell_contents unguarded and raised ValueError out of the pickler.
-        # Pickler-level because a guard cannot root at a raw cell through a
-        # capture: CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
+        # reducer_override's CellType branch read cell_contents unguarded and
+        # raised ValueError out of the pickler for an empty cell. Pickler-level
+        # because a guard cannot root at a raw cell through a capture:
+        # CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
         empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
@@ -847,23 +762,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         cell = fn.__closure__[0]
         buf = io.BytesIO()
-        GuardsStatePickler({id(fn): fn, id(cell): cell}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
-
-    def test_function_reaching_itself_through_its_dict(self):
-        # wrapper.me = wrapper, and wrapper is its own free variable; identity
-        # has to survive the round trip through both.
-        w = SELF_REFERENCING_WRAPPED
-        cell = [i for i, c in enumerate(w.__closure__) if c.cell_contents is w]
-        self.assertEqual(len(cell), 1)
-        buf = io.BytesIO()
-        gtv = {id(w): w, id(w.__dict__): w.__dict__}
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"w": w})
-        out = pickle.loads(buf.getvalue())["w"]
-        self.assertIs(out.me, out)
-        self.assertIs(out.__closure__[cell[0]].cell_contents, out)
 
     def test_bound_method_under_a_name_self_lacks(self):
         # types.MethodType can bind a function under a name self has no
@@ -879,10 +781,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__self__, Inputs)
 
     def test_bound_method_under_a_slot_name(self):
-        # A method bound under a __slots__ member-descriptor name has no
-        # instance __dict__, and the slot value is restored only after the
-        # method is rebuilt, so getattr(self, name) cannot be trusted to resolve
-        # at load. _reduce_bound_method carries the function and self explicitly.
+        # A method bound under a __slots__ member-descriptor name: getattr(self,
+        # name) hands back the raw function stored in the slot, not a bound
+        # method, so pickle's default reconstruction would load a function where
+        # a method was. _reduce_bound_method carries the function and self
+        # explicitly; that also covers a slot holding a self-bound method, whose
+        # cycle means the slot is restored only after the method is rebuilt.
         obj = SlottedByName()
         obj.global_add = global_add
         m = types.MethodType(global_add, obj)
@@ -895,13 +799,45 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
         # self defines __getattr__, so probing getattr(self, name) to check
         # resolution would run user code and can recurse. _reduce_bound_method
-        # carries the function and self explicitly instead of probing.
+        # carries the function and self explicitly without reading the instance.
         m = types.MethodType(global_add, GetattrProxy())
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
+
+    def test_bound_method_over_a_staticmethod_name(self):
+        # getattr(self, name) resolves, but to the raw function: pickle's default
+        # reconstruction would load a function where a bound method was.
+        m = types.MethodType(global_add, StaticHolder())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIsInstance(out, types.MethodType)
+        self.assertIs(out.__func__, global_add)
+
+    def test_bound_method_of_a_partial(self):
+        # MethodType accepts any callable; a functools.partial has no __name__,
+        # so there is nothing to probe and the method is carried explicitly.
+        m = types.MethodType(functools.partial(global_add), Inputs(1, 2))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__.func, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
+    def test_bound_method_of_a_module_keeps_its_function(self):
+        # nn.Module defines __getattr__, so every module method is carried
+        # explicitly. That is also what keeps the right function: the rebuilt
+        # receiver is a bare nn.Module, on which a getattr() reconstruction
+        # would resolve "forward" to nn.Module's own placeholder.
+        mod = torch.nn.Linear(2, 2)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(mod): mod}, {}, {}, buf).dump({"m": mod.forward})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, torch.nn.Linear.forward)
+        self.assertIsInstance(out.__self__, torch.nn.Module)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
@@ -919,20 +855,43 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
-    def test_guard_rooted_at_wrapper_that_reaches_itself(self):
-        # A kept closure cell and a kept attribute both reach back to the
-        # function being reduced; see FunctionPicklerBase for why that has to
-        # travel as pickle state.
-        def fn(x):
-            return SELF_REFERENCING_WRAPPED(x)
+    def test_empty_closure_cell_of_a_traced_local_function(self):
+        # A local function reached through a capture is pickled with its whole
+        # __closure__, so a sibling cell left empty beside the guarded one has to
+        # round-trip as an empty cell rather than fail the dump.
+        def make(captured):
+            def fn(x):
+                if x is None:
+                    return unset
+                return x + captured
 
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
-        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
-        SELF_REFERENCING_WRAPPED.flag = 3.0
-        try:
-            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
-        finally:
-            SELF_REFERENCING_WRAPPED.flag = 2.0
+            if captured is None:
+                unset = 1  # never runs, so the cell fn closes over stays EMPTY
+
+            return fn
+
+        def foo(f, x):
+            return f(x)
+
+        f = make(torch.randn(3))
+        self.assertEqual(sum(_cell_is_empty(c) for c in f.__closure__), 1)
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", foo, f, x)
+        self._test_check_fn(ref, loaded, {"f": f, "x": x}, True)
+
+    def test_recursing_guarded_value_overflow_is_a_package_error(self):
+        # A recursion overflow while pickling a guarded value -- here a
+        # pathological __reduce__ that never memoizes -- is a serialization
+        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
+        # without strict_precompile, which this class turns on), never a raw
+        # RecursionError that hard-fails a program that compiled fine before.
+        def fn(x, cfg=RecursingGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "exceeded the recursion limit"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
 
     def test_guard_rooted_at_a_none_valued_closure_cell(self):
         # The cell is reached as a CELL through the wrapper's __closure__, so
@@ -950,24 +909,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
         finally:
             cell.cell_contents = None
-
-    def test_guard_rooted_at_wrapper_preserves_copied_doc(self):
-        # functools.wraps copies the wrapped function's __doc__ onto a wrapper
-        # whose own code object has none. Rebuilt from the code object alone
-        # the wrapper reads None, the EQUALS_MATCH rebakes against it at load,
-        # and the guard fails forever with no load error.
-        def fn(x):
-            if DOC_WRAPPED.__doc__ == "base doc":
-                x = x + 1
-            return DOC_WRAPPED(x)
-
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
-        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
-        DOC_WRAPPED.__doc__ = "other"
-        try:
-            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
-        finally:
-            DOC_WRAPPED.__doc__ = "base doc"
 
     def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
         # The rebuilt function's __module__ names a module that only ever lived
@@ -1014,35 +955,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             setattr(inner, attr, old_value)
-
-    def test_nested_function_preserves_a_guarded_defaults_tuple(self):
-        # A guard on the container itself registers no per-element source, so
-        # pruning the elements is a silent permanent cache miss, not a load
-        # error; see the Note in guards.py.
-        mod = GuardedDefaultsTupleModule()
-        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
-        self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)
-        mod.fn.__defaults__ = (3.0, 1.0)
-        self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, False)
-        mod.fn.__defaults__ = (2.0, 1.0)
-        mod.fn.__kwdefaults__ = {"c": 4.0}
-        self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, False)
-
-    def test_guard_rooted_at_a_lambda(self):
-        # A module-level lambda is an fqn mismatch too (see GLOBAL_LAMBDA) and
-        # is rebuilt by value with the guarded attribute intact.
-        def fn(x):
-            if GLOBAL_LAMBDA.scale_flag == 2.0:
-                x = x + 1
-            return GLOBAL_LAMBDA(x)
-
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
-        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
-        GLOBAL_LAMBDA.scale_flag = 3.0
-        try:
-            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
-        finally:
-            GLOBAL_LAMBDA.scale_flag = 2.0
 
     def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
         # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.

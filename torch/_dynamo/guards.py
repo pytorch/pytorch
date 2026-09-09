@@ -4298,14 +4298,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         See Note [Reconstructing a function a guard is rooted at].
         """
         return self._reduce_function(
-            obj,
-            defaults=obj.__defaults__,
-            kwdefaults=obj.__kwdefaults__,
-            closure=obj.__closure__,
-            attributes=obj.__dict__,
-            annotations=self._read_raw_annotations(obj),
-            doc=obj.__doc__,
-            type_params=getattr(obj, "__type_params__", None),
+            obj, defaults=obj.__defaults__, closure=obj.__closure__
         )
 
     # pyrefly: ignore [bad-override]
@@ -4460,7 +4453,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             if "<locals>" in obj.__qualname__:
                 return self._reduce_function_by_value(obj)
             resolved: Any = None
-            if obj.__module__ in sys.modules:
+            # __module__ need not be a str (a decorator can set anything); an
+            # unhashable one must not TypeError out of the reducer.
+            if isinstance(obj.__module__, str) and obj.__module__ in sys.modules:
                 resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
                     resolved = getattr(resolved, name, None)
@@ -4596,6 +4591,15 @@ def pickle_guards_state(
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
+    except RecursionError as e:
+        # A deep (but finite) guarded object graph, or a __reduce__ that never
+        # memoizes, overflows the recursion limit inside dump: a serialization
+        # limit, not a compiler bug. Reporting WHERE it overflowed is skipped
+        # deliberately, since walking the object graph would recurse again off
+        # an already exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "guard state exceeded the recursion limit while pickling"
+        ) from e
     except Exception as e:
         # Deliberately broad, AssertionError included: GradScaler.__getstate__
         # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
