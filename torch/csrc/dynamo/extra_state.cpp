@@ -361,9 +361,11 @@ void ExtraState::clear_in_place() {
       // Dynamo internals; only a reader itself at depth zero (the
       // single-threaded case) is guaranteed to see them gone. Making reset()
       // atomic against an in-flight lookup is deferred
-      // (pytorch/pytorch#196394). _clear_cache_entries_for_region is the one
-      // depth-zero op that does not drain first: it erases one region in place,
-      // which a parked CLEAR_ALL (a whole-map swap) does not mind.
+      // (pytorch/pytorch#196394). The in-place erases
+      // (_clear_cache_entries_for_region, the _reset_precompile_entries*
+      // bindings) do not drain first: a parked eviction is an idempotent
+      // removal, so it commutes with erasing the same entries in place, and a
+      // depth-zero insert drains before it pushes.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
       // Split state until that holder runs: the strategy, frame state and
