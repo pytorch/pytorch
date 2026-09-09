@@ -58,6 +58,18 @@ inline void check_valid_input(const Tensor& input, IntArrayRef padding, int64_t 
       input.sizes());
 }
 
+// TODO(#196457): remove this overload once the torch-xpu-ops pin in
+// third_party/xpu.txt passes the rank as an argument. Its ReflectionPadKernels
+// still calls check_valid_input<2>(input, padding). torch-xpu-ops compiles every
+// TU with -DUSE_XPU (see its cmake/BuildFlags.cmake), while in-tree USE_XPU is
+// PRIVATE to torch_xpu, so this stays out of torch_cpu.
+#ifdef USE_XPU
+template <int dim>
+inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
+  check_valid_input(input, padding, dim);
+}
+#endif
+
 // Renders the spatial extents as "D: 1 H: 2 W: 3", using the trailing
 // `sizes.size()` labels. Only ever called to build an error message.
 inline std::string spatial_sizes_str(IntArrayRef sizes, const char* sep) {
