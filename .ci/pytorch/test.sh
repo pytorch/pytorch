@@ -586,6 +586,8 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
+  # TODO: fix the op to reuse/free teams instead of raising this limit.
+  export NVSHMEM_MAX_TEAMS=512
   _run_fabric_handle_tests
 }
 
