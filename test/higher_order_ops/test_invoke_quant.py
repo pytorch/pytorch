@@ -13,6 +13,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops import InvokeQuant
 from torch._inductor import config
+from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -214,7 +215,9 @@ class TestInvokeQuantInductorPrologue(TestCase):
         try:
             device_interface = get_interface_for_device(torch.device(device).type)
         except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+            raise unittest.SkipTest(
+                f"no Dynamo device interface registered for {device}"
+            ) from exc
 
         if not device_interface.is_triton_capable(device):
             raise unittest.SkipTest(f"requires Triton support for {device}")
@@ -223,6 +226,11 @@ class TestInvokeQuantInductorPrologue(TestCase):
             device_interface.raise_if_triton_unavailable(device)
         except TritonUnavailableError as exc:
             raise unittest.SkipTest(str(exc)) from exc
+
+        if not has_backend_feature(
+            torch.device(device), BackendFeature.TRITON_TEMPLATES
+        ):
+            raise unittest.SkipTest(f"requires Triton templates for {device}")
 
         if not is_big_gpu(torch.device(device)):
             raise unittest.SkipTest("requires large gpu to max-autotune")
