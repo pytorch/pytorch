@@ -361,14 +361,10 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
-    if (
-        len(device_node_mapping) == 1
-        and next(iter(device_node_mapping)).type
-        in (
-            _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
-            if expected_device_type is None
-            else (expected_device_type,)
-        )
+    if len(device_node_mapping) == 1 and next(iter(device_node_mapping)).type in (
+        _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
+        if expected_device_type is None
+        else (expected_device_type,)
     ):
         return None
 

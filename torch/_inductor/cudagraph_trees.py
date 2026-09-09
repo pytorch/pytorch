@@ -788,10 +788,12 @@ class CUDAWarmupNode:
             )
 
         # sdpa returns cpu tensors when not recording cuda graph
+        device_type = tree_backend.get_device_type()
+
         def add_ref(o: object) -> bool:
             return (
                 isinstance(o, torch.Tensor)
-                and o.device.type == tree_backend.get_device_type()
+                and o.device.type == device_type
                 and o.untyped_storage()._cdata not in non_cudagraph_inps_storage_ptrs
                 and o.untyped_storage().data_ptr() != 0
             )
@@ -928,6 +930,11 @@ class CUDAGraphNode:
         self.device = device_index
         self.stack_traces = stack_traces
         self.stream = stream
+
+        allocator = tree_backend.get_allocator_interface()
+        self._construct_tensor_from_storage_and_metadata = (
+            allocator.construct_tensor_from_storage_and_metadata
+        )
 
         # Enable re-record a cudagraph when static tensor address changed.
         # if not we should error when it changed.
@@ -1514,14 +1521,14 @@ class CUDAGraphNode:
         self.unaliased_in_all_paths = [False for _ in range(len(outputs))]
         self.static_output_tensors = [None for _ in range(len(outputs))]
 
+        device_type = tree_backend.get_device_type()
         for i, o in enumerate(outputs):
             if o is None or not isinstance(o, torch.Tensor):
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
             torch._check(
-                o.device.type == tree_backend.get_device_type()
-                or o.untyped_storage().data_ptr() == 0,
+                o.device.type == device_type or o.untyped_storage().data_ptr() == 0,
                 lambda: (
                     "Expected all cuda outputs in cuda graph recording. Non cuda output "
                     f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
@@ -1933,7 +1940,7 @@ class CUDAGraphNode:
         self, metadata: dict[str, Any], storage: UntypedStorage | None = None
     ) -> Tensor:
         s = self.create_storage(metadata) if storage is None else storage
-        return tree_backend.get_allocator_interface().construct_tensor_from_storage_and_metadata(
+        return self._construct_tensor_from_storage_and_metadata(
             metadata, cast(torch.types.Storage, s)
         )
 
@@ -2364,7 +2371,7 @@ class CUDAGraphTreeManager:
         graph_interface = tree_backend.get_graph_interface()
         with graph_capture_lock, torch.accelerator.device_index(device_index):
             torch.accelerator.synchronize()
-            self.stream = torch.Stream(device=device_index)
+            self.stream = graph_interface.create_stream(device_index)
             self.stream.wait_stream(torch.accelerator.current_stream())
 
             # Keeps Memory Pool Alive
@@ -2818,6 +2825,7 @@ class CUDAGraphTreeManager:
         if user_visible_output_idxs_set:
             self.has_live_user_visible_output_cloning = True
         self.ids_to_stack_traces[id] = stack_traces
+        device_type = tree_backend.get_device_type()
         self.ids_to_funcs[id] = WrappedFunction(
             model,
             list(static_input_idxs),
@@ -2825,8 +2833,7 @@ class CUDAGraphTreeManager:
             tuple(
                 t
                 for t in constants
-                if isinstance(t, torch.Tensor)
-                and t.device.type == tree_backend.get_device_type()
+                if isinstance(t, torch.Tensor) and t.device.type == device_type
             ),
             placeholders,
             mutated_input_idxs,
@@ -3187,6 +3194,7 @@ class CUDAGraphTreeManager:
                 )
 
         deleted = OrderedSet[Any]()
+        allocator = tree_backend.get_allocator_interface()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
@@ -3198,7 +3206,7 @@ class CUDAGraphTreeManager:
                 msg = self.format_dealloc_msg(
                     stack_trace, is_grad_output=is_grad_output
                 )
-                tree_backend.get_allocator_interface().free_and_remove_deleter(
+                allocator.free_and_remove_deleter(
                     tree_backend.StorageImplHandle(_storage_deref)
                 )
 

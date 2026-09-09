@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -2349,7 +2349,7 @@ def cudagraphify_impl(
         raise RuntimeError("Expected a current accelerator, but found none")
 
     torch.accelerator.synchronize()
-    stream = torch.Stream()
+    stream = torch.cuda.Stream() if accelerator.type == "cuda" else torch.Stream()
     stream.wait_stream(torch.accelerator.current_stream())
     with stream:
         model(list(static_inputs))
@@ -2358,10 +2358,12 @@ def cudagraphify_impl(
     torch.accelerator.synchronize()
 
     if accelerator.type == "cuda":
+        if not isinstance(stream, torch.cuda.Stream):
+            raise AssertionError("Expected a CUDA stream for CUDA graph capture")
         graph = torch.cuda.CUDAGraph()
         graph_context = torch.cuda.graph(
             graph,
-            stream=cast(torch.cuda.Stream, stream),
+            stream=stream,
             capture_error_mode="thread_local",
         )
         stream_context = contextlib.nullcontext()
