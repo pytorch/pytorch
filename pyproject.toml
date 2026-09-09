@@ -396,6 +396,7 @@ nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
 "nccl-lazy" = "torch.distributed.distributed_c10d:_register_builtin_nccl_lazy_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
+nccl4py = "torch.distributed.nccl4py_backend:_register_nccl4py_backend"
 
 [project.urls]
 Homepage = "https://pytorch.org"
