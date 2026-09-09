@@ -310,10 +310,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from torch._C._dynamo.eval_frame import (
-                _debug_get_cache_entry_list,
-                _debug_get_precompile_entries,
-            )
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
             from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
             message = (
@@ -322,7 +319,12 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 + f"function name: '{frame.f_code.co_name}', "
                 + f"line number: {frame.f_lineno}"
             )
-            cache_entries = _debug_get_cache_entry_list(frame.f_code)
+            # The buckets the lookup consulted: the region's own, then the
+            # default bucket an isolated region falls back to.
+            region_id = get_eval_frame_isolate_recompiles_id()
+            cache_entries = _get_cache_entries_for_region(frame.f_code, region_id)
+            if region_id >= 0:
+                cache_entries += _get_cache_entries_for_region(frame.f_code, -1)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
                     cache_entries,
@@ -339,7 +341,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             precompile_entries = [
                 e
                 for e in _debug_get_precompile_entries(frame.f_code)
-                if e.isolate_recompiles_id == get_eval_frame_isolate_recompiles_id()
+                if e.isolate_recompiles_id == region_id
             ]
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
@@ -714,23 +716,17 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
-    from .convert_frame import compile_lock
+    if isinstance(f, types.CodeType):
+        reset_code(f)
+    elif hasattr(f, "__code__"):
+        reset_code(f.__code__)
+    elif hasattr(getattr(f, "forward", None), "__code__"):
+        reset_code(f.forward.__code__)
+    else:
+        from . import reset  # type: ignore[attr-defined]
 
-    # Under compile_lock, like torch._dynamo.reset(): an in-flight compile
-    # holds a snapshot of this code's cache entries (recompile-reason logging,
-    # cache-size accounting) and reset_code frees them in place.
-    with compile_lock:
-        if isinstance(f, types.CodeType):
-            _reset_code(f)
-        elif hasattr(f, "__code__"):
-            _reset_code(f.__code__)
-        elif hasattr(getattr(f, "forward", None), "__code__"):
-            _reset_code(f.forward.__code__)
-        else:
-            from . import reset  # type: ignore[attr-defined]
-
-            reset()
-            log.warning("could not determine __code__ for %s", f)
+        reset()
+        log.warning("could not determine __code__ for %s", f)
 
 
 def nothing() -> None:
@@ -779,6 +775,12 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     return unaltered_fn
 
 
+# Every built-in nn.Module compiles through this one code object (OptimizedModule
+# wraps a skipfile forward in wrap_inline), so entries on it never say which
+# package owns the frame.
+_WRAP_INLINE_INNER_CODE = external_utils.wrap_inline(lambda: None).__code__
+
+
 def _refusal_frame_code(fn: Any) -> types.CodeType | None:
     # No getattr probe: a user nn.Module.__getattr__ can recurse on it.
     if (
@@ -787,9 +789,10 @@ def _refusal_frame_code(fn: Any) -> types.CodeType | None:
         and fn.__func__ is torch.nn.Module.__call__
     ):
         fn = innermost_fn(fn.__self__.forward)
-    if isinstance(fn, (types.FunctionType, types.MethodType)):
-        return fn.__code__
-    return None
+    if not isinstance(fn, (types.FunctionType, types.MethodType)):
+        return None
+    code = fn.__code__
+    return None if code is _WRAP_INLINE_INNER_CODE else code
 
 
 def innermost_backend(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -1085,16 +1088,21 @@ class _TorchDynamoContext:
         # below, once fn is final.
         user_package = self._package if self._user_package else None
         refusal_code: types.CodeType | None = None
+        recorded = False
 
         def refuse_if_another_package_serves() -> None:
+            nonlocal recorded
             code = refusal_code
-            if (
-                user_package is not None
-                and code is not None
-                and not user_package.has_guarded_codes_for(code)
-                and not user_package.owns_install_on(code, self._isolate_recompiles_id)
-                and _has_precompile_entries(code, self._isolate_recompiles_id)
-            ):
+            if recorded or user_package is None or code is None:
+                return
+            if user_package.has_guarded_codes_for(code):
+                # This package serves the frame from here on: latch, so the
+                # steady state is one bool read per call.
+                recorded = True
+                return
+            if not user_package.owns_install_on(
+                code, self._isolate_recompiles_id
+            ) and _has_precompile_entries(code, self._isolate_recompiles_id):
                 raise RuntimeError(
                     f"another CompilePackage is installed on {code.co_name} in "
                     "this compile region; uninstall it first or compile with "
