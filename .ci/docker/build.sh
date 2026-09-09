@@ -218,7 +218,7 @@ case "$tag" in
     GCC_VERSION=13
     ROCM_VERSION=10.1.0a20260903
     THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
-    USE_MSLK=0
+    USE_MSLK=1
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx950"
