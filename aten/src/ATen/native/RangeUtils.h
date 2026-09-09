@@ -34,7 +34,7 @@ inline void arange_check_bounds(
         endc.real());
     TORCH_CHECK(
         std::isfinite(startc.imag()) && std::isfinite(endc.imag()),
-        "unsupported range for real part: ",
+        "unsupported range for imaginary part: ",
         startc.imag(),
         " -> ",
         endc.imag());
@@ -93,16 +93,12 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
 
     TORCH_CHECK(!(xstepc.real() == 0 && xstepc.imag() == 0), "complex step must be nonzero");
     if(xstepc.real() == 0) {
-      int64_t sgn = (xstepc.imag() > 0) - (xstepc.imag() < 0);
-      size_d = std::ceil((distance.imag() + xstepc.imag() - sgn) / xstepc.imag());
+      size_d = std::ceil((distance.imag()) / xstepc.imag());
     } else if (xstepc.imag() == 0) {
-      int64_t sgn = (xstepc.real() > 0) - (xstepc.real() < 0);
-      size_d = std::ceil((distance.real() + xstepc.real() - sgn) / xstepc.real());
+      size_d = std::ceil((distance.real()) / xstepc.real());
     } else {
-      int64_t sgn_real = (xstepc.real() > 0) - (xstepc.real() < 0);
-      int64_t sgn_imag = (xstepc.imag() > 0) - (xstepc.imag() < 0);
-      auto size_d_real = std::ceil((distance.real() + xstepc.real() - sgn_real) / xstepc.real());
-      auto size_d_imag = std::ceil((distance.imag() + xstepc.imag() - sgn_imag) / xstepc.imag());
+      auto size_d_real = std::ceil((distance.real()) / xstepc.real());
+      auto size_d_imag = std::ceil((distance.imag()) / xstepc.imag());
       TORCH_CHECK(size_d_real == size_d_imag,
                   "cannot perform step due to incorrect upper and lower bounds");
         size_d = size_d_real; // size_d_imag is expected to be same

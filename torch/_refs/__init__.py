@@ -5642,6 +5642,11 @@ def arange(
             if step.imag != 0 and math.isfinite(step.imag)
             else 0
         )
+        if step.real != 0 and step.imag != 0:
+            torch._check(
+                real_length == imag_length,
+                lambda: "cannot perform step due to incorrect upper and lower bounds",
+            )
 
         length = max(real_length, imag_length)
     else:
