@@ -67,6 +67,12 @@ if [[ "$(uname)" == 'Darwin' ]]; then
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
+# Preview wheels keep desired_cuda=rocmpreview (stable HUD job names) and put the
+# pin only in the PEP 440 local version, e.g. +rocm10.1.0a20260805.
+if [[ "$DESIRED_CUDA" == "rocmpreview" ]]; then
+  ROCM_PREVIEW_PIN=$(tr -d '[:space:]' < "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+rocm${ROCM_PREVIEW_PIN}"
+fi
 
 export PYTORCH_BUILD_NUMBER=1
 
