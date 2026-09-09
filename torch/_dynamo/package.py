@@ -111,6 +111,52 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by the picklers that rebuild objects pickle cannot do by
+    reference: code objects, closure cells, python modules, and bound methods. Each subclass
+    keeps its own dispatch; this class fixes HOW they are rebuilt so a fix in
+    one pickler cannot be missed in the other.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -804,6 +850,13 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -822,6 +875,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -829,6 +884,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
