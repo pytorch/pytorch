@@ -536,6 +536,12 @@ void initDynamoBindings(PyObject* torch) {
             isolate_recompiles_id >= -1,
             "isolate_recompiles_id must be >= -1 (-1 is the default region)");
         PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
+        // This get-then-create (and the identical one in
+        // set_code_exec_strategy_with_token below) is the same TOCTOU that
+        // keeps compare_and_set_code_exec_strategy from creating-on-absent:
+        // init_and_set_extra_state CHECK-aborts if the slot filled in between.
+        // It is atomic under the GIL, so unreachable on a normal build; on a
+        // free-threaded build these two would have to serialize, deferred here.
         ExtraState* extra = get_extra_state(code_obj);
         if (extra == nullptr) {
           extra = init_and_set_extra_state(code_obj);
