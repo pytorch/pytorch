@@ -51,18 +51,18 @@ class _XctaConfig(NamedTuple):
     subrow_target: int = _SUBROW_TARGET
 
 
-def _split_C(N, vec, smem_budget_elems, subrow_target=None):
+def _split_C(N, vec, max_subrow_elems, subrow_target=None):
     # C = chunks per output row. The reshape needs C | N exactly, with the sub-row length a
     # multiple of vec that fits its tile. We do NOT maximize it -- that pins ~1 block/SM and halves
     # bandwidth -- but aim for subrow_target and take the nearest divisor, searching outward. The
-    # search is bounded by the smem budget rather than by N, which matters when the divisors near
+    # search is bounded by the sub-row cap rather than by N, which matters when the divisors near
     # the target lie tens of thousands apart.
     target = _SUBROW_TARGET if subrow_target is None else subrow_target
     step = max(vec, 1)
     # Floor on sub-row length: below it stage 1 barely reduces (a prime N degenerates to N
     # partials and a no-op stage 1). Those stay on the grid-striding fallback instead.
     lo = max(step, 256)
-    hi = min(smem_budget_elems, N)
+    hi = min(max_subrow_elems, N)
     hi -= hi % step
     if hi < lo:
         return None
@@ -246,7 +246,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     vec = math.gcd(N, 128 // (elsize * 8))
     # C is fixed in the plan (it sets stage-1's sub-row length N//C and stage-2's partial
     # count), so the same C must serve every M -> derive it once here, from N alone.
-    C = _split_C(N, vec, _RB._SMEM_BUDGET // elsize, subrow_target)
+    C = _split_C(N, vec, _RB._MAX_ROW_BYTES // elsize, subrow_target)
     if C is None:
         # Prime / poorly-factored N: no clean reshape split. The caller memoizes the
         # None -> the K0 general kernel serves it (any N, no reshape, O(1) compile).
