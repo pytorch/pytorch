@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
+    ROCM_VERSION,
     SM70OrLater,
     SM89OrLater,
     TEST_CUDNN,
@@ -926,7 +927,6 @@ print("RECOVERED")
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
-                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
                 archs = ["gfx90a", "gfx942"]
                 if ROCM_VERSION >= (6, 4):
                     archs.extend(["gfx1200", "gfx1201"])
@@ -7804,6 +7804,7 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI350_ARCH)
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
@@ -7845,6 +7846,7 @@ print(value, end="")
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI350_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
