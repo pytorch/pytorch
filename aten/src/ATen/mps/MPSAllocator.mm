@@ -6,6 +6,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
 
 #include <algorithm>
@@ -549,12 +550,16 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
   }
   // before releasing the buffers make sure the command buffer has finished.
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
-  m_mutex.unlock();
-  auto stream = getDefaultMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  });
-  m_mutex.lock();
+  // commitAndWait throws on a faulted command buffer, so re-lock via scope guard: our caller holds
+  // m_mutex through a lock_guard and would otherwise unlock a mutex we no longer own while unwinding.
+  {
+    m_mutex.unlock();
+    auto relock = c10::make_scope_exit([this]() { m_mutex.lock(); });
+    auto stream = getDefaultMPSStream();
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    });
+  }
   // Give back every heap no allocation is left in
   for (const auto& poolIt : m_pools) {
     release_free_heaps(*poolIt.second, std::numeric_limits<size_t>::max());

@@ -26,6 +26,12 @@
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
+namespace at::mps {
+// DIAGNOSTIC (env MPS_FAULT_NAME_DIAG) fault-naming hooks, defined in MPSStream.mm.
+void mpsSetCurrentOp(const char* name);
+bool mpsFaultNameDiag();
+} // namespace at::mps
+
 namespace at::native::mps {
 /**
  * Computes distance from lowest to highest element offset in given tensor.
@@ -846,6 +852,10 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
     id<MTLLibrary> lib,
     const std::string& fname) {
+  // DIAGNOSTIC: central place to record the currently-executing kernel name for fault attribution.
+  if (at::mps::mpsFaultNameDiag()) {
+    at::mps::mpsSetCurrentOp(fname.c_str());
+  }
   auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
   auto found_cpl = cplMap.find(key);
   if (found_cpl != cplMap.end()) {
@@ -1092,7 +1102,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
@@ -1194,7 +1204,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
       getMPSProfiler().beginProfileKernel(cplState, kernel_name, /*isGraph=*/false, mpsStream);
       [computeEncoder setComputePipelineState:cplState];

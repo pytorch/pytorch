@@ -13,6 +13,8 @@
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <bit>
+#include <cstdio>
+#include <cstdlib>
 #include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -584,6 +586,30 @@ static void min_max_out_mps(const Tensor& input_t,
   int64_t dims[1] = {dim_};
   auto iter = at::meta::make_reduction(input_t, output_t, IntArrayRef(dims, 1), keepdim, input_t.scalar_type());
   value_reduction_kernel_mps(iter, reduction_type == MPSReductionType::MIN ? "min_" : "max_");
+
+  // DIAGNOSTIC (env ARGMAX_DIAG): argmax indices MUST be in [0, input.size(dim)); anything outside proves
+  // the arg-reduction wrote garbage/uninitialized indices (a candidate producer of a bad index buffer).
+  if (std::getenv("ARGMAX_DIAG")) {
+    const int64_t dimsz = input_t.size(dim_);
+    auto h = indices_t.to(at::kCPU).contiguous();
+    const int64_t n = h.numel();
+    const int64_t* p = h.data_ptr<int64_t>();
+    int64_t mn = n ? p[0] : 0, mx = n ? p[0] : 0;
+    for (int64_t i = 1; i < n; i++) {
+      mn = p[i] < mn ? p[i] : mn;
+      mx = p[i] > mx ? p[i] : mx;
+    }
+    const bool bad = (mx >= dimsz || mn < 0);
+    fprintf(stderr,
+            "ARGMAX_%s: %s numel=%lld min=%lld max=%lld reduced_dim=%lld\n",
+            bad ? "BAD" : "OK",
+            func_name.c_str(),
+            static_cast<long long>(n),
+            static_cast<long long>(mn),
+            static_cast<long long>(mx),
+            static_cast<long long>(dimsz));
+    fflush(stderr);
+  }
 }
 
 // Min/Max with dim
@@ -639,6 +665,30 @@ static std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   }
 
   min_max_out_mps(input_t, dim, keepdim, output_t, indices_t, reduction_type, func_name);
+
+  // DIAGNOSTIC (env ARGMAX_DIAG): the argmax indices MUST be in [0, input.size(dim)); anything outside
+  // proves MPSGraph's arg-reduction wrote garbage/uninitialized indices (the producer of a bad index buffer).
+  if (std::getenv("ARGMAX_DIAG")) {
+    const int64_t dimsz = input_t.size(maybe_wrap_dim(dim, input_t.dim()));
+    auto h = indices_t.to(at::kCPU).contiguous();
+    const int64_t n = h.numel();
+    const int64_t* p = h.data_ptr<int64_t>();
+    int64_t mn = n ? p[0] : 0, mx = n ? p[0] : 0;
+    for (int64_t i = 1; i < n; i++) {
+      mn = p[i] < mn ? p[i] : mn;
+      mx = p[i] > mx ? p[i] : mx;
+    }
+    const bool bad = (mx >= dimsz || mn < 0);
+    fprintf(stderr,
+            "ARGMAX_%s: %s numel=%lld min=%lld max=%lld reduced_dim=%lld\n",
+            bad ? "BAD" : "OK",
+            func_name.c_str(),
+            static_cast<long long>(n),
+            static_cast<long long>(mn),
+            static_cast<long long>(mx),
+            static_cast<long long>(dimsz));
+    fflush(stderr);
+  }
 
   return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
