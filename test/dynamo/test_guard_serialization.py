@@ -101,6 +101,10 @@ def _empty_cell_base(x):
 EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
 
 
+def global_add(obj, x):
+    return x + 1
+
+
 class ModuleNotSerializable(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -140,6 +144,21 @@ class Inputs:
     def __init__(self, x, unused):
         self.x = x
         self.unused = unused
+
+
+class SlottedByName:
+    # A slot named for the function it will hold: a method bound under that name
+    # has a class-level member descriptor but no instance __dict__ to inspect.
+    __slots__ = ("global_add",)
+
+
+class GetattrProxy:
+    # __getattr__ dynamically serves the bound function's name; probing
+    # getattr(self, name) to check resolution would run user code (and recurse).
+    def __getattr__(self, name):
+        if name == "global_add":
+            return global_add
+        raise AttributeError(name)
 
 
 def _global_func_wrong_fqn(x):
@@ -542,6 +561,44 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
+    def test_bound_method_under_a_name_self_lacks(self):
+        # types.MethodType can bind a function under a name self has no
+        # attribute for. _reduce_bound_method looked that name up unguarded,
+        # and the AttributeError bypassed the package instead of carrying the
+        # function and self explicitly.
+        m = types.MethodType(global_add, Inputs(1, 2))
+        self.assertFalse(hasattr(m.__self__, "global_add"))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
+    def test_bound_method_under_a_slot_name(self):
+        # A method bound under a __slots__ member-descriptor name has no
+        # instance __dict__, and the slot value is restored only after the
+        # method is rebuilt, so getattr(self, name) cannot be trusted to resolve
+        # at load. _reduce_bound_method carries the function and self explicitly.
+        obj = SlottedByName()
+        obj.global_add = global_add
+        m = types.MethodType(global_add, obj)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, SlottedByName)
+
+    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
+        # self defines __getattr__, so probing getattr(self, name) to check
+        # resolution would run user code and can recurse. _reduce_bound_method
+        # carries the function and self explicitly instead of probing.
+        m = types.MethodType(global_add, GetattrProxy())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, GetattrProxy)
+
 
 @torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(TestGuardSerializationBase):
@@ -553,6 +610,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
+        # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
+        bound = types.MethodType(global_add, Inputs(1, 2))
+
+        def fn(f, x):
+            if callable(f):
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
