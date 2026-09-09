@@ -336,7 +336,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                         f"triggered by the following guard failure(s):\n{failures}"
                     )
                     message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
-            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            precompile_entries = [
+                e
+                for e in _debug_get_precompile_entries(frame.f_code)
+                if e.isolate_recompiles_id == get_eval_frame_isolate_recompiles_id()
+            ]
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
                 for entry in precompile_entries:
@@ -775,6 +779,19 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     return unaltered_fn
 
 
+def _refusal_frame_code(fn: Any) -> types.CodeType | None:
+    # No getattr probe: a user nn.Module.__getattr__ can recurse on it.
+    if (
+        inspect.ismethod(fn)
+        and isinstance(fn.__self__, torch.nn.Module)
+        and fn.__func__ is torch.nn.Module.__call__
+    ):
+        fn = innermost_fn(fn.__self__.forward)
+    if isinstance(fn, (types.FunctionType, types.MethodType)):
+        return fn.__code__
+    return None
+
+
 def innermost_backend(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     Unwrap backend wrapper chain via _torchdynamo_orig_backend to find the
@@ -1055,20 +1072,26 @@ class _TorchDynamoContext:
 
         # Lookup is region-exact but not owner-exact: while another package's
         # entries serve this frame in this context's region, Dynamo never
-        # reaches this context's callback, so a capturing package records
-        # nothing and a later save writes a zero-guarded artifact whose install
-        # skip_code()s the frame. Refuse when a user-supplied package does not
-        # own the entries serving the frame -- at decoration and again on each
-        # call, since the neighbour can be installed in either order. The
-        # transparent cache's package is exempt: a hit installs its own entries
-        # and a miss records and writes nothing.
+        # reaches this context's callback, so a capturing package that has
+        # recorded nothing for the frame keeps recording nothing, and a later
+        # save writes a zero-guarded artifact whose install skip_code()s the
+        # frame. Refuse when a user-supplied package with no guarded code for the
+        # frame does not own the entries serving it -- at decoration and again on
+        # each call, since the neighbour can arrive in either order. A package
+        # that already recorded the frame is served legitimately (the manual
+        # DynamoCache flow: an old wrapper served by a freshly loaded package),
+        # and the transparent cache's package is exempt: a hit installs its own
+        # entries and a miss records and writes nothing. refusal_code is bound
+        # below, once fn is final.
         user_package = self._package if self._user_package else None
-        code = getattr(fn, "__code__", None)
+        refusal_code: types.CodeType | None = None
 
         def refuse_if_another_package_serves() -> None:
+            code = refusal_code
             if (
                 user_package is not None
                 and code is not None
+                and not user_package.has_guarded_codes_for(code)
                 and not user_package.owns_install_on(code, self._isolate_recompiles_id)
                 and _has_precompile_entries(code, self._isolate_recompiles_id)
             ):
@@ -1077,8 +1100,6 @@ class _TorchDynamoContext:
                     "this compile region; uninstall it first or compile with "
                     "isolate_recompiles=True"
                 )
-
-        refuse_if_another_package_serves()
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
@@ -1213,6 +1234,12 @@ class _TorchDynamoContext:
 
         is_jit_tracing = torch._C._is_tracing
         is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
+
+        # Resolved once fn is final (wrap_inline may have rebound it above), on
+        # the frame Dynamo intercepts: a module's forward rather than the
+        # skipfile _wrapped_call_impl that OptimizedModule hands this context.
+        refusal_code = _refusal_frame_code(fn)
+        refuse_if_another_package_serves()
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -1876,6 +1903,10 @@ def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool
     # _TorchCompileWrapper rather than the string the user wrote.
     from torch._dynamo.package import emits_native_code
 
+    # A user backend that bakes no native code can declare it.
+    user_backend = getattr(backend, "compiler_fn", backend)
+    if getattr(user_backend, "emits_native_code", True) is False:
+        return False
     return emits_native_code(str(getattr(backend, "compiler_name", backend)))
 
 
