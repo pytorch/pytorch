@@ -188,13 +188,19 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2: Support for ROCm distribution from TheRock
-        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
-        # (include/, lib/, bin/, ...), so the module's own location is the
-        # ROCM_HOME we want. Use find_spec to locate it without importing.
-        spec = importlib.util.find_spec('_rocm_sdk_core')
-        if spec is not None and spec.origin is not None:
-            rocm_home = str(Path(spec.origin).parent.resolve())
+        # Guess #2: Support for ROCm distribution from TheRock.
+        # TheRock splits the SDK across wheels under site-packages:
+        #   _rocm_sdk_core  - HIP runtime, hipcc
+        #   _rocm_sdk_devel - the above plus math-library headers
+        #                     (hipblas, hipsparse, hipsolver, ...)
+        # Prefer devel when present so JIT extensions can include ATen CUDA
+        # headers that hipify to those libraries. Use find_spec to locate
+        # the package without importing it.
+        for modname in ('_rocm_sdk_devel', '_rocm_sdk_core'):
+            spec = importlib.util.find_spec(modname)
+            if spec is not None and spec.origin is not None:
+                rocm_home = str(Path(spec.origin).parent.resolve())
+                break
     if rocm_home is None:
         # Guess #3
         hipcc_path = shutil.which('hipcc')
