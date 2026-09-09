@@ -921,7 +921,7 @@ class OrderedSetVariable(BaseSetVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
-            key = next(iter(self.items))
+            key = next(reversed(self.items))
         except StopIteration:
             raise_observed_exception(KeyError, tx, args=["pop from an empty set"])
         self.should_reconstruct_all = True

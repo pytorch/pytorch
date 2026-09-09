@@ -1010,6 +1010,14 @@ class OrderedSetHierarchyTests(_BaseSetTests):
         self.assertIs(s, alias)
         self.assertEqual(list(s), [2])
 
+    @make_dynamo_test
+    def test_pop_removes_last_item(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        s = OrderedSet([1, 2, 3])
+        self.assertEqual(s.pop(), 3)
+        self.assertEqual(list(s), [1, 2])
+
 
 class FrozensetHierarchyTests(_BaseSetTests):
     """frozenset must not be a subclass of set (CPython parity). Part of #192874."""
