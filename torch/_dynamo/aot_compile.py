@@ -344,7 +344,14 @@ class AOTCompiledFunction:
         if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = self.prepare_f_locals(*args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
-            raise RuntimeError(f"GuardManager check failed, reason: {reason}")
+            msg = f"GuardManager check failed, reason: {reason}"
+            if self._guard_globals is None and "KeyError on G[" in reason:
+                msg += (
+                    " -- the guard scope was reconstructed from the serialized "
+                    "bytecode and lacks this global; pass f_globals to "
+                    "load_compiled_function so it can be resolved."
+                )
+            raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -672,6 +679,7 @@ class AOTCompiledModel:
             f"No AOT compiled graph matched this call. Tried "
             f"{len(self.compiled_results)} compiled input(s):"
         ]
+        missing_global = False
         for i, result in enumerate(self.compiled_results):
             # __post_init__ always leaves a live artifact with a populated
             # guard_manager (only serialize() nulls it, on a copy).
@@ -689,11 +697,19 @@ class AOTCompiledModel:
                 continue
             parts = reason.verbose_code_parts or [str(reason)]
             joined = "; ".join(str(p) for p in parts).replace("\n", " ")
+            if "KeyError on G[" in joined:
+                missing_global = True
             lines.append(f"  [{i}] {joined}")
-        lines.append(
-            "Add a ModelInput covering this call, or check whether a guard that "
-            "distinguishes it was dropped by guard_filter_fn."
-        )
+        if missing_global:
+            lines.append(
+                "A guarded global is missing from this process; define it (or "
+                "load with an f_globals carrying it) so the guard can resolve it."
+            )
+        else:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether a guard "
+                "that distinguishes it was dropped by guard_filter_fn."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
