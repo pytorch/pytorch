@@ -7,15 +7,6 @@ import functools
 import torch
 
 
-# Reference GPU the constants were TUNED on. Thresholds multiply by a RATIO against these, so
-# it is exactly 1.0 there and the anchors reproduce byte-identically. EXACT property values --
-# do not round. A heuristic reads the ratio, never these directly.
-_REF_SM_COUNT = 148
-_REF_MAX_THREADS_PER_SM = 2048
-_REF_SMEM_PER_SM = 233472
-_REF_DEVICE_LANES = _REF_SM_COUNT * _REF_MAX_THREADS_PER_SM  # resident-thread capacity
-
-
 class HWCaps:
     # Raw, portable device facts + a few derived quantities the heuristics want.
     def __init__(self, device=None):
@@ -66,24 +57,6 @@ class HWCaps:
     def fill_blocks(self, threads_per_block, waves=1.0):
         # Number of blocks needed to fill the device to `waves` occupancy waves.
         return int(self.sm_count * self.blocks_per_sm(threads_per_block) * waves)
-
-    @property
-    def device_lanes(self):
-        # Total resident-thread capacity: the natural unit for how much parallel work saturates this
-        # GPU, so size thresholds scale with it.
-        return self.sm_count * self.max_threads_per_sm
-
-    @property
-    def fill_scale(self):
-        # Ratio of this device's fill capacity to the tuning reference, so the same rule fills a larger
-        # device at a larger numel and a smaller one sooner.
-        return self.device_lanes / _REF_DEVICE_LANES
-
-    @property
-    def smem_scale(self):
-        # Ratio of this device's per-SM smem to the reference: how much accumulator state fits before
-        # occupancy drops, which is the lever behind the nfields sensitivity.
-        return self.smem_per_sm / _REF_SMEM_PER_SM
 
 
 @functools.cache

@@ -27,28 +27,24 @@ from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import block_reduce, WARP, warp_reduce
 
 
-def _magic(d):
-    # Magic-number reciprocal for exact n // d as (n * m) >> sh: one multiply-shift instead of a
-    # runtime 64-bit divide per element per pair. Granlund-Montgomery, as in aten's IntDivider,
-    # in the round-up form the Int32-positive domain allows -- exact, and an instruction cheaper.
-    l = (d - 1).bit_length()
-    return (1 << (31 + l)) // d + 1, 31 + l
+# (extent, element-stride) pairs from TensorIterator, fastest dim first.
+Pairs = list[tuple[int, int]]
 
 
-def _decode_offset(linear, vals, npairs):
-    # Mixed-radix decode of a linear index to a flat element offset. `vals` is a RUNTIME quad list,
-    # fastest dim first, so only the pair COUNT is baked and one kernel serves every geometry
-    # sharing it; the last pair needs neither div nor mod. INT64 throughout, since numel can exceed
-    # 2**31 and an int32 product wraps negative and reads out of bounds.
-    rem = cutlass.Int64(linear)
+def _decode_offset(linear, divs, strides, npairs):
+    # Mixed-radix decode of a linear index to a flat element offset; only the pair COUNT is baked,
+    # so one kernel serves every geometry sharing it. The div/mod stays INT32 -- `linear` spans
+    # count or num_o, both asserted < 2**31 -- and only the offset product needs Int64. npairs >= 1:
+    # the caller drops the decode for an empty KEPT list.
+    rem = Int32(linear)
     if npairs == 1:
-        return rem * vals[3]
+        return cutlass.Int64(rem) * strides[0]
     off = cutlass.Int64(0)
     for j in range(npairs - 1):
-        q = (rem * vals[4 * j]) >> vals[4 * j + 1]
-        off = off + (rem - q * vals[4 * j + 2]) * vals[4 * j + 3]
+        q, r = divmod(rem, divs[j])
+        off = off + cutlass.Int64(r) * strides[j]
         rem = q
-    return off + rem * vals[4 * (npairs - 1) + 3]
+    return off + cutlass.Int64(rem) * strides[npairs - 1]
 
 
 class ReduceBlock:
@@ -74,8 +70,7 @@ class ReduceBlock:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
-        # The magic-division decode (_magic) is exact only for linear indices
-        # < 2^31; r spans count and o spans num_o, both Int32 in the kernel.
+        # The decode runs in Int32: r spans count and o spans num_o.
         if not (count < 2**31 and num_o < 2**31):
             raise AssertionError(
                 f"decode needs count and num_o < 2^31, got {count} and {num_o}"
@@ -134,16 +129,33 @@ class ReduceBlock:
         self,
         mIns: list,
         mOuts: list,
-        rvals: list,
-        kvals: list,
+        rexts: list,
+        rstrides: list,
+        kexts: list,
+        kstrides: list,
         count: cutlass.Int32,
         in_base: cutlass.Int64,
         limit: cutlass.Int64,
         project_n: cutlass.Int64,
         stream,
     ):
+        # The divisors need an MLIR context, so they are built here rather than by the caller. V2
+        # rather than V1 so `.divisor` stays readable across the kernel boundary.
+        rdivs = [cute.FastDivmodDivisorV2(e) for e in rexts]
+        kdivs = [cute.FastDivmodDivisorV2(e) for e in kexts]
         # Dynamic grid: read the output row count live so one compile serves any M.
-        self.kernel(mIns, mOuts, rvals, kvals, count, in_base, limit, project_n).launch(
+        self.kernel(
+            mIns,
+            mOuts,
+            rdivs,
+            rstrides,
+            kdivs,
+            kstrides,
+            count,
+            in_base,
+            limit,
+            project_n,
+        ).launch(
             grid=[mOuts[0].shape[0], 1, 1], block=[self.block, 1, 1], stream=stream
         )
 
@@ -152,28 +164,32 @@ class ReduceBlock:
         self,
         mIns: list,
         mOuts: list,
-        rvals: list,
-        kvals: list,
+        rdivs: list,
+        rstrides: list,
+        kdivs: list,
+        kstrides: list,
         count: cutlass.Int32,
         in_base: cutlass.Int64,
         limit: cutlass.Int64,
         project_n: cutlass.Int64,
     ):
+        """One block per kept coordinate; its `block` threads fold that output and merge.
+
+        Decode o -> this block's flat base, clamp the fold bound, fold (combining partial tuples
+        when from_partials, else reducing raw inputs), merge across the block, then project and
+        store from thread 0.
+        """
         trait = self.trait
         tidx, _, _ = cute.arch.thread_idx()
         o, _, _ = cute.arch.block_idx()
         nfields = const_expr(trait.nfields)
 
         acc = trait.init()
-        # Base flat input offset for this block's KEPT coordinate (decode o
-        # against the kept dims). 0 kept pairs (reduce-all) -> just in_base.
-        obase = in_base
+        obase = in_base  # 0 kept pairs (reduce-all) -> in_base alone
         if const_expr(self.npairs_kept > 0):
-            obase = in_base + _decode_offset(o, kvals, self.npairs_kept)
-        # Per-block fold bound: normally the full count, but with flat_tail clamped to the elements
-        # left before `limit`, so the overhanging last chunk folds nothing out of range.
+            obase = in_base + _decode_offset(o, kdivs, kstrides, self.npairs_kept)
         chunk_base = Int32(0)
-        rb = count
+        rb = count  # flat_tail: clamp so the overhanging last chunk folds nothing out of range
         if const_expr(self.flat_tail):
             left = limit - obase
             c64 = cutlass.Int64(count)
@@ -184,11 +200,10 @@ class ReduceBlock:
         elif const_expr(self.ragged_chunk):
             # RAGGED CHUNK SPLIT: the reduced run is cut into chunks of `count` STEPS whose extent need not
             # divide it, so the LAST chunk of every output is short and must not fold the next one's
-            # elements. The chunk pair is the fastest-varying kept pair, so its magic quad yields the chunk
-            # index once per BLOCK with no runtime divide. In STEPS, so a row split and a column split use
-            # it unchanged.
-            q = (cutlass.Int64(o) * kvals[0]) >> kvals[1]
-            c = cutlass.Int64(o) - q * kvals[2]
+            # elements. The chunk pair is the fastest-varying kept pair, so one divmod per BLOCK yields
+            # the chunk index. In STEPS, so a row split and a column split use it unchanged.
+            _, cc = divmod(Int32(o), kdivs[0])
+            c = cutlass.Int64(cc)
             cnt = cutlass.Int64(count)
             chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
             left = limit - c * cnt
@@ -201,11 +216,8 @@ class ReduceBlock:
         reduce_fn = trait.reduce  # local bind: attribute access trips a dyn loop
         acc_dtype = trait.acc  # accumulator dtype (a compile-time Python class)
         if const_expr(self.from_partials):
-            # Stage 2: COMBINE pre-reduced accumulator tuples from the per-field partial buffers. Each
-            # output's partials are a contiguous run, and the base must be decoded from kept_pairs or every
-            # row reads row 0's. The fold is a DYNAMIC full-wave loop plus a constexpr remainder, because a
-            # static unroll scaled compile time with the partial count (~3s at 1e5). Bind the trait's
-            # attributes to locals -- attribute access inside a dynamic loop trips the IR flattener.
+            # Stage 2. The loop is dynamic: a static unroll scaled compile time with the
+            # partial count (~3s at 1e5).
             combine_fn = trait.combine
             fdtypes = trait.fdtypes
             nf = const_expr(nfields)
@@ -237,10 +249,16 @@ class ReduceBlock:
                         acc,
                         acc_dtype(
                             mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
+                                obase
+                                + _decode_offset(
+                                    base_r, rdivs, rstrides, self.npairs_red
+                                )
                             ]
                         ),
-                        Int32(obase + _decode_offset(base_r, rvals, self.npairs_red)),
+                        Int32(
+                            obase
+                            + _decode_offset(base_r, rdivs, rstrides, self.npairs_red)
+                        ),
                         True,
                     )
                 elif const_expr(self.gidx_from == "chunk"):
@@ -251,7 +269,10 @@ class ReduceBlock:
                         acc,
                         acc_dtype(
                             mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
+                                obase
+                                + _decode_offset(
+                                    base_r, rdivs, rstrides, self.npairs_red
+                                )
                             ]
                         ),
                         chunk_base + base_r,
@@ -262,7 +283,10 @@ class ReduceBlock:
                         acc,
                         acc_dtype(
                             mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
+                                obase
+                                + _decode_offset(
+                                    base_r, rdivs, rstrides, self.npairs_red
+                                )
                             ]
                         ),
                         base_r,
@@ -272,7 +296,7 @@ class ReduceBlock:
             # Invalid lanes read in_base (always in range) -- obase itself can be
             # past the end for an overhanging reduce-all chunk (rb clamped to 0).
             valid = base_r < rb
-            off = obase + _decode_offset(base_r, rvals, self.npairs_red)
+            off = obase + _decode_offset(base_r, rdivs, rstrides, self.npairs_red)
             off_s = off if valid else in_base
             val = acc_dtype(mIns[0][off_s])
             # gidx is the argmax index fed to the trait (Int32 domain): "flat" =
@@ -326,36 +350,36 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts):
+def _fakes(ts: list[torch.Tensor]) -> list:
     # Compile-time descriptors. Every operand is a 1D flat view whose extent is DYNAMIC, so one
     # structural kernel serves any length -- required, since the grid reads a shape live.
     return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
 
 
-def _operands(ts, read_only=False):
+def _operands(ts: list[torch.Tensor], read_only: bool = False) -> list:
     # The real tensors, as the compiled callable takes them. INPUTS go through read_only(), or a COW
     # input is materialized on export.
     return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
-def _quads(pairs):
-    # (extent, stride) pairs -> the flat quad list _decode_offset consumes. Runs once per NEW
-    # geometry (the boxed result is memoized), so the divide cost is off the repeat path.
-    out = []
-    for ext, strd in pairs:
-        m, sh = _magic(ext)
-        out += [Int64(m), Int64(sh), Int64(ext), Int64(strd)]
-    return out
+def _exts(pairs: Pairs) -> list:
+    # Extents for the decode's divisors, which the launch turns into FastDivmod objects inside
+    # the traced region (they need an MLIR context, so they cannot be built here).
+    return [Int32(ext) for ext, _ in pairs]
+
+
+def _strides(pairs: Pairs) -> list:
+    return [Int64(strd) for _, strd in pairs]
 
 
 def _geom_args(op):
-    # The RUNTIME geometry of a launch: magic-division quads for the two decodes plus the scalar
-    # bounds, all of which used to be baked const_exprs. The magic form needs indices < 2**31,
-    # which count/num_o assert. Unused row/col args are None, not dummies: an unused Int32 kernel
-    # parameter is not free (see tile.TileReduce.kernel).
+    # The RUNTIME geometry of a launch: the two decodes' extents and strides plus the scalar
+    # bounds, all of which used to be baked const_exprs.
     return (
-        _quads(op.red_pairs),
-        _quads(op.kept_pairs),
+        _exts(op.red_pairs),
+        _strides(op.red_pairs),
+        _exts(op.kept_pairs),
+        _strides(op.kept_pairs),
         Int32(op.count),
         Int64(op.in_base),
         Int64(op.limit),
@@ -380,7 +404,7 @@ def _launch(op, key, ins, outs):
     fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream())
 
 
-def _ti_pairs(x, out):
+def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
     """Input addressing for ``reduce x into out``, off TensorIterator: a dim is REDUCED iff the
     output stride along it is 0. Returns (red_pairs, kept_pairs) of (extent, input stride).
 
@@ -398,9 +422,11 @@ def _ti_pairs(x, out):
     return red, [(e, s) for e, s, _ in kept]
 
 
-def _probe(x, red_axes):
+def _probe(x: torch.Tensor, red_axes: set[int]) -> torch.Tensor:
     # A dummy output with the reduced dims set to 1, as reduce_op expects (it reads shapes and
-    # strides only). Shared by the classifier and the fallback so both see one TI decode.
+    # strides only). Shared by the classifier and the fallback so both see one TI decode. It must
+    # be its OWN allocation, not a view of x: TI takes an output's writable pointer, which would
+    # materialize a COW input.
     return torch.empty(
         [1 if i in red_axes else s for i, s in enumerate(x.shape)],
         device=x.device,
@@ -408,7 +434,7 @@ def _probe(x, red_axes):
     )
 
 
-def _flat(x):
+def _flat(x: torch.Tensor) -> torch.Tensor:
     # A 1D stride-1 view over x's ENTIRE storage: TI's element strides are storage-relative, and
     # x.reshape(-1) on a non-contiguous x would copy and break the stride math.
     n = max(x.untyped_storage().nbytes() // x.element_size(), 1)
@@ -419,7 +445,7 @@ def _flat(x):
 # runs on the TI-decomposed pairs, so it sees POST-coalesce geometry. ---
 
 
-def fast_kind(red_pairs, kept_pairs, nouts):
+def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
     """Which fast kernel serves this TI-decomposed reduction, or None for the general one.
 
     BOTH axes must coalesce to a single run, so the reduction is a dense 2D view; the stride-1
@@ -464,7 +490,7 @@ def _oneshot_ok(x):
 
     width = x.element_size() * 8
     vec = math.gcd(N, 128 // width)
-    tpr = max(WARP, rt.row_config(N, width, 1).tpr)
+    tpr = max(WARP, rt.row_config(N, width).tpr)
     return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
 
 
@@ -512,7 +538,7 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
-def _as_shape(out, out_shape):
+def _as_shape(out: torch.Tensor, out_shape: list[int]) -> torch.Tensor:
     # Give the flat output its n-D shape WITHOUT leaving it a view: the kernels allocate their own
     # buffer, and an aten reduction never aliases -- OpInfo's python-ref tests check that.
     if tuple(out.shape) == tuple(out_shape):
@@ -551,7 +577,7 @@ def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
 
     # Stage 1: one output per (row, chunk). The chunk pair is FASTEST-varying, which is what lets
-    # the ragged clamp read its magic quad from the front of kvals.
+    # the ragged clamp take its chunk index from the front of the kept lists.
     s1 = ReduceBlock(
         trait,
         count=s_chunk,
@@ -651,7 +677,7 @@ def reduce_dim2(trait, trait_key, x, dims, out_dtypes, block=_K0_BLOCK):
     return _reduce(trait, trait_key, x, dims, list(out_dtypes), 2, block=block)
 
 
-def _grid_size(L, block, sm_count, grid_mult=4):
+def _grid_size(L: int, block: int, sm_count: int, grid_mult: int = 4) -> int:
     # G = stage-1 chunks. Fill the device to grid_mult waves, capped by the work available: more
     # chunks means more stage-1 parallelism but a larger stage-2 fold.
     by_work = (L + block - 1) // block
@@ -683,7 +709,7 @@ def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
 
         # The launch is ONE row, so the ladder's row-packing tpr would leave the device on a fraction
         # of one CTA. rt.single_row_config returns None when the ladder's pick already stands.
-        cfg = rt.single_row_config(L, x.element_size() * 8, trait.nfields)
+        cfg = rt.single_row_config(L, x.element_size() * 8)
         kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
         outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
         return tuple(_as_shape(o, ()) for o in outs)

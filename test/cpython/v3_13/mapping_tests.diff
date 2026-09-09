@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/mapping_tests.py b/test/cpython/v3_13/mapping_tests.py
-index ed89a81a6ea..10fc6e7e467 100644
+index ed89a81a6ea685df63aa219b8646036ae7775c83..10fc6e7e46722e41f9c3e894d558c771e28501ad 100644
 --- a/test/cpython/v3_13/mapping_tests.py
 +++ b/test/cpython/v3_13/mapping_tests.py
 @@ -1,10 +1,64 @@
