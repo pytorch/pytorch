@@ -54,8 +54,13 @@ class TileMap:
     """
 
     def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
-        if tpr != 1 and tpr % WARP != 0:
-            raise ValueError(f"tpr must be 1 or a multiple of {WARP}, got {tpr}")
+        # The warp COUNT must be a power of two, not just a multiple of 32: the cross-warp
+        # butterfly spans tpr // WARP groups only then, and silently drops a partial otherwise.
+        nw = tpr // WARP
+        if tpr != 1 and (tpr % WARP or nw & (nw - 1)):
+            raise ValueError(
+                f"tpr must be 1 or a power-of-two multiple of {WARP}, got {tpr}"
+            )
         unroll = vec_size(N, itemsize) * loads
         if unroll > MAX_UNROLL:
             raise ValueError(
@@ -332,14 +337,22 @@ class TileReduce:
             # Every thread of the block folds the one output, so the tail is the row axis's
             # at tpr == nt.
             tpr = nt
-            if nt % WARP:
-                # _block_merge derives warps_per_row from nt, so a block that is not a whole number of warps
-                # leaves the last partial warp OUT of the merge -- a silently wrong reduction, measured 12-62%
-                # low. `block` is caller-settable, so the row axis's own check is not enough.
-                raise ValueError(f"a general-axis block must be whole warps, got {nt=}")
-        if axis == "row" and tpr != 1 and (tpr % WARP or tpr > nt or nt % tpr):
+            nwg = nt // WARP
+            if nt % WARP or nwg & (nwg - 1):
+                # _block_merge derives warps_per_row from nt, so a block that is not a whole POWER-OF-TWO
+                # number of warps leaves a partial warp OUT of the merge -- a silently wrong reduction,
+                # measured 12-62% low. `block` is caller-settable, so the row axis's check is not enough.
+                raise ValueError(
+                    f"a general-axis block must be a power-of-two warp count, got {nt=}"
+                )
+        nwpr = tpr // WARP
+        if (
+            axis == "row"
+            and tpr != 1
+            and (tpr % WARP or tpr > nt or nt % tpr or nwpr & (nwpr - 1))
+        ):
             raise ValueError(
-                f"tpr must be 1 or a multiple of {WARP} dividing nt: {tpr=} {nt=}"
+                f"tpr must be 1 or a power-of-two multiple of {WARP} dividing nt: {tpr=} {nt=}"
             )
         if use_tma and (axis != "row" or tpr != 1):
             raise ValueError(
