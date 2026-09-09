@@ -642,8 +642,7 @@ class GetattrProxy:
 
 
 class SlottedLoudGetattr:
-    # No instance __dict__: a plain getattr(self, "__dict__") lands here and
-    # raises something other than AttributeError.
+    # No instance __dict__: getattr(self, "__dict__") lands here and raises.
     __slots__ = ("val",)
 
     def __getattr__(self, name):
@@ -1230,11 +1229,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertLess(dump_size(fns) - one, one // 2)
 
     def test_locals_function_prunes_unguarded_values(self):
-        # A <locals> function is rebuilt by value too, and used to carry its
-        # defaults and closure verbatim: one unpicklable unguarded neighbour
-        # bypassed the whole package. Pruning has to keep the signature's
-        # shape -- defaults length, kwdefaults keys -- so a guard reading the
-        # structure rather than the values still rebuilds against it.
+        # A <locals> function is rebuilt by value too; carrying its defaults
+        # and closure verbatim let one unpicklable neighbour bypass the package.
+        # Pruning keeps the signature's shape (defaults length, kwdefaults keys).
         def outer():
             captured = UnpicklableDefault()
 
@@ -1520,6 +1517,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         builder = types.SimpleNamespace(
             guard_tree_values={id(fn): fn, id(fn.__defaults__): fn.__defaults__},
             guard_tree_children={},
+            guard_tree_verbatim={},
         )
         with self.assertRaisesRegex(
             PackageError, r"reached via: local_scope\['fn'\]\.__defaults__\[0\]"
@@ -1919,11 +1917,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_fqn_mismatched_function_prunes_an_unpicklable_called_default(self):
         # The call-site default binding (DefaultsSource, base = the function)
-        # registers the __defaults__ tuple via SEQUENCE_LENGTH, but the generic
-        # edge keys on the function, so the tuple was carried verbatim with its
-        # unpicklable sibling; only a full compile (all guards live) reaches it.
-        # Without the tuple edge this raises PackageError on the lock; with it
-        # the frame is captured and the reloaded guards still match.
+        # registers the tuple via SEQUENCE_LENGTH but the generic edge keys on the
+        # function, so the tuple was carried verbatim with its unpicklable sibling
+        # (full-compile only). With the tuple edge it captures and still matches.
         self._assert_reloads_and_still_matches(
             DecoratedCalledDefaultForwardModule(), torch.randn(3)
         )
