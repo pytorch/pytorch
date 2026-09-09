@@ -1334,11 +1334,10 @@ def get_desired_device_type_test_bases(
 def requires_capabilities(*caps: str):
     """Declare that a test method requires device capabilities.
 
-    Wraps the test to call ``type(self).get_capabilities()`` at runtime
-    and skip if any required capability is unsupported by the device.
-
-    Raises AssertionError if a capability is not declared in the
-    device's ``_capabilities()`` map.
+    If a required capability is missing from the device's ``_capabilities()``
+    map or is declared but unsupported, the test is skipped by raising
+    ``unittest.SkipTest``. The same capability preflight also runs during device
+    test ``setUp``.
     """
     caps_set = frozenset(caps)
 

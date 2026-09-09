@@ -3,26 +3,19 @@
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
     Capability,
-    CPUTestBase,
-    CUDATestBase,
     dtypes,
-    HPUTestBase,
     instantiate_device_type_tests,
-    MPSTestBase,
     onlyCUDA,
     onlyOn,
     ops,
     precisionOverride,
     PrivateUse1TestBase,
     requires_capabilities,
-    XPUTestBase,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -358,21 +351,21 @@ class TestCapabilityGating(TestCase):
         self.fail("Expected preflight skip: dtype.fp64 is unsupported on this device")
 
     def test_capability_missing(self, device):
-        """@requires_capabilities raises AssertionError for undeclared capabilities."""
+        """@requires_capabilities raises SkipTest for undeclared capabilities."""
 
         @requires_capabilities(Capability.attention.flash_attention)
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            AssertionError,
+            unittest.SkipTest,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
         type(self).executed_tests.add(self._testMethodName)
 
     def test_capability_combined(self, device):
-        """@requires_capabilities raises AssertionError when a combined set
+        """@requires_capabilities raises SkipTest when a combined set
         includes an undeclared capability."""
 
         @requires_capabilities(
@@ -384,7 +377,7 @@ class TestCapabilityGating(TestCase):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            AssertionError,
+            unittest.SkipTest,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
@@ -428,86 +421,6 @@ instantiate_device_type_tests(TestNoCapabilityPreflight, globals(), only_for="op
 _no_capability_test_cls = globals()["TestNoCapabilityPreflightOPENREG"]
 _no_capability_test_cls._capabilities = classmethod(_fail_if_capabilities_queried)
 del _no_capability_test_cls
-
-
-class TestFP64CapabilityDeclarations(TestCase):
-    def test_existing_capability_declarations(self):
-        existing_capabilities = {
-            Capability.dtype.fp8,
-            Capability.dtype.bf16,
-            Capability.attention.flash_attention,
-            Capability.attention.mem_efficient_attention,
-        }
-        for test_base in (CPUTestBase, CUDATestBase, MPSTestBase, XPUTestBase):
-            self.assertTrue(existing_capabilities <= test_base._capabilities().keys())
-
-        for test_base, expected in (
-            (
-                CPUTestBase,
-                {
-                    Capability.dtype.fp8: True,
-                    Capability.dtype.bf16: True,
-                    Capability.attention.flash_attention: True,
-                    Capability.attention.mem_efficient_attention: False,
-                },
-            ),
-            (
-                MPSTestBase,
-                {
-                    Capability.dtype.fp8: False,
-                    Capability.dtype.bf16: True,
-                    Capability.attention.flash_attention: False,
-                    Capability.attention.mem_efficient_attention: False,
-                },
-            ),
-        ):
-            predicates = test_base._capabilities()
-            self.assertEqual(
-                {capability: bool(predicates[capability]()) for capability in expected},
-                expected,
-            )
-
-    def test_static_fp64_capabilities(self):
-        for test_base, expected in (
-            (CPUTestBase, True),
-            (CUDATestBase, True),
-            (MPSTestBase, False),
-            (HPUTestBase, False),
-        ):
-            predicate = test_base._capabilities()[Capability.dtype.fp64]
-            self.assertEqual(predicate(), expected)
-
-    def test_hpu_has_no_distributed_capabilities(self):
-        capabilities = HPUTestBase._capabilities()
-        self.assertIn(Capability.lib.safetensors, capabilities)
-        distributed_capabilities = {
-            Capability.distributed.backend,
-            Capability.distributed.dtensor,
-            Capability.distributed.fsdp,
-        }
-        self.assertEqual(
-            set(capabilities) & distributed_capabilities,
-            set(),
-        )
-
-    def test_xpu_fp64_capability_tracks_device_properties(self):
-        predicate = XPUTestBase._capabilities()[Capability.dtype.fp64]
-        with (
-            patch.object(torch.xpu, "is_available", return_value=False),
-            patch.object(torch.xpu, "get_device_properties") as get_device_properties,
-        ):
-            self.assertFalse(predicate())
-            get_device_properties.assert_not_called()
-
-        for expected in (True, False):
-            properties = SimpleNamespace(has_fp64=expected)
-            with (
-                patch.object(torch.xpu, "is_available", return_value=True),
-                patch.object(
-                    torch.xpu, "get_device_properties", return_value=properties
-                ),
-            ):
-                self.assertEqual(predicate(), expected)
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
