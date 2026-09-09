@@ -182,12 +182,19 @@ For any sections not listed here, please refer to the CUDA semantics doc: :ref:`
 Enabling kernel asserts
 -----------------------
 
-Kernel asserts are supported on ROCm, but they are disabled due to performance overhead. It can be enabled
-by recompiling the PyTorch from source.
+Kernel asserts are **enabled by default** on ROCm builds. When enabled,
+device-side assert failures are reported through the OCKL device printf path.
+That path increases register pressure (VGPR/SGPR) in kernels that emit assert
+branches, which can reduce occupancy even when asserts never fire.
 
-Please add below line as an argument to cmake command parameters::
+To disable them when building from source, set the environment variable or
+CMake option::
 
-    -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON
+    USE_ROCM_KERNEL_ASSERT=0
+
+or::
+
+    -DUSE_ROCM_KERNEL_ASSERT=OFF
 
 Enabling/Disabling ROCm Composable Kernel
 -----------------------------------------
