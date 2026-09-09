@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import gc
 import operator
 import queue
 import sys
@@ -910,7 +909,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
             def __eq__(self, other):
                 if isinstance(other, ResettingBackend):
-                    resets.append(True)
+                    resets.append(_get_total_cache_entry_count(code))
                     reset_code(code)
                     return True
                 return NotImplemented
@@ -932,7 +931,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # runs at depth 0, drains the parked reset, and compiles fresh -- all
         # on this one call.
         self.assertEqual(opt2(x), f(x))
-        self.assertGreater(len(resets), 0)
+        self.assertEqual(resets, [1])
         # The backend is now pointer-identical, so this is a plain cache hit.
         self.assertEqual(opt2(x), f(x))
         self.assertEqual(_get_total_cache_entry_count(code), 1)
@@ -1118,6 +1117,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             DeletedGuardManagerWrapper("owns no entry"),
         )
         self.assertEqual(invalidated(), [])
+        self.assertEqual(len(_get_cache_entries_for_region(code, -1)), 2)
 
         # Invalidating w0 marks exactly the w0 entry; w1 survives unchanged.
         extra_state.invalidate(DeletedGuardManagerWrapper("gone"), w0)
@@ -1180,10 +1180,18 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         code = f.__code__
         hook = []
         compiles = []
+        compile_strategies = []
+        region_box = []
 
         class Backend:
             def __call__(self, gm, example_inputs):
                 compiles.append(gm)
+                if region_box:
+                    compile_strategies.append(
+                        get_code_region_exec_strategy(
+                            code, region_box[0]
+                        ).recursive_action
+                    )
                 return gm.forward
 
             def __hash__(self):
@@ -1202,6 +1210,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )(f)
         self.assertEqual(opt1(x), f(x))
         region = opt1._isolate_recompiles_id
+        region_box.append(region)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
         ctx = torch._dynamo.optimize(
             backend=Backend(), dynamic=False, isolate_recompiles=True
@@ -1255,8 +1264,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(compiles), 2)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
         self.assertEqual(_get_total_cache_entry_count(code), 1)
-        # Draining the parked eviction also applied the deferred strategy reset,
-        # so the region is back to the inherited DEFAULT.
+        # Draining the parked eviction also applied the deferred strategy reset
+        # before the recompile ran: the backend already saw the region back at
+        # the inherited DEFAULT, and it still reads so now.
+        self.assertEqual(compile_strategies, [FrameAction.DEFAULT])
         self.assertEqual(
             get_code_region_exec_strategy(code, region).recursive_action,
             FrameAction.DEFAULT,
@@ -1313,10 +1324,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
         )
         self.assertFalse(hook, "the backend __eq__ hook never fired")
-        # Parked, not evicted, while the lookup was live; drained by the reader.
+        # Parked, not evicted, while the lookup was live; the depth-zero
+        # fallback lookup() that follows drains it.
         self.assertEqual(seen, [True])
         self.assertFalse(_has_precompile_entries(code, 7))
         self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+
+    # ===== Basic isolation: independent caches per compile call =====
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1941,10 +1955,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     def test_isolate_recompiles_inherits_default_skip(self):
         """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
         TorchScript __init__ / etc.) is a correctness decision — the code
-        must not be traced. Isolated regions inherit this SKIP, so neither
-        the default nor isolated wrapper compiles a skip_code-marked code
-        object. Only the automatic RUN_ONLY (from a prior non-isolated
-        recompile-limit hit) is prevented from bleeding into regions."""
+        must not be traced. Regions with no recorded strategy of their own
+        inherit this SKIP, so neither the default nor isolated wrapper
+        compiles a skip_code-marked code object (a region that already
+        recorded a strategy keeps it: pytorch/pytorch#196520). Only the
+        automatic RUN_ONLY (from a prior non-isolated recompile-limit hit) is
+        prevented from bleeding into regions."""
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
@@ -2457,6 +2473,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(self._num_cache_entries(f), 1)
 
+        import gc
+
         del opt_a
         gc.collect()
 
@@ -2502,8 +2520,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
             class Backend:
                 # Carries the _torchdynamo_cache_key / _torchdynamo_orig_backend
-                # attributes get_backend inspects, without an __init__ that would
-                # flip the gate before the OFF half is measured.
+                # attributes get_backend inspects; nothing here enables the gate
+                # (_enable_precompile_cache_keys) before the OFF half is measured.
                 def __init__(self, inner):
                     self._torchdynamo_orig_backend = inner
                     self._torchdynamo_cache_key = object()
@@ -2719,6 +2737,16 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         reset_code(code2)
         self.assertFalse(compare_and_set_code_exec_strategy(code2, zero_token, skip))
         self.assertEqual(get_code_exec_strategy(code2).cur_action, FrameAction.DEFAULT)
+        # Before any global write the generation-0 token is live, so the same
+        # region-created state still accepts it.
+        code3 = g.__code__.replace()
+        set_code_region_exec_strategy(
+            code3, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        _, token3 = get_code_exec_strategy_token(code3)
+        self.assertEqual(token3, 0)
+        self.assertTrue(compare_and_set_code_exec_strategy(code3, token3, skip))
+        self.assertEqual(get_code_exec_strategy(code3).cur_action, FrameAction.SKIP)
 
     def test_region_exec_strategy_inherits_skip_but_not_run_only(self):
         from torch._C._dynamo.eval_frame import (
@@ -2761,8 +2789,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 get_code_region_exec_strategy(code, -1).cur_action,
                 FrameAction.RUN_ONLY,
             )
-            # ...but a global SKIP (a deliberate do-not-trace mark) applies
-            # everywhere, except where a region's own strategy wins.
+            # ...but a global SKIP (a deliberate do-not-trace mark) reaches every
+            # region without a recorded strategy of its own. A recorded region
+            # strategy (even the DEFAULT/DEFAULT a compile leaves) shadows it;
+            # that precedence gap is pytorch/pytorch#196520.
             set_code_region_exec_strategy(
                 code, -1, FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
             )
@@ -2920,6 +2950,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
 
         def run(force):
+            torch._dynamo.reset()
             cnt = torch._dynamo.testing.CompileCounter()
             ctx = torch._dynamo.optimize(cnt, dynamic=False)
             opt = ctx(f)
