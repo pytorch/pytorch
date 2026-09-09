@@ -15,6 +15,9 @@ SKIP_TEST_LISTS = [
     "original_kernel_tensor_N1_C3_H512_W512_zero_point_dtypetorch.int32_nbits8_cpu",
     # https://github.com/pytorch/pytorch/issues/195629
     "matmul_M256_N256_K256_trans_aFalse_trans_bTrue_cpu",
+    # aarch64 ~2us micro: expected/actual flipped 4.43 → 1.71 (IMPROVED) → 3.60
+    # (FAILED). Rewriting the CSV ping-pongs; do not rebaseline.
+    "stack_sizes(1,1,1)_N2_cpu_dim0",
 ]
 
 

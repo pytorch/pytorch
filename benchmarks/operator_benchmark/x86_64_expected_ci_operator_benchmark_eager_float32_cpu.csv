@@ -1135,7 +1135,7 @@ PyTorch,le,le_N8_dtypetorch.qint32_contigTrue_other_scalarTrue_out_variantTrue,s
 PyTorch,le,le_N64_dtypetorch.quint8_contigFalse_other_scalarFalse_out_variantFalse,short,False,25.299143,0.0,0.485708
 PyTorch,le,le_N64_dtypetorch.quint8_contigFalse_other_scalarFalse_out_variantTrue,short,False,37.745093,0.0,0.325552
 PyTorch,le,le_N64_dtypetorch.quint8_contigFalse_other_scalarTrue_out_variantFalse,short,False,16.2003,0.0,0.492895
-PyTorch,le,le_N64_dtypetorch.quint8_contigFalse_other_scalarTrue_out_variantTrue,short,False,31.542524,0.0,0.389569
+PyTorch,le,le_N64_dtypetorch.quint8_contigFalse_other_scalarTrue_out_variantTrue,short,False,20.971949,0.0,0.389569
 PyTorch,le,le_N64_dtypetorch.quint8_contigTrue_other_scalarFalse_out_variantFalse,short,False,19.797569,0.0,0.412527
 PyTorch,le,le_N64_dtypetorch.quint8_contigTrue_other_scalarFalse_out_variantTrue,short,False,27.429263,0.0,0.447989
 PyTorch,le,le_N64_dtypetorch.quint8_contigTrue_other_scalarTrue_out_variantFalse,short,False,15.318771,0.0,0.802153
