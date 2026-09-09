@@ -1391,6 +1391,8 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_tree_values: dict[int, Any] = {}
         # Container id -> ids of elements a guard source is rooted at THROUGH it.
         self.guard_tree_children: dict[int, set[int]] = {}
+        # Ids of values a guard bakes whole (EQUALS_MATCH); never pruned per value.
+        self.guard_tree_verbatim: set[int] = set()
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1755,15 +1757,13 @@ class GuardBuilder(GuardBuilderBase):
                     id(example_value)
                 )
                 # The generic edge above keys on id(base_example_value): obj.attr
-                # records its edge on the OBJECT, not obj.__dict__. A guard that
-                # reads the whole __dict__ (DunderDictVariable registers
-                # AttrSource(base, "__dict__")) makes _keep(mapping) True, so
-                # without an edge on the mapping _keep_container_verbatim would
-                # carry it verbatim and drag an unpicklable sibling. Mirror the
-                # DefaultsSource repair below on the instance __dict__, read via
-                # the plain slot so a user __getattr__ on a __slots__ receiver
-                # never runs here (an annotation read is keyed on the
-                # __annotations__ dict itself and takes the generic edge above).
+                # records its edge on the OBJECT, not obj.__dict__, but a whole
+                # __dict__ read (DunderDictVariable registers AttrSource(base,
+                # "__dict__")) makes _keep(mapping) True, so without an edge on the
+                # mapping it would be carried verbatim with an unpicklable sibling.
+                # Mirror the DefaultsSource repair below on the instance __dict__,
+                # read via the plain slot so no user __getattr__ runs (annotation
+                # reads key on the __annotations__ dict and take the generic edge).
                 if isinstance(source, AttrSource):
                     mapping = _instance_dict(base_example_value)
                     if mapping is not None and source.member in mapping:
@@ -2906,6 +2906,8 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
+        if self.save_guards:
+            self.guard_tree_verbatim.add(id(val))
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -4265,6 +4267,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         missing_values: dict[int, Any],
         *args: Any,
         guard_tree_children: dict[int, set[int]] | None = None,
+        guard_tree_verbatim: set[int] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -4275,6 +4278,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Absent for the pickler-level unit tests, which never root a guard at a
         # kept container, so an empty map keeps their containers verbatim.
         self.guard_tree_children = guard_tree_children or {}
+        self.guard_tree_verbatim = guard_tree_verbatim or set()
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4403,20 +4407,17 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     # Note [Reconstructing a function a guard is rooted at]
     #
-    # A function whose qualname does not resolve back to it cannot be pickled by
-    # reference -- every functools.wraps wrapper is one, copying the wrapped
-    # function's __module__/__qualname__ while living in the decorator's file --
-    # so it becomes a _Missing sentinel, which is right for one nothing depends
-    # on. When a guard's source walks THROUGH it, evaluating that source against
-    # the sentinel fails the whole load, so it is rebuilt from its code object
-    # instead (FunctionPicklerBase._reduce_function). Rebuilding drags along
-    # whatever the function holds (cells, defaults, attributes, module scope), so
-    # only values some guard tree node references are carried (_keep) and the
-    # rest become sentinels. A registered plain container is carried verbatim
-    # unless a guard is rooted at one of its elements through it
-    # (_keep_container_verbatim): a whole-tuple/dict guard (wrap_listlike's
-    # SEQUENCE_LENGTH / CONSTANT_MATCH) rebakes its constant from the rebuilt
-    # function at load, so a pruned element would fail it forever, silently.
+    # A function whose qualname does not resolve back to it (every functools.wraps
+    # wrapper: it copies __module__/__qualname__ while living in the decorator's
+    # file) cannot be pickled by reference and becomes a _Missing sentinel, fine
+    # for one nothing depends on. When a guard's source walks THROUGH it, the
+    # sentinel fails the whole load, so it is rebuilt from its code object instead
+    # (FunctionPicklerBase._reduce_function). Rebuilding drags along whatever it
+    # holds (cells, defaults, attributes, module scope), so only values some guard
+    # tree node references are carried (_keep); the rest become sentinels. A plain
+    # container is verbatim unless an element is guarded through it and no guard
+    # bakes it whole (_keep_container_verbatim): a pruned element under a
+    # whole-value EQUALS_MATCH would fail that guard forever, silently.
 
     def _keep(self, value: object) -> bool:
         """Identity match; an interned value that collides is kept, harmlessly."""
@@ -4437,29 +4438,22 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole.
 
         A dict/tuple SUBCLASS is always verbatim: its type/identity must survive
-        for the guard reading the slot. A plain dict/tuple is verbatim only when
-        no element is individually guarded (a whole-container EQUALS_MATCH/length
-        guard reads it, which pruning would break). When a guard is rooted at a
-        value INSIDE a plain container it is pruned per value -- else an unguarded
-        unpicklable sibling (a threading.Lock a decorator stashed) fails the dump.
-
-        The verbatim and per-value cases coexist by construction: a plain
-        container carried whole is read by a keys/identity (dict) or length
-        (tuple) guard that a pruned value preserves, while a whole-value
-        EQUALS_MATCH -- which does bake tuple values -- keeps its container
-        verbatim instead; a guard rooted at an element records a child->element
-        edge that forces per-value pruning. The shapes we have identified that
-        read a plain container whole while also rooting an edge at one of their
-        elements are a function's __defaults__ (a whole-tuple EQUALS_MATCH plus a
-        call-site default binding, repaired at the DefaultsSource site) and its
-        __dict__ (a DunderDict guard keeps the mapping whole while an attribute
-        guard reads an element through it).
-        get_guard_manager_from_source records the edge on the container itself so
-        those shapes prune per value here rather than carry an unpicklable sibling.
+        for the guard reading the slot. A plain dict/tuple is verbatim when a
+        guard bakes it whole (guard_tree_verbatim: EQUALS_MATCH, which a pruned
+        element would break forever, silently) or when no guard is rooted at an
+        element THROUGH it (guard_tree_children); only the remaining case prunes
+        per value, so an unguarded unpicklable sibling (a threading.Lock a
+        decorator stashed) does not fail the dump. get_guard_manager_from_source
+        records the edges on the container itself (the DefaultsSource and
+        instance-__dict__ repairs), since the generic edge keys on the function.
         """
         if not self._keep(container):
             return False
         if type(container) in (dict, tuple):
+            # A whole-value EQUALS_MATCH bakes the contents, so a call-site
+            # default binding on a sibling must not prune what it rebakes.
+            if id(container) in self.guard_tree_verbatim:
+                return True
             # Prune per value only when a guard is rooted at an element THROUGH
             # this container; an element that is _keep for an unrelated reason
             # (interned, shared, reachable elsewhere) must not force a prune that
@@ -4555,6 +4549,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             type_params = tuple(
                 self._prune(t, "unguarded function type param") for t in type_params
             )
+        # A str docstring always pickles; only a reassigned object is pruned.
+        doc = obj.__doc__
+        if doc is not None and type(doc) is not str:
+            doc = self._prune(doc, "unguarded function doc")
         return self._reduce_function(
             obj,
             defaults=defaults,
@@ -4562,7 +4560,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             closure=closure,
             attributes=attributes,
             annotations=annotations,
-            doc=self._prune(obj.__doc__, "unguarded function doc"),
+            doc=doc,
             type_params=type_params,
             globals_snapshot=snapshot,
         )
@@ -4755,11 +4753,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                     resolved = getattr(resolved, name, None)
             if resolved is not obj:
                 # See Note [Reconstructing a function a guard is rooted at].
-                # A module absent from sys.modules (exec-created, or __module__
-                # None) is an fqn mismatch too: pickling by reference would
-                # import __module__ and re-read the qualname without rounding
-                # back to this object, so rebuild a guarded function by value
-                # and prune an unguarded one rather than mis-serialize.
+                # A module absent from sys.modules (exec-created, __module__ None)
+                # is an fqn mismatch too -- pickling by reference could not round
+                # back to this object -- so rebuild a guarded function by value.
                 if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
                 return self._reduce_function_by_value(obj)
@@ -5012,13 +5008,6 @@ def pickle_guards_state(
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
     for leaf in leaves:
-        # A guard rooted at a bound method reads through __func__, so the
-        # function _reduce_bound_method carries must be rebuilt, not pruned.
-        # reducer_override checks missing_values before guard_tree_values, so
-        # register the func here, before missing_values is populated below.
-        if inspect.ismethod(leaf) and id(leaf) in guard_tree_values:
-            guard_tree_values.setdefault(id(leaf.__func__), leaf.__func__)
-    for leaf in leaves:
         if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
             base = leaf.__self__
             if id(base) not in guard_tree_values:
@@ -5037,6 +5026,7 @@ def pickle_guards_state(
         missing_values,
         buf,
         guard_tree_children=builder.guard_tree_children,
+        guard_tree_verbatim=builder.guard_tree_verbatim,
     )
 
     # Snapshot the search roots before the pruning below empties global_scope.
@@ -5065,12 +5055,11 @@ def pickle_guards_state(
     except torch._dynamo.exc.PackageError:
         raise
     except RecursionError as e:
-        # A guard rooted at an fqn-mismatched function is now traversed rather
-        # than dropped, so a deep (finite, acyclic) object graph hanging off it,
-        # or a pathological __reduce__ that never memoizes, overflows the
-        # recursion limit here. That is a serialization limit, not a compiler
-        # bug: bypass it (or raise under strict_precompile) like any other
-        # unpicklable value. Reporting WHERE would recurse off an exhausted stack.
+        # A guard rooted at an fqn-mismatched function is now traversed, so a
+        # deep (finite, acyclic) object graph or a never-memoizing __reduce__
+        # hanging off it overflows the recursion limit here: a serialization
+        # limit, bypassed like any other unpicklable value, not a compiler bug.
+        # Reporting WHERE would recurse off an exhausted stack.
         raise torch._dynamo.exc.PackageError(
             "guard state exceeded the recursion limit while pickling"
         ) from e
@@ -5919,10 +5908,14 @@ def format_user_stack_trace(
     return "\n".join(lines)
 
 
-def describe_backend(backend: Callable[..., object] | None) -> str:
+def describe_backend(backend: object | None) -> str:
     """Return a human-readable string describing a backend callable for debugging."""
     if backend is None:
         return "None"
+    if not callable(backend):
+        # A precompile backend is cached by its _torchdynamo_cache_key
+        # (get_backend, cache_entry.cpp), not by the callable.
+        return f"_torchdynamo_cache_key {backend!r} (id={id(backend):#x})"
 
     # _TorchCompileWrapper is the internal wrapper created by torch.compile().
     # It has structured fields that are more informative than generic introspection.
@@ -6018,8 +6011,9 @@ def get_guard_fail_reason_helper(
         # None of the guard entries failed - a backend match issue
         cached_desc = describe_backend(cache_entry_backend)
         new_desc = describe_backend(backend)
+        kind = "callables" if callable(cache_entry_backend) else "cache keys"
         reason = (
-            f"BACKEND_MATCH failure: torch.compile detected different backend callables."
+            f"BACKEND_MATCH failure: torch.compile detected different backend {kind}."
             f" Cached backend: {cached_desc}."
             f" New backend: {new_desc}."
             " If this is unexpected, wrap your backend in functools.partial (or reuse the"
