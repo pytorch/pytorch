@@ -22,7 +22,7 @@ from ..pattern_matcher import (
     MatchResult,
     stable_topological_sort,
 )
-from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
+from ..utils import is_bf16x9_matmul, OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -301,7 +301,12 @@ class PostGradBatchLinearFusion(BatchFusion):
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[1].meta["val"]  # type: ignore[union-attr]
+        # fbgemm.gmm has no precision argument and bypasses ATen/cuBLAS.
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[2].meta["val"].shape  # type: ignore[union-attr]
         return (
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
@@ -316,7 +321,10 @@ class GroupLinearFusion(GroupFusion):
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[0].meta["val"].shape  # type: ignore[union-attr]
+        input_value = node.args[0].meta["val"]  # type: ignore[union-attr]
+        if is_bf16x9_matmul(input_value.device.type, input_value.dtype):
+            return False
+        input_shape = input_value.shape
         weight_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
         return (
             len(input_shape) == 2
