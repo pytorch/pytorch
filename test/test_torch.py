@@ -54,7 +54,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA)
+    get_all_device_types, skipXLA, onlyAccelerator)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -67,6 +67,7 @@ from torch.testing._internal.common_dtype import (
     get_all_qint_dtypes, all_types_complex_float8_and, all_passthru_types_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.profiler import kineto_available
 from torch.testing._internal.common_utils import IS_WINDOWS
 
 if TEST_WITH_TORCHINDUCTOR:
@@ -132,6 +133,67 @@ class TestTorchDeviceType(TestCase):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.complex64, torch.complex128)
+    def test_zero_dense_view_with_storage_offset(self, device, dtype):
+        base = make_tensor((64, 96), dtype=dtype, device=device, low=1, high=2)
+        original = base.clone()
+        base[16:32].zero_()
+        self.assertEqual(base[16:32].count_nonzero().item(), 0)
+        self.assertEqual(base[:16], original[:16])
+        self.assertEqual(base[32:], original[32:])
+
+    @onlyNativeDeviceTypes
+    def test_zero_transposed_dense_view(self, device):
+        base = torch.ones(64, 96, device=device)
+        base[16:32].t().zero_()
+        self.assertEqual(base[16:32].count_nonzero().item(), 0)
+        self.assertEqual(base[:16], torch.ones(16, 96, device=device))
+        self.assertEqual(base[32:], torch.ones(32, 96, device=device))
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.complex64)
+    def test_zero_strided_view_with_gaps(self, device, dtype):
+        base = make_tensor((64, 96), dtype=dtype, device=device, low=1, high=2)
+        original = base.clone()
+        base[:, ::2].zero_()
+        self.assertEqual(base[:, ::2].count_nonzero().item(), 0)
+        self.assertEqual(base[:, 1::2], original[:, 1::2])
+
+    @onlyNativeDeviceTypes
+    def test_zero_empty_view_leaves_storage_intact(self, device):
+        base = torch.ones(4, device=device)
+        base[2:2].zero_()
+        self.assertEqual(base, torch.ones(4, device=device))
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
+            torch.bits16, torch.float4_e2m1fn_x2)
+    def test_zero_dtypes_without_fill_kernel(self, device, dtype):
+        raw = torch.ones(1024, dtype=torch.uint8, device=device)
+        raw.view(dtype).zero_()
+        self.assertEqual(raw.count_nonzero().item(), 0)
+
+    @onlyCUDA
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[16:32].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @onlyCUDA
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_strided_emits_fill_kernel(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[:, ::2].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
 
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
@@ -1730,7 +1792,7 @@ class TestTorchDeviceType(TestCase):
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
-        target = torch.randint(0, 14, (3, 30), device=device)
+        target = torch.randint(1, 14, (3, 30), device=device)
         input_lengths = [50, 50, 50]
         target_lengths = [30, 25, 20]
         res = module(input, target, input_lengths, target_lengths)
@@ -2125,6 +2187,7 @@ class TestTorchDeviceType(TestCase):
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
                           lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_put_fn(x, ind, 1.),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
@@ -3322,7 +3385,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
@@ -3337,6 +3400,33 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(input_s, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
+
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_special_values(self, device, dtype):
+        special = torch.tensor(
+            [float("nan"), -float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
+             torch.finfo(dtype).tiny, torch.finfo(dtype).tiny / 2],
+            dtype=dtype, device=device)
+        dense = torch.randn(4099, dtype=dtype, device=device)
+        dense[:special.numel()] = special
+        strided = torch.empty(4099 * 2, dtype=dtype, device=device)[::2]
+        strided.copy_(dense)
+        self.assertEqual(
+            dense.to(torch.float32).view(torch.uint8),
+            strided.to(torch.float32).view(torch.uint8))
+
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            src.to(torch.float32)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
@@ -6620,7 +6710,7 @@ class TestDevicePrecision(TestCase):
     exact_dtype = True
 
     # FIXME: move to indexing test suite
-    @onlyCUDA
+    @onlyAccelerator
     def test_index_add_bfloat16(self, device):
         inp_tensor = torch.randn(5, 3, device='cpu').bfloat16()
         t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.bfloat16, device='cpu')
@@ -11275,10 +11365,10 @@ class TestTensorDeviceOps(TestCase):
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
 add_neg_dim_tests()
-instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
