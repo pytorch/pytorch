@@ -1004,7 +1004,7 @@ def forward(self, primals_1):
         self.assertEqual(f(inp), f_compiled(inp))
 
     def test_sparse_csr_creation_requires_grad_errors(self):
-        # AOTAutograd without dynamo gives bogus 0-sized grad; eager, #192093 fine
+        # AOTAutograd without dynamo gives bogus 0-sized grad, see #196450
         def f(v):
             crow = torch.tensor([0, 2, 4])
             col = torch.tensor([0, 1, 0, 1])
