@@ -4808,7 +4808,7 @@ def pickle_guards_state(
         # assert in __reduce__ and properties. Each is a legitimate limit of
         # what a package can carry, reported as a bypass rather than failing
         # the compile.
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
