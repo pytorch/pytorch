@@ -5537,8 +5537,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and reduction_type in ("sum", "prod")
         )
         strict_reduction_loop = strict_reduction and not self.persistent_reduction
-        # Ordered signed-zero ties need the tuple-reduce arg helpers.
-        strict_suffix = "_strict" if config.strict_signed_zero else ""
         # Combiner for the persistent strict path: "+" for sum, "*" for prod
         # (identity 0.0 / 1.0 comes from `default`); the loop uses combine_fn.
         strict_op = "*" if reduction_type == "prod" else "+"
@@ -5664,6 +5662,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer.splice(f"{result_var} = {value}")
 
         def final_argreduce(buffer, result_var, value, index, result_kind="index"):
+            # Only the index-only kinds may take the two-pass helper.
+            suffix = "_with_first_index" if result_kind == "index" else "_with_index"
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
                 buffer,
@@ -5676,7 +5676,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_value, result_index = result_var
                 buffer.splice(
                     f"""\
-                    {result_value}, {result_index} = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
+                    {result_value}, {result_index} = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
                     {result_value} = {self.reduction_resize(f"{result_value}")}
                     {result_index} = {self.reduction_resize(f"{result_index}")}
                     """
@@ -5684,14 +5684,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif result_kind == "value":
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_val")}
                     """
                 )
             else:
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                     """
                 )
@@ -5968,10 +5968,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     else f"{reduction_range_prefix}index"
                 )
                 if scalar_argreduce:
+                    index_only = argreduce_result_kind() == "index"
+                    block_suffix = "_with_first_index" if index_only else "_with_index"
                     block_index = f"tl.broadcast_to({where_cond(index_var, index_max)}, {self.dense_size_str()})"
                     self.compute.splice(
                         f"""\
-                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{root_op}_with_index{strict_suffix}(
+                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{root_op}{block_suffix}(
                         {where_cond(value, default)}, {block_index}, {dim}
                     )
                     {accumulator}, {accumulator_index} = triton_helpers.{root_op}imum_with_index(

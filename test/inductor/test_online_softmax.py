@@ -686,7 +686,7 @@ class TestScalarAccumulators(TestCase):
         x[5].fill_(2.0)
         x[7, 8192] = x[7].amax() + 1
         _, code = self.check_codegen(f, x, marker=self.HINT)
-        self.assertIn("_block = triton_helpers.max_with_index(", code)
+        self.assertIn("_block = triton_helpers.max_with_first_index(", code)
         self.assertIn("_block = triton_helpers.min_with_index(", code)
         self.assertIn("tl.full([XBLOCK, 1], ", code)
 
@@ -778,9 +778,8 @@ class TestScalarAccumulators(TestCase):
         act, _ = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
         self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
 
-    @inductor_config.patch(strict_signed_zero=True)
     @parametrize("n", [33, 8193])
-    def test_strict_signed_zero_arg_value(self, n):
+    def test_max_value_signed_zero_tie(self, n):
         x = torch.zeros(2, n, device=GPU_TYPE)
         x[:, 0] = -0.0
         values, indices = torch.compile(lambda t: torch.max(t, -1))(x)

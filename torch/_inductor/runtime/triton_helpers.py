@@ -344,28 +344,28 @@ def _first_index_of(value, result, index, dim):
 
 
 @triton.jit
-def min_with_index(value, index, dim):
+def min_with_first_index(value, index, dim):
     min_value = min2(value, dim)
     return min_value, _first_index_of(value, min_value, index, dim)
 
 
 @triton.jit
-def max_with_index(value, index, dim):
+def max_with_first_index(value, index, dim):
     # Two native reductions (NaN-propagating max, then the smallest index that
     # attains it) are much cheaper than a tuple reduce with a NaN-aware combine.
+    # The index is the one the combine picks; the value is the max rather than
+    # the winning lane's, which differs on a tie between -0.0 and 0.0.
     max_value = max2(value, dim)
     return max_value, _first_index_of(value, max_value, index, dim)
 
 
 @triton.jit
-def min_with_index_strict(value, index, dim):
+def min_with_index(value, index, dim):
     return tl.reduce((value, index), dim, minimum_with_index)
 
 
 @triton.jit
-def max_with_index_strict(value, index, dim):
-    # The tuple reduce returns the value of the winning lane, which differs
-    # from the two-pass form only for a tie between -0.0 and 0.0.
+def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
