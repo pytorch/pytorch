@@ -29,7 +29,7 @@ from torch._dynamo.guards import (
     CompileId,
     GuardsStatePickler,
 )
-from torch._dynamo.package import CompilePackage
+from torch._dynamo.package import CompilePackage, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -422,10 +422,11 @@ class GuardedDefaultsTupleModule(torch.nn.Module):
         self.fn = fn
 
     def forward(self, x):
-        # EQUALS_MATCH on the containers themselves, with no per-element source.
+        # EQUALS_MATCH on the containers themselves (no per-element source) AND a
+        # call-site default binding for `a`: that edge must not prune `b`.
         if self.fn.__defaults__ == (2.0, 1.0) and self.fn.__kwdefaults__ == {"c": 3.0}:
             x = x + 1
-        return x + 2
+        return self.fn(x, b=5.0)
 
 
 def keep_dict_attribute(func):
@@ -1097,11 +1098,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(out.__dict__["cache"], _Missing)
 
     def test_a_whole_tuple_guard_keeps_defaults_verbatim(self):
-        # A __defaults__ tuple that carries a whole-tuple guard (the tuple is in
-        # guard_tree_values) while one element is _keep for an UNRELATED reason
-        # (interned, shared, reachable elsewhere) but is NOT a child of the tuple
-        # must stay verbatim: pruning the unguarded sibling to _Missing would
-        # rebake the whole-tuple guard against a value it can never match at load.
+        # A __defaults__ tuple under a whole-tuple guard whose element is _keep
+        # for an UNRELATED reason (interned, shared) but is NOT a child of the
+        # tuple stays verbatim: pruning the sibling would break that guard at load.
         def base(x, a="alpha", b="beta"):
             return x
 
@@ -1858,9 +1857,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             FQN_MISMATCH_GLOBAL = old_value
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
-        # A guard on the container itself registers no per-element source, so
-        # pruning the elements is a silent permanent cache miss, not a load
-        # error; see the Note in guards.py.
+        # A whole-value guard on the container bakes its contents, so the
+        # call-site default binding on a sibling must not prune the tuple: that
+        # is a silent permanent cache miss, not a load error (Note in guards.py).
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)
@@ -1902,35 +1901,42 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             inner.__defaults__ = original
 
+    def _assert_reloads_and_still_matches(self, mod, x):
+        # Capture, save, reset, reload through the transparent cache and serve
+        # under fail_on_recompile: the saved guards still MATCH, not merely
+        # "the frame was captured" (a pruned baked value fails silently).
+        DynamoCache.clear()
+        PrecompileContext.clear()
+        expected = mod(x)
+        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_fqn_mismatched_function_prunes_an_unpicklable_called_default(self):
         # The call-site default binding (DefaultsSource, base = the function)
         # registers the __defaults__ tuple via SEQUENCE_LENGTH, but the generic
-        # container->element edge keys on the function, so the tuple was carried
-        # verbatim with its unpicklable sibling. _test_serialization's guard
-        # filter drops the whole-tuple guard, so only a full compile (all guards
-        # live) reaches this shape -- drive a real compile here.
-        mod = DecoratedCalledDefaultForwardModule()
-        PrecompileContext.clear()
-        # Serializes cleanly with the edge recorded on the tuple; without it this
-        # raises PackageError("cannot pickle '_thread.lock' object"). Pin that
-        # the frame was captured rather than bypassed.
-        torch.compile(mod, backend="eager")(torch.randn(3))
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertTrue(entry["backend_ids"])
+        # edge keys on the function, so the tuple was carried verbatim with its
+        # unpicklable sibling; only a full compile (all guards live) reaches it.
+        # Without the tuple edge this raises PackageError on the lock; with it
+        # the frame is captured and the reloaded guards still match.
+        self._assert_reloads_and_still_matches(
+            DecoratedCalledDefaultForwardModule(), torch.randn(3)
+        )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_fqn_mismatched_function_prunes_a_verbatim_dict_read(self):
-        # A guard that reads the WHOLE __dict__ (DunderDict keeps the mapping)
-        # plus an element through it recorded no child edge on __dict__ (the
-        # generic rule keys on the function), so an unpicklable unguarded
-        # sibling (func.cache) bypassed the frame. Full-compile only, like the
-        # called-default shape; without the mapping edge this raises PackageError.
-        mod = DecoratedWholeDictAttributeForwardModule()
-        PrecompileContext.clear()
-        torch.compile(mod, backend="eager")(torch.randn(3))
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertTrue(entry["backend_ids"])
+        # A guard that reads the WHOLE __dict__ plus an element through it
+        # recorded no child edge on __dict__ (the generic rule keys on the
+        # function), so an unpicklable unguarded sibling (func.cache) bypassed
+        # the frame. Full-compile only; the mapping edge prunes it per value.
+        self._assert_reloads_and_still_matches(
+            DecoratedWholeDictAttributeForwardModule(), torch.randn(3)
+        )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_attribute_guard_on_a_slotted_receiver_runs_no_user_getattr(self):
