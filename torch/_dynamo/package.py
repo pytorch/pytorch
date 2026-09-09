@@ -536,10 +536,13 @@ def _resume_global_renames(
         for name in entry.function_names:
             # Two entries in one package sharing a capture-time name would
             # collapse onto one token-suffixed global (second wins). The token
-            # separates packages, not entries within a package, so make the
-            # collision loud here rather than silently rebinding.
+            # separates packages, not entries within a package, so surface the
+            # collision here rather than silently rebinding. RuntimeError (not
+            # AssertionError) so a corrupt on-disk artifact is caught by the
+            # failed-install fallback in eval_frame instead of crashing
+            # torch.compile at decoration time.
             if name in renames:
-                raise AssertionError(
+                raise RuntimeError(
                     f"duplicate resume-function name {name!r} within one package"
                 )
             renames[name] = f"{name}_{package_token}"
@@ -1134,12 +1137,12 @@ def _uninstall_abandoned_package(
     # blocks (it parks the reset when the cache lock is unavailable).
     from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
+    for code in precompile_codes.values():
+        _reset_precompile_entries_for_owner(code, region_id, owner)
     for module, values_by_name in installed_globals.items():
         for name, value in values_by_name.items():
             if module.__dict__.get(name) is value:
                 del module.__dict__[name]
-    for code in precompile_codes.values():
-        _reset_precompile_entries_for_owner(code, region_id, owner)
 
 
 class CompilePackage:
@@ -1290,7 +1293,7 @@ class CompilePackage:
                     f"code_source mismatch: {code.code_source} != {code_source}"
                 )
 
-        if function_name is not None:
+        if function_name is not None and function_name not in code.function_names:
             code.function_names.append(function_name)
 
     @property
