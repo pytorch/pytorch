@@ -13,6 +13,7 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
+from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -1194,6 +1195,45 @@ class TestFXMatcherUtils(JitTestCase):
         tearDown = getattr(test_model, "tearDown", None)
         if callable(setup):
             tearDown()
+
+
+class TestFXSourceMatcherUtils(JitTestCase):
+    def test_get_source_partitions_input_nodes_deterministic(self):
+        """input_nodes order must follow graph traversal order, not set hash order.
+
+        Regression test for gh#147170: get_source_partitions() used set() for
+        input_nodes/output_nodes, making their order vary across Python
+        invocations (PYTHONHASHSEED). The fix uses insertion-ordered dicts so
+        nodes are returned in the order they were encountered during graph
+        traversal, which is topological.
+        """
+        import torch.fx as fx
+
+        # Build a graph with a two-node partition that has two distinct
+        # external inputs.  x appears before y in the graph, so input_nodes
+        # must always be [x, y], never [y, x].
+        g = fx.Graph()
+        x = g.placeholder("x")
+        y = g.placeholder("y")
+        a = g.call_function(torch.add, (x, y))
+        b = g.call_function(torch.mul, (x, y))
+        a.meta["source_fn_stack"] = [("linear1", torch.nn.Linear)]
+        b.meta["source_fn_stack"] = [("linear1", torch.nn.Linear)]
+        g.output((a, b))
+        gm = fx.GraphModule(torch.nn.Module(), g)
+
+        result = get_source_partitions(gm.graph, [torch.nn.Linear])
+        self.assertIn(torch.nn.Linear, result)
+        parts = result[torch.nn.Linear]
+        self.assertEqual(len(parts), 1)
+
+        # input_nodes must be in graph-traversal order: x appears before y
+        self.assertIs(parts[0].input_nodes[0], x)
+        self.assertIs(parts[0].input_nodes[1], y)
+
+        # output_nodes must be in graph-traversal order: a appears before b
+        self.assertIs(parts[0].output_nodes[0], a)
+        self.assertIs(parts[0].output_nodes[1], b)
 
 
 if __name__ == "__main__":
