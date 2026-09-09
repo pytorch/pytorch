@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/refcount_contention.h>
 #include <cstring>
 
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
@@ -16,6 +17,7 @@ PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
   std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
+  torch::utils::set_immortal_if_possible(self.get());
   return self.release();
 }
 

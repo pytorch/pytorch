@@ -28,10 +28,11 @@ _CUTEDSL_DSL_NAME = "cutedsl"
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     # Current version - Note Version.from_part(release=(4.4.1)) is better
     #                   but > v26 of packaging.
-    Version(f"{4}.{4}.{1}"),
-    Version(f"{4}.{4}.{2}"),
-    Version(f"{4}.{5}.{2}"),
-    Version(f"{4}.{6}.{2}"),
+    Version("4.4.1"),
+    Version("4.4.2"),
+    Version("4.5.2"),
+    Version("4.6.2"),
+    Version("4.7.1"),
 }
 
 

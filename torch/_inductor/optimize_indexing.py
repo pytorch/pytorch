@@ -198,7 +198,10 @@ def _index_expr_arg(loop_body: LoopBody, node: Any) -> tuple[str, sympy.Expr] | 
         and index.target == "get_index"
     ):
         return None
-    return index.args[0], loop_body.indexing_exprs[index.args[0]]
+    name = index.args[0]
+    if not isinstance(name, str):
+        return None
+    return name, loop_body.indexing_exprs[name]
 
 
 def _range_implied_indices(loop_body: LoopBody, predicate: Any) -> OrderedSet[str]:
