@@ -356,17 +356,27 @@ void ExtraState::clear_in_place() {
       // interrupted lookup makes reset()'s clean-slate contract asynchronous: a
       // reset() on another thread parks here while this thread's lookup holds
       // depth > 0 and returns with the entries still present and servable,
-      // until the next depth-zero holder drains them. The readers that could
-      // observe them -- lookup, _get_total_cache_entry_count,
-      // _debug_get_cache_entry_list -- all apply pending evictions before they
-      // read, so a Python caller never sees the parked entries as live. The one
-      // depth-zero op that does NOT drain first is
-      // _clear_cache_entries_for_region, which erases a single region in place;
-      // that is safe because a parked CLEAR_ALL swaps the whole map when it
-      // finally runs and does not mind that one region is already gone. This
-      // cross-thread park is new with releasing
-      // cache_mutex during guard evaluation; the old recursive mutex would have
-      // blocked the peer instead.
+      // until the next depth-zero holder drains them. lookup,
+      // _get_total_cache_entry_count and _debug_get_cache_entry_list apply
+      // pending evictions before they read, but apply_pending_evictions gates
+      // on cache_python_depth, a CROSS-thread atomic: the drain waits until no
+      // thread is inside a lookup window on this code object, not merely until
+      // the next reader. While a peer thread holds one open all three still
+      // report the parked entries as live, and reset() has by then cleared its
+      // Python-side bookkeeping (orig_code_map, torch/_dynamo/__init__.py), so
+      // a compile of this frame racing the parked CLEAR_ALL can serve a stale
+      // entry or KeyError out of Dynamo internals. Only a reader on a thread
+      // that itself sits at depth zero (the common single-threaded case) is
+      // guaranteed to see them gone. Making reset() atomic against an in-flight
+      // lookup -- wait for depth zero, or gate its Python clear on the C++
+      // clear having applied -- is deferred (tracked with
+      // pytorch/pytorch#196394). The one depth-zero op that does NOT drain
+      // first is _clear_cache_entries_for_region, which erases a single region
+      // in place; that is safe because a parked CLEAR_ALL swaps the whole map
+      // when it finally runs and does not mind that one region is already gone.
+      // This cross-thread park is new with releasing cache_mutex during guard
+      // evaluation; the old recursive mutex would have blocked the peer
+      // instead.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
       // Split state until that holder runs: the strategy, frame state and
@@ -595,6 +605,15 @@ void reset_extra_state(PyCodeObject* code) {
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
+  // This only rejects re-installing the SAME pointer; it still lets
+  // _PyCode_SetExtra destroy a live old state when a different non-null one is
+  // installed. What makes that unreachable is the caller: the sole path that
+  // installs a non-null state, init_and_set_extra_state, CHECKs the slot is
+  // null first, so "never free an ExtraState another thread may be parked on"
+  // is enforced there. Tightening this to reject a non-null old_extra_state
+  // outright would make the invariant structural rather than caller-enforced;
+  // that is a behavioral change deferred here (tracked with
+  // pytorch/pytorch#196394).
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
