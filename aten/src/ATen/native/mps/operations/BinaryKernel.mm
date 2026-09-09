@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Lerp.h>
+#include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -61,6 +62,10 @@ void binary_op_kernel(const std::string func_name,
 
 static void atan2_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "atan2");
+}
+
+static void pow_tensor_tensor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "pow");
 }
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
@@ -413,6 +418,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
 REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_mps_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_mps_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_mps_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_mps_kernel)

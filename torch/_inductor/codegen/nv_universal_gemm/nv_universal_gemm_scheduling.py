@@ -3,12 +3,15 @@
 NVIDIA Universal GEMM scheduling for PyTorch Inductor.
 """
 
+from __future__ import annotations
+
 import dataclasses
+import enum
 import hashlib
 import logging
-from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
+import torch
 from torch._inductor.utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -29,16 +32,10 @@ from ...ir import (
 )
 from ...kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
-    GemmReductionConfig,
-    GemmReductionPlan,
+    GemmEpiloguePlan,
+    GemmReductionGeometry,
 )
 from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
-from ...kernel.loop_ir_epilogue_lowering import (
-    centered_mean_consumer_type_unrolled_ir,
-    GemmEpilogueIRAnalysis,
-    grouped_reduction_ir,
-    single_source_affine_ir,
-)
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -48,7 +45,15 @@ from ...scheduler import (
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 from ..cutlass.python_evt import CutlassEVTCodegen
-from .nv_universal_gemm import NVUniversalGemmCaller
+from .epilogue_lowering import NVGemmEpilogueCapture, NVGemmEpilogueLowering
+from .nv_universal_gemm import GemmVariant, NVUniversalGemmCaller
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ...kernel.gemm_epilogue import GemmReductionPlan
+    from .epilogue_lowering import NVGemmEpilogueProgram
 
 
 log = logging.getLogger(__name__)
@@ -58,21 +63,20 @@ _BENCHMARK_KERNEL_PREFIX = "nv_gemm_"
 EPILOGUE_FN_NAME = "_epilogue_fn"
 
 
-@dataclasses.dataclass(frozen=True)
-class NVGemmEpiloguePlan:
-    nodes: tuple[BaseSchedulerNode, ...]
-    reductions: tuple[GemmReductionConfig, ...]
-    reduction_nodes: tuple[BaseSchedulerNode, ...]
-    candidate_reduction: GemmReductionConfig | None = None
-    feed_main: GemmReductionConfig | None = None
-
-    @property
-    def evt_nodes(self) -> list[BaseSchedulerNode]:
-        owned = OrderedSet(self.reduction_nodes)
-        return [node for node in self.nodes if node not in owned]
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class NVGemmGeneratedSource:
+    source: str
+    epilogue_reads: tuple[str, ...]
+    output_buffers: tuple[str, ...]
 
 
-class NVUniversalGemmScheduling(BaseScheduling):
+class NVGemmVerticalFusionDecision(enum.Enum):
+    FUSE = enum.auto()
+    DEFER = enum.auto()
+    REJECT = enum.auto()
+
+
+class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     """
     Scheduling implementation for NVIDIA Universal GEMM kernels.
 
@@ -110,6 +114,25 @@ class NVUniversalGemmScheduling(BaseScheduling):
             return False
 
     @staticmethod
+    def _has_nvgemm_choice(ir_node: Any) -> bool:
+        return isinstance(ir_node, NVUniversalGemmBuffer) or (
+            isinstance(ir_node, MultiTemplateBuffer)
+            and any(
+                isinstance(choice, NVUniversalGemmCaller) for choice in ir_node._choices
+            )
+        )
+
+    @staticmethod
+    def _uses_swap_ab(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.swap_ab
+        return (
+            isinstance(ir_node, MultiTemplateBuffer)
+            and isinstance(ir_node._render_caller, NVUniversalGemmCaller)
+            and ir_node._render_caller.swap_ab
+        )
+
+    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -120,16 +143,20 @@ class NVUniversalGemmScheduling(BaseScheduling):
     def _best_nvgemm_choice(
         ir_node: MultiTemplateBuffer,
         require_epilogue_fusion: bool = False,
+        min_tile_n: int = 0,
     ) -> NVUniversalGemmCaller:
         """Find the best NVUniversalGemmCaller from an MTB's choice timings."""
         choice_timings = ir_node.choice_timings()
         best: NVUniversalGemmCaller | None = None
         best_time = float("inf")
-        for choice, timing in choice_timings.items():
+        for choice in ir_node._choices:
             if not isinstance(choice, NVUniversalGemmCaller):
                 continue
             if require_epilogue_fusion and not choice.supports_epilogue_fusion:
                 continue
+            if choice.kernel.metadata.design.tile_shape[1] < min_tile_n:
+                continue
+            timing = choice_timings.get(choice, float("inf"))
             if best is None or timing < best_time:
                 best_time = timing
                 best = choice
@@ -140,7 +167,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
     @staticmethod
     def get_nv_gemm_buffer_from_node(
-        node: BaseSchedulerNode, require_epilogue_fusion: bool = False
+        node: BaseSchedulerNode,
+        require_epilogue_fusion: bool = False,
+        min_tile_n: int = 0,
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
         if not isinstance(node, SchedulerNode):
@@ -152,14 +181,21 @@ class NVUniversalGemmScheduling(BaseScheduling):
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Honor an explicit swap/finalize -- the fusion benchmark loop swaps
             # in each EFC choice one at a time and must not re-select from timings.
-            if isinstance(ir_node._render_caller, NVUniversalGemmCaller) and (
-                not require_epilogue_fusion
-                or ir_node._render_caller.supports_epilogue_fusion
+            if (
+                isinstance(ir_node._render_caller, NVUniversalGemmCaller)
+                and (
+                    not require_epilogue_fusion
+                    or ir_node._render_caller.supports_epilogue_fusion
+                )
+                and ir_node._render_caller.kernel.metadata.design.tile_shape[1]
+                >= min_tile_n
             ):
                 selected_choice = ir_node._render_caller
             elif require_epilogue_fusion:
                 selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
-                    ir_node, require_epilogue_fusion=True
+                    ir_node,
+                    require_epilogue_fusion=True,
+                    min_tile_n=min_tile_n,
                 )
             else:
                 min_choice, _ = ir_node.get_min_choice()
@@ -187,6 +223,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return (
+            self.vertical_fusion_decision(node1, node2)
+            is NVGemmVerticalFusionDecision.FUSE
+        )
+
+    def vertical_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> NVGemmVerticalFusionDecision:
         if self.is_nv_universal_gemm_template(node1):
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, node1),
@@ -200,243 +244,59 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 None,
             )
             if template_snode is None:
-                return False
+                return NVGemmVerticalFusionDecision.REJECT
             return self._can_fuse_epilogue_impl(
                 cast(SchedulerNode, template_snode),
-                self._unwrap_epilogue_nodes(fnode1),
+                [
+                    node
+                    for node in fnode1.snodes
+                    if not self.is_nv_universal_gemm_template(node)
+                ],
                 node2,
             )
-        return False
+        return NVGemmVerticalFusionDecision.REJECT
 
-    def _unwrap_epilogue_nodes(
-        self, fused_node: FusedSchedulerNode
-    ) -> list[BaseSchedulerNode]:
-        """Extract epilogue nodes from a fused node."""
-        epilogue_nodes = []
-        for node in fused_node.snodes:
-            if not self.is_nv_universal_gemm_template(node):
-                epilogue_nodes.append(node)
-        return epilogue_nodes
-
-    @classmethod
-    def _grouped_reduce_config(
-        cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> GemmReductionConfig | None:
-        nodes = scheduler_node.get_nodes()
-        if len(nodes) not in (1, 2):
-            return None
-        buffers = [snode.node for snode in nodes]
-        if not all(isinstance(buffer, ComputedBuffer) for buffer in buffers):
-            return None
-        buffers = [cast(ComputedBuffer, buffer) for buffer in buffers]
-        node = buffers[0]
-        access_node = scheduler_node
-        output_name = node.get_name()
-        if len(node.data.ranges) != 2 or len(gemm_node.get_size()) != 2:
-            return None
+    @staticmethod
+    def _lower_pointwise_epilogue(
+        gemm_name: str,
+        nodes: Sequence[BaseSchedulerNode],
+        removed_buffers: OrderedSet[str],
+        reduction_geometries: dict[str, GemmReductionGeometry] | None = None,
+        suppressed_outputs: OrderedSet[str] | None = None,
+    ) -> GemmEpiloguePlan:
+        buffers = [node.node for node in nodes if isinstance(node.node, ComputedBuffer)]
+        if len(buffers) != len(nodes):
+            raise NotImplementedError("NVGEMM epilogue nodes must be computed buffers")
         try:
-            m, n = (V.graph.sizevars.optimization_hint(v) for v in gemm_node.get_size())
-            out_m, out_n = (
-                V.graph.sizevars.optimization_hint(v) for v in node.data.ranges
+            return LoopIRCuteDSLCodegen.from_buffers(
+                gemm_name,
+                buffers,
+                removed_buffers,
+                EPILOGUE_FN_NAME,
+                reduction_geometries,
+                suppressed_outputs,
             )
-        except Exception:
-            return None
-
-        if isinstance(node.data, Reduction):
-            reduction = node.data
-            if len(reduction.reduction_ranges) != 1:
-                return None
-            group = V.graph.sizevars.optimization_hint(reduction.reduction_ranges[0])
-            if m == out_m and n % group == 0 and out_n == n // group:
-                axis = 1
-                expected_strides = [n, group, 1]
-                max_group = n
-            elif n == out_n and m % group == 0 and out_m == m // group:
-                axis = 0
-                expected_strides = [group * n, 1, n]
-                max_group = 16
-            else:
-                return None
-        elif isinstance(node.data, Pointwise):
-            if n != out_n or out_m <= 0 or m % out_m != 0:
-                return None
-            group = m // out_m
-            axis = 0
-            max_group = 16
-            expected_strides = [group * n, 1]
-        else:
-            return None
-        if group <= 1 or group > max_group:
-            return None
-
-        store = GemmEpilogueIRAnalysis.store_from_buffer(node)
-        classified = (
-            grouped_reduction_ir(
-                store,
-                gemm_node.get_name(),
-                group,
-                gemm_node.get_dtype(),
+        except NotImplementedError:
+            return CutlassEVTCodegen.ir_to_evt_python_code(
+                gemm_name,
+                list(nodes),
+                removed_buffers,
+                fn_name=EPILOGUE_FN_NAME,
+                as_standalone_function=True,
             )
-            if store is not None
-            else None
-        )
-        if classified is None:
-            return None
-        reduction_type, source_type = classified
-        if reduction_type not in (
-            "sum",
-            "mean",
-            "prod",
-            "max",
-            "min",
-        ) or source_type not in ("identity", "square"):
-            return None
-        if (
-            isinstance(node.data, Reduction)
-            and node.data.reduction_type != reduction_type
-        ):
-            return None
-        if len(buffers) == 2:
-            finalizer = buffers[1]
-            finalizer_store = GemmEpilogueIRAnalysis.store_from_buffer(finalizer)
-            finalizer_reads = list(nodes[1].read_writes.reads)
-            if (
-                reduction_type != "sum"
-                or not isinstance(node.data, Reduction)
-                or not isinstance(finalizer.data, Pointwise)
-                or not finalizer_reads
-                or any(read.name != node.get_name() for read in finalizer_reads)
-                or not V.graph.sizevars.statically_known_list_equals(
-                    node.get_size(), finalizer.get_size()
-                )
-                or finalizer_store is None
-                or single_source_affine_ir(finalizer_store, node.get_name())
-                != (1.0 / group, 0.0)
-            ):
-                return None
-            reduction_type = "mean"
-            access_node = nodes[0]
-            output_name = finalizer.get_name()
-
-        reads = list(access_node.read_writes.reads)
-        if not reads or any(read.name != gemm_node.get_name() for read in reads):
-            return None
-        range_vars = access_node.read_writes.range_vars
-        if range_vars is None:
-            return None
-        if not range_vars:
-            return GemmReductionConfig(
-                output_name, group, axis, reduction_type, source_type
-            )
-        if isinstance(node.data, Reduction):
-            if len(reads) != 1:
-                return None
-            strides = V.graph.sizevars.stride_vars(reads[0].index, range_vars)
-            if list(strides) != expected_strides:
-                return None
-        else:
-            if len(reads) != group:
-                return None
-            expected_base = group * n * range_vars[0] + range_vars[1]
-            offsets = []
-            for read in reads:
-                strides = V.graph.sizevars.stride_vars(read.index, range_vars)
-                if list(strides) != expected_strides:
-                    return None
-                offsets.append(V.graph.sizevars.simplify(read.index - expected_base))
-            expected_offsets = OrderedSet(offset * n for offset in range(group))
-            if OrderedSet(offsets) != expected_offsets:
-                return None
-        return GemmReductionConfig(
-            output_name, group, axis, reduction_type, source_type
-        )
-
-    @classmethod
-    def _grouped_reduce_feeds_main_config(
-        cls, gemm_node: Buffer, scheduler_node: BaseSchedulerNode
-    ) -> GemmReductionConfig | None:
-        nodes = scheduler_node.get_nodes()
-        if len(nodes) != 1 or not isinstance(nodes[0].node, ComputedBuffer):
-            return None
-        node = cast(ComputedBuffer, nodes[0].node)
-        if not isinstance(node.data, Pointwise):
-            return None
-        reads = list(scheduler_node.read_writes.reads)
-        range_vars = scheduler_node.read_writes.range_vars
-        if range_vars is None or len(reads) <= 2:
-            return None
-        try:
-            _, n = map(V.graph.sizevars.optimization_hint, gemm_node.get_size())
-        except Exception:
-            return None
-        group = len(reads) - 1
-        if group <= 1 or group > 4:
-            return None
-        store = GemmEpilogueIRAnalysis.store_from_buffer(node)
-        if store is None or centered_mean_consumer_type_unrolled_ir(
-            store, gemm_node.get_name(), group
-        ) != (1.0, -1.0, 0.0):
-            return None
-        if any(read.name != gemm_node.get_name() for read in reads):
-            return None
-        grouped_base = reads[1].index
-        if any(
-            V.graph.sizevars.simplify(read.index - grouped_base) != i * n
-            for i, read in enumerate(reads[1:])
-        ):
-            return None
-        return GemmReductionConfig(node.get_name(), group, 0, "mean", "identity")
-
-    @classmethod
-    def _epilogue_plan(
-        cls,
-        gemm_node: Buffer,
-        epilogue_nodes: Sequence[BaseSchedulerNode],
-        candidate: BaseSchedulerNode | None = None,
-    ) -> NVGemmEpiloguePlan:
-        reductions: list[GemmReductionConfig] = []
-        reduction_nodes: list[BaseSchedulerNode] = []
-        candidate_reduction = None
-        for node in epilogue_nodes:
-            config = cls._grouped_reduce_config(gemm_node, node)
-            if config is None:
-                continue
-            reductions.append(config)
-            reduction_nodes.extend(node.get_nodes())
-            if node is candidate:
-                candidate_reduction = config
-        nodes = tuple(
-            scheduler_node
-            for node in epilogue_nodes
-            for scheduler_node in node.get_nodes()
-        )
-        feed_main = (
-            cls._grouped_reduce_feeds_main_config(gemm_node, epilogue_nodes[0])
-            if len(epilogue_nodes) == 1
-            else None
-        )
-        return NVGemmEpiloguePlan(
-            nodes,
-            tuple(reductions),
-            tuple(reduction_nodes),
-            candidate_reduction,
-            feed_main,
-        )
 
     def _can_fuse_epilogue_impl(
         self,
         gemm_template_node: SchedulerNode,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
-    ) -> bool:
-        from .nv_universal_gemm import GemmVariant
-
+    ) -> NVGemmVerticalFusionDecision:
         if not config.epilogue_fusion:
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
             if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
@@ -444,117 +304,140 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     "NVGEMM epilogue fusion: not supported for %s variant",
                     ir_node.variant.op_name,
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
             if not ir_node.supports_epilogue_fusion:
                 log.debug(
                     "NVGEMM epilogue fusion: kernel %s does not support epilogue fusion",
                     ir_node.kernel_metadata.get("kernel_name", "unknown"),
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
+            variants = (ir_node.variant,)
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Use _choices, not choice_timings() — the latter forces autotune sync.
-            has_efc_choice = False
-            for choice in ir_node._choices:
-                if not (
-                    isinstance(choice, NVUniversalGemmCaller)
-                    and choice.supports_epilogue_fusion
-                ):
-                    continue
-                has_efc_choice = True
-                if choice.variant not in (
-                    GemmVariant.GEMM,
-                    GemmVariant.SCALED_GEMM,
-                ):
-                    log.debug(
-                        "NVGEMM epilogue fusion: MultiTemplateBuffer has unsupported EFC choices"
-                    )
-                    return False
-            if not has_efc_choice:
-                log.debug("NVGEMM epilogue fusion: no EFC kernel available in choices")
-                return False
-
-        plan = self._epilogue_plan(
-            ir_node, (*existing_epilogue_nodes, node_to_fuse), node_to_fuse
-        )
-        reduction_nodes = OrderedSet(plan.reduction_nodes)
-        local_reduce = plan.candidate_reduction
-        feed_main = plan.feed_main
-        variants = (
-            (ir_node.variant,)
-            if isinstance(ir_node, NVUniversalGemmBuffer)
-            else tuple(
+            variants = tuple(
                 choice.variant
                 for choice in ir_node._choices
                 if isinstance(choice, NVUniversalGemmCaller)
                 and choice.supports_epilogue_fusion
             )
+            if not variants:
+                log.debug("NVGEMM epilogue fusion: no EFC kernel available in choices")
+                return NVGemmVerticalFusionDecision.DEFER
+            if any(
+                variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM)
+                for variant in variants
+            ):
+                log.debug(
+                    "NVGEMM epilogue fusion: MultiTemplateBuffer has unsupported EFC choices"
+                )
+                return NVGemmVerticalFusionDecision.DEFER
+
+        epilogue_program = self._lower_epilogue(
+            ir_node, (*existing_epilogue_nodes, node_to_fuse)
         )
-        scaled_epilogue = bool(variants) and all(
+        all_scheduler_nodes = epilogue_program.capture.nodes
+        if not epilogue_program.supported:
+            log.debug("NVGEMM could not lower every captured reduction region")
+            return NVGemmVerticalFusionDecision.DEFER
+        feeds_main = epilogue_program.feeds_main
+        if feeds_main:
+            fused_names = OrderedSet(
+                scheduler_node.get_name() for scheduler_node in all_scheduler_nodes
+            )
+            fused_names.add(gemm_template_node.get_name())
+            if not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+                ir_node.get_name(), fused_names
+            ):
+                return NVGemmVerticalFusionDecision.DEFER
+        reduction_region = epilogue_program.reduction_partition.region_for(
+            node_to_fuse.get_nodes()
+        )
+        scaled_epilogue = all(
             variant == GemmVariant.SCALED_GEMM for variant in variants
         )
-        if local_reduce is not None:
-            if not scaled_epilogue:
-                return False
+        reduction_plan = epilogue_program.reduction_plan
+        if reduction_plan is not None and self._uses_swap_ab(ir_node):
+            log.debug("NVGEMM swap_ab does not support fused local reductions")
+            return NVGemmVerticalFusionDecision.DEFER
+        if reduction_plan is not None and not all(
+            variant.supports_reduction(reduction_plan) for variant in variants
+        ):
+            return NVGemmVerticalFusionDecision.DEFER
 
-        for s_node in plan.nodes:
+        for s_node in all_scheduler_nodes:
             node = s_node.node
             if not isinstance(node, ComputedBuffer):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
-                return False
-            if (
-                feed_main is None
-                and not isinstance(node.data, Pointwise)
-                and s_node not in reduction_nodes
-            ):
-                log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
-            if (
-                feed_main is None
-                and s_node not in reduction_nodes
-                and not V.graph.sizevars.statically_known_list_equals(
+        generated_reduction_nodes = OrderedSet(
+            node
+            for region in epilogue_program.generated_reduction_regions
+            for node in region.nodes
+        )
+        generated_reduction_outputs = epilogue_program.generated_reduction_geometries
+        if not feeds_main:
+            for s_node in epilogue_program.pointwise_nodes:
+                node = cast(ComputedBuffer, s_node.node)
+                if (
+                    s_node in generated_reduction_nodes
+                    or node.get_name() in generated_reduction_outputs
+                ):
+                    continue
+                if not isinstance(node.data, Pointwise):
+                    log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
+                    return NVGemmVerticalFusionDecision.DEFER
+                if not V.graph.sizevars.statically_known_list_equals(
                     node.get_size(), ir_node.get_size()
-                )
-            ):
-                log.debug(
-                    "NVGEMM epilogue fusion: size mismatch %s vs %s",
-                    node.get_size(),
-                    ir_node.get_size(),
-                )
-                return False
-        # cutlass.operators' EVT supports matrix, row, and column loads here.
-        # Reject unresolved inputs and shapes outside those broadcast patterns;
-        # the trial EVT trace below remains the final capability check.
+                ):
+                    log.debug(
+                        "NVGEMM epilogue fusion: size mismatch %s vs %s",
+                        node.get_size(),
+                        ir_node.get_size(),
+                    )
+                    return NVGemmVerticalFusionDecision.DEFER
+                if not V.graph.sizevars.statically_known_list_equals(
+                    node.data.ranges, ir_node.get_size()
+                ):
+                    log.debug(
+                        "NVGEMM epilogue fusion: iteration-domain mismatch %s vs %s",
+                        node.data.ranges,
+                        ir_node.get_size(),
+                    )
+                    return NVGemmVerticalFusionDecision.DEFER
+        # Epilogue inputs support matrix, row, and column loads here. Reject
+        # other broadcast patterns before the pointwise lowerer's capability check.
         gemm_size = ir_node.get_size()
         name_to_buf = V.graph.name_to_buffer | V.graph.graph_inputs
         internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet(
-            [s_node.get_name() for s_node in plan.nodes]
+            node.node.get_name()
+            for node in all_scheduler_nodes
+            if isinstance(node.node, Buffer)
         )
-        epilogue_inputs: OrderedSet[str] = OrderedSet()
-        for s_node in plan.nodes:
+        for s_node in epilogue_program.pointwise_nodes:
             for rd in s_node.read_writes.reads:
                 if rd.name in internal_names:
                     continue
-                epilogue_inputs.add(rd.name)
                 read_buf = name_to_buf.get(rd.name)
                 if read_buf is None:
                     log.debug(
                         "NVGEMM epilogue fusion: read %s not in name_to_buffer/graph_inputs, refusing to fuse",
                         rd.name,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 read_size = read_buf.get_size()
-                if not read_size or len(read_size) > len(gemm_size):
+                if len(read_size) > len(gemm_size):
                     log.debug(
                         "NVGEMM epilogue fusion: read buffer %s has unsupported rank",
                         rd.name,
                     )
-                    return False
+                    return NVGemmVerticalFusionDecision.DEFER
                 padded_size = [1] * (len(gemm_size) - len(read_size)) + list(read_size)
                 supported_shapes = (
                     gemm_size,
                     [1, gemm_size[1]],
                     [gemm_size[0], 1],
+                    [1] * len(gemm_size),
                 )
                 if not any(
                     V.graph.sizevars.statically_known_list_equals(padded_size, shape)
@@ -566,32 +449,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         read_size,
                         gemm_size,
                     )
-                    return False
-        if scaled_epilogue and len(epilogue_inputs) > 4:
-            log.debug(
-                "NVGEMM scaled epilogue has %d captured tensors; at most four are supported",
-                len(epilogue_inputs),
-            )
-            return False
-
+                    return NVGemmVerticalFusionDecision.DEFER
         if not existing_epilogue_nodes:
             reads = OrderedSet(rd.name for rd in node_to_fuse.read_writes.reads)
             if ir_node.get_name() not in reads:
                 log.debug(
                     "NVGEMM epilogue fusion: first epilogue node doesn't read from GEMM output"
                 )
-                return False
+                return NVGemmVerticalFusionDecision.DEFER
 
         if node_to_fuse.has_aliasing_or_mutation():
             log.debug("NVGEMM epilogue fusion: node has aliasing or mutation")
-            return False
-        elif node_to_fuse.is_reduction() and local_reduce is None:
+            return NVGemmVerticalFusionDecision.DEFER
+        elif (
+            node_to_fuse.is_reduction() and reduction_region is None and not feeds_main
+        ):
             log.debug("NVGEMM epilogue fusion: reductions not supported")
-            return False
+            return NVGemmVerticalFusionDecision.DEFER
 
-        all_epilogue_nodes = list(plan.nodes)
         fused_buffer_names = OrderedSet(
-            n.get_name() for n in [gemm_template_node, *all_epilogue_nodes]
+            n.get_name() for n in [gemm_template_node, *epilogue_program.capture.nodes]
         )
         preserve_gemm_output = (
             not V.graph.scheduler.can_buffer_be_removed_through_fusion(
@@ -603,35 +480,73 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if not preserve_gemm_output:
             trial_removed_buffers.add(ir_node.get_name())
         try:
-            evt_nodes = plan.evt_nodes
-            trial_reads: list[str] = []
-            trial_writes: list[str] = []
-            if feed_main is not None:
-                evt_nodes = []
-            if evt_nodes:
-                trial_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
-                    ir_node.get_name(),
-                    evt_nodes,
-                    trial_removed_buffers,
+            trial_reads: tuple[str, ...] = ()
+            epilogue_dtype = ir_node.get_dtype()
+            pointwise_nodes = epilogue_program.pointwise_nodes
+            codegen_nodes = pointwise_nodes
+            if (
+                reduction_plan is not None
+                and reduction_plan.tensor_epilogue_returns_local_reduce
+            ):
+                codegen_nodes = epilogue_program.capture.nodes
+                generated_nodes = OrderedSet(epilogue_program.reduction_partition.nodes)
+                trial_removed_buffers.update(
+                    node.node.get_name()
+                    for node in generated_nodes
+                    if isinstance(node.node, Buffer)
+                    and node.node.get_name() != reduction_plan.reduction_output
                 )
-                trial_reads = list(trial_epilogue.reads)
-                trial_writes = list(trial_epilogue.writes)
+            if codegen_nodes:
+                suppressed_outputs = OrderedSet()
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                    and reduction_plan.reduction_output is not None
+                ):
+                    suppressed_outputs.add(reduction_plan.reduction_output)
+                lowered_epilogue = self._lower_pointwise_epilogue(
+                    ir_node.get_name(),
+                    codegen_nodes,
+                    trial_removed_buffers,
+                    epilogue_program.generated_reduction_geometries,
+                    suppressed_outputs,
+                )
+                trial_reads = lowered_epilogue.reads
+                epilogue_dtype = V.graph.get_dtype(lowered_epilogue.writes[0])
+            if GemmVariant.GEMM in variants:
+                for read_name in trial_reads:
+                    read_buf = name_to_buf.get(read_name)
+                    read_dtype = None if read_buf is None else read_buf.get_dtype()
+                    try:
+                        dtype_supported = read_dtype is None or (
+                            read_dtype.is_floating_point
+                            and torch.promote_types(read_dtype, epilogue_dtype)
+                            == epilogue_dtype
+                        )
+                    except (RuntimeError, TypeError):
+                        dtype_supported = False
+                    if not dtype_supported:
+                        log.debug(
+                            "NVGEMM dense epilogue input %s has dtype %s, which cannot be represented by %s",
+                            read_name,
+                            read_dtype,
+                            epilogue_dtype,
+                        )
+                        return NVGemmVerticalFusionDecision.REJECT
             if scaled_epilogue:
-                if len(trial_reads) > 4 or len(trial_writes) > 4:
-                    return False
                 for read_name in trial_reads:
                     read_buf = name_to_buf.get(read_name)
                     if read_buf is None:
                         log.debug(
-                            "NVGEMM scaled EVT input %s cannot be resolved",
+                            "NVGEMM scaled epilogue input %s cannot be resolved",
                             read_name,
                         )
-                        return False
-        except (NotImplementedError, AssertionError) as e:
-            log.debug("NVGEMM epilogue fusion: trial EVT codegen failed: %s", e)
-            return False
+                        return NVGemmVerticalFusionDecision.DEFER
+        except NotImplementedError as e:
+            log.debug("NVGEMM epilogue fusion: trial pointwise codegen failed: %s", e)
+            return NVGemmVerticalFusionDecision.DEFER
 
-        return True
+        return NVGemmVerticalFusionDecision.FUSE
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -639,14 +554,165 @@ class NVUniversalGemmScheduling(BaseScheduling):
         # NVIDIA Universal GEMM templates don't support horizontal fusion yet
         return False
 
+    def has_conflicting_epilogue_reductions(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        read_names = OrderedSet(read.name for read in node1.read_writes.reads)
+        read_names.intersection_update(read.name for read in node2.read_writes.reads)
+        for name in read_names:
+            producer = V.graph.try_get_buffer(name)
+            if not isinstance(producer, Buffer) or not self._has_nvgemm_choice(
+                producer
+            ):
+                continue
+            program = self._lower_epilogue(producer, (node1, node2))
+            if program.has_unclaimed_reduction:
+                return True
+        return False
+
+    @staticmethod
+    def has_bool_output(node: BaseSchedulerNode) -> bool:
+        return any(
+            isinstance(scheduler_node.node, ComputedBuffer)
+            and scheduler_node.node.get_dtype() == torch.bool
+            for scheduler_node in node.get_nodes()
+        )
+
+    def has_nvgemm_bool_output(self, node: BaseSchedulerNode) -> bool:
+        if not self.has_bool_output(node):
+            return False
+        is_template = self.is_nv_universal_gemm_template(node)
+        if is_template or self.is_nv_universal_gemm_fused_template(node):
+            return True
+        return any(
+            isinstance(producer := V.graph.try_get_buffer(read.name), Buffer)
+            and self._has_nvgemm_choice(producer)
+            for read in node.read_writes.reads
+        )
+
+    def get_fusion_pair_priority(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        has_reduction = any(
+            isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, Reduction)
+            for node in node1.get_nodes()
+        )
+        if not has_reduction:
+            node1_ir = node1.node if isinstance(node1, SchedulerNode) else None
+            if self._has_nvgemm_choice(node1_ir) and any(
+                isinstance(node.node, ComputedBuffer)
+                and isinstance(node.node.data, Reduction)
+                for node in node2.get_nodes()
+            ):
+                return 1
+            return 2
+        node1_outputs = node1.get_buffer_names()
+        if not any(read.name in node1_outputs for read in node2.read_writes.reads):
+            return 2
+        scheduler = self.scheduler
+        if scheduler is None:
+            return 2
+        for read in node1.read_writes.reads:
+            producer = scheduler.name_to_fused_node.get(read.name)
+            try:
+                producer_buffer = V.graph.get_buffer(read.name)
+            except RuntimeError:
+                producer_buffer = None
+            has_nvgemm_producer = (
+                producer is not None
+                and (
+                    self.is_nv_universal_gemm_template(producer)
+                    or self.is_nv_universal_gemm_fused_template(producer)
+                )
+            ) or self._has_nvgemm_choice(producer_buffer)
+            if has_nvgemm_producer and isinstance(producer_buffer, Buffer):
+                capture = NVGemmEpilogueCapture.from_nodes(
+                    producer_buffer, (node1, node2)
+                )
+                if self._feed_main_config(capture):
+                    return 0
+                combined_partition = self._partition_local_reductions(capture)
+                if combined_partition.owns(node2.get_nodes()):
+                    log.debug(
+                        "prioritizing NVGEMM reduction chain %s -> %s",
+                        node1.get_name(),
+                        node2.get_name(),
+                    )
+                    return 0
+                if combined_partition.owns(node1.get_nodes()):
+                    return 2
+                return 0
+        return 2
+
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         template = node1.get_template_node()
-        return isinstance(template, Buffer) and (
-            self._grouped_reduce_config(template, node2) is not None
-            or self._grouped_reduce_feeds_main_config(template, node2) is not None
+        if not isinstance(template, Buffer):
+            return False
+        epilogue_nodes = [
+            node
+            for node in node1.get_nodes()
+            if not self.is_nv_universal_gemm_template(node)
+        ]
+        combined_program = self._lower_epilogue(template, (*epilogue_nodes, node2))
+        if not combined_program.supported:
+            return False
+        feed_main_ordered = combined_program.feeds_main and (
+            bool(epilogue_nodes)
+            or all(
+                read.name == template.get_name()
+                for node in node2.get_nodes()
+                for read in node.read_writes.reads
+            )
         )
+        candidate_nodes = node2.get_nodes()
+        reduction_partition = combined_program.reduction_partition
+        generated_reduction_outputs = combined_program.generated_reduction_geometries
+        generated_reduction = any(
+            isinstance(node.node, ComputedBuffer)
+            and node.node.get_name() in generated_reduction_outputs
+            for node in candidate_nodes
+        )
+        if not (
+            reduction_partition.intersects(candidate_nodes)
+            or feed_main_ordered
+            or generated_reduction
+        ):
+            return False
+        template_snode = next(
+            node
+            for node in node1.get_nodes()
+            if self.is_nv_universal_gemm_template(node)
+        )
+        return (
+            self._can_fuse_epilogue_impl(
+                cast(SchedulerNode, template_snode), epilogue_nodes, node2
+            )
+            is NVGemmVerticalFusionDecision.FUSE
+        )
+
+    @staticmethod
+    def _schedule_reduction_plan(
+        program: NVGemmEpilogueProgram,
+    ) -> GemmReductionPlan | None:
+        if not program.supported:
+            return None
+        reduction_plan = program.reduction_plan
+        if (
+            reduction_plan is None
+            or not reduction_plan.feeds_main
+            or reduction_plan.reduction_output is None
+        ):
+            return reduction_plan
+        fused_names = OrderedSet(node.get_name() for node in program.capture.nodes)
+        fused_names.add(program.capture.gemm.get_name())
+        if V.graph.scheduler.can_buffer_be_removed_through_fusion(
+            reduction_plan.reduction_output, fused_names
+        ):
+            return dataclasses.replace(reduction_plan, reduction_output=None)
+        return reduction_plan
 
     def define_kernel(
         self, src_code: str, node_schedule, precompile_metadata=None
@@ -699,6 +765,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
         return kernel_name
 
+    @overload
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: Literal[False] = False,
+    ) -> str | None: ...
+
+    @overload
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: Literal[True],
+    ) -> NVGemmGeneratedSource: ...
+
     def codegen_template(
         self,
         template_node: BaseSchedulerNode,
@@ -706,7 +792,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
         *,
         only_gen_src_code: bool = False,
-    ) -> str | None:
+    ) -> str | NVGemmGeneratedSource | None:
         """
         Codegen a NVIDIA Universal GEMM template with optional epilogue fusion.
 
@@ -736,72 +822,39 @@ class NVUniversalGemmScheduling(BaseScheduling):
             raise AssertionError(f"expected Buffer, got {type(original_ir_node)}")
         original_buffer_name = original_ir_node.get_name()
 
+        epilogue_program = self._lower_epilogue(original_ir_node, epilogue_nodes)
+        epilogue_nodes = epilogue_program.capture.nodes
+        feeds_main = epilogue_program.feeds_main
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
-            template_node, require_epilogue_fusion=bool(epilogue_nodes)
+            template_node,
+            require_epilogue_fusion=bool(epilogue_nodes),
+            min_tile_n=epilogue_program.min_tile_n,
         )
 
-        epilogue_fn_code: str | None = None
-        epilogue_is_cutedsl = False
-        epilogue_reads: list[str] = []
-        epilogue_writes: list[str] = []
-        epilogue_var_renames: dict[str, Any] = {}
-        local_reduce: GemmReductionPlan | None = None
+        lowered_epilogue = GemmEpiloguePlan()
+        reduction_plan: GemmReductionPlan | None = None
 
         if epilogue_nodes:
             scheduler = V.graph.scheduler
             try:
-                plan = self._epilogue_plan(original_ir_node, epilogue_nodes)
-                if len(plan.reductions) > 1:
-                    raise NotImplementedError(
-                        "NVGEMM supports one grouped local reduction"
-                    )
-                if plan.reductions:
-                    reduction = plan.reductions[0]
-                    local_reduce = GemmReductionPlan(
-                        reduction_output=reduction.output_name,
-                        group=reduction.group,
-                        axis=reduction.axis,
-                        reduction_type=reduction.reduction_type,
-                        source_type=reduction.source_type,
-                        primary_output=original_buffer_name,
-                        reduction_algorithm=reduction.reduction_algorithm,
-                        finalizer_fn=reduction.finalizer_fn,
-                    )
-                feed_main = plan.feed_main
-                if feed_main is not None:
-                    (feed_scheduler_node,) = epilogue_nodes[0].get_nodes()
-                    feed_buffer = feed_scheduler_node.node
-                    if not isinstance(feed_buffer, ComputedBuffer):
-                        raise AssertionError(
-                            f"expected ComputedBuffer, got {type(feed_buffer)}"
-                        )
-                    local_reduce = GemmReductionPlan(
-                        reduction_output=None,
-                        group=feed_main.group,
-                        axis=feed_main.axis,
-                        reduction_type=feed_main.reduction_type,
-                        source_type=feed_main.source_type,
-                        primary_output=feed_main.output_name,
-                        reduction_algorithm=feed_main.reduction_algorithm,
-                        finalizer_fn=feed_main.finalizer_fn,
-                        feeds_main=True,
-                        consumer_fn=LoopIRCuteDSLCodegen.consumer_from_buffer(
-                            original_buffer_name,
-                            None,
-                            feed_buffer,
-                            "_local_reduce_consumer",
-                            feed_main.group,
+                reduction_plan = self._schedule_reduction_plan(epilogue_program)
+                if feeds_main:
+                    if reduction_plan is None:
+                        raise AssertionError("expected feed-main reduction plan")
+                    primary_output = reduction_plan.primary_output
+                    lowered_epilogue = GemmEpiloguePlan(
+                        writes=(primary_output,),
+                        renames={
+                            GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
+                            "D": primary_output,
+                        },
+                        source=(
+                            f"def {EPILOGUE_FN_NAME}(accum):\n"
+                            "    D = accum\n    return D"
                         ),
+                        is_evt_fallback=True,
                     )
-                    epilogue_fn_code = (
-                        f"def {EPILOGUE_FN_NAME}(accum):\n    D = accum\n    return D"
-                    )
-                    epilogue_writes = [feed_main.output_name]
-                    epilogue_var_renames = {
-                        GEMM_ACCUMULATOR_ARG_NAME: original_buffer_name,
-                        "D": feed_main.output_name,
-                    }
-                evt_nodes = [] if feed_main is not None else plan.evt_nodes
+                pointwise_nodes = epilogue_program.pointwise_nodes
                 fused_buffer_names: OrderedSet[str] = OrderedSet(
                     n.get_name() for n in epilogue_nodes
                 )
@@ -812,48 +865,48 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 ):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
-                if evt_nodes:
-                    evt_buffers = [
-                        node.node
-                        for node in evt_nodes
-                        if isinstance(node.node, ComputedBuffer)
-                    ]
-                    from .nv_universal_gemm import GemmVariant
+                codegen_nodes = pointwise_nodes
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                ):
+                    codegen_nodes = epilogue_program.capture.nodes
+                    generated_nodes = OrderedSet(
+                        epilogue_program.reduction_partition.nodes
+                    )
+                    removed_buffers_with_gemm.update(
+                        node.node.get_name()
+                        for node in generated_nodes
+                        if isinstance(node.node, Buffer)
+                        and node.node.get_name() != reduction_plan.reduction_output
+                    )
 
-                    if ctb.variant == GemmVariant.SCALED_GEMM:
-                        try:
-                            lowered_epilogue = LoopIRCuteDSLCodegen.from_buffers(
-                                original_buffer_name,
-                                evt_buffers,
-                                removed_buffers_with_gemm,
-                                EPILOGUE_FN_NAME,
+                if codegen_nodes:
+                    suppressed_outputs = OrderedSet()
+                    if (
+                        reduction_plan is not None
+                        and reduction_plan.tensor_epilogue_returns_local_reduce
+                        and reduction_plan.reduction_output is not None
+                    ):
+                        suppressed_outputs.add(reduction_plan.reduction_output)
+                    lowered_epilogue = self._lower_pointwise_epilogue(
+                        original_buffer_name,
+                        codegen_nodes,
+                        removed_buffers_with_gemm,
+                        epilogue_program.generated_reduction_geometries,
+                        suppressed_outputs,
+                    )
+                    if feeds_main and reduction_plan is not None:
+                        d_buf = lowered_epilogue.renames.get("D")
+                        if isinstance(d_buf, str):
+                            reduction_plan = dataclasses.replace(
+                                reduction_plan, primary_output=d_buf
                             )
-                        except NotImplementedError:
-                            lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
-                                original_buffer_name,
-                                list(evt_nodes),
-                                removed_buffers_with_gemm,
-                                fn_name=EPILOGUE_FN_NAME,
-                                as_standalone_function=True,
-                            )
-                    else:
-                        lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
-                            original_buffer_name,
-                            list(evt_nodes),
-                            removed_buffers_with_gemm,
-                            fn_name=EPILOGUE_FN_NAME,
-                            as_standalone_function=True,
-                        )
-                    epilogue_fn_code = lowered_epilogue.source
-                    epilogue_is_cutedsl = lowered_epilogue.is_cutedsl
-                    epilogue_reads = list(lowered_epilogue.reads)
-                    epilogue_writes = list(lowered_epilogue.writes)
-                    epilogue_var_renames = lowered_epilogue.renames
 
                 if not only_gen_src_code:
-                    write_bufs = OrderedSet(epilogue_writes)
-                    if local_reduce is not None:
-                        write_bufs.update(local_reduce.auxiliary_outputs)
+                    write_bufs = OrderedSet(lowered_epilogue.writes)
+                    if reduction_plan is not None:
+                        write_bufs.update(reduction_plan.auxiliary_outputs)
                     for node in epilogue_nodes:
                         node_name = node.get_name()
                         if node_name in write_bufs:
@@ -873,26 +926,23 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         node.mark_run()
 
                 log.debug(
-                    "NVGEMM epilogue fusion: %d nodes, reads=%s, writes=%s, local_reduce=%s",
+                    "NVGEMM epilogue fusion: %d nodes, reads=%s, writes=%s, reduction_plan=%s",
                     len(epilogue_nodes),
-                    epilogue_reads,
-                    epilogue_writes,
-                    local_reduce,
+                    lowered_epilogue.reads,
+                    lowered_epilogue.writes,
+                    reduction_plan,
                 )
-            except (NotImplementedError, AssertionError) as e:
-                log.warning("NVGEMM epilogue codegen failed unexpectedly: %s", e)
+            except NotImplementedError as e:
+                log_fn = log.debug if only_gen_src_code else log.warning
+                log_fn("NVGEMM epilogue codegen failed unexpectedly: %s", e)
                 raise
 
         if ctb.make_kernel_render is None:
             raise AssertionError("expected ctb.make_kernel_render to be not None")
         kernel, render = ctb.make_kernel_render(
             ctb,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_is_cutedsl=epilogue_is_cutedsl,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
-            local_reduce=local_reduce,
+            epilogue=lowered_epilogue,
+            local_reduce=reduction_plan,
         )
 
         if not only_gen_src_code:
@@ -901,7 +951,11 @@ class NVUniversalGemmScheduling(BaseScheduling):
         src_code = render()
 
         if only_gen_src_code:
-            return src_code
+            return NVGemmGeneratedSource(
+                source=src_code,
+                epilogue_reads=lowered_epilogue.reads,
+                output_buffers=tuple(kernel.ordered_output_buffers()),
+            )
 
         # Precompile only base (non-EFC) kernels. EFC kernels produce
         # closure-wrapped artifacts that can't be serialized to disk cache.
@@ -1006,62 +1060,41 @@ class NVUniversalGemmScheduling(BaseScheduling):
         benchmark_kernel: bool = False,
         hint_override: int | None = None,
     ) -> str:
+        """Generate benchmark source for an NVGEMM template and its epilogue."""
         prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(
             list(nodes)
         )
 
-        epilogue_reads: list[str] = []
-        output_bufs: list[str] = []
-        if epilogue:
-            template_sn = cast(SchedulerNode, template)
-            if not isinstance(template_sn.node, Buffer):
-                raise AssertionError(f"expected Buffer, got {type(template_sn.node)}")
-            original_buffer_name = template_sn.node.get_name()
-            plan = self._epilogue_plan(template_sn.node, epilogue)
-            evt_nodes = [] if plan.feed_main is not None else plan.evt_nodes
-            removed_buffers_with_gemm = V.graph.removed_buffers.copy()
-            if not plan.reductions:
-                removed_buffers_with_gemm.add(original_buffer_name)
-            try:
-                if evt_nodes:
-                    lowered_epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
-                        original_buffer_name,
-                        evt_nodes,
-                        removed_buffers_with_gemm,
-                    )
-                    epilogue_reads = list(lowered_epilogue.reads)
-                    d_buf = lowered_epilogue.renames.get("D")
-                    output_bufs = ([d_buf] if d_buf else []) + [
-                        w for w in lowered_epilogue.writes if w != d_buf
-                    ]
-                if plan.reductions:
-                    output_bufs = [
-                        original_buffer_name,
-                        *output_bufs,
-                        plan.reductions[0].output_name,
-                    ]
-                elif plan.feed_main is not None:
-                    output_bufs = [plan.feed_main.output_name]
-            except (NotImplementedError, AssertionError) as e:
-                log.warning("NVGEMM benchmark epilogue codegen failed: %s", e)
-
         with config.patch("benchmark_kernel", benchmark_kernel):
-            src_code = self.codegen_template(
-                template,
-                epilogue,
-                prologue,
-                only_gen_src_code=True,
-            )
+            try:
+                generated = self.codegen_template(
+                    template,
+                    epilogue,
+                    prologue,
+                    only_gen_src_code=True,
+                )
+            except NotImplementedError as exc:
+                from ..simd import CantSplit
 
-        if src_code is None:
-            raise AssertionError("expected src_code to be not None")
-        src_code = src_code.replace(
+                raise CantSplit(
+                    "NVGEMM epilogue", "supported pointwise lowering"
+                ) from exc
+
+        if not isinstance(generated, NVGemmGeneratedSource):
+            raise AssertionError(
+                f"expected NVGemmGeneratedSource, got {type(generated)}"
+            )
+        src_code = generated.source.replace(
             str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
         )
 
         if benchmark_kernel:
             src_code = self._add_benchmark_helpers(
-                src_code, template, epilogue, epilogue_reads, output_bufs
+                src_code,
+                template,
+                epilogue,
+                list(generated.epilogue_reads),
+                list(generated.output_buffers),
             )
 
         return src_code

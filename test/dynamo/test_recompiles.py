@@ -601,6 +601,81 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(count_recompiles(out_fn), 2)
 
 
+class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
+    # Float constant guards must be value-identity (bitwise), not IEEE eq:
+    # -0.0 == 0.0 so an EQUALS_MATCH guard built for 0.0 wrongly passed for
+    # -0.0 and reused a graph with 0.0 baked in, while nan != nan needs
+    # (and has) dedicated is-nan guards.
+
+    def test_neg_zero_recompiles_and_is_correct(self):
+        import math
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s, math.copysign(1.0, s)
+
+        x = torch.randn(4)
+        _, sign_pos = f(x, 0.0)
+        _, sign_neg = f(x, -0.0)
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_sign_recompiles_and_is_correct(self):
+        import math
+        import struct
+
+        def from_bits(bits):
+            return struct.unpack(">d", struct.pack(">Q", bits))[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x + 1, math.copysign(1.0, s)
+
+        # nan sign and payload are observable, so the nan guard must be
+        # bitwise: a graph specialized on a positive nan must not be reused
+        # for a negative nan.
+        x = torch.randn(4)
+        _, sign_pos = f(x, from_bits(0x7FF8000000000001))
+        _, sign_neg = f(x, from_bits(0xFFF8000000001234))
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_float_does_not_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s
+
+        x = torch.randn(4)
+        f(x, float("nan"))
+        f(x, float("nan"))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_complex_nan_guard_checks_other_component(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, c: complex):
+            return x + c
+
+        # The COMPLEX_IS_NAN guard must include the non-nan component:
+        # complex(7, nan) must not reuse the graph specialized on
+        # complex(5, nan), but the same constant must not recompile.
+        x = torch.randn(4, dtype=torch.cfloat)
+        f(x, complex(5.0, float("nan")))
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
