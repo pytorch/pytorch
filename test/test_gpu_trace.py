@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    skipCUDANonDefaultStreamIf,
     TestCase,
 )
 
@@ -87,6 +88,7 @@ class TestGpuTraceDevice(TestCase):
         self.mock.assert_called_once_with(data_ptr)
 
     @onlyCUDA
+    @skipCUDANonDefaultStreamIf(True)
     def test_stream_creation_callback(self, device):
         gpu_trace.register_callback_for_stream_creation(self.mock)
 
