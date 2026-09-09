@@ -258,7 +258,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertNotEqual(narrow_target, wide_target)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self):
+    @parametrize("fullgraph", (False, True))
+    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self, fullgraph):
+        # fullgraph=False takes _optimize, fullgraph=True optimize_assert; both
+        # thread native_backend and must agree.
         def fn(x):
             return x + 1
 
@@ -269,7 +272,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             "torch._dynamo.package._current_cpu_codegen_target",
             side_effect=AssertionError("toolchain probe ran for an eager backend"),
         ) as probe:
-            torch.compile(fn, backend="eager")(torch.randn(3))
+            torch.compile(fn, backend="eager", fullgraph=fullgraph)(torch.randn(3))
             (entry,) = PrecompileContext._dynamo_cache_entries.values()
         # side_effect fails at the call site, but Dynamo swallows exceptions on
         # the compile path, so assert not-called outside the patch too.
@@ -286,7 +289,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
             "torch._dynamo.package._current_cpu_codegen_target",
             return_value=sentinel,
         ):
-            torch.compile(fn, backend=custom_backend)(torch.randn(3))
+            torch.compile(fn, backend=custom_backend, fullgraph=fullgraph)(
+                torch.randn(3)
+            )
         (entry,) = PrecompileContext._dynamo_cache_entries.values()
         self.assertTrue(entry.requires_native_backend_compatibility)
         self.assertEqual(entry.system_info.cpu_codegen_target, sentinel)
