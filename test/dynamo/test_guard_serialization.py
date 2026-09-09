@@ -69,6 +69,17 @@ def global_func(x):
     return x + 1
 
 
+class RecursingGuardedDefault:
+    flag = 2.0
+
+    def __init__(self, inner=None):
+        self.inner = inner
+
+    def __reduce__(self):
+        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        return type(self), (type(self)(),)
+
+
 class ModuleNotSerializable(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -484,6 +495,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_recursing_guarded_value_overflow_is_a_package_error(self):
+        # A recursion overflow while pickling a guarded value -- here a
+        # pathological __reduce__ that never memoizes -- is a serialization
+        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
+        # without strict_precompile, which this class turns on), never a raw
+        # RecursionError that hard-fails a program that compiled fine before.
+        def fn(x, cfg=RecursingGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "exceeded the recursion limit"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
