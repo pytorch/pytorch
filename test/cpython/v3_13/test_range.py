@@ -540,6 +540,7 @@ class RangeTest(__TestCase):
         self.assertNotIn(-1, r)
         self.assertNotIn(1, r)
 
+    @skipIfTorchDynamo("Unrolls ~3M symbolic range-iterator steps; ~597s vs 0.9s eager")
     def test_range_iterators(self):
         # exercise 'fast' iterators, that use a rangeiterobject internally.
         # see issue 7298

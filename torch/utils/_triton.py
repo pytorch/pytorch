@@ -44,6 +44,22 @@ def has_triton_package() -> bool:
 
 
 @functools.cache
+def has_triton_block_ptr() -> bool:
+    """Whether the installed Triton still provides the block-pointer frontend API.
+
+    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
+    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
+    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
+    stub. Inductor's codegen emits both builtins, so require both.
+    """
+    if not has_triton_package():
+        return False
+    import triton.language as tl
+
+    return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
+
+
+@functools.cache
 def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     try:
         import triton
@@ -55,20 +71,30 @@ def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
 
 
 @functools.cache
-def _device_supports_tma() -> bool:
+def _device_supports_tensor_descriptor() -> bool:
     import torch
 
     return (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
         and not torch.version.hip
-    )
+    ) or has_triton_cpu_backend()
+
+
+@functools.cache
+def has_triton_cpu_backend() -> bool:
+    if has_triton_package():
+        import triton
+
+        return "cpu" in triton.backends.backends
+
+    return False
 
 
 @functools.cache
 def has_triton_experimental_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.experimental_descriptor import (  # noqa: F401
                     create_1d_tma_descriptor,
@@ -90,7 +116,7 @@ def has_triton_experimental_host_tma() -> bool:
 @functools.cache
 def has_triton_tensor_descriptor_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tma():
+        if _device_supports_tensor_descriptor():
             try:
                 from triton.tools.tensor_descriptor import (  # noqa: F401
                     TensorDescriptor,
@@ -114,10 +140,14 @@ def has_triton_tma_device() -> bool:
         import torch
 
         if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ) or torch.xpu.is_available():
+            (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability() >= (9, 0)
+                and not torch.version.hip
+            )
+            or torch.xpu.is_available()
+            or has_triton_cpu_backend()
+        ):
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -161,10 +191,14 @@ def has_triton_stable_tma_api() -> bool:
         import torch
 
         if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ) or torch.xpu.is_available():
+            (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability() >= (9, 0)
+                and not torch.version.hip
+            )
+            or torch.xpu.is_available()
+            or has_triton_cpu_backend()
+        ):
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -175,7 +209,25 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton_reduction_ordering() -> bool:
+    """Whether the available Triton exposes inner-tree reduction ordering."""
+    if has_triton_package():
+        try:
+            from triton.language import ReductionOrdering
+
+            return hasattr(ReductionOrdering, "INNER_TREE")
+        except ImportError:
+            pass
+    return False
+
+
+@functools.cache
+def has_triton(*, include_cpu: bool = False) -> bool:
+    """Return whether a usable Triton backend is available.
+
+    By default, this helper only considers accelerator devices; callers must
+    explicitly include CPU.
+    """
     if not has_triton_package():
         return False
 
@@ -184,34 +236,28 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    from torch._dynamo.device_interface import get_interface_for_device
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+    from torch._dynamo.exc import TritonUnavailableError
 
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
+    # A device supports Triton if it is available, reports Triton capability, and
+    # its Triton backend is actually built. Capability is gated first so that
+    # raise_if_triton_unavailable() only surfaces missing-backend errors (and
+    # not, e.g., CUDA's GPUTooOldForTriton for sub-capable devices). We catch the
+    # specific TritonUnavailableError rather than RuntimeError so unexpected
+    # errors are not silently swallowed.
+    for name, device_interface in get_registered_device_interfaces():
+        if ":" in name or (name == "cpu" and not include_cpu):
+            continue
+        if not (
+            device_interface.is_available() and device_interface.is_triton_capable()
+        ):
+            continue
+        try:
+            device_interface.raise_if_triton_unavailable()
+        except TritonUnavailableError:
+            continue
         return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-        "mtia": _return_true,
-    }
-
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
-
-    return is_device_compatible_with_triton()
+    return False
 
 
 @functools.cache

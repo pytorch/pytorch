@@ -21,12 +21,14 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_VER_14_4_PLUS = 0,
-  MACOS_VER_15_0_PLUS,
-  MACOS_VER_15_1_PLUS,
-  MACOS_VER_15_2_PLUS,
-  MACOS_VER_26_0_PLUS,
-  MACOS_VER_26_4_PLUS,
+  MACOS_14_4 = 0,
+  MACOS_15_0,
+  MACOS_15_1,
+  MACOS_15_2,
+  MACOS_26_0,
+  MACOS_26_2,
+  MACOS_26_4,
+  MACOS_27_0,
 };
 
 // Helper enum for GPU-family-gated workarounds
@@ -88,8 +90,10 @@ class TORCH_API MPSDevice {
 };
 
 TORCH_API bool is_available();
-TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
+TORCH_API bool is_macos_at_least(MacOSVersion version);
 TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
+// Whether MetalPerformancePrimitives (cooperative tensors) is usable;
+TORCH_API bool has_mpp();
 TORCH_API at::Allocator* GetMPSAllocator();
 
 inline Device getDeviceFromPtr(void* ptr) {

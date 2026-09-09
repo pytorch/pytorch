@@ -82,7 +82,7 @@ void initTreeViewBindings(PyObject* module) {
           [](const SourceRange& self) {
             std::ostringstream stream;
             self.highlight(stream);
-            return stream.str();
+            return std::move(stream).str();
           })
       .def("__repr__", [](const SourceRange& self) { return self.str(); })
       .def(
@@ -112,7 +112,7 @@ void initTreeViewBindings(PyObject* module) {
           [](const TreeView& tree) {
             std::ostringstream stream;
             stream << tree.get();
-            return stream.str();
+            return std::move(stream).str();
           })
       .def("dump", [](const TreeView& tree) { tree.dump(); });
 

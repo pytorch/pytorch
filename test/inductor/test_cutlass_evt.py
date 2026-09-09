@@ -28,8 +28,13 @@ def _is_cuda_sm90_or_sm10x():
     return bool(IS_SM90) or bool(IS_SM10X)
 
 
-def _expect_cuda_evt_key_error():
-    return GPU_TYPE == "cuda" and bool(IS_SM10X) and int(cutlass_arch(GPU_TYPE)) > 100
+def _cuda_evt_arch_supported():
+    if GPU_TYPE != "cuda":
+        return True
+
+    from cutlass_cppgen.backend.evt.passes.util import cc_map
+
+    return int(cutlass_arch(GPU_TYPE)) in cc_map
 
 
 if try_import_cutlass():
@@ -158,7 +163,7 @@ class TestCutlassEVT(TestCase):
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -166,10 +171,14 @@ class TestCutlassEVT(TestCase):
                 ],
                 OrderedSet([]),
             )
+        self.assertTrue(epilogue.is_evt_fallback)
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -268,7 +277,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -276,10 +285,13 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
                 ],
                 OrderedSet([]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -327,7 +339,7 @@ return tmp_0, tmp_2, D""",
                 {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
             )
         ):
-            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
@@ -335,10 +347,13 @@ return tmp_0, tmp_2, D""",
                 ],
                 OrderedSet(["buf0"]),
             )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
         self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames,
+            epilogue.renames,
             """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_1': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
@@ -350,6 +365,132 @@ def fn(accum, buf1, buf2):
     D = accum + tmp_1
 
 return tmp_1, D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_neg_constant(self):
+        """Test EVT codegen for neg and constant ops (used in decomposed SiLU)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            c = ops.constant(1, torch.float32)
+            return c + ops.exp(ops.neg(x))
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    tmp_0 = 1.0
+    tmp_1 = (0.0 - accum)
+    tmp_2 = exp(tmp_1)
+    D = tmp_0 + tmp_2
+
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_sigmoid_decomposed(self):
+        """Test EVT codegen for decomposed sigmoid: 1/(1+exp(-x))."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            neg_x = ops.neg(x)
+            exp_neg = ops.exp(neg_x)
+            one = ops.constant(1, torch.float32)
+            denom = one + exp_neg
+            return ops.truediv(one, denom)
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        # Sigmoid doesn't match _fuse_activations (not x/denom form with x in num)
+        # so it stays decomposed
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    tmp_0 = (0.0 - accum)
+    tmp_1 = exp(tmp_0)
+    tmp_2 = 1.0
+    tmp_3 = tmp_2 + tmp_1
+    D = tmp_2 / tmp_3
+
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_silu_fused(self):
+        """Test EVT codegen for SiLU: x/(1+exp(-x)) is folded to silu(x)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            neg_x = ops.neg(x)
+            exp_neg = ops.exp(neg_x)
+            one = ops.constant(1, torch.float32)
+            denom = one + exp_neg
+            return ops.truediv(x, denom)
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        reads = list(epilogue.reads)
+        writes = list(epilogue.writes)
+        code = epilogue.source
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        # _fuse_activations folds x/(1+exp(0.0-x)) into silu(x)
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    D = silu(accum)
+return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
@@ -399,10 +540,8 @@ return tmp_1, D""",
                 lambda x: int(x),
             )[0]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
         if GPU_TYPE == "xpu":
@@ -489,10 +628,8 @@ def fn(accum, bias):
                 lambda x: int(x),
             )[0]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
 
@@ -542,10 +679,8 @@ def fn(accum, bias):
                 device_type=GPU_TYPE,
             )[2]
 
-        if _expect_cuda_evt_key_error():
-            with self.assertRaises(KeyError):
-                render_code()
-            return
+        if not _cuda_evt_arch_supported():
+            self.skipTest(f"CUTLASS EVT does not support arch {cutlass_arch(GPU_TYPE)}")
 
         code = render_code()
         if IS_SM90:

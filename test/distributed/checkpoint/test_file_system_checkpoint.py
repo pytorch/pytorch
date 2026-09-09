@@ -82,12 +82,12 @@ def assert_state_dict_equal(
             ):
                 self.assertTrue(
                     torch.equal(local_shard_1.tensor, local_shard_2.tensor),
-                    f"Key {key}'s shard does not match",
+                    lambda msg: f"{msg}\nKey {key}'s shard does not match",
                 )
         elif isinstance(value_1, torch.Tensor):
             self.assertTrue(
                 torch.equal(value_1, value_2),
-                f"Key {key}'s tensor does not match",
+                lambda msg: f"{msg}\nKey {key}'s tensor does not match",
             )
 
     return True
@@ -354,7 +354,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(store_tensor, load_tensor),
-                        msg=f"{s0} vs {s1}",
+                        msg=lambda msg: f"{msg}\n{s0} vs {s1}",
                     )
 
     @with_comms(init_rpc=False, backend=backend)
@@ -506,11 +506,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(save_dict_sharded, load_dict["sharded"]),
-                        f"save-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
                     )
                     self.assertTrue(
                         torch.allclose(save_dict["replicated"], load_dict_replicated),
-                        f"save-spec {save_spec} load-spec {load_spec}",
+                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
                     )
 
 

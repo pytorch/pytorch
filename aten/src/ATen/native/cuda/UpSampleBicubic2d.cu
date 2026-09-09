@@ -257,8 +257,6 @@ static void upsample_bicubic2d_out_cuda_template(
   int input_height = input.size(2);
   int input_width = input.size(3);
 
-  output.zero_();
-
   const int num_output_elements = output_height * output_width;
   const int max_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);

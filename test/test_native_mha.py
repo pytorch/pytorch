@@ -8,14 +8,20 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyOn,
+    onlyAccelerator,
     skipMeta,
-    skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.nn.attention import SDPBackend
 
-class TestMHADeviceType(TestCase):
+class TestMHADevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @torch.no_grad()
     def _test_transform_bias_rescale_qkv_impl(
         self, device, dtype, use_nt, use_padding=False
@@ -106,8 +112,7 @@ class TestMHADeviceType(TestCase):
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -191,9 +196,8 @@ class TestMHADeviceType(TestCase):
             embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
-        if device == "cuda" or device == "xpu":
-            pt = pt.to(device)
-            npt = npt.to(device)
+        pt = pt.to(device)
+        npt = npt.to(device)
 
         ypt, weight_pt = pt(
             q,
@@ -349,7 +353,7 @@ class TestMHADeviceType(TestCase):
         )
 
 
-instantiate_device_type_tests(TestMHADeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMHADevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

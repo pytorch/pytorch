@@ -62,7 +62,8 @@ struct activity_t;
 void addMetadata(
     activity_t* activity,
     const std::string& key,
-    const std::string& value);
+    const std::string& value,
+    bool quote = false);
 
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
@@ -111,7 +112,7 @@ using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 using ActivityFilter = std::unordered_map<
     torch::autograd::profiler::ActivityType,
     std::unordered_set<std::string>>;
-void prepareTrace(
+TORCH_API void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,

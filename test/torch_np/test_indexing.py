@@ -36,7 +36,11 @@ class TestAdvancedIndexing(TestCase):
 
                 # Test getitem
                 tr, nr = torch_arr[index], numpy_arr[index]
-                self.assertEqual(tr.shape, nr.shape, f"{name} getitem shape mismatch")
+                self.assertEqual(
+                    tr.shape,
+                    nr.shape,
+                    lambda msg: f"{msg}\n{name} getitem shape mismatch",
+                )
                 assert_array_equal(
                     tr.tensor.numpy() if hasattr(tr, "tensor") else tr, nr
                 )

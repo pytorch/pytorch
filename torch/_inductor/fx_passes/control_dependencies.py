@@ -24,14 +24,20 @@ class ControlDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
 
-    Schema: control_deps(additional_deps, target, *args, **kwargs) -> result
+    Schema: control_deps(additional_deps, subgraph, *args, **kwargs) -> result
     where:
     - additional_deps: tuple of tensors that must be computed before this op
+      (ordering-only, not a real data use)
     - subgraph: GraphModule containing the exact operation to execute
-    - args/kwargs: arguments for the target function
+    - *args: pass-through arguments forwarded to the subgraph
 
-    This ensures all tensors in additional_deps are computed before the target
-    executes, creating explicit scheduling dependencies.
+    Semantics:
+    - All tensors in additional_deps are computed before the subgraph executes.
+    - Pass-through args (inputs returned unchanged by the subgraph) are
+      versioned: future readers are ordered after all subgraph operations
+      via a rename chain (OrderingOutput).  This ensures that consumers of
+      a pass-through value cannot be scheduled before the subgraph's sync
+      ops (e.g. wait_event) complete.
     """
 
     def __init__(self) -> None:
@@ -151,7 +157,8 @@ def preserve_node_ordering(
 
     # Process each node that needs additional dependencies
     for dependent_node, dep_nodes in additional_deps_map.items():
-        assert dependent_node.op == "call_function", dependent_node.op
+        if dependent_node.op != "call_function":
+            raise AssertionError(dependent_node.op)
 
         original_name = dependent_node.name
         original_args = dependent_node.args
@@ -164,7 +171,8 @@ def preserve_node_ordering(
         subgraph_module = _create_subgraph_for_node(graph, dependent_node)
 
         owning_mod = graph.owning_module
-        assert owning_mod is not None
+        if owning_mod is None:
+            raise AssertionError("expected graph to have an owning_module")
         subgraph_attr_name = get_subgraph_name(owning_mod, original_name)
         setattr(graph.owning_module, subgraph_attr_name, subgraph_module)
 
@@ -195,6 +203,14 @@ def preserve_node_ordering(
         ordered_node.meta = original_meta
         # this will be constrained on the target node in subgraph if it exists
         ordered_node.meta.pop("eager_input_vals", None)
+        # The wrapped operation retains its fallback metadata in the subgraph.
+        # The control_deps HOP itself must use its dedicated lowering because
+        # FallbackKernel cannot handle its Subgraph argument.
+        ordered_node.meta.pop("should_fallback", None)
+        custom_meta = ordered_node.meta.get("custom")
+        if isinstance(custom_meta, dict) and "fallback_to_eager" in custom_meta:
+            ordered_node.meta["custom"] = custom_meta.copy()
+            ordered_node.meta["custom"].pop("fallback_to_eager")
 
         # Replace all uses of the original node with the ordered version
         dependent_node.replace_all_uses_with(ordered_node)
@@ -264,7 +280,8 @@ def _create_subgraph_for_node(
     new_args, new_kwargs = pytree.tree_unflatten(new_flat, spec)
 
     # Recreate the exact original operation in the subgraph
-    assert callable(node.target)
+    if not callable(node.target):
+        raise AssertionError(f"expected node.target to be callable, got {node.target}")
     result = subgraph.call_function(
         node.target,
         tuple(new_args),

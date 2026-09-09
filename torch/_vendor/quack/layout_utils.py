@@ -278,7 +278,7 @@ def convert_layout_zero_stride(
 
 
 def mma_partition_C_vec(
-    sVec: cute.Tensor, thr_mma: cute.core.ThrMma, expand_shape: int, is_colvec: bool
+    sVec: cute.Tensor, thr_mma: cute.ThrMma, expand_shape: int, is_colvec: bool
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
@@ -295,7 +295,7 @@ def mma_partition_C_vec(
 
 
 def mma_partition_A_vec(
-    sVec: cute.Tensor, thr_mma: cute.core.ThrMma, expand_shape: int, is_colvec: bool
+    sVec: cute.Tensor, thr_mma: cute.ThrMma, expand_shape: int, is_colvec: bool
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
@@ -312,7 +312,7 @@ def mma_partition_A_vec(
 
 
 def copy_partition_S_vec(
-    sVec: cute.Tensor, thr_copy: cute.core.ThrCopy, expand_shape: int, is_colvec: bool
+    sVec: cute.Tensor, thr_copy: cute.ThrCopy, expand_shape: int, is_colvec: bool
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1
@@ -329,7 +329,7 @@ def copy_partition_S_vec(
 
 
 def copy_partition_D_vec(
-    sVec: cute.Tensor, thr_copy: cute.core.ThrCopy, expand_shape: int, is_colvec: bool
+    sVec: cute.Tensor, thr_copy: cute.ThrCopy, expand_shape: int, is_colvec: bool
 ) -> cute.Tensor:
     assert cute.rank(sVec) == 2
     assert sVec.stride[0] == 1

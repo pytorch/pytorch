@@ -329,18 +329,14 @@ def as_position_independent_swizzle_tensor(tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(cute.recast_ptr(tensor.iterator, dtype=tensor.element_type), new_layout)
 
 
-def partition_D_position_independent(
-    thr_copy: cute.core.ThrCopy, tensor: cute.Tensor
-) -> cute.Tensor:
+def partition_D_position_independent(thr_copy: cute.ThrCopy, tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(
         swizzle_ptr(thr_copy.partition_D(tensor).iterator),
         thr_copy.partition_D(as_position_independent_swizzle_tensor(tensor)).layout,
     )
 
 
-def partition_S_position_independent(
-    thr_copy: cute.core.ThrCopy, tensor: cute.Tensor
-) -> cute.Tensor:
+def partition_S_position_independent(thr_copy: cute.ThrCopy, tensor: cute.Tensor) -> cute.Tensor:
     return cute.make_tensor(
         swizzle_ptr(thr_copy.partition_S(tensor).iterator),
         thr_copy.partition_S(as_position_independent_swizzle_tensor(tensor)).layout,

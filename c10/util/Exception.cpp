@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
@@ -70,7 +69,7 @@ std::string Error::compute_what(bool include_backtrace) const {
     oss << '\n' << backtrace_->get();
   }
 
-  return oss.str();
+  return std::move(oss).str();
 }
 
 const Backtrace& Error::backtrace() const {
@@ -118,7 +117,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const std::string& msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  // @allow-raw-throw: this is the throw TORCH_CHECK routes to
   throw ::c10::Error({func, file, line}, msg);
 }
 
@@ -127,7 +126,7 @@ void torchCheckFail(
     const char* file,
     uint32_t line,
     const char* msg) {
-  // NOLINTNEXTLINE(modernize-use-designated-initializers)
+  // @allow-raw-throw: this is the throw TORCH_CHECK routes to
   throw ::c10::Error({func, file, line}, msg);
 }
 

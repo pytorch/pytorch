@@ -58,7 +58,7 @@ Tensor TensorMaker::make_tensor() {
   return tensor;
  }
 
- std::size_t TensorMaker::computeStorageSize() const noexcept {
+ std::size_t TensorMaker::computeStorageSize() const {
    std::size_t itemsize = opts_.dtype().itemsize();
 
    if (strides_) {

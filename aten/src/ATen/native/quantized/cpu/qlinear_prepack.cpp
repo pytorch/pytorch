@@ -590,8 +590,11 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -602,7 +605,8 @@ class QLinearPackWeightInt8 final {
     }
 #endif
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
     }
 #endif // #if AT_MKLDNN_ENABLED()

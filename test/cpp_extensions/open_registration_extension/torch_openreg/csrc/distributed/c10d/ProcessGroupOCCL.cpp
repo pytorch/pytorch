@@ -236,7 +236,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupOCCL::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& /* opts */) {
@@ -245,7 +245,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::_reduce_scatter_base(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupOCCL::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupOCCL::all_gather_single(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& /* opts */) {
@@ -272,7 +272,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::allgather_coalesced(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupOCCL::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupOCCL::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& /* opts */) {
@@ -308,7 +308,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& /* opts */) {
@@ -317,7 +317,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter_tensor_coalesced(
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupOCCL::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupOCCL::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& /* outputCounts */,

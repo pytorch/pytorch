@@ -114,11 +114,19 @@ class DecorateInfo:
                     raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
+        device_type_matched = False
+        if isinstance(self.device_type, str):
+            device_type_matched = self.device_type == device_type
+        elif isinstance(self.device_type, (list, tuple)):
+            device_type_matched = device_type in self.device_type
+        elif self.device_type is None:
+            device_type_matched = True
+
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
-            and (self.device_type is None or self.device_type == device_type)
+            and device_type_matched
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (
@@ -785,7 +793,11 @@ class OpInfo:
     # backward dtypes this function is expected to work with on MPS
     backward_dtypesIfMPS: _dispatch_dtypes = None
 
+    # backward dtypes this function is expected to work with on HPU
     backward_dtypesIfHpu: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on XPU
+    backward_dtypesIfXPU: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -1036,7 +1048,17 @@ class OpInfo:
                 else self.dtypes
             )
         )
-
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else (
+                self.backward_dtypesIfCUDA
+                if self.backward_dtypesIfCUDA is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypes
+            )
+        )
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -1127,7 +1149,7 @@ class OpInfo:
         if self.supports_njt is None:
             self.supports_njt = False
 
-        # We run the sampling functions without tracking the gradiends of the creation of inputs
+        # We run the sampling functions without tracking the gradients of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
         self.sample_inputs_sparse_coo_func = torch.no_grad()(
             self.sample_inputs_sparse_coo_func
@@ -1608,6 +1630,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         elif device_type == "mps":
             backward_dtypes = self.backward_dtypesIfMPS
         else:
@@ -3120,12 +3144,8 @@ def sample_inputs_foreach(
 
 
 def get_foreach_method_names(name):
-    # get torch inplace reference function
-    op_name = "_foreach_" + name
-    inplace_op_name = op_name + "_"
-
-    op = getattr(torch, op_name, None)
-    inplace_op = getattr(torch, inplace_op_name, None)
+    op = getattr(torch.foreach, name, None)
+    inplace_op = getattr(torch.foreach, name + "_", None)
 
     ref = getattr(torch, name, None)
     ref_inplace = getattr(torch.Tensor, name + "_", None)
@@ -3140,9 +3160,9 @@ class ForeachFuncInfo(OpInfo):
     are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
 
     ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
-    as the last keyword argument such as `_foreach_add`.
+    as the last keyword argument such as ``torch.foreach.add``.
     ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
-    Currently only `_foreach_pow` supports this.
+    Currently only ``torch.foreach.pow`` supports this.
     ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
     the forward result for its backward computation.
     """
@@ -3159,10 +3179,8 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_inplace,
         ) = get_foreach_method_names(self.name)
         if not self.supports_out:
-            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
-            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
-            # is not defined at the moment. Thus to skip the qualification, set a similar torch
-            # function.
+            # Functional foreach APIs do not exist for zero and copy. Use their
+            # in-place variants to avoid qualifying a missing function.
             if foreach_method is not None:
                 raise AssertionError("foreach_method must be None")
             if torch_ref_method is not None:
@@ -3187,6 +3205,8 @@ class ForeachFuncInfo(OpInfo):
         self.has_no_in_place = self.inplace_variant is None
 
         name = self.name
+        # Keep the established private-style OpInfo names for test IDs and
+        # name-based skips even while testing the public callables above.
         self.name = f"_foreach_{name}"
         if name == "norm":
             self.ref = torch.linalg.vector_norm

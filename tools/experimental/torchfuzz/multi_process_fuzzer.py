@@ -84,6 +84,7 @@ def run_fuzzer_with_seed(
     seed: int,
     template: str = "default",
     supported_ops: str | None = None,
+    generate_only: str | None = None,
 ) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
@@ -92,6 +93,9 @@ def run_fuzzer_with_seed(
         seed: The seed value to pass to fuzzer.py
         template: The template to use for code generation
         supported_ops: Comma-separated ops string with optional weights
+        generate_only: If set, forward as --generate-only so the subprocess only
+            generates the program file (substituting the seed into the pattern)
+            instead of running it
 
     Returns:
         FuzzerResult dataclass instance
@@ -113,6 +117,10 @@ def run_fuzzer_with_seed(
         # Append supported ops if provided
         if supported_ops:
             cmd.extend(["--supported-ops", supported_ops])
+
+        # Forward generate-only; the single-seed subprocess substitutes the seed.
+        if generate_only:
+            cmd.extend(["--generate-only", generate_only])
 
         result = subprocess.run(
             cmd,
@@ -213,6 +221,7 @@ def run_multi_process_fuzzer(
     verbose: bool = False,
     template: str = "default",
     supported_ops: str | None = None,
+    generate_only: str | None = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -224,6 +233,8 @@ def run_multi_process_fuzzer(
         verbose: Whether to print detailed output
         template: The template to use for code generation
         supported_ops: Comma-separated ops string with optional weights
+        generate_only: If set, forward as --generate-only to each worker so they
+            only generate program files instead of running them
     """
     seeds = list(range(seed_start, seed_start + seed_count))
 
@@ -253,7 +264,8 @@ def run_multi_process_fuzzer(
             future_results = []
             for seed in seeds:
                 future = pool.apply_async(
-                    run_fuzzer_with_seed, (seed, template, supported_ops)
+                    run_fuzzer_with_seed,
+                    (seed, template, supported_ops, generate_only),
                 )
                 future_results.append(future)
 
