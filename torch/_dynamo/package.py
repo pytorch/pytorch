@@ -111,6 +111,254 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
+
+    Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
+    A closure cell is a reduce ARGUMENT: a function closing over itself is
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that. Leave that None in
+        # place rather than assigning it back (which the stub rejects).
+        if module is not None:
+            fn.__module__ = module
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(
+        cls,
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope. That is safe on the guard-serialization path,
+        # which reads attributes off the rebuilt function without calling it;
+        # the shared AOT path (AOTCompilePickler) does call it, so there an
+        # empty scope surfaces as a NameError at first call, not a load error.
+        f_globals: dict[str, Any]
+        # __module__ need not be an importable string: a decorator can set it to
+        # a non-str (42), a <locals>/exec function can carry None or "" (bare
+        # globals with no __name__), and a relative name (".rel") or a module
+        # whose body raises fails import with something other than ImportError.
+        # None of those should fail the load, so require a non-empty str and
+        # swallow any import failure into the empty scope.
+        if isinstance(module, str) and module:
+            try:
+                f_globals = importlib.import_module(module).__dict__
+            except Exception:
+                f_globals = {}
+        else:
+            f_globals = {}
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
+
+    @classmethod
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_state. The
+        # {} is fresh per call, so two functions that shared one module dict at
+        # save get distinct __globals__ after load; deliberate and unobservable,
+        # since no serialized guard reads __globals__ identity.
+        return cls._build_function({}, module, code, qualname, name, closure)
+
+    @staticmethod
+    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+        (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        ) = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        # FunctionType took __doc__/__annotations__/__type_params__ from the code
+        # object; functools.wraps overwrote them on the live function and a guard
+        # rooted there rebakes, so restore what the reducer captured.
+        fn.__doc__ = doc
+        fn.__annotations__ = annotations
+        # Assign __dict__ before __type_params__: on Python < 3.12 the function
+        # has no __type_params__ slot, so that write lands in __dict__ and a
+        # wholesale __dict__ assignment afterwards would discard it.
+        fn.__dict__ = attributes
+        if type_params is not None:
+            fn.__type_params__ = type_params
+        if globals_snapshot is not None:
+            fn.__globals__.update(globals_snapshot)
+
+    @staticmethod
+    def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
+        # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
+        # pickler wants the unevaluated shape, so it takes FORWARDREF and prunes
+        # the proxies later. A caller that must SERIALIZE the annotations passes
+        # resolve=True instead: it gets real values, and an empty dict when a
+        # name will not resolve, because a ForwardRef -- even nested in
+        # list[Bar] -- is not picklable. This resolves the whole set or nothing;
+        # a caller that also needs per-value picklability filters on top.
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            if resolve:
+                try:
+                    return annotationlib.get_annotations(
+                        obj, format=annotationlib.Format.VALUE
+                    )
+                except Exception:
+                    return {}
+            return annotationlib.get_annotations(
+                obj, format=annotationlib.Format.FORWARDREF
+            )
+        return obj.__annotations__
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same function; those
+        # carry the function and self explicitly.
+        func = method.__func__
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE resolves only after self is restored, which
+        # is after pickle rebuilds the method, so getattr() at load would miss
+        # it: carry func+self explicitly. That covers an instance __dict__
+        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
+        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
+        # lookup we must also not probe below -- it can recurse). A type receiver
+        # (classmethod) is exempt: its namespace is restored with the class.
+        cls = type(method.__self__)
+        self_dict = getattr(method.__self__, "__dict__", None)
+        instance_served = not isinstance(method.__self__, type) and (
+            (isinstance(self_dict, dict) and name in self_dict)
+            or (
+                name is not None
+                and isinstance(
+                    inspect.getattr_static(cls, name, None),
+                    types.MemberDescriptorType,
+                )
+            )
+            or hasattr(cls, "__getattr__")
+        )
+        if instance_served:
+            return type(self)._unpickle_bound_method, (func, method.__self__)
+        inner = getattr(method.__self__, name, None) if name is not None else None
+        if inspect.ismethod(inner):
+            inner = inner.__func__
+        # `func is inner` proves the class MRO resolves back to this function.
+        if func is inner:
+            return None
+        return type(self)._unpickle_bound_method, (func, method.__self__)
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        annotations: dict[str, Any],
+        doc: Any,
+        type_params: tuple[Any, ...] | None,
+        globals_snapshot: dict[str, Any] | None = None,
+    ) -> tuple[Any, ...]:
+        # annotations/type_params/doc are passed in rather than read off fn: the
+        # guard pickler prunes what no guard reads, so an unpicklable local class
+        # in an annotation -- or a __doc__ reassigned to an unpicklable object --
+        # cannot fail the whole dump (a failure there silently bypasses the
+        # package). The AOT pickler passes them through verbatim.
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+        state = (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        )
+        return unpickle, args, state, None, None, type(self)._apply_function_state
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -804,6 +1052,13 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -822,6 +1077,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -829,6 +1086,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
