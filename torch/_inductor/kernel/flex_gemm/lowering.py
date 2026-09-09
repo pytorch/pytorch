@@ -774,10 +774,18 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     indexed_metas = () if indexed_output is None else (indexed_output.node.meta["val"],)
     if not has_flex_gemm_quack():
         raise NotImplementedError("FlexGEMM QUACK backend requires CuTeDSL")
-    packed_uint8_main = main_transform is not None and output_meta.dtype is torch.uint8
+    # A terminal ``view(dtype)`` reinterprets bits: the kernel stores the source
+    # dtype and the result is re-viewed below.
+    output_storage = outputs.output_storage
+    storage_dtype = (
+        output_meta.dtype
+        if output_storage is None
+        else output_storage.meta["val"].dtype
+    )
+    packed_uint8_main = main_transform is not None and storage_dtype is torch.uint8
     if (
-        not output_meta.dtype.is_floating_point
-        and output_meta.dtype is not torch.bool
+        not storage_dtype.is_floating_point
+        and storage_dtype is not torch.bool
         and not packed_uint8_main
     ):
         raise NotImplementedError(
@@ -788,13 +796,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     if main_transform is not None:
         # Grouped main outputs use TMA stores, whose outer stride must preserve
         # 16-byte alignment even when the contracted N extent is not aligned.
-        output_alignment = max(16 // output_meta.dtype.itemsize, 1)
+        output_alignment = max(16 // storage_dtype.itemsize, 1)
         output_stride[-2] = (
             ceildiv(output_size[-1], output_alignment) * output_alignment
         )
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
-        output_meta.dtype,
+        storage_dtype,
         output_size,
         output_stride,
     )
@@ -860,6 +868,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             "FlexGEMM QUACK grouped_mm (varlen) does not yet support captured "
             "tensors of the full [total_m, N] output shape"
         )
+    if gemm_args[mat1_index].get_device_or_error().type != "cuda":
+        raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")
     epimod_source = materialize_flex_gemm_epimod(
         subgraph.graph_module,
         epilogue_analysis,
@@ -1003,6 +1013,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         structural_outs[node] if node in structural_outs else next(aux_iter)
         for node in outputs.returned_aux_outputs
     ]
+    if storage_dtype is not output_meta.dtype:
+        result = TensorBox(ir.DtypeView.create(result, output_meta.dtype))
     return (result, *ordered_aux_outs)
 
 
