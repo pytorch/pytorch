@@ -5,7 +5,16 @@
 
 #include <torch/headeronly/cpu/vec/intrinsics.h>
 #include <torch/headeronly/cpu/vec/vec_base.h>
+#include <torch/headeronly/native/Math.h>
+#include <torch/headeronly/native/cpu/zmath.h>
+#include <torch/headeronly/util/MathConstants.h>
+#include <torch/headeronly/util/NumericUtils.h>
 #include <torch/headeronly/util/irange.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <type_traits>
 
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
@@ -32,6 +41,16 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
+
+#ifndef __at_align__
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#endif
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -79,6 +98,9 @@ static inline float32x4_t sve_to_neon(svfloat32_t v) {
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
+
+using torch::headeronly::_isinf;
+using torch::headeronly::_isnan;
 
 template <int index, bool mask_val>
 struct BlendRegs {
