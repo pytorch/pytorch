@@ -53,7 +53,7 @@ class MPSEvent {
   std::mutex m_cpu_sync_mutex{};
   std::condition_variable m_cpu_sync_cv{};
   // CondVar predicate to sync the events created on this Stream with CPU
-  bool m_cpu_sync_completed = false;
+  uint32_t m_cpu_sync_pending = 0;
   // used to compute elapsed time
   uint64_t m_completion_time = 0;
 
