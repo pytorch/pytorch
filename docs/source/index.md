@@ -34,3 +34,5 @@ community/index
 
 * {ref}`genindex`
 * {ref}`modindex`
+
+<!-- docs-preview validation: no-op change to confirm the docs preview build/upload still works; safe to revert. -->
