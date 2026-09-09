@@ -1738,6 +1738,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention",
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
+        "torch._scaled_addmm",
+        "torch._scaled_addmm_",
         "torch._scaled_mm",
         "torch._scaled_mm_v2",
         "torch._scaled_grouped_mm",
