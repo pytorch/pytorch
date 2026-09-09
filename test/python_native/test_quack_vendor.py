@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
+FLEX_GEMM_PATCHES = REPO_ROOT / "tools" / "vendoring" / "quack" / "flex_gemm_patches"
+# Classes the FlexGEMM patch series may add to QuACK: generic protocol hooks
+# only. Concrete FlexGEMM EpiOps live in torch/_inductor/kernel/flex_gemm/quack_ops.
+FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin"}
 
 
 @unittest.skipIf(
@@ -24,12 +29,11 @@ class TestQuackVendor(TestCase):
         import torch._vendor.quack as quack
         from torch._vendor.quack.epilogue.frontend import EpiMod
         from torch._vendor.quack.gemm_interface import gemm_symmetric_out
-        from torch._vendor.quack.grouped_reduce import feed_main_capable
         from torch._vendor.quack.rmsnorm import rmsnorm
 
         vendor_root = Path(quack.__file__).resolve().parent
         self.assertIn("torch/_vendor/quack", vendor_root.as_posix())
-        for obj in (EpiMod, gemm_symmetric_out, feed_main_capable, rmsnorm):
+        for obj in (EpiMod, gemm_symmetric_out, rmsnorm):
             self.assertTrue(callable(obj))
         self.assertNotIn("quack", sys.modules)
 
@@ -40,6 +44,27 @@ class TestQuackVendor(TestCase):
 
         self.assertTrue(hasattr(torch.ops.torch_vendor_quack, "gemm_epi"))
         self.assertTrue(hasattr(torch.ops.torch_vendor_quack, "_rmsnorm_fwd"))
+
+
+class TestQuackFlexGemmPatches(TestCase):
+    def test_patch_series_holds_only_hooks(self):
+        series = [
+            line.split("#")[0].strip()
+            for line in (FLEX_GEMM_PATCHES / "series").read_text().splitlines()
+        ]
+        for name in filter(None, series):
+            text = (FLEX_GEMM_PATCHES / name).read_text()
+            files = re.findall(r"^diff --git a/(\S+) ", text, flags=re.MULTILINE)
+            self.assertFalse(
+                [f for f in files if f.startswith("tests/")],
+                f"{name} carries QuACK test hunks; keep them on the upstreaming branch",
+            )
+            classes = set(re.findall(r"^\+class (\w+)\b", text, flags=re.MULTILINE))
+            self.assertEqual(
+                classes - FLEX_GEMM_PATCH_CLASSES,
+                set(),
+                f"{name} adds concrete classes; move them to flex_gemm/quack_ops",
+            )
 
 
 @unittest.skipIf(

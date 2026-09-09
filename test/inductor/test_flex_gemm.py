@@ -661,7 +661,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             LOCAL_REDUCE_FRAGMENT_WIDTH,
         )
-        from torch._vendor.quack.grouped_reduce import GROUPED_FRAGMENT_WIDTH
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            GROUPED_FRAGMENT_WIDTH,
+        )
 
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
 
