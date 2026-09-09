@@ -224,7 +224,11 @@ class _DynamoCodeCacheEntry:
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
-      10. Whether or not this code entry was bypassed
+      10. Whether the entry currently has nothing installable: every compile of
+         it was bypassed (its guards could not be serialized), or a backend was
+         missing at load. install() then leaves the frame to be traced fresh
+         rather than skipping it as trivial. Cleared once a compile records a
+         guarded code.
     """
 
     python_code: SerializedCode
@@ -636,6 +640,9 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
+        # Backend ids the compile inside the current code_context registered,
+        # so a bypass can drop exactly those.
+        self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
@@ -764,6 +771,7 @@ class CompilePackage:
 
         entry = self._codes[code]
         self._current_entry = entry
+        self._current_backend_ids = []
         try:
             yield
         finally:
@@ -777,21 +785,18 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
-        if self._current_entry.bypassed:
-            return
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
+        self._current_entry.bypassed = False
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
-        if self._current_entry.bypassed:
-            return
         for code in sources:
             if code in self._resume_codes:
                 continue
@@ -800,10 +805,25 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_compile(self) -> None:
+        """Drop what the current compile registered on its entry.
+
+        Only this compile is lost: its guarded code is never recorded
+        (convert_frame skips add_guarded_code once bypass_package clears
+        output.package) and the backend ids it registered go with it. Guarded
+        codes an earlier compile of the same code object recorded stay
+        installable, so a reload keeps them and only re-traces the inputs that
+        would have matched the dropped one. An entry left with no guarded code
+        is marked bypassed so install() re-traces the frame instead of skipping
+        it as trivial.
+        """
         if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in bypass_current_entry")
-        self._current_entry.bypassed = True
+            raise AssertionError("_current_entry is not set in bypass_current_compile")
+        for backend_id in self._current_backend_ids:
+            self._current_entry.backend_ids.remove(backend_id)
+            self._cached_backends.pop(backend_id, None)
+        self._current_backend_ids = []
+        self._current_entry.bypassed = not self._current_entry.guarded_codes
 
     def add_resume_function(
         self,
@@ -831,6 +851,7 @@ class CompilePackage:
             raise AssertionError("_current_entry is not set in add_backend_id")
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
+            self._current_backend_ids.append(backend_id)
         if backend is not None:
             self._cached_backends[backend_id] = backend
 
