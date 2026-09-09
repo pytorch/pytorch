@@ -1,14 +1,17 @@
 # Owner(s): ["module: dynamo"]
+import base64
+import binascii
 import functools
-import operator
 import os
 import re
+import sys
 import unittest
 import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
+from torch._dynamo import external_utils
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
@@ -26,6 +29,11 @@ from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTe
 
 def my_custom_function(x):
     return x + 1
+
+
+@torch._dynamo.assume_constant_result
+def tensor_constant_result():
+    return torch.tensor([4.0])
 
 
 class DecoratorTests(PytreeRegisteringTestCase):
@@ -345,6 +353,46 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         ref = fn(x, y)
         res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_none_inputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, maybe_y, payload):
+            torch._dynamo.graph_break()
+            if maybe_y is None and payload["bias"] is None:
+                return x + 1
+            if payload["bias"] is None:
+                return x + maybe_y
+            return x + maybe_y + payload["bias"]
+
+        def fn(x, maybe_y):
+            return trace_me(x, maybe_y, {"bias": None}) * 2
+
+        x = torch.randn(3)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
+
+        for maybe_y in (None, torch.randn(3)):
+            self.assertEqual(fn(x, maybe_y), opt_fn(x, maybe_y))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_none_outputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 1, None, {"bias": None}
+
+        def fn(x):
+            y, maybe_y, payload = trace_me(x)
+            if maybe_y is None and payload["bias"] is None:
+                return y * 2
+            return y
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_dict(self):
@@ -1220,13 +1268,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def test_substitute_in_graph(self):
         counters.clear()
 
-        # NB: Choose another C function for test when we support operator.indexOf
+        # NB: Choose another C function for test when we support base64.b64encode
         #     out of the box
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = base64.b64encode
         opt_fn = torch.compile(fn, backend=cnts)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 1)
@@ -1234,27 +1282,72 @@ class DecoratorTests(PytreeRegisteringTestCase):
         torch._dynamo.reset()
         counters.clear()
 
+        base46_map = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
         with self.assertRaisesRegex(TypeError, "Signature mismatch"):
 
-            @torch._dynamo.substitute_in_graph(operator.indexOf)
-            def _(sequence, x):
-                for i, item in enumerate(sequence):
-                    if item is x or item == x:
-                        return i
-                raise ValueError("sequence.index(x): x not in sequence")
+            @torch._dynamo.substitute_in_graph(binascii.b2a_base64)
+            def _(x, /, *, newline=True):
+                return b""
 
-        @torch._dynamo.substitute_in_graph(operator.indexOf)
-        def polyfill(a, b):
-            for i, item in enumerate(a):
-                if item is b or item == b:
-                    return i
-            raise ValueError("sequence.index(x): x not in sequence")
+        def polyfill(data, /, *, newline=True):
+            buffer = []
+            cipher = []
+            for byte in data:
+                buffer.append(byte)
+                if len(buffer) == 3:
+                    cipher.append(base46_map[int(buffer[0]) >> 2])
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[0]) & 0x03) << 4) | (int(buffer[1]) >> 4)
+                        ]
+                    )
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[1]) & 0x0F) << 2) | (int(buffer[2]) >> 6)
+                        ]
+                    )
+                    cipher.append(base46_map[int(buffer[2]) & 0x3F])
+                    buffer = []
+            if len(buffer) != 0:
+                cipher.append(base46_map[int(buffer[0]) >> 2])
+                if len(buffer) == 1:
+                    cipher.append(base46_map[(int(buffer[0]) & 0x03) << 4])
+                    cipher.append(b"=")
+                else:
+                    cipher.append(
+                        base46_map[
+                            ((int(buffer[0]) & 0x03) << 4) | (int(buffer[1]) >> 4)
+                        ]
+                    )
+                    cipher.append(base46_map[((int(buffer[1]) & 0x0F) << 2)])
+                cipher.append("=")
+            if newline:
+                cipher.append("\n")
+            return "".join(cipher).encode()
+
+        if sys.version_info < (3, 15):
+            wrapper = polyfill
+        else:
+
+            def wrapper(
+                data,
+                /,
+                *,
+                padded=True,
+                alphabet=binascii.BASE64_ALPHABET,
+                wrapcol=0,
+                newline=True,
+            ):
+                return polyfill(data, newline=newline)
+
+        wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = operator.indexOf
+        fn = binascii.b2a_base64
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 0)
@@ -1263,10 +1356,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = wrapped
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        out = fn([1, 2, 3, 4, 5], 3)
-        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        out = fn(b"abc")
+        opt_out = opt_fn(b"abc")
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(len(counters["graph_break"]), 0)
@@ -1582,6 +1675,117 @@ class DecoratorTests(PytreeRegisteringTestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
+
+    def test_assume_constant_result_tensor_output_with_attr_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.tensor = torch.tensor([1.0])
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.tensor.sum() == 1.0
+
+            def forward(self, x):
+                # Keep this mutation to exercise the reconstruction path from
+                # https://github.com/pytorch/pytorch/issues/159457.
+                self.device_prop = x.device
+                return x * 2 if self.check() else x * 3
+
+        mod = Mod()
+        x = torch.randn(2)
+        ref = mod(x)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnt)
+        self.assertEqual(ref, opt_mod(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_assume_constant_result_tensor_output_module_level(self):
+        def fn(x):
+            y = x + 1
+            constant = tensor_constant_result()
+            torch._dynamo.graph_break()
+            return y.sin(), constant
+
+        x = torch.randn(2)
+        expected = ((x + 1).sin(), torch.tensor([4.0]))
+        # debug_force_nested_calls compiles external_utils.wrap_inline as the
+        # top frame, so installed globals belong to that wrapper's scope.
+        scope = (
+            external_utils.__dict__
+            if torch._dynamo.config.debug_force_nested_calls
+            else tensor_constant_result.__globals__
+        )
+        prefix = f"{tensor_constant_result.__name__}_"
+        globals_before = set(scope)
+
+        with self.assertRaisesRegex(Unsupported, "graph_break") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
+        def post_trace_fn(x):
+            return x + tensor_constant_result()
+
+        hook_called = False
+
+        def fail_hook(_code, _out_code):
+            nonlocal hook_called
+            hook_called = True
+            raise cm.exception
+
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(fail_hook)
+        try:
+            torch.compile(post_trace_fn, backend="eager")(x)
+        finally:
+            handle.remove()
+        self.assertTrue(hook_called)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+
+        self.assertEqual(expected, opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+        installed_globals = {
+            name for name in set(scope) - globals_before if name.startswith(prefix)
+        }
+        # The explicit graph break discards the first trace attempt. Only the
+        # winning attempt's tensor global should remain installed.
+        self.assertEqual(len(installed_globals), 1)
+
+    def test_assume_constant_result_tensor_output_specialized_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.tensor = torch.tensor([1.0])
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.tensor.sum() == 1.0
+
+        mod = Mod()
+        # Exercise NNModuleVariable.call_method(constant=True).
+        mod.torchdynamo_force_dynamic = False
+
+        def fn(x):
+            y = x + 1
+            constant = mod.check()
+            torch._dynamo.graph_break()
+            return y.sin(), constant
+
+        x = torch.randn(2)
+        expected = ((x + 1).sin(), torch.tensor(True))
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        self.assertEqual(expected, torch.compile(fn, backend=cnt)(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_justknobs_check(self):
         def fn(x, y):

@@ -427,6 +427,13 @@ static DftiDescriptor _plan_mkl_fft(
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, int64_t normalization, bool forward) {
+  // MKL DFTI rejects zero-element batches ("Inconsistent configuration
+  // parameters"). An empty batch has nothing to transform, so skip planning and
+  // execution and return the output in its expected (empty) shape.
+  if (out.numel() == 0) {
+    out.resize_(out_sizes, MemoryFormat::Contiguous);
+    return out;
+  }
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
   const auto batch_dims = ndim - signal_ndim;

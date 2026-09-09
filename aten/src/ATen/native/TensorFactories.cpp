@@ -187,7 +187,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       (a.scalar_type() == kFloat || a.scalar_type() == kDouble ||
        a.scalar_type() == kHalf) &&
           (b.scalar_type() == kFloat || b.scalar_type() == kDouble ||
