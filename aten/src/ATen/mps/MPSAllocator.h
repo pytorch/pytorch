@@ -12,6 +12,7 @@
 #include <functional>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 
 // this implementation is based on CUDACachingAllocator.
@@ -30,9 +31,17 @@ static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" all
 
 enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
 
-inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+// oversize_threshold_bytes, when nonzero, lowers the OVERSIZE cutoff below the
+// default kXLargeHeap/2 (see MPSAllocatorConfig::large_alloc_threshold_bytes()):
+// large-but-sub-512MB tensors that would otherwise share a 1 GiB XLARGE heap
+// instead get their own right-sized, non-split heap. Checked right after the
+// SMALL cutoff (not after kMinLargeAlloc) so a threshold below 10 MB still
+// takes effect instead of being silently absorbed into the LARGE tier.
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure, size_t oversize_threshold_bytes = 0) {
   if (size <= kMaxSmallAlloc) {
     return HeapTier::SMALL;
+  } else if (oversize_threshold_bytes > 0 && size >= oversize_threshold_bytes) {
+    return HeapTier::OVERSIZE;
   } else if (size < kMinLargeAlloc) {
     return HeapTier::LARGE;
   } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
@@ -130,6 +139,10 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
+  // mirrors MPSAllocatorConfig::large_alloc_threshold_bytes(); threaded through
+  // here so the static HeapBlock::createHeapBlock() (no access to the .mm-local
+  // config singleton) can lower the OVERSIZE cutoff the same way getHeapTier does.
+  size_t oversize_threshold_bytes = 0;
 };
 
 struct HeapBlock {
@@ -178,7 +191,7 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      switch (getHeapTier(size, params.has_memory_pressure)) {
+      switch (getHeapTier(size, params.has_memory_pressure, params.oversize_threshold_bytes)) {
         case HeapTier::SMALL:
           d.size = kSmallHeap;
           break;
