@@ -14,8 +14,8 @@ PyTorch provides several features for working with C++, and it’s best to choos
 
 Most of the tensor and autograd operations in PyTorch Python API are also available in the C++ API. These include:
 
-- `torch::Tensor` methods such as `add` / `reshape` / `clone`. For the full list of methods available, please see: <https://pytorch.org/cppdocs/api/classat_1_1_tensor.html>
-- C++ tensor indexing API that looks and behaves the same as the Python API. For details on its usage, please see: <https://pytorch.org/cppdocs/notes/tensor_indexing.html>
+- `torch::Tensor` methods such as `add` / `reshape` / `clone`. For the full list of methods available, please see: <https://docs.pytorch.org/cppdocs/api/aten/tensor.html>
+- C++ tensor indexing API that looks and behaves the same as the Python API. For details on its usage, please see: <https://docs.pytorch.org/cppdocs/api/aten/indexing.html>
 - The tensor autograd APIs and the `torch::autograd` package that are crucial for building dynamic neural networks in C++ frontend. For more details, please see: <https://pytorch.org/tutorials/advanced/cpp_autograd.html>
 
 ## Authoring Models in C++
@@ -24,7 +24,7 @@ We provide the full capability of authoring and training a neural net model pure
 
 - For an overview of the PyTorch C++ model authoring and training API, please see: <https://pytorch.org/cppdocs/frontend.html>
 - For a detailed tutorial on how to use the API, please see: <https://pytorch.org/tutorials/advanced/cpp_frontend.html>
-- Docs for components such as `torch::nn` / `torch::nn::functional` / `torch::optim` can be found at: <https://pytorch.org/cppdocs/api/library_root.html>
+- Docs for components such as `torch::nn` / `torch::nn::functional` / `torch::optim` can be found at: <https://docs.pytorch.org/cppdocs/api/index.html>
 
 ## Packaging for C++
 
