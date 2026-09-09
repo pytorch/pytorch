@@ -3482,6 +3482,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Reconstruct the original reduction in a temporary scheduler node and
         # make it write the structural plan's externally visible output.
+        active_scheduler = self.scheduler
+        if active_scheduler is None:
+            raise AssertionError("outer reduction plan codegen requires a scheduler")
         with contextlib.ExitStack() as stack:
             original_names = []
             one_pass_nodes = []
@@ -3505,7 +3508,7 @@ class SIMDScheduling(BaseScheduling):
                         reduction_hint=ReductionHint.OUTER_NO_SPLIT,
                     )
                     one_pass_node = scheduler.SchedulerNode(
-                        self.scheduler, partial_buffer
+                        active_scheduler, partial_buffer
                     )
                     # These temporary nodes are created after scheduler
                     # initialization; inherit the ordering metadata required
@@ -3521,7 +3524,7 @@ class SIMDScheduling(BaseScheduling):
                 one_pass_owner = (
                     one_pass_nodes[0]
                     if len(one_pass_nodes) == 1
-                    else scheduler.FusedSchedulerNode(self.scheduler, one_pass_nodes)
+                    else scheduler.FusedSchedulerNode(active_scheduler, one_pass_nodes)
                 )
                 one_pass_kernel, _ = self._codegen_single_kernel_for_plan(
                     one_pass_owner

@@ -10005,8 +10005,6 @@ class Scheduler:
         ):
             return False
 
-        if isinstance(node1, FusedNestedReductions):
-            return node1.can_fuse_with(node2, can_reorder=can_reorder)
         if isinstance(node2, FusedNestedReductions):
             return False
 
