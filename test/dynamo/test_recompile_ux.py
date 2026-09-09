@@ -626,7 +626,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     @unittest.skip(
         "Flaky SIGSEGV (~12%): callers snapshot non-owning CacheEntry wrappers "
         "and free them at the depth-zero drain. The durable fix is handing back "
-        "owning references from the ExtraState C++ layer; re-enable once that lands."
+        "owning references from the ExtraState C++ layer (tracked in "
+        "pytorch/pytorch#196394); re-enable once that lands."
     )
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
         """reset_code can run while other threads are parked on the same
@@ -779,7 +780,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         def installer(owner):
             try:
-                for _ in range(300):
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    if stop.is_set():
+                        break
                     for guard_manager, dynamo_code in installables:
                         _load_precompile_entry(
                             code, guard_manager, dynamo_code, -1, owner
@@ -810,6 +814,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
             stop.set()
+            rejoin_deadline = time.monotonic() + 30
+            for thread in callers + installers:
+                thread.join(timeout=max(0.0, rejoin_deadline - time.monotonic()))
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
@@ -824,7 +831,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         total_iters = 0
         while not iters.empty():
             total_iters += iters.get_nowait()
-        self.assertGreater(total_iters, 0, "callers never interleaved with installers")
+        self.assertGreater(total_iters, 20, "callers never interleaved with installers")
         # A reset that raced an in-flight lookup was parked (on the raised
         # cache_python_depth, or a failed try-lock during the snapshot window);
         # the entry reader applies whatever is still parked, nothing survives.
