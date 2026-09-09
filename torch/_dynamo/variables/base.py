@@ -2345,6 +2345,28 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
 
+    def tp_new_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """tp_new slot (__new__). Unlike every other tp_*_impl, `self` here is
+        the type being constructed *from* (e.g. BuiltinVariable(set)), not an
+        instance -- there is no instance yet. `args[0]` is `cls` (possibly a
+        subclass of `self`, e.g. via `super().__new__(cls, ...)`), not a
+        receiver, so callers must not forward it to `args[0].call_method`.
+        VTs representing a constructible type (BuiltinVariable,
+        DictBuiltinVariable, ListBuiltinVariable, UserDefinedClassVariable)
+        override this to implement `cls.__new__(cls, ...)`.
+        """
+        unimplemented(
+            gb_type="missing tp_new",
+            context=f"tp_new_impl not implemented for {self.python_type_name()}",
+            explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
+
     def call_function(
         self,
         tx: InstructionTranslatorBase,
