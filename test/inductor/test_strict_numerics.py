@@ -18,13 +18,14 @@ from torch._native.ops.reductions.inner_tree_plan import (
     compute_inner_tree_params,
     vec_size,
 )
-from torch.testing._internal.common_cuda import IS_SM100, SM90OrLater
+from torch.testing._internal.common_cuda import IS_SM100, IS_SM89, IS_SM90, SM90OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    LazyVal,
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
@@ -473,27 +474,13 @@ instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cu
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
-# ---------------------------------------------------------------------------
-# Pointwise strict numerics: eager vs torch.compile bitwise equivalence.
-#
-# Every pointwise OpInfo is run through eager and torch.compile under numerics="strict"
-# and byte-compared; ops that do not yet match are listed in POINTWISE_XFAIL /
-# BACKWARD_XFAIL / NONFLOAT_XFAIL. Skipped rather than compared: COMPILE_UNSUPPORTED ops,
-# RNG ops, calls whose output is not the broadcast of its tensor inputs, and ops for which
-# Inductor emits no kernel at all (those fall back to the ATen kernel eager itself calls,
-# so there is nothing to compare). Coverage is float32/bfloat16/float16 only.
-#
-# Two input sources. Reference inputs supply the non-contiguous and arbitrarily strided
-# layouts that drive codegen; a raw bit-pattern call supplies the subnormals, NaN
-# encodings and exact special values that reference inputs never contain.
-# ---------------------------------------------------------------------------
+# Bitwise eager/compiled checks for pointwise OpInfos under numerics="strict".
+# Reference inputs cover layouts; raw bit patterns cover special values.
 
 
-# Non-ufunc pointwise ops (composite elementwise with multi-tensor / scalar / kwargs
-# signatures). Unioned with the ufunc set so coverage spans all pointwise ops.
+# Pointwise ops not represented by UnaryUfuncInfo or BinaryUfuncInfo.
 POINTWISE_EXTRA = frozenset(
     {
-        # composite elementwise (multi-tensor / scalar / kwargs signatures)
         "addcmul",
         "addcdiv",
         "clamp",
@@ -506,9 +493,7 @@ POINTWISE_EXTRA = frozenset(
         "nn.functional.hardswish",
         "nn.functional.leaky_relu",
         "native_dropout_backward",
-        # Losses are deliberately absent: pointwise only at reduction="none", a corner
-        # that decomposes into already-covered refs (sub/abs/where/mul/log).
-        # Revisit once reductions are bitwise.
+        # Losses are excluded: only reduction="none" is pointwise.
     }
 )
 
@@ -536,8 +521,6 @@ def _pointwise_ops():
 
 
 POINTWISE_OPS = _pointwise_ops()
-# Float dtypes swept by the bitwise test. bf16 and fp16 are where
-# emulate_precision_casts and disable_ftz actually bite, so they are the key coverage.
 POINTWISE_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
 
 
@@ -545,15 +528,11 @@ def _dtype_label(dtype):
     return str(dtype).split(".")[-1]
 
 
-# Bit-pattern coverage. reference_inputs come from randn/linspace and contain no
-# subnormals -- exactly what disable_ftz / emulate_precision_casts govern -- so we add
-# one call over raw bit patterns: exhaustive for 16-bit (all 65536 values), sampled for
-# fp32.
+# Sweep all 16-bit encodings; sample fp32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
 
 _FINFO32 = torch.finfo(torch.float32)
-# Exact values random sampling never lands on. Appended to every value sweep, and crossed
-# with themselves so every special-vs-special operand pair is reachable.
+# Include exact values that random bit sampling is unlikely to hit.
 _SPECIALS = torch.tensor(
     [
         0.0,
@@ -577,8 +556,7 @@ _SPECIALS = torch.tensor(
 
 
 def _exhaustive_16bit(dtype, device):
-    # All 65536 patterns; the narrowing int32->int16 cast wraps so 32768..65535 land on
-    # negative int16 and reinterpret as the negative half of the float line.
+    # Narrowing wraps the upper half into negative int16 encodings.
     return (
         torch.arange(0, 65536, dtype=torch.int32, device=device)
         .to(torch.int16)
@@ -586,19 +564,15 @@ def _exhaustive_16bit(dtype, device):
     )
 
 
-def _substitute(t, y, n):
-    """Swap the value vector into the slots a signature will accept.
-
-    Float data operands take the vector; bool masks are rebuilt at its length so the call
-    still type-checks; scalars and per-channel weights stay as the sample built them.
-    Substituting blindly makes eager reject the whole signature, which silently costs the
-    op its entire value sweep.
-    """
+def _substitute(t, y, n, parity=0):
+    r"""Substitute data vectors and resize masks, preserving scalar operands."""
     if not isinstance(t, torch.Tensor):
         return t
     if t.dtype == torch.bool:
+        # With x and x.flip(0), the even-index mask selects only even encodings.
+        # Sweep both parities to include odd encodings and both smallest subnormals.
         mask = torch.zeros(n, dtype=torch.bool, device=y.device)
-        mask[::2] = True
+        mask[parity::2] = True
         return mask
     if t.is_floating_point() and t.numel() != 1:
         return y
@@ -606,8 +580,7 @@ def _substitute(t, y, n):
 
 
 def _sampled_fp32(n, device, seed=0):
-    # randint can't span 2**32 in int32, so draw 31 bits and OR the sign in. Random
-    # sampling never lands on the exact special values, so they are appended.
+    # Draw the sign separately because randint cannot span 2**32 in int32.
     gen = torch.Generator(device=device).manual_seed(seed)
     bits = torch.randint(
         0, 2**31, (n,), dtype=torch.int32, device=device, generator=gen
@@ -625,13 +598,7 @@ _BIT_VIEW = {
 
 
 def _diff_kind(a, b):
-    """Coarse label for a known mismatch, so a regenerated list stays triageable.
-
-    "nan-payload" when every differing element is NaN on both sides (eager quiets a
-    signalling NaN where Triton passes it through), "signed-zero" when every differing
-    element is zero on both sides, "value" for a real arithmetic difference. Computed
-    only on failure.
-    """
+    r"""Classify mismatches as shape, value, NaN payload, or signed zero."""
     if isinstance(a, (tuple, list)):
         if not isinstance(b, (tuple, list)) or len(a) != len(b):
             return "shape"
@@ -664,14 +631,19 @@ def _diff_kind(a, b):
     return "+".join(parts) or "value"
 
 
-def _outputs_equal(a, b):
-    """True iff eager and compiled outputs are bit-for-bit identical.
+def _diff_output(out):
+    r"""Select the floating-point output, excluding frexp's integer exponent."""
+    if isinstance(out, torch.Tensor):
+        return out if out.is_floating_point() else None
+    if isinstance(out, (tuple, list)):
+        for t in out:
+            if isinstance(t, torch.Tensor) and t.is_floating_point():
+                return t
+    return None
 
-    torch.equal on the raw bytes, not the values: comparing floats directly would
-    call two identical NaNs unequal and +0.0/-0.0 equal. Complex is compared as
-    (real, imag); tuple outputs (frexp, and gradient tuples whose entries may be
-    None) element by element.
-    """
+
+def _outputs_equal(a, b):
+    r"""Compare raw bytes, including NaN payloads and signed zeros."""
     if isinstance(a, (tuple, list)):
         if not isinstance(b, (tuple, list)) or len(a) != len(b):
             return False
@@ -695,7 +667,6 @@ def _outputs_equal(a, b):
     )
 
 
-# Fallback input dtypes for ops without fp32 support (int first, then complex).
 _NONFLOAT_DTYPES = (
     torch.int64,
     torch.int32,
@@ -716,7 +687,6 @@ def _first_nonfloat_dtype(op):
     return None
 
 
-# Ops with no fp32 support (gcd/lcm on ints, imag on complex).
 NONFLOAT_INPUT_OPS = [
     op
     for op in POINTWISE_OPS
@@ -724,13 +694,9 @@ NONFLOAT_INPUT_OPS = [
     and _first_nonfloat_dtype(op) is not None
 ]
 
-# Pointwise ops supporting autograd; their (elementwise) backward is bitwise-checked
-# against eager in test_pointwise_backward.
 BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 
-# (op_id, dtype_label) pairs not yet bitwise-identical to eager under strict numerics,
-# generated from a full run on sm_100. Every entry is a real difference; the failure
-# message tags each mismatching call as nan-payload, signed-zero or value.
+# (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
         ("abs", "bfloat16"),
@@ -871,102 +837,134 @@ POINTWISE_XFAIL = frozenset(
     }
 )
 
-# Ledger entries that are not portable across GPUs: on sm_89 the compiled result
-# already matches eager, so listing them there would XPASS. All but remainder and
-# float_power route through the neg signed-zero divergence (atan2, cos, __rdiv__,
-# special_entr, special_modified_bessel_k0/k1) and go away once that is fixed later
-# in this stack. Measured on sm_89 (CUDA 13.0 and 13.2) and on sm_100.
-_SM100_ONLY_BACKWARD_XFAIL = frozenset(
+# Measured on sm_89 (CUDA 13.0/13.2), sm_90, and sm_100.
+# The neg signed-zero family matches on sm_89 but differs from sm_90 up;
+# float_power fp32 backward differs only on sm_100.
+_SM90_PLUS_BACKWARD_XFAIL = frozenset(
     {
         ("__rdiv__", "bfloat16"),
         ("__rdiv__", "float16"),
         ("__rdiv__", "float32"),
+        ("__rmod__", "bfloat16"),
+        ("__rmod__", "float16"),
+        ("__rmod__", "float32"),
+        ("__rsub__", "bfloat16"),
+        ("__rsub__", "float16"),
+        ("__rsub__", "float32"),
         ("atan2", "bfloat16"),
         ("atan2", "float16"),
         ("atan2", "float32"),
         ("cos", "bfloat16"),
         ("cos", "float16"),
         ("cos", "float32"),
-        ("float_power", "float32"),
+        ("div_no_rounding_mode", "bfloat16"),
+        ("div_no_rounding_mode", "float16"),
+        ("div_no_rounding_mode", "float32"),
+        ("fmod", "bfloat16"),
+        ("fmod", "float16"),
+        ("fmod", "float32"),
+        ("neg", "bfloat16"),
+        ("neg", "float16"),
+        ("neg", "float32"),
+        ("reciprocal", "bfloat16"),
+        ("reciprocal", "float16"),
+        ("reciprocal", "float32"),
+        ("remainder", "bfloat16"),
+        ("remainder", "float16"),
         ("remainder", "float32"),
+        ("rsub", "bfloat16"),
+        ("rsub", "float16"),
+        ("rsub", "float32"),
         ("special_entr", "bfloat16"),
         ("special_entr", "float16"),
         ("special_modified_bessel_k0", "float32"),
         ("special_modified_bessel_k1", "float32"),
+        ("sub", "bfloat16"),
+        ("sub", "float16"),
+        ("sub", "float32"),
+        ("true_divide", "bfloat16"),
+        ("true_divide", "float16"),
+        ("true_divide", "float32"),
     }
-    if IS_SM100
+    if SM90OrLater
     else ()
 )
 
-BACKWARD_XFAIL = _SM100_ONLY_BACKWARD_XFAIL | frozenset(
-    {
-        ("__rpow__", "bfloat16"),
-        ("__rpow__", "float16"),
-        ("__rpow__", "float32"),
-        ("addcdiv", "bfloat16"),
-        ("addcdiv", "float16"),
-        ("addcdiv", "float32"),
-        ("double", "bfloat16"),
-        ("double", "float16"),
-        ("float_power", "bfloat16"),
-        ("float_power", "float16"),
-        ("hypot", "float16"),
-        ("hypot", "float32"),
-        ("i0", "bfloat16"),
-        ("i0", "float16"),
-        ("i0", "float32"),
-        ("ldexp", "bfloat16"),
-        ("ldexp", "float16"),
-        ("ldexp", "float32"),
-        ("logaddexp2", "float32"),
-        ("logit", "bfloat16"),
-        ("logit", "float16"),
-        ("logit", "float32"),
-        ("mvlgamma_mvlgamma_p_1", "float32"),
-        ("mvlgamma_mvlgamma_p_3", "float32"),
-        ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("nn_functional_gelu", "bfloat16"),
-        ("nn_functional_gelu", "float16"),
-        ("nn_functional_gelu", "float32"),
-        ("nn_functional_hardswish", "bfloat16"),
-        ("nn_functional_hardswish", "float16"),
-        ("nn_functional_hardswish", "float32"),
-        ("nn_functional_mish", "bfloat16"),
-        ("nn_functional_mish", "float16"),
-        ("nn_functional_mish", "float32"),
-        ("nn_functional_silu", "bfloat16"),
-        ("nn_functional_silu", "float16"),
-        ("nn_functional_silu", "float32"),
-        ("nn_functional_softshrink", "bfloat16"),
-        ("nn_functional_softshrink", "float16"),
-        ("nn_functional_softshrink", "float32"),
-        ("nn_functional_tanhshrink", "bfloat16"),
-        ("nn_functional_tanhshrink", "float16"),
-        ("nn_functional_tanhshrink", "float32"),
-        ("rsqrt", "bfloat16"),
-        ("rsqrt", "float16"),
-        ("sigmoid", "bfloat16"),
-        ("sigmoid", "float16"),
-        ("sigmoid", "float32"),
-        ("special_bessel_j0", "float32"),
-        ("special_bessel_j1", "float32"),
-        ("special_bessel_y0", "float32"),
-        ("special_bessel_y1", "float32"),
-        ("special_erfcx", "float32"),
-        ("special_i1", "bfloat16"),
-        ("special_i1", "float16"),
-        ("special_i1", "float32"),
-        ("special_log_ndtr", "float32"),
-        ("special_modified_bessel_i0", "float32"),
-        ("special_modified_bessel_i1", "float32"),
-        ("special_xlog1py", "bfloat16"),
-        ("special_xlog1py", "float16"),
-        ("tanh", "bfloat16"),
-        ("tanh", "float16"),
-        ("tanh", "float32"),
-        ("xlogy", "bfloat16"),
-        ("xlogy", "float16"),
-    }
+_SM100_ONLY_BACKWARD_XFAIL = frozenset({("float_power", "float32")} if IS_SM100 else ())
+
+BACKWARD_XFAIL = (
+    _SM90_PLUS_BACKWARD_XFAIL
+    | _SM100_ONLY_BACKWARD_XFAIL
+    | frozenset(
+        {
+            ("__rpow__", "bfloat16"),
+            ("__rpow__", "float16"),
+            ("__rpow__", "float32"),
+            ("addcdiv", "bfloat16"),
+            ("addcdiv", "float16"),
+            ("addcdiv", "float32"),
+            ("double", "bfloat16"),
+            ("double", "float16"),
+            ("float_power", "bfloat16"),
+            ("float_power", "float16"),
+            ("hypot", "float16"),
+            ("hypot", "float32"),
+            ("i0", "bfloat16"),
+            ("i0", "float16"),
+            ("i0", "float32"),
+            ("ldexp", "bfloat16"),
+            ("ldexp", "float16"),
+            ("ldexp", "float32"),
+            ("logaddexp2", "float32"),
+            ("logit", "bfloat16"),
+            ("logit", "float16"),
+            ("logit", "float32"),
+            ("mvlgamma_mvlgamma_p_1", "float32"),
+            ("mvlgamma_mvlgamma_p_3", "float32"),
+            ("mvlgamma_mvlgamma_p_5", "float32"),
+            ("nn_functional_gelu", "bfloat16"),
+            ("nn_functional_gelu", "float16"),
+            ("nn_functional_gelu", "float32"),
+            ("nn_functional_hardswish", "bfloat16"),
+            ("nn_functional_hardswish", "float16"),
+            ("nn_functional_hardswish", "float32"),
+            ("nn_functional_mish", "bfloat16"),
+            ("nn_functional_mish", "float16"),
+            ("nn_functional_mish", "float32"),
+            ("nn_functional_silu", "bfloat16"),
+            ("nn_functional_silu", "float16"),
+            ("nn_functional_silu", "float32"),
+            ("nn_functional_softshrink", "bfloat16"),
+            ("nn_functional_softshrink", "float16"),
+            ("nn_functional_softshrink", "float32"),
+            ("nn_functional_tanhshrink", "bfloat16"),
+            ("nn_functional_tanhshrink", "float16"),
+            ("nn_functional_tanhshrink", "float32"),
+            ("rsqrt", "bfloat16"),
+            ("rsqrt", "float16"),
+            ("sigmoid", "bfloat16"),
+            ("sigmoid", "float16"),
+            ("sigmoid", "float32"),
+            ("special_bessel_j0", "float32"),
+            ("special_bessel_j1", "float32"),
+            ("special_bessel_y0", "float32"),
+            ("special_bessel_y1", "float32"),
+            ("special_erfcx", "float32"),
+            ("special_i1", "bfloat16"),
+            ("special_i1", "float16"),
+            ("special_i1", "float32"),
+            ("special_log_ndtr", "float32"),
+            ("special_modified_bessel_i0", "float32"),
+            ("special_modified_bessel_i1", "float32"),
+            ("special_xlog1py", "bfloat16"),
+            ("special_xlog1py", "float16"),
+            ("tanh", "bfloat16"),
+            ("tanh", "float16"),
+            ("tanh", "float32"),
+            ("xlogy", "bfloat16"),
+            ("xlogy", "float16"),
+        }
+    )
 )
 
 NONFLOAT_XFAIL = frozenset(
@@ -976,19 +974,12 @@ NONFLOAT_XFAIL = frozenset(
 )
 
 POINTWISE_STRICT_CFG = {
-    # The base inductor TestCase already gives every test a fresh, isolated (cold) cache
-    # via fresh_cache() + fx_graph_cache=True, so force_disable_caches is unnecessary
-    # (and would override fx_graph_cache, killing in-test reuse of repeated shapes).
     "numerics": "strict",
 }
 
 
-# Ops excluded from the bit-pattern sweep because they are value-dependent: their
-# kernels iterate a series whose length depends on the argument, so a 65k vector of
-# arbitrary bit patterns drives them for minutes. Measured on a full run: polygamma
-# 64-363s per test, shifted_chebyshev >300s, everything else under 60s. They keep their
-# reference_inputs coverage; only the value sweep is skipped (sample_inputs feed the bit-
-# pattern call's signature, so for these ops those values never execute).
+# Raw-bit sweeps take 64-363s for polygamma and >300s for shifted Chebyshev.
+# Keep reference inputs; skip raw bit patterns for these value-dependent series.
 BITPATTERN_SLOW = frozenset(
     {
         "polygamma",
@@ -1003,8 +994,7 @@ BITPATTERN_SLOW = frozenset(
     }
 )
 
-# Ops that cannot compile under fullgraph (skipped, not xfail'd -- the exception happens
-# before the comparison). jiterator kernels are runtime string-JIT'd CUDA.
+# Jiterator kernels cannot compile under fullgraph.
 COMPILE_UNSUPPORTED = frozenset(
     {
         "jiterator_unary",
@@ -1025,16 +1015,19 @@ class _RngOpDetector(TorchDispatchMode):
         return func(*args, **(kwargs or {}))
 
 
+# Restrict the sweep to GPUs with a measured mismatch ledger.
+_LEDGER_ARCH = LazyVal(lambda: bool(IS_SM89 or IS_SM90 or IS_SM100))
+
+
 @unittest.skipUnless(
-    HAS_CUDA_AND_TRITON and torch.version.hip is None,
-    "requires CUDA and Triton",
+    HAS_CUDA_AND_TRITON and torch.version.hip is None and _LEDGER_ARCH,
+    "requires CUDA and Triton on sm_89, sm_90 or sm_100 (the ledger's measured arches)",
 )
 class PointwiseStrictNumericsTest(TestCase):
     def setUp(self):
         super().setUp()
         torch.manual_seed(0)
-        # Reference inputs materialise millions of elements per op, so cached allocator
-        # blocks accumulate across tests and OOM when several run concurrently.
+        # Release large reference-input allocations between concurrent tests.
         torch.cuda.empty_cache()
 
     def _is_tensor_output(self, out):
@@ -1044,7 +1037,6 @@ class PointwiseStrictNumericsTest(TestCase):
         )
 
     def _is_pointwise_output(self, inp, args, kwargs, out):
-        # A pointwise call preserves shape: output == broadcast of tensor inputs.
         shapes = [inp.shape] + [a.shape for a in args if isinstance(a, torch.Tensor)]
         shapes += [v.shape for v in kwargs.values() if isinstance(v, torch.Tensor)]
         try:
@@ -1055,13 +1047,7 @@ class PointwiseStrictNumericsTest(TestCase):
         return all(isinstance(o, torch.Tensor) and o.shape == bshape for o in outs)
 
     def _build_calls(self, samples, dtype):
-        """One call per usable sample at its natural shape: (input, args, kwargs).
-
-        No flattening: shape drives Inductor codegen (tiling, masking, index math,
-        strides), so each natural shape is compiled and checked as its own kernel.
-        Only samples whose input is a tensor and that carry a `dtype` tensor are kept.
-        The bit-pattern call (added separately) is a 1-D value sweep, not a shape sweep.
-        """
+        r"""Build calls without flattening so reference layouts exercise codegen."""
         calls = []
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
@@ -1072,15 +1058,7 @@ class PointwiseStrictNumericsTest(TestCase):
         return calls
 
     def _bitpattern_call(self, op, dtype, device):
-        """Raw bit-pattern calls: one per non-tensor signature in sample_inputs.
-
-        Exhaustive for 16-bit (all 65536 values), sampled for fp32. Tensor operands are
-        replaced by the bit-pattern vector while scalars and kwargs are taken from the
-        sample, so ops carrying a scalar parameter (polygamma n, mvlgamma p, threshold,
-        fill value) are swept at each of their values rather than skipped. The trial
-        call drops signatures that cannot take substituted data -- prelu's per-channel
-        weight, and the bool masks of where / masked_fill / native_dropout_backward.
-        """
+        r"""Build valid raw-bit calls for each sampled signature and mask parity."""
         if op.name in BITPATTERN_SLOW:
             return []
         if dtype in (torch.float16, torch.bfloat16):
@@ -1091,11 +1069,7 @@ class PointwiseStrictNumericsTest(TestCase):
             y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
         else:
             return []
-        # Position i of x pairs with position i of y, and neither sweep ever puts +0.0
-        # opposite -0.0: flip(0) maps 0x0000 to 0xFFFF, and the two fp32 draws append the
-        # same specials at the same offsets, so only identical specials meet. Signed-zero
-        # and infinity ties are exactly what byte comparison exists to catch
-        # (minimum/maximum/copysign/atan2), so cross the specials with themselves.
+        # Cross special values to cover missing pairs such as (+0, -0).
         sp = _SPECIALS.to(device=device, dtype=dtype)
         x = torch.cat([x, sp.repeat_interleave(sp.numel())])
         y = torch.cat([y, sp.repeat(sp.numel())])
@@ -1104,38 +1078,42 @@ class PointwiseStrictNumericsTest(TestCase):
         except Exception:
             return []
 
-        def scalar(v):
-            return None if isinstance(v, torch.Tensor) else repr(v)
+        def sig(v):
+            # Keep scalar-tensor and vector-tensor signatures distinct.
+            return tuple(v.shape) if isinstance(v, torch.Tensor) else repr(v)
 
         calls = []
         seen = set()
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
                 continue
-            args = tuple(_substitute(a, y, x.numel()) for a in sample.args)
-            kwargs = {k: _substitute(v, y, x.numel()) for k, v in sample.kwargs.items()}
-            key = (
-                tuple(scalar(a) for a in args),
-                tuple(sorted((k, scalar(v)) for k, v in kwargs.items())),
+            operands = (*sample.args, *sample.kwargs.values())
+            masked = any(
+                isinstance(t, torch.Tensor) and t.dtype == torch.bool for t in operands
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            try:
-                op.op(x, *args, **kwargs)
-            except Exception:
-                continue  # e.g. prelu, whose per-channel weight is not elementwise
-            calls.append((x, args, kwargs))
+            for parity in (0, 1) if masked else (0,):
+                args = tuple(_substitute(a, y, x.numel(), parity) for a in sample.args)
+                kwargs = {
+                    k: _substitute(v, y, x.numel(), parity)
+                    for k, v in sample.kwargs.items()
+                }
+                key = (
+                    parity,
+                    tuple(sig(a) for a in args),
+                    tuple(sorted((k, sig(v)) for k, v in kwargs.items())),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    op.op(x, *args, **kwargs)
+                except Exception:
+                    continue  # e.g. per-channel PReLU weights
+                calls.append((x, args, kwargs))
         return calls
 
     def _collect_calls(self, device, op, dtype):
-        """The (source, input, args, kwargs) list both sweeps run over.
-
-        Reference inputs are the only source of non-contiguous / arbitrarily strided
-        layouts; the bit-pattern call is the only source of subnormals and exhaustive
-        16-bit values. Skips ops this suite cannot judge: uncompilable under fullgraph,
-        RNG-seeded, or yielding no usable call.
-        """
+        r"""Return (source, input, args, kwargs) calls for both sweeps."""
         if op.name in COMPILE_UNSUPPORTED:
             self.skipTest("uncompilable op under fullgraph")
         try:
@@ -1158,21 +1136,14 @@ class PointwiseStrictNumericsTest(TestCase):
         return calls
 
     def _require_kernel(self, tested, nothing_tested):
-        # Inductor emitting no kernel means the "compiled" result came from the same ATen
-        # kernel eager dispatched to, so the comparison was eager-vs-eager. Passing would
-        # claim a verification that did not happen.
+        # ATen fallbacks compare eager against itself, so do not count them as coverage.
         if tested == 0:
             self.skipTest(nothing_tested)
         if metrics.generated_kernel_count == 0:
             self.skipTest("no Triton kernel generated (op falls back to ATen)")
 
     def _sweep(self, device, op, dtype, cfg):
-        """Run reference inputs and bit patterns through eager and torch.compile.
-
-        Returns mismatching (source, index, shape, kwargs, kind) records, where
-        source is "ref" (reference inputs) or "bits" (raw bit patterns); both are
-        held to the same bitwise standard.
-        """
+        r"""Return mismatching (source, index, shape, kwargs, kind) records."""
         calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
@@ -1201,11 +1172,13 @@ class PointwiseStrictNumericsTest(TestCase):
                     kind = _diff_kind(eager, result)
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
-        self._require_kernel(tested, "no usable sample")
+        if not mismatches:
+            # A mismatch must not be turned into a no-kernel skip.
+            self._require_kernel(tested, "no usable sample")
         return mismatches
 
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
-        """Hold the (op, dtype) to its ledger entry: listed means it must still differ."""
+        r"""Require listed pairs to differ and unlisted pairs to match eager."""
         key = (_op_id(op), _dtype_label(dtype))
         if key in xfail:
             self.assertTrue(
@@ -1222,8 +1195,6 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(POINTWISE_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_bitwise(self, device, dtype, op):
-        # @ops intersects allowed_dtypes with each op's supported dtypes, so unsupported
-        # combos are never generated. No-fp32 ops are covered by test_pointwise_nonfloat.
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
             mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
@@ -1231,24 +1202,18 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
-        # No-fp32 ops (bitwise/gcd/lcm on ints, imag on complex): no rounding, so eager
-        # and compile must agree exactly. Swept over every supported int/complex dtype.
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
             mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
         )
 
     def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
-        # grad_output is shared across eager and compiled so both see identical upstream.
         leaves = []
 
         def leafify(t):
             if isinstance(t, torch.Tensor) and t.is_floating_point():
-                # clone() only keeps strides for non-overlapping-and-dense tensors, so a
-                # sliced or arbitrarily-strided sample would silently become contiguous and
-                # stop testing the layout it was generated for. Rebuild the stride instead.
-                # Zero-stride (expanded) inputs are left alone: accumulating into them is a
-                # reduction, which this backward sweep deliberately excludes.
+                # Preserve non-dense strides that clone() would make contiguous.
+                # Clone expanded inputs to avoid overlapping writes.
                 src = t.detach()
                 if src.is_contiguous() or 0 in src.stride():
                     leaf = src.clone().requires_grad_(True)
@@ -1265,25 +1230,19 @@ class PointwiseStrictNumericsTest(TestCase):
         inp2 = leafify(inp)
         args2 = tuple(leafify(a) for a in args)
         out = call_fn(inp2, args2, kwargs)
-        if not leaves or not isinstance(out, torch.Tensor):
+        target = _diff_output(out)
+        if not leaves or target is None:
             return out, None
-        if out.shape != grad_output.shape:
-            # Compiled produced a different output shape than eager: report it
-            # rather than let autograd.grad raise on the mismatched grad_outputs.
+        if target.shape != grad_output.shape:
+            # Report shape mismatches without calling autograd.grad.
             return out, None
         grads = torch.autograd.grad(
-            out, leaves, grad_outputs=grad_output, allow_unused=True
+            target, leaves, grad_outputs=grad_output, allow_unused=True
         )
         return out, grads
 
     def _sweep_backward(self, device, op, dtype, cfg):
-        """Run each pointwise sample's backward through eager and torch.compile.
-
-        Backward of a pointwise op is elementwise, so input gradients must match eager
-        bitwise. Same two input sources as _sweep. Per-sample (backward needs leaf
-        inputs); a fixed grad_output is shared so both paths see identical upstream
-        gradients.
-        """
+        r"""Compare input gradients with identical upstream gradients."""
         calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
@@ -1302,23 +1261,32 @@ class PointwiseStrictNumericsTest(TestCase):
             for idx, (tag, inp, args, kwargs) in enumerate(calls):
                 with torch.no_grad():
                     probe = fn(inp, args, kwargs)
-                if not isinstance(probe, torch.Tensor) or not probe.is_floating_point():
+                probe_out = _diff_output(probe)
+                if probe_out is None:
                     continue
                 if not self._is_pointwise_output(inp, args, kwargs, probe):
                     continue
-                # No reduction in backward: require every differentiable input to match
-                # the output shape (broadcasting would sum-reduce the gradient).
+                # Exclude broadcasted inputs whose gradients require a reduction.
                 diff_ts = [
                     t
                     for t in (inp, *args)
                     if isinstance(t, torch.Tensor) and t.is_floating_point()
                 ]
-                if any(t.shape != probe.shape for t in diff_ts):
+                if any(t.shape != probe_out.shape for t in diff_ts):
                     continue
-                gen = torch.Generator(device=probe.device).manual_seed(0)
+                gen = torch.Generator(device=probe_out.device).manual_seed(0)
                 grad_output = torch.randn(
-                    probe.shape, generator=gen, device=probe.device, dtype=probe.dtype
+                    probe_out.shape,
+                    generator=gen,
+                    device=probe_out.device,
+                    dtype=probe_out.dtype,
                 )
+                # randn does not reliably exercise signed-zero bugs (e.g. neg).
+                # Seed both +0.0 and -0.0; inf/NaN upstream is outside this sweep.
+                flat = grad_output.reshape(-1)
+                if flat.numel() >= 2:
+                    flat[0] = 0.0
+                    flat[1] = -0.0
                 try:
                     _, eager_grads = self._input_grads(
                         fn, inp, args, kwargs, grad_output
@@ -1334,14 +1302,14 @@ class PointwiseStrictNumericsTest(TestCase):
                 )
                 tested += 1
                 if comp_grads is None:
-                    # Output shape diverged, so there are no gradients to compare.
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, "shape"))
                     continue
                 if not _outputs_equal(eager_grads, comp_grads):
                     kind = _diff_kind(eager_grads, comp_grads)
                     mismatches.append((tag, idx, tuple(inp.shape), kwargs, kind))
 
-        self._require_kernel(tested, "no differentiable sample")
+        if not mismatches:
+            self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
     @ops(BACKWARD_OPS, allowed_dtypes=POINTWISE_DTYPES)
