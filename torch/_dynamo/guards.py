@@ -4490,8 +4490,9 @@ def _pickles_by_default(obj: Any) -> bool:
     """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``.
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
-    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__ or __setstate__
-    reads attributes no guard named and gets the sentinel instead.
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
     """
     cls = type(obj)
     return (
@@ -4499,6 +4500,8 @@ def _pickles_by_default(obj: Any) -> bool:
         and cls.__reduce__ is object.__reduce__
         and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
         and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs__")
+        and not hasattr(cls, "__getnewargs_ex__")
     )
 
 
@@ -4774,12 +4777,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
-            # A sentinel __builtins__ is harmless: FunctionType({}, ...) binds
-            # builtins from the interpreter (CPython >= 3.10) before this applies.
             snapshot = {
                 name: self._prune(value, "unguarded function global")
                 for name, value in f_globals.items()
             }
+            # The builtins module, not the sentinel: a function the rebuilt one
+            # creates at call time reads its builtins from __globals__.
+            snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
@@ -5254,7 +5258,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         would read a pruned attribute and see _Missing at load.
         """
         is_module = isinstance(obj, torch.nn.Module)
-        for name, attr in vars(obj).items():
+        for name, attr in (_instance_dict(obj) or {}).items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
                 continue
             if is_module and name in _NN_MODULE_STATE_ATTRS:
@@ -6582,7 +6586,7 @@ def get_guard_fail_reason_helper(
         # None of the guard entries failed - a backend match issue
         cached_desc = describe_backend(cache_entry_backend)
         new_desc = describe_backend(backend)
-        kind = "callables" if callable(cache_entry_backend) else "cache keys"
+        kind = "callables" if callable(cache_entry_backend or backend) else "cache keys"
         reason = (
             f"BACKEND_MATCH failure: torch.compile detected different backend {kind}."
             f" Cached backend: {cached_desc}."
