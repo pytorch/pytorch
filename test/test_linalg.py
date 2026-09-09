@@ -9763,6 +9763,7 @@ class TestLinalgCudaOnly(TestCase):
             else None
         )
         self._set_tunableop_defaults()
+        torch.cuda.tunable._clear_all()
         torch.cuda.tunable.enable(True)
 
         try:
