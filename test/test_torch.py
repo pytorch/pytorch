@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_FILESYSTEM_UTF8_ENCODING,
     HardwareClassification,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipIfXpu, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -54,7 +54,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator)
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -116,7 +116,6 @@ class TestTorchDeviceType(TestCase):
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
 
-    @onlyNativeDeviceTypes
     @slowTestIf(IS_WINDOWS)
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
@@ -135,7 +134,6 @@ class TestTorchDeviceType(TestCase):
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64, torch.complex128)
     def test_zero_dense_view_with_storage_offset(self, device, dtype):
         base = make_tensor((64, 96), dtype=dtype, device=device, low=1, high=2)
@@ -145,7 +143,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base[:16], original[:16])
         self.assertEqual(base[32:], original[32:])
 
-    @onlyNativeDeviceTypes
     def test_zero_transposed_dense_view(self, device):
         base = torch.ones(64, 96, device=device)
         base[16:32].t().zero_()
@@ -153,7 +150,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base[:16], torch.ones(16, 96, device=device))
         self.assertEqual(base[32:], torch.ones(32, 96, device=device))
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64)
     def test_zero_strided_view_with_gaps(self, device, dtype):
         base = make_tensor((64, 96), dtype=dtype, device=device, low=1, high=2)
@@ -162,13 +158,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base[:, ::2].count_nonzero().item(), 0)
         self.assertEqual(base[:, 1::2], original[:, 1::2])
 
-    @onlyNativeDeviceTypes
     def test_zero_empty_view_leaves_storage_intact(self, device):
         base = torch.ones(4, device=device)
         base[2:2].zero_()
         self.assertEqual(base, torch.ones(4, device=device))
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
             torch.bits16, torch.float4_e2m1fn_x2)
     def test_zero_dtypes_without_fill_kernel(self, device, dtype):
@@ -219,7 +213,6 @@ class TestTorchDeviceType(TestCase):
                 bytes_to_scalar(v_s_byte[start:end], dtype, device),
                 v[dim0][dim1])
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.quint8, torch.qint8, torch.qint32,
@@ -255,7 +248,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(s, storage_type(l))
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @onlyNativeDeviceTypes
     @slowTestIf(IS_WINDOWS)
     def test_storage_use_count(self, device):
         a = torch.randn(10, device=device)
@@ -265,7 +257,6 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
-    @onlyNativeDeviceTypes
     def test_storage_throws_on_data_ptr_access(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.storage import _throws_on_data_ptr_access
@@ -299,7 +290,6 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(raises_on_data_ptr(s2))
 
     @xfailIfTorchDynamo
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_tensor_storage_type(self, device, dtype):
@@ -310,7 +300,6 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(a.storage_type(), expected_storage_type)
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
     @slowTestIf(IS_WINDOWS)
     def test_tensor_from_storage(self, device, dtype):
@@ -328,7 +317,6 @@ class TestTorchDeviceType(TestCase):
                 error_storage = a.to(error_dtype).storage()
                 torch.tensor(error_storage, device=device, dtype=dtype)
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_set_storage(self, device, dtype):
@@ -369,7 +357,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(s.dtype, s_check.dtype)
             self._check_storage_meta(s.untyped(), s_check.untyped())
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_typed_storage_meta(self, device, dtype):
@@ -384,7 +371,6 @@ class TestTorchDeviceType(TestCase):
             s = torch.TypedStorage(*args, dtype=dtype, device='meta')
             self._check_storage_meta(s, s_check)
 
-    @onlyNativeDeviceTypes
     @slowTestIf(IS_WINDOWS)
     def test_untyped_storage_meta(self, device):
         args_list = [
@@ -398,7 +384,6 @@ class TestTorchDeviceType(TestCase):
             s = torch.UntypedStorage(*args, device='meta')
             self._check_storage_meta(s, s_check)
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_storage_meta_from_tensor(self, device, dtype):
@@ -996,7 +981,6 @@ class TestTorchDeviceType(TestCase):
             torch.from_numpy(a)
             torch.from_numpy(a)
 
-    @onlyNativeDeviceTypes
     def test_complex_half_experimental_warning(self, device):
         msg = 'ComplexHalf support is experimental'
         with self.assertWarnsOnceRegex(UserWarning, msg):
@@ -1359,6 +1343,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1371,6 +1356,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1383,6 +1369,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1395,6 +1382,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1407,6 +1395,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1419,6 +1408,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1431,6 +1421,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1443,7 +1434,6 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @dtypes(*floating_types_and(torch.half))
-    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
         module = torch.nn.MaxUnpool1d(3, 1)
         input = torch.randn(1, 1, 7, dtype=dtype, device=device)
@@ -1454,7 +1444,6 @@ class TestTorchDeviceType(TestCase):
             'max_unpooling2d_forward_out')
 
     @dtypes(*floating_types_and(torch.half))
-    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
         module = torch.nn.MaxUnpool2d(3, 1)
         input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
@@ -1465,7 +1454,6 @@ class TestTorchDeviceType(TestCase):
             'max_unpooling2d_forward_out')
 
     @dtypes(*floating_types_and(torch.half))
-    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
         module = torch.nn.MaxUnpool3d(3, 1)
         input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
@@ -1476,6 +1464,7 @@ class TestTorchDeviceType(TestCase):
             'max_unpooling3d_forward_out')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1491,6 +1480,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1540,6 +1530,7 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("aot-autograd issue")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5306")
     def test_deterministic_max_pool3d(self, device):
         test_cases = [
             # size, kernel_size, stride, padding, dilation, ceil_mode
@@ -1614,6 +1605,7 @@ class TestTorchDeviceType(TestCase):
                 input.grad = None
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1648,6 +1640,7 @@ class TestTorchDeviceType(TestCase):
                 input.grad = None
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1663,6 +1656,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1675,6 +1669,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1687,6 +1682,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1699,6 +1695,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
@@ -1725,6 +1722,7 @@ class TestTorchDeviceType(TestCase):
             False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1737,6 +1735,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchDynamo("Warning is not raised.")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
@@ -1749,6 +1748,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1764,6 +1764,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -1839,7 +1840,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
-    @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -1854,6 +1854,7 @@ class TestTorchDeviceType(TestCase):
     # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
     # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
     @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_put_accumulate(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -1867,6 +1868,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float32)
     @dtypesIfCUDA(torch.float32, torch.int32)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_histc(self, device, dtype):
         a = torch.tensor([], device=device, dtype=dtype)
         for op_call in [torch.histc, torch.Tensor.histc]:
@@ -1875,6 +1877,7 @@ class TestTorchDeviceType(TestCase):
                 '_histc_cuda with floating point input',
                 torch.device(device).type == 'cuda' and dtype.is_floating_point)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_bincount(self, device):
         a = torch.tensor([], device=device, dtype=torch.long)
         weights = torch.tensor([], device=device)
@@ -1893,6 +1896,7 @@ class TestTorchDeviceType(TestCase):
                 False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1905,6 +1909,7 @@ class TestTorchDeviceType(TestCase):
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -1982,6 +1987,7 @@ class TestTorchDeviceType(TestCase):
 
     # Ensures that median throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5304")
     def test_nondeterministic_alert_median(self, device, dtype):
         def test_func(call_type):
             S = 10
@@ -2043,16 +2049,15 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(grad, expected, atol=0, rtol=0)
 
     # FIXME: move to test_scatter_gather_ops
-    @onlyNativeDeviceTypes
     def test_gather_backward_deterministic_path(self, device) -> None:
         self._test_gather_backward_one_dim(device, True)
 
     # FIXME: move to test_scatter_gather_ops
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5307")
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
 
     # FIXME: move to test_scatter_gather_ops
-    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.int)
     def test_scatter_add_one_dim_deterministic(self, device, dtype) -> None:
         with DeterministicGuard(True):
@@ -2080,7 +2085,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
 
     # FIXME: move to test_scatter_gather_ops
-    @onlyNativeDeviceTypes
     def test_scatter_zero_size_index(self, device) -> None:
         null_index = torch.zeros((0, 4), dtype=torch.int64)
         null_arr = torch.zeros((0, 4))
@@ -2299,7 +2303,6 @@ class TestTorchDeviceType(TestCase):
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
     @tf32_on_and_off(0.005)
-    @onlyNativeDeviceTypes
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_corrcoef(self, device, dtype):
         for x in self._generate_correlation_tensors(device, dtype):
@@ -3006,7 +3009,6 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(actual, expected.to(t.dtype))
 
     # All tensors appear contiguous on XLA
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_diff_noncontig(self, device, dtype):
         shapes = (
@@ -3081,7 +3083,6 @@ class TestTorchDeviceType(TestCase):
 
         return actual, expected
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_all(self, device, dtype):
         def create_scalar(shape):
@@ -3134,7 +3135,6 @@ class TestTorchDeviceType(TestCase):
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
             self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @slowTestIf(TEST_WITH_TORCHINDUCTOR)
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_extreme_cases(self, device, dtype):
@@ -3157,7 +3157,6 @@ class TestTorchDeviceType(TestCase):
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=2)]
         self.assertEqual(actual, expected, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     def test_gradient_type_promotion(self, device):
         inputs = (
             make_tensor((4, 4), device=device, dtype=torch.float32),
@@ -3202,7 +3201,6 @@ class TestTorchDeviceType(TestCase):
                 actual, expected = self._inf_nan_preprocess(list(actual), list(expected))
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_spacing_list_length_error(self, device, dtype):
         t = make_tensor((2, 2), device=device, dtype=dtype)
@@ -3327,7 +3325,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
@@ -3359,7 +3356,6 @@ class TestTorchDeviceType(TestCase):
             strided.to(torch.float32).view(torch.uint8))
 
     # FIXME: move to data movement test suite
-    @onlyNativeDeviceTypes
     def test_copy_math_view(self, device):
         for dst_dtype, src_dtype in [
                 (torch.float32, torch.float32),
@@ -3400,7 +3396,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
-    @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
         src = make_tensor((100, 100), dtype=dtype, device=device).transpose(0, 1)
@@ -3804,9 +3799,11 @@ class TestTorchDeviceType(TestCase):
                                             [True, False, True, False, True]], device=device))
 
     # FIXME: find a test suite for the masked scatter operator
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
+        if device.startswith("xpu") and (dtype == torch.complex64 or dtype == torch.complex128):
+            self.skipTest("intel/torch-xpu-ops/issues/5286")
+
         dt = dtype
         num_copy, num_dest = 3, 10
         dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
@@ -4236,7 +4233,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(actual, torch.cdist(x1, x2, p=3), atol=1e-4, rtol=1e-4)
 
     # FIXME: move to elementwise ternary test suite
-    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
     def test_addcdiv(self, device, dtype):
@@ -4286,7 +4282,6 @@ class TestTorchDeviceType(TestCase):
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_addcdiv_zero_divisor(self, device, dtype):
         input = torch.ones(17, dtype=dtype, device=device)
@@ -4343,7 +4338,6 @@ class TestTorchDeviceType(TestCase):
 
     @expectedFailureMeta  # RuntimeError not raised
     @dtypes(torch.double)
-    @onlyNativeDeviceTypes
     def test_copy_mem_overlap(self, device, dtype):
         self.check_internal_mem_overlap(
             torch.Tensor.copy_, num_inputs=2, dtype=dtype, device=device)
@@ -4354,7 +4348,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
-    @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4391,7 +4384,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
-    @onlyNativeDeviceTypes
     def test_index_copy_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4409,7 +4401,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # Warning not triggered
-    @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         ind = torch.tensor([2, 1, 0], device=device)
@@ -4421,7 +4412,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
-    @onlyNativeDeviceTypes
     def test_shift_mem_overlap(self, device):
         x = torch.rand(3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -4432,7 +4422,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
-    @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
 
@@ -4447,7 +4436,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
-    @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4469,7 +4457,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
-    @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
@@ -4491,7 +4478,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
-    @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         mask = torch.tensor([True, False, True, True, False, False], device=device)
@@ -4508,7 +4494,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
-    @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
@@ -4519,7 +4504,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
-    @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
@@ -5405,7 +5389,6 @@ class TestTorchDeviceType(TestCase):
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     # FIXME: move to test_serialization
-    @onlyNativeDeviceTypes
     def test_pickle_gradscaler(self, device):
         # This test should pass in 3 cases for cuda:
         #  1. cuda is not available.
@@ -5461,7 +5444,6 @@ class TestTorchDeviceType(TestCase):
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_grad_scaling_unscale(self, device, dtype):
         device = torch.device(device)
@@ -5557,7 +5539,6 @@ class TestTorchDeviceType(TestCase):
                 # inf was injected, ensures inf was found.
                 self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 1)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_update_scale(self, device, dtype):
         growth = 2.0
@@ -5582,7 +5563,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(scale, 2.0)
 
     @skipIfTorchDynamo("Failed running call_function for sparse_coo_tensor. See https://github.com/pytorch/pytorch/issues/118856")
-    @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
         device = torch.device(device)
@@ -5642,7 +5622,6 @@ class TestTorchDeviceType(TestCase):
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
         self.assertEqual(found_inf, 1.0)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -5706,7 +5685,6 @@ class TestTorchDeviceType(TestCase):
 
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
-    @onlyNativeDeviceTypes
     @parametrize("foreach, fused", [(None, None), (True, None), (None, True)])
     @optims(
         [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
@@ -5789,7 +5767,6 @@ class TestTorchDeviceType(TestCase):
 
             self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
 
-    @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
         dtypes=[torch.float32]
@@ -5797,7 +5774,6 @@ class TestTorchDeviceType(TestCase):
     def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
         self._test_params_invalidated_with_grads_invalidated_between_unscale_and_step(device, dtype, optim_info)
 
-    @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
         dtypes=[torch.float32]
@@ -5806,7 +5782,6 @@ class TestTorchDeviceType(TestCase):
     def test_params_invalidated_with_grads_invalidated_and_graph_partition(self, device, dtype, optim_info):
         self._test_params_invalidated_with_grads_invalidated_between_unscale_and_step(device, dtype, optim_info)
 
-    @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
         device = torch.device(device)
         model = torch.nn.Linear(5, 1).to(device)
@@ -5822,7 +5797,6 @@ class TestTorchDeviceType(TestCase):
         if scaler._scale == float("inf") or scaler._scale != scaler._scale:
             raise AssertionError(f"scaler._scale should not be inf or nan, got {scaler._scale}")
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
         device = torch.device(device)
 
@@ -5847,7 +5821,6 @@ class TestTorchDeviceType(TestCase):
 
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1, atol=1e-5)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_clipping_separate_unscale(self, device):
         device = torch.device(device)
 
@@ -5873,7 +5846,6 @@ class TestTorchDeviceType(TestCase):
 
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_penalty(self, device):
         device = torch.device(device)
 
@@ -5910,7 +5882,6 @@ class TestTorchDeviceType(TestCase):
 
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_accumulation(self, device):
         device = torch.device(device)
 
@@ -5935,7 +5906,6 @@ class TestTorchDeviceType(TestCase):
 
         self._run_scaling_case(device.type, run, unskipped=2, skipped=0)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaling_multiple(self, device):
         device = torch.device(device)
         # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
@@ -5988,7 +5958,6 @@ class TestTorchDeviceType(TestCase):
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
-    @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.amp.GradScaler, device=device.type)
@@ -6028,7 +5997,7 @@ class TestTorchDeviceType(TestCase):
         scaler.step(o2)
         scaler.update()
 
-    @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5308")
     def test_grad_scaler_deprecated_warning(self, device):
         device = torch.device(device)
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
@@ -6067,7 +6036,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: move to elementwise ternary test suite
     # As the test fails with Runtime Error not raised on XLA
-    @onlyNativeDeviceTypes
     def test_where_scalar_handcrafted_values(self, device):
         # Tests ScalarxScalar, ScalarxTensor and TensorxScalar
         # variant of `where` against NumPy version with
@@ -6114,7 +6082,6 @@ class TestTorchDeviceType(TestCase):
                         check_equal(torch.tensor(True), x, y)
                         check_equal(torch.tensor(True), y, x)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_fill_barebones_unsigned(self, device, dtype):
         # Both FillKernel.cpp and FillKernel.cu dispatch over barebones
@@ -6135,8 +6102,8 @@ class TestTorchDeviceType(TestCase):
         t = torch.empty(8, dtype=dtype, device=device).fill_(max_val)
         self.assertEqual(t.cpu().tolist(), [max_val] * 8)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5305")
     def test_where_barebones_unsigned(self, device, dtype):
         # The barebones unsigned dtypes are excluded from the broader
         # test_where_scalar_handcrafted_values because torch.result_type
@@ -6159,7 +6126,6 @@ class TestTorchDeviceType(TestCase):
         expected = torch.where(cond.cpu(), a.cpu(), b.cpu()).to(device)
         self.assertEqual(out, expected)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_eq_ne_barebones_unsigned(self, device, dtype):
         # The eq/ne kernels dispatch over uint16/uint32/uint64 via
@@ -6320,7 +6286,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
             torch.ops.aten._local_scalar_dense(input)
 
-    @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
         t = torch.zeros(5, 2, dtype=torch.long, device=device)
         t_non_contig = t.transpose(0, 1)
@@ -9741,6 +9706,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 raise AssertionError(f"qengine not set successfully: expected {qe}, got {torch.backends.quantized.engine}")
         torch.backends.quantized.engine = original_qe
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5309")
     def test_terminate_handler_on_crash(self):
         cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
                import torch; import torch._C; torch._C._abort()"]
@@ -11371,8 +11337,8 @@ class TestTorchDeviceSpecific(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestTensorDeviceOps, globals())
-instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestTensorDeviceOps, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestTorchDeviceType, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTorchDeviceSpecific, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 
