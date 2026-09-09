@@ -294,22 +294,33 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE resolves only after self is restored, which
+        # is after pickle rebuilds the method, so getattr() at load would miss
+        # it: carry func+self explicitly. That covers an instance __dict__
+        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
+        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
+        # lookup we must also not probe below -- it can recurse). A type receiver
+        # (classmethod) is exempt: its namespace is restored with the class.
+        cls = type(method.__self__)
+        self_dict = getattr(method.__self__, "__dict__", None)
+        instance_served = not isinstance(method.__self__, type) and (
+            (isinstance(self_dict, dict) and name in self_dict)
+            or (
+                name is not None
+                and isinstance(
+                    inspect.getattr_static(cls, name, None),
+                    types.MemberDescriptorType,
+                )
+            )
+            or hasattr(cls, "__getattr__")
+        )
+        if instance_served:
+            return type(self)._unpickle_bound_method, (func, method.__self__)
         inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
             inner = inner.__func__
-        # `func is inner` proves resolution NOW, but a name satisfied only by a
-        # per-instance __dict__ will NOT resolve at load: self.__dict__ is
-        # restored AFTER the method is rebuilt, so an instance monkeypatch
-        # (m.forward = MethodType(f, m)) would round-trip to the class default.
-        # A class namespace (when __self__ is itself a type, e.g. a classmethod)
-        # is restored with the class, so it is exempt.
-        self_dict = getattr(method.__self__, "__dict__", None)
-        in_instance_dict = (
-            not isinstance(method.__self__, type)
-            and isinstance(self_dict, dict)
-            and name in self_dict
-        )
-        if func is inner and not in_instance_dict:
+        # `func is inner` proves the class MRO resolves back to this function.
+        if func is inner:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
 
