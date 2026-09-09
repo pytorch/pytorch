@@ -815,6 +815,14 @@ class TestSidecarIntegrity(unittest.TestCase):
         self.assertIn("no sidecar claims", out.getvalue())
         self.assertNotIn("partial copy", out.getvalue())
 
+    def test_an_unclaimed_cubin_is_reported_like_any_other_artifact(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k.cubin"), "w").close()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                export._check_no_orphan_artifacts(d, [])
+        self.assertIn("k.cubin", out.getvalue())
+        self.assertIn("no sidecar claims", out.getvalue())
+
     def test_artifacts_with_sidecar_are_fine(self):
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "k.o"), "w").close()
@@ -845,6 +853,18 @@ class TestSidecarIntegrity(unittest.TestCase):
                 f.write("{truncated")
             with self.assertRaisesRegex(RuntimeError, "could not be read"):
                 export._read_sidecar(path)
+
+    def test_sm_number_ignores_the_arch_conditional_suffix(self):
+        tc = toolchains.TritonToolchain
+        self.assertEqual(tc._sm_number("sm_90a"), 90)
+        self.assertEqual(tc._sm_number("sm_100"), 100)
+
+    def test_sm_number_refuses_a_malformed_arch(self):
+        tc = toolchains.TritonToolchain
+        for bad in ("90a", "sm_90b"):
+            with self.subTest(arch=bad):
+                with self.assertRaisesRegex(ValueError, "must look like sm_90a"):
+                    tc._sm_number(bad)
 
 
 class TestLauncherGeneration(unittest.TestCase):
@@ -1805,6 +1825,29 @@ class TestSourceClosureAndRuntimes(unittest.TestCase):
     # What makes an artifact stale: the files whose contents decide what it means,
     # and the compiler that built it. The artifact records neither.
 
+    def test_read_only_args_take_const_data_ptr(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "p.cubin"), "wb") as f:
+                f.write(b"x")
+            sc = {
+                "prefix": "p",
+                "kind": "triton",
+                "symbol": "sym",
+                "shared": 0,
+                "block_x": 128,
+                "launch": {"grid_x": "1"},
+                "_dir": d,
+                "args": [
+                    {"name": "a", "kind": "tensor", "read_only": True},
+                    {"name": "out", "kind": "tensor"},
+                ],
+            }
+            src = toolchains.get_toolchain("triton").gen_launcher(sc)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(a.const_data_ptr());", src)
+        self.assertIn("reinterpret_cast<CUdeviceptr>(out.mutable_data_ptr());", src)
+
+
+class TestSourceStaleness(unittest.TestCase):
     def test_closure_covers_shared_declaration_machinery(self):
         # The grid expander and the loader decide what a declaration means, and arrive
         # by import, so only the sys.modules half of the closure catches them.
@@ -1955,6 +1998,64 @@ CUBIN_SIDECAR = {
         {"name": "M", "kind": "scalar", "ctype": "int32_t"},
     ],
 }
+
+
+class TestCubinLauncher(unittest.TestCase):
+    def _gen(self, tmpdir):
+        import os as _os
+
+        with open(_os.path.join(tmpdir, "fakemm_f32.cubin"), "wb") as f:
+            f.write(b"\x7fELF-fake")
+        sc = dict(CUBIN_SIDECAR, _dir=tmpdir)
+        return toolchains.get_toolchain("triton").gen_launcher(sc)
+
+    def test_the_cubin_is_embedded_and_loaded_once_per_device(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        self.assertIn("const unsigned char fakemm_f32_cubin[]", src)
+        self.assertIn("c10::call_once(fakemm_f32_once[device]", src)
+        self.assertIn(
+            'drv->cuModuleGetFunction_(&fakemm_f32_fn[device], mod, "_fakemm_kernel")',
+            src,
+        )
+
+    def test_a_load_failure_raises_rather_than_exiting(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        self.assertNotIn("exit(", src)
+        self.assertIn("TORCH_CHECK(rc == CUDA_SUCCESS", src)
+
+    def test_every_driver_call_goes_through_c10s_dlopen_wrapper(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        for raw in ("cuModuleLoadData(", "cuModuleGetFunction(", "cuLaunchKernel("):
+            self.assertNotIn(raw, src.replace(f"_{raw}", ""))
+        self.assertIn("c10::cuda::DriverAPI::get()", src)
+
+    def test_the_grid_block_and_shared_bytes_come_from_the_sidecar(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        self.assertIn("const unsigned gx = B_dim*((M+31)/32);", src)
+        self.assertIn("128, 1, 1, 512,", src)
+        self.assertIn("c10::cuda::CUDAStream(stream).stream()", src)
+
+    def test_tritons_hidden_scratch_pointers_follow_the_visible_args(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        self.assertIn("&M, &global_scratch, &profile_scratch}", src)
+
+    def test_the_launcher_signature_matches_every_other_kind(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._gen(d)
+        self.assertIn(
+            "void launch_fakemm_f32(const at::Tensor& a, int32_t B_dim, int32_t M, c10::Stream stream)",
+            src,
+        )
+
+    def test_the_embedded_cubin_reaches_no_linker_input(self):
+        tc = toolchains.get_toolchain("triton")
+        self.assertEqual(tc.link_exts, ())
+        self.assertNotIn(".o", tc.artifact_exts)
 
 
 class TestEndToEndGeneration(unittest.TestCase):
