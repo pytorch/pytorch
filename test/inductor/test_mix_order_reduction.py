@@ -1546,9 +1546,7 @@ class MixOrderReductionHeuristicTest(TestBase):
             ReductionHint.DEFAULT,
             ReductionHint.OUTER_NO_SPLIT,
         ):
-            self.assertTrue(
-                MixOrderReduction.supports_contiguous_reduction_hint(hint)
-            )
+            self.assertTrue(MixOrderReduction.supports_contiguous_reduction_hint(hint))
         self.assertFalse(
             MixOrderReduction.supports_contiguous_reduction_hint(ReductionHint.OUTER)
         )
