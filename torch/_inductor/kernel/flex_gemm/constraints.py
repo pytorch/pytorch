@@ -5,6 +5,7 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Final
 
+from torch._inductor.kernel.gemm_epilogue import GEMM_REDUCTION_FRAGMENT_WIDTH
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known
 from torch._inductor.utils import _IntLike
 from torch.types import IntLikeType
@@ -20,12 +21,9 @@ LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
 # Axis-0 feed-main reduces within one lane-layout M group. Axis-1 groups that
 # fit one logical TensorSSA fragment use QuACK's in-kernel accumulator prepass;
 # larger groups remain unsupported.
-LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
 NESTED_TENSORSSA_PHYSICAL_SPAN = 2
 NESTED_TENSORSSA_PACKED_STORAGE_SPAN = 2
-LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
-    "FlexGEMM local-reduce feed-main currently supports only axis 0"
-)
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
     f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
@@ -183,19 +181,6 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
 def local_reduce_needs_physical_combine(axis: int, group: int) -> bool:
     """Return whether QuACK must combine a group outside one logical fragment."""
     return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
-
-
-def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
-    """Limit feed-main reducers to the physical path QuACK can re-inject today.
-
-    Feeding a reduction back into the main epilogue needs the physical row-lane
-    combine result to be available as a scalar value for each output element.
-    That is currently implemented only for same-warp M-axis groups.
-    """
-    if axis != 0:
-        raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR)
-    if group > LOCAL_REDUCE_FRAGMENT_WIDTH:
-        raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
 
 
 def local_reduce_compressed_shape(
