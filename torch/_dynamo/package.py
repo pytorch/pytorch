@@ -113,7 +113,7 @@ class SerializedCode:
 
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers shared by the picklers that rebuild objects pickle cannot do by
-    reference: code objects, python modules, and bound methods. Each subclass
+    reference: code objects, closure cells, python modules, and bound methods. Each subclass
     keeps its own dispatch; this class fixes HOW they are rebuilt so a fix in
     one pickler cannot be missed in the other.
     """
@@ -129,6 +129,32 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
         return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
 
 
 @dataclasses.dataclass
