@@ -1086,6 +1086,11 @@ def _checkpoint_with_dynamo_reenabled(
 ) -> Any:
     import torch.utils.checkpoint
 
+    # SAC policies see aten ops; compiled regions hide them, so keep fn eager.
+    noop_context_fn = torch.utils.checkpoint.noop_context_fn
+    if kwargs.get("context_fn", noop_context_fn) is not noop_context_fn:
+        return torch.utils.checkpoint.checkpoint(function, *args, **kwargs)
+
     callback = torch._C._dynamo.eval_frame.get_eval_frame_callback()
 
     def function_with_dynamo(*fn_args: Any, **fn_kwargs: Any) -> Any:

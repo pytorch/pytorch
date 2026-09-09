@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
@@ -4026,10 +4027,28 @@ class ActivationCheckpointingGraphBreakFallbackTests(torch._dynamo.test_case.Tes
         cnt = self._check_fn(fn, fn, "eager", x)
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_graph_break_selective_checkpoint(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize(
+        "mm_policy", [CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_RECOMPUTE]
+    )
+    def test_graph_break_selective_checkpoint(self, backend, mm_policy):
+        class CountMM(TorchDispatchMode):
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+            def __init__(self):
+                super().__init__()
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.mm.default:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.mm.default:
-                return CheckpointPolicy.MUST_SAVE
+                return mm_policy
             return CheckpointPolicy.PREFER_RECOMPUTE
 
         def context_fn():
@@ -4047,7 +4066,13 @@ class ActivationCheckpointingGraphBreakFallbackTests(torch._dynamo.test_case.Tes
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
-        self._check_fn(fn, fn, "aot_eager", x, y)
+        with CountMM() as counter:
+            cnt = self._check_fn(fn, fn, backend, x, y)
+        # per run: forward mm, two backward mms, plus a recompute unless saved
+        expected_mm = 3 if mm_policy is CheckpointPolicy.MUST_SAVE else 4
+        self.assertEqual(counter.count, expected_mm * 2)  # eager ref + compiled
+        # gn runs eagerly so the SAC policy sees every aten op
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_graph_break_fullgraph_still_errors(self):
         model = self._Attention()
