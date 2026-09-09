@@ -1802,6 +1802,7 @@ def _compile(
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
+    tracer_output_for_cleanup: DynamoTracerOutput | None = None
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
@@ -1842,7 +1843,7 @@ def _compile(
         one_graph: bool,
         hooks: Hooks,
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput]:
-        nonlocal dynamo_time_before_restart
+        nonlocal dynamo_time_before_restart, tracer_output_for_cleanup
         last_attempt_start_time = start_time = time.time()
 
         def log_bytecode(
@@ -1913,12 +1914,13 @@ def _compile(
                 e._torch_dynamo_tracer_output,
             )
 
+        tracer_output = dynamo_output.tracer_output
+        tracer_output_for_cleanup = tracer_output
         if distributed_state is not None and distributed_state.all_states is None:  # type: ignore[has-type]
             raise AssertionError(
                 "compiler collective wasn't run before compilation completed"
             )
         out_code = dynamo_output.bytecode
-        tracer_output = dynamo_output.tracer_output
         if dynamo_output.last_attempt_start_time is not None:
             last_attempt_start_time = dynamo_output.last_attempt_start_time
 
@@ -2021,6 +2023,8 @@ def _compile(
         # are extra graphs now.
 
         if output.export and output.is_empty_graph():
+            tracer_output._cleanup_output_graph()
+            tracer_output_for_cleanup = None
             return (
                 ConvertFrameReturn(skip_reason="export mode produced an empty graph"),
                 tracer_output,
@@ -2029,6 +2033,7 @@ def _compile(
         if output.guards is None:
             raise AssertionError("output.guards must not be None")
         CleanupManager.instance[out_code] = output.cleanups
+        tracer_output_for_cleanup = None
         nonlocal cache_entry
         # Temporarily restore the mode stack so guard expressions that
         # reference modes can evaluate.  DisableTorchFunction prevents
@@ -2058,8 +2063,9 @@ def _compile(
                 strict_error=record and explicit_capture,
             )
 
-        # bypass_package sets output.package to None when this entry's guards
-        # could not be serialized (the local `package` still holds the object).
+        # bypass_package sets output.package to None when this entry was bypassed
+        # (unserializable guards, or a graph holding named parameters); the local
+        # `package` still holds the object.
         # An entry bypassed on an earlier recompile stays bypassed, and
         # add_guarded_code/add_inlined_source/update_device_type all no-op on it.
         # Skip the whole block in either case: a bypassed entry contributes none
@@ -2330,7 +2336,16 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            error_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            tracer_output = tracer_output_for_cleanup or error_tracer_output
+            if tracer_output_for_cleanup is not None:
+                tracer_output_for_cleanup._cleanup_output_graph()
+            if (
+                error_tracer_output is not None
+                and error_tracer_output is not tracer_output_for_cleanup
+            ):
+                error_tracer_output._cleanup_output_graph()
+            tracer_output_for_cleanup = None
             if isinstance(
                 e,
                 (
