@@ -44,6 +44,9 @@ constexpr int SWP_WIDTH = 4;
 // Max possible panel width for the register-resident panel LU factozization.
 constexpr int MAX_RECNB = 32;
 
+// Max possible (diagonal) panel for the LDL kernel
+constexpr int MAX_LDL_NB = 32;
+
 // Nb values for the base case in the recursive call,
 // when dispatching to the register-resident panel LU kernel
 struct LURecnbRegisterResidentConfig {
@@ -819,6 +822,54 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
         handle, dA, matrix_stride, ws, lda,
         j, actual_nb, n - j - actual_nb, m - j - actual_nb, batch_count
       );
+    }
+  });
+}
+
+template <typename scalar_t>
+void ldl_diagonal_panel(
+  scalar_t* dLD, int n, int lda,
+  int curr_step, int* dcurr_step,
+  int* dipiv, int* dinfo
+) {
+}
+
+void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info, bool hermitian) {
+  // LD is lower triangular.
+  // We materialize the upper triangular part for GEMM-friendly residual updates,
+  // and that also spares us from swaps that restore the initial triangular structure.
+  LD.add_(hermitian ? LD.tril(-1).mH() : LD.tril(-1).mT());
+  int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
+  int lda = std::max(cuda_int_cast(LD.stride(-1), "LD.stride(-1)"), std::max(1, n));
+  info.zero_();
+
+  // Disabling TF32 in GEMMs
+  NoTF32Guard disable_tf32;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
+    auto* dLD = static_cast<scalar_t*>(LD.data_ptr());
+    auto* dipiv = static_cast<int*>(pivots.data_ptr());
+    auto* dinfo = static_cast<int*>(info.data_ptr());
+
+    auto panel_step_holder = at::zeros({0}, LD.options().dtype(at::kInt));
+    auto* dcurr_step = static_cast<int*>(panel_step_holder.data_ptr());
+    int curr_step = 0;
+
+    // Right-Down-Diagonal-looking blocked LDLT/LDLH:
+    // step through columns/rows in blocks of NB or NB-1 (pivots are 1x1 or 2x2)
+    // and factor diagonal panels, then update the trailing matrix with a GEMM
+    while (curr_step < n - 1) {
+      // 1. Panel factorization
+      ldl_diagonal_panel(
+        dLD, n, lda,
+        curr_step, dcurr_step,
+        dipiv, dinfo
+      );
+
+      // 2. Trailing matrix update
+
+      // D2H to update the curr_step on the host
+      curr_step = panel_step_holder.item().toInt();
     }
   });
 }
