@@ -200,12 +200,10 @@ class FunctionPicklerBase(pickle.Pickler):
         # pickler whose rebuilt function is CALLED would surface an empty scope
         # as a NameError at first call, not a load error.
         f_globals: dict[str, Any]
-        # __module__ need not be an importable string: a decorator can set it to
-        # a non-str (42), a <locals>/exec function can carry None or "" (bare
-        # globals with no __name__), and a relative name (".rel") or a module
-        # whose body raises fails import with something other than ImportError.
-        # None of those should fail the load, so require a non-empty str and
-        # swallow any import failure into the empty scope.
+        # __module__ need not be an importable string (a decorator can set 42, a
+        # <locals>/exec function carries None or "", ".rel" or a module whose
+        # body raises fails import with something other than ImportError); none
+        # should fail the load: require a non-empty str, swallow any failure.
         if isinstance(module, str) and module:
             try:
                 f_globals = importlib.import_module(module).__dict__
@@ -258,6 +256,17 @@ class FunctionPicklerBase(pickle.Pickler):
             fn.__globals__.update(globals_snapshot)
 
     @staticmethod
+    def _fqn_resolves(fn: types.FunctionType) -> bool:
+        """Whether pickling fn by reference (module + qualname) finds fn itself."""
+        module = fn.__module__
+        if "<locals>" in fn.__qualname__ or not isinstance(module, str):
+            return False
+        resolved: Any = sys.modules.get(module)
+        for name in fn.__qualname__.split("."):
+            resolved = getattr(resolved, name, None)
+        return resolved is fn
+
+    @staticmethod
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
@@ -297,24 +306,23 @@ class FunctionPicklerBase(pickle.Pickler):
         name = getattr(func, "__name__", None)
         # A name served PER-INSTANCE resolves only after self is restored, i.e.
         # after pickle rebuilds the method, so getattr() at load would miss it:
-        # carry func+self explicitly. That covers an instance __dict__ monkeypatch
-        # (m.forward = MethodType(f, m)), a __slots__ member descriptor, and a
-        # __getattr__ proxy (which must not be probed below -- it can recurse).
-        # A type receiver (classmethod) is exempt: its namespace is restored.
+        # carry func+self explicitly (an instance __dict__ monkeypatch, a __slots__
+        # member descriptor, or a __getattr__ proxy, which must not be probed --
+        # it can recurse). A type receiver (classmethod) is exempt.
         cls = type(method.__self__)
         self_dict = _instance_dict(method.__self__)
-        instance_served = not isinstance(method.__self__, type) and (
+        static = inspect.getattr_static(cls, name, None) if name is not None else None
+        instance = not isinstance(method.__self__, type)
+        if instance and (
             (self_dict is not None and name in self_dict)
-            or (
-                name is not None
-                and isinstance(
-                    inspect.getattr_static(cls, name, None),
-                    types.MemberDescriptorType,
-                )
-            )
-            or hasattr(cls, "__getattr__")
-        )
-        if instance_served:
+            or isinstance(static, types.MemberDescriptorType)
+        ):
+            return type(self)._unpickle_bound_method, (func, method.__self__)
+        # The class MRO serving the name (nn.Module methods, say) needs no
+        # explicit binding; getattr_static never runs a user __getattr__.
+        if static is func:
+            return None
+        if instance and hasattr(cls, "__getattr__"):
             return type(self)._unpickle_bound_method, (func, method.__self__)
         inner = getattr(method.__self__, name, None) if name is not None else None
         if inspect.ismethod(inner):
@@ -338,10 +346,8 @@ class FunctionPicklerBase(pickle.Pickler):
         globals_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         # annotations/type_params/doc are passed in rather than read off fn: the
-        # guard pickler prunes what no guard reads, so an unpicklable local class
-        # in an annotation -- or a __doc__ reassigned to an unpicklable object --
-        # cannot fail the whole dump (a failure there silently bypasses the
-        # package). The AOT pickler passes them through verbatim.
+        # guard pickler prunes what no guard reads (an unpicklable annotation or
+        # __doc__ must not bypass the package); the AOT pickler passes them on.
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
@@ -1052,14 +1058,12 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        # install() still imports this entry's import_sources and global names,
-        # but skips its backends and guarded codes (the entry.bypassed check in
-        # install()). Clear those two here, and the add_* methods refuse to
-        # repopulate them once bypassed, so a later serializable recompile that
-        # reuses this same entry cannot resurrect the frame.
-        # Drop this entry's compiled backends from the package-global cache
-        # before clearing backend_ids; otherwise they are stranded, pinning a
-        # dead GraphModule under an id no entry references.
+        # install() still imports this entry's import_sources and global names
+        # but skips its backends and guarded codes (entry.bypassed). Clear both
+        # here, and the add_* methods refuse to repopulate them once bypassed, so
+        # a later serializable recompile reusing this entry cannot resurrect the
+        # frame. Pop the compiled backends before clearing backend_ids, or a dead
+        # GraphModule stays pinned under an id no entry references.
         for backend_id in self._current_entry.backend_ids:
             self._cached_backends.pop(backend_id, None)
         self._current_entry.backend_ids.clear()
