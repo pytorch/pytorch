@@ -403,6 +403,29 @@ def online_softmax_combine(
 
 
 @triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs,
+    rhs_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    """
+    Reduce a block of values along `dim` and fold it into a per-row (max, sum)
+    state, so only one max/sum per output row stays live across the loop.
+    """
+    rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
+    rhs_max, rhs_sum = online_softmax_reduce(
+        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
+    )
+    return online_softmax_combine_with_sum(
+        lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
+    )
+
+
+@triton.jit
 def online_softmax_combine_with_sum(
     lhs_max,
     lhs_sum,
@@ -792,14 +815,43 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 @triton.jit
 def frexp(x):
-    # TODO(isuruf): use inline_asm_elementwise here
-    zero = x == 0
-    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
-    special = zero | not_finite
-    safe_x = tl.where(special, 1.0, x)
-    y = libdevice.ilogb(safe_x) + 1
-    exponent = tl.where(special, 0, y)
-    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
+    # Decompose the IEEE-754 bit pattern with integer ops rather than calling
+    # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
+    # float32 subnormals to zero and would return a mantissa of 0 for subnormal
+    # inputs, and the float path also loses the sign of -0.0.
+    if x.dtype == tl.float64:
+        MBITS: tl.constexpr = 52
+        EMASK: tl.constexpr = 0x7FF
+        BIAS: tl.constexpr = 1023
+    elif x.dtype == tl.float32:
+        MBITS: tl.constexpr = 23
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    elif x.dtype == tl.bfloat16:
+        MBITS: tl.constexpr = 7
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    else:
+        tl.static_assert(x.dtype == tl.float16)
+        MBITS: tl.constexpr = 10
+        EMASK: tl.constexpr = 0x1F
+        BIAS: tl.constexpr = 15
+    FMASK: tl.constexpr = (1 << MBITS) - 1
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    bits = x.to(idtype, bitcast=True)
+    exp_field = (bits >> MBITS) & EMASK
+    frac = bits & FMASK
+    # Normalize subnormals by converting the fraction to float (exact, since
+    # it fits in the mantissa), then reuse the normal-number path on that.
+    is_sub = (exp_field == 0) & (frac != 0)
+    norm_bits = frac.to(x.dtype).to(idtype, bitcast=True)
+    src_bits = tl.where(is_sub, (bits & ~FMASK) | (norm_bits & FMASK), bits)
+    src_exp = tl.where(is_sub, (norm_bits >> MBITS) - (BIAS - 1 + MBITS), exp_field)
+    mantissa_bits = (src_bits & ~(EMASK << MBITS)) | ((BIAS - 1) << MBITS)
+    # frexp(+-0) = (+-0, 0), frexp(+-inf) = (+-inf, 0), frexp(nan) = (nan, 0)
+    special = (exp_field == EMASK) | ((exp_field == 0) & (frac == 0))
+    mantissa = tl.where(special, x, mantissa_bits.to(x.dtype, bitcast=True))
+    exponent = tl.where(special, 0, src_exp - (BIAS - 1)).to(tl.int32)
     return mantissa, exponent
 
 
