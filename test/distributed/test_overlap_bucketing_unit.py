@@ -2360,6 +2360,61 @@ class TestProfileGuidedEstimation(TestCase):
         self.assertEqual(estimate, 0.02)
         self.assertEqual(profile.arrival_incomplete_collectives, 1)
 
+    def test_multi_profile_aggregates_equivalent_process_groups(self):
+        pg_desc = "mesh_hsdp2_shard_dim"
+
+        def trace(rank, ranks, duration):
+            pg_name = f"shard_{rank}"
+            return _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": duration,
+                        "nelems": 1000,
+                        "pg_name": pg_name,
+                        "ranks": json.dumps(ranks),
+                    }
+                ],
+                rank=rank,
+                group_trace_id="capture",
+                pg_config=[{"pg_name": pg_name, "pg_desc": pg_desc, "ranks": ranks}],
+            )
+
+        profile = _load_pge_profiles([trace(0, [0, 1], 10.0), trace(2, [2, 3], 30.0)])
+
+        for ranks in ((0, 1), (2, 3), (4, 5)):
+            estimate, _ = profile.lookup_collective(
+                "all_reduce", ranks, 1000, "Float", pg_desc=pg_desc
+            )
+            self.assertEqual(estimate, 0.02)
+            extrapolated, source = profile.lookup_collective(
+                "all_reduce", ranks, 3000, "Float", pg_desc=pg_desc
+            )
+            self.assertEqual(source, "pg_bandwidth")
+            self.assertEqual(extrapolated, 0.03)
+
+    def test_multi_profile_does_not_use_ambiguous_rank_specific_estimates(self):
+        def trace(rank, ranks, duration):
+            return _make_pge_trace(
+                collectives=[
+                    {
+                        "name": "allreduce",
+                        "dur": duration,
+                        "nelems": 1000,
+                        "ranks": json.dumps(ranks),
+                    }
+                ],
+                rank=rank,
+                group_trace_id="capture",
+            )
+
+        profile = _load_pge_profiles([trace(0, [0, 1], 10.0), trace(2, [2, 3], 30.0)])
+
+        for ranks in ((0, 1), (2, 3), (4, 5)):
+            self.assertIsNone(
+                profile.lookup_collective("all_reduce", ranks, 1000, "Float")
+            )
+
     def test_collective_lookup_aggregates_repeated_samples(self):
         samples = (
             (1000, (4000.0, 10.0, 10.0)),
@@ -2767,7 +2822,7 @@ class TestProfileGuidedEstimatorIntegration(InductorTestCase):
                     "dtypes": ["float", "float"],
                 },
             ],
-            pg_config={"0": {"ranks": list(pg_ranks)}},
+            pg_config={"0": {"ranks": list(pg_ranks), "pg_desc": "default_pg"}},
         )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:

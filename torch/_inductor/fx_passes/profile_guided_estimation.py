@@ -69,6 +69,7 @@ class CollectiveRecord:
 
     collective_name: str  # "all_gather_into_tensor", "reduce_scatter_tensor", etc.
     pg_name: str
+    pg_desc: str
     pg_ranks: tuple[int, ...]  # sorted rank tuple
     group_size: int
     in_nelems: int  # "In msg nelems" from profile
@@ -108,6 +109,7 @@ class ProfileData:
     collectives: list[CollectiveRecord] = field(default_factory=list)
     ops: list[OpRecord] = field(default_factory=list)
     pg_configs: dict[str, tuple[int, ...]] = field(default_factory=dict)
+    pg_descriptions: dict[str, str] = field(default_factory=dict)
 
     # Lookup indices built after loading
     _collective_index: dict[
@@ -118,6 +120,11 @@ class ProfileData:
     # E.g. (0,2,4,6) and (1,3,5,7) both have stride=2, size=4 → same mesh dim.
     _collective_index_by_mesh_dim: dict[
         tuple[str, int, int, str], list[tuple[int, float]]
+    ] = field(default_factory=dict)
+    # Index by logical process-group description. DeviceMesh gives every
+    # parallel subgroup for one mesh axis the same description.
+    _collective_index_by_pg_desc: dict[
+        tuple[str, str, int, str], list[tuple[int, float]]
     ] = field(default_factory=dict)
     # Count of distinct PGs per mesh dimension (stride, group_size) — used for
     # ambiguity check (skip fallback if multiple PGs share the same mesh dim).
@@ -136,6 +143,8 @@ class ProfileData:
     _pg_peak_bw: dict[tuple[int, ...], float] = field(default_factory=dict)
     # Mesh-dimension fallback: (stride, group_size) -> peak BW (GB/s)
     _mesh_dim_peak_bw: dict[tuple[int, int], float] = field(default_factory=dict)
+    # Logical process-group fallback: (description, group_size) -> peak BW (GB/s)
+    _pg_desc_peak_bw: dict[tuple[str, int], float] = field(default_factory=dict)
     profile_count: int = 0
     arrival_corrected_collectives: int = 0
     arrival_clock_fallback_collectives: int = 0
@@ -239,11 +248,17 @@ class ProfileData:
                 ranks = pg_info.get("ranks", [])
                 if ranks:
                     self.pg_configs[pg_name] = tuple(sorted(ranks))
+                pg_desc = pg_info.get("pg_desc")
+                if isinstance(pg_desc, str):
+                    self.pg_descriptions[pg_name] = pg_desc
         elif isinstance(pg_config, dict):
             for pg_name, pg_info in pg_config.items():
                 ranks = pg_info.get("ranks", [])
                 if ranks:
                     self.pg_configs[pg_name] = tuple(sorted(ranks))
+                pg_desc = pg_info.get("pg_desc")
+                if isinstance(pg_desc, str):
+                    self.pg_descriptions[pg_name] = pg_desc
 
     def _parse_events(self, data: dict[str, Any], parse_ops: bool = True) -> None:
         events = data.get("traceEvents", [])
@@ -323,6 +338,7 @@ class ProfileData:
                 CollectiveRecord(
                     collective_name=coll_name,
                     pg_name=str(pg_name),
+                    pg_desc=self.pg_descriptions.get(str(pg_name), ""),
                     pg_ranks=pg_ranks,
                     group_size=group_size,
                     in_nelems=in_nelems,
@@ -496,6 +512,9 @@ class ProfileData:
         coll_idx_by_mesh_dim: dict[
             tuple[str, int, int, str], list[tuple[int, float]]
         ] = defaultdict(list)
+        coll_idx_by_pg_desc: dict[
+            tuple[str, str, int, str], list[tuple[int, float]]
+        ] = defaultdict(list)
         # Track distinct PG rank sets per mesh dimension for ambiguity check
         pg_sets_by_mesh_dim: dict[tuple[int, int], OrderedSet[tuple[int, ...]]] = (
             defaultdict(OrderedSet)
@@ -506,6 +525,10 @@ class ProfileData:
             coll_idx[(norm_name, rec.pg_ranks, rec.dtype)].append(
                 (rec.out_nelems, rec.duration_us)
             )
+            if rec.pg_desc and rec.pg_desc != "undefined":
+                coll_idx_by_pg_desc[(norm_name, rec.pg_desc, gs, rec.dtype)].append(
+                    (rec.out_nelems, rec.duration_us)
+                )
             stride = _rank_stride(rec.pg_ranks)
             if stride is not None:
                 coll_idx_by_mesh_dim[(norm_name, stride, gs, rec.dtype)].append(
@@ -520,6 +543,10 @@ class ProfileData:
         self._collective_index_by_mesh_dim = {
             k: self._aggregate_collective_samples(v)
             for k, v in coll_idx_by_mesh_dim.items()
+        }
+        self._collective_index_by_pg_desc = {
+            k: self._aggregate_collective_samples(v)
+            for k, v in coll_idx_by_pg_desc.items()
         }
         self._pg_count_by_mesh_dim = {
             k: len(pgs) for k, pgs in pg_sets_by_mesh_dim.items()
@@ -550,6 +577,9 @@ class ProfileData:
         mesh_dim_bw_samples: dict[tuple[int, int], list[tuple[int, float]]] = (
             defaultdict(list)
         )
+        pg_desc_bw_samples: dict[tuple[str, int], list[tuple[int, float]]] = (
+            defaultdict(list)
+        )
         for rec in self.collectives:
             if rec.out_nelems <= 0 or rec.duration_us <= 0:
                 continue
@@ -558,6 +588,8 @@ class ProfileData:
             total_bytes = rec.out_nelems * elem_bytes
             bw_gbps = total_bytes / (rec.duration_us * 1e-6) / 1e9  # GB/s
             pg_bw_samples[rec.pg_ranks].append((total_bytes, bw_gbps))
+            if rec.pg_desc and rec.pg_desc != "undefined":
+                pg_desc_bw_samples[(rec.pg_desc, gs)].append((total_bytes, bw_gbps))
             stride = _rank_stride(rec.pg_ranks)
             if stride is not None:
                 mesh_dim_bw_samples[(stride, gs)].append((total_bytes, bw_gbps))
@@ -579,6 +611,11 @@ class ProfileData:
         self._mesh_dim_peak_bw = {
             key: _peak_bw_from_samples(samples)
             for key, samples in mesh_dim_bw_samples.items()
+            if samples
+        }
+        self._pg_desc_peak_bw = {
+            key: _peak_bw_from_samples(samples)
+            for key, samples in pg_desc_bw_samples.items()
             if samples
         }
 
@@ -640,18 +677,34 @@ class ProfileData:
         pg_ranks: tuple[int, ...],
         nelems: int,
         dtype: str,
+        *,
+        pg_desc: str | None = None,
     ) -> float | None:
         """Estimate collective duration using peak observed bandwidth for this PG.
 
         Used when the target size exceeds the extrapolation cap. Returns ms or None.
         """
-        bw_gbps = self._pg_peak_bw.get(pg_ranks)
-        if bw_gbps is None or bw_gbps <= 0:
-            # Try mesh-dimension fallback
+        gs = len(pg_ranks)
+        bw_gbps: float | None = None
+        if pg_desc and pg_desc != "undefined":
+            bw_gbps = self._pg_desc_peak_bw.get((pg_desc, gs))
+        if (bw_gbps is None or bw_gbps <= 0) and self.profile_count > 1:
+            # Rank-specific samples from multiple profiles can produce different
+            # schedules. Use a shared mesh estimate only when it is unambiguous.
             stride = _rank_stride(pg_ranks)
-            gs = len(pg_ranks)
-            if stride is not None:
+            if (
+                stride is not None
+                and self._pg_count_by_mesh_dim.get((stride, gs), 0) == 1
+            ):
                 bw_gbps = self._mesh_dim_peak_bw.get((stride, gs))
+            else:
+                bw_gbps = None
+        elif bw_gbps is None or bw_gbps <= 0:
+            bw_gbps = self._pg_peak_bw.get(pg_ranks)
+            if bw_gbps is None or bw_gbps <= 0:
+                stride = _rank_stride(pg_ranks)
+                if stride is not None:
+                    bw_gbps = self._mesh_dim_peak_bw.get((stride, gs))
         if bw_gbps is None or bw_gbps <= 0:
             return None  # fall through to analytical
         elem_bytes = self._dtype_elem_bytes(dtype)
@@ -665,26 +718,31 @@ class ProfileData:
         pg_ranks: tuple[int, ...],
         nelems: int,
         dtype: str,
+        *,
+        pg_desc: str | None = None,
     ) -> tuple[float, str] | None:
         """Look up collective duration in ms. Returns (duration_ms, source) or None.
 
         ``source`` is ``"profile"`` for exact/interpolated matches, or
         ``"pg_bandwidth"`` when bandwidth-based extrapolation was used.
 
-        Tries exact rank match first, then falls back to mesh-dimension match
-        (e.g. (0,2,4,6) and (1,3,5,7) both have stride=2, size=4 → same mesh dim).
+        A process-group description identifies equivalent DeviceMesh subgroups.
+        Multiple profiles use only description- or mesh-based aggregate estimates,
+        because rank-specific estimates can make distributed schedules diverge.
 
         When the target size exceeds EXTRAPOLATION_CAP * max_observed, uses
         bandwidth-based estimation from peak observed bandwidth instead of
         linear extrapolation (which overestimates for large messages).
         """
         norm_name = self._normalize_collective_name(collective_name)
-        # Try exact rank match first
-        key = (norm_name, pg_ranks, dtype)
-        entries = self._collective_index.get(key)
-        if not entries:
-            # Fall back to mesh-dimension match
-            gs = len(pg_ranks)
+        gs = len(pg_ranks)
+        entries: list[tuple[int, float]] | None = None
+        if pg_desc and pg_desc != "undefined":
+            desc_key = (norm_name, pg_desc, gs, dtype)
+            entries = self._collective_index_by_pg_desc.get(desc_key)
+        if not entries and self.profile_count > 1:
+            # Never choose an exact-rank estimate from a multi-profile input.
+            # Only an unambiguous shared estimate can preserve rank invariance.
             stride = _rank_stride(pg_ranks)
             if (
                 stride is not None
@@ -692,8 +750,21 @@ class ProfileData:
             ):
                 mesh_dim_key = (norm_name, stride, gs, dtype)
                 entries = self._collective_index_by_mesh_dim.get(mesh_dim_key)
+            else:
+                entries = None
+        elif not entries:
+            key = (norm_name, pg_ranks, dtype)
+            entries = self._collective_index.get(key)
             if not entries:
-                return None
+                stride = _rank_stride(pg_ranks)
+                if (
+                    stride is not None
+                    and self._pg_count_by_mesh_dim.get((stride, gs), 0) == 1
+                ):
+                    mesh_dim_key = (norm_name, stride, gs, dtype)
+                    entries = self._collective_index_by_mesh_dim.get(mesh_dim_key)
+        if not entries:
+            return None
 
         # Exact match
         for n, dur in entries:
@@ -704,7 +775,9 @@ class ProfileData:
         # use bandwidth-based model instead of log-log extrapolation
         max_observed = max((n for n, _ in entries if n > 0), default=0)
         if max_observed > 0 and nelems > max_observed * self.EXTRAPOLATION_CAP:
-            est = self._estimate_with_pg_bandwidth(pg_ranks, nelems, dtype)
+            est = self._estimate_with_pg_bandwidth(
+                pg_ranks, nelems, dtype, pg_desc=pg_desc
+            )
             if est is not None:
                 return (est, "pg_bandwidth")
             # Fall through to log-log if no BW data available
@@ -869,8 +942,8 @@ def _is_collective_node(node: fx.Node) -> bool:
 
 def _get_collective_info(
     node: fx.Node,
-) -> tuple[str, tuple[int, ...], int, str] | None:
-    """Extract (collective_name, pg_ranks, nelems, dtype) from collective node."""
+) -> tuple[str, tuple[int, ...], str, int, str] | None:
+    """Extract collective identity, size, and dtype from a collective node."""
     import torch.distributed as c10d
     from torch.fx.operator_schemas import normalize_function
 
@@ -901,6 +974,7 @@ def _get_collective_info(
 
         pg = _resolve_process_group(group_name)
         pg_ranks = tuple(sorted(get_process_group_ranks(pg)))
+        pg_desc = pg.group_desc
     except (RuntimeError, KeyError, ValueError):
         log.debug(
             "PGE: failed to resolve process group for %s", node.name, exc_info=True
@@ -928,7 +1002,7 @@ def _get_collective_info(
         else:
             return None
 
-    return (collective_name, pg_ranks, nelems, dtype)
+    return (collective_name, pg_ranks, pg_desc, nelems, dtype)
 
 
 class ProfileGuidedEstimator:
@@ -1049,7 +1123,7 @@ class ProfileGuidedEstimator:
         info = _get_collective_info(node)
         if info is None:
             return None
-        coll_name, pg_ranks, nelems, dtype = info
+        coll_name, pg_ranks, pg_desc, nelems, dtype = info
         val = node.meta.get("val")
         if override_size is not None:
             if override_size == 0:
@@ -1058,7 +1132,9 @@ class ProfileGuidedEstimator:
                 elem_size = val.element_size()
                 if elem_size > 0:
                     nelems = override_size // elem_size
-        result = self.profile.lookup_collective(coll_name, pg_ranks, nelems, dtype)
+        result = self.profile.lookup_collective(
+            coll_name, pg_ranks, nelems, dtype, pg_desc=pg_desc
+        )
         if result is not None:
             return result[0]
         return None
