@@ -80,9 +80,12 @@ def single_row_config(N: int, dtype_width: int):
 
 class RowTile:
     def __init__(self, trait, dtype, N, tpr, nt, nouts=1, final=True, unroll=4):
-        if tpr % WARP or tpr > nt or nt % tpr:
+        # A non-power-of-two WARP COUNT silently drops a partial: block_reduce's second level
+        # butterflies over tpr // WARP groups, and _offsets spans a group only at a power of two.
+        nw = tpr // WARP
+        if tpr % WARP or tpr > nt or nt % tpr or nw & (nw - 1):
             raise ValueError(
-                f"tpr must be a multiple of {WARP} dividing nt: {tpr=} {nt=}"
+                f"tpr must be a power-of-two multiple of {WARP} dividing nt: {tpr=} {nt=}"
             )
         self.trait = trait
         self.dtype = dtype
@@ -163,6 +166,19 @@ class RowTile:
                     mOuts[f][row] = trait.fdtypes[f](acc[f])
 
 
+def _declared_align(x, natural: int) -> int:
+    """The alignment the wrap may DECLARE for `x`: what N allows, narrowed to what its base
+    pointer meets. Both are powers of two, so halving terminates at the element width.
+    """
+    # const_data_ptr, so reading the address does not materialize a COW tensor.
+    with torch._C.DisableTorchFunctionSubclass():
+        ptr = x.const_data_ptr()
+    align = natural
+    while align > x.element_size() and ptr % align:
+        align //= 2
+    return align
+
+
 def reduce_row_tile(
     trait, trait_key, x, out_dtypes, nouts=1, tpr=None, nt=None, final=True, unroll=None
 ):
@@ -189,7 +205,9 @@ def reduce_row_tile(
     # final -> nouts projected results; stage 1 -> one RAW partial buffer per trait field
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    align = tile.align_bytes(N, x.element_size())
+    # What N allows, narrowed to what the base pointer meets: a wider claim than the pointer
+    # honours is rejected at launch, and N alone cannot see a storage offset.
+    align = _declared_align(x, tile.align_bytes(N, x.element_size()))
     nchunks = Int32(N // op.vec)
     nwaves = Int32(math.ceil((N // op.vec) / tpr))
 
@@ -207,7 +225,10 @@ def reduce_row_tile(
             _stream(),
         )
 
-    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
+    # align is part of the KEY now that it depends on the pointer: two calls of the same shape
+    # can differ in it, and the declared value is baked into the kernel.
+    dts = tuple(out_dtypes[:ndst])
+    key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     # The real operands: read_only on the INPUT, or a COW input materializes on export. The other
