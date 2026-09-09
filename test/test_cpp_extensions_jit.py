@@ -12,6 +12,8 @@ import sys
 import tempfile
 import unittest
 import warnings
+from pathlib import Path
+from unittest import mock
 
 import torch
 import torch.backends.cudnn
@@ -81,6 +83,81 @@ with tempfile.TemporaryDirectory() as tmpdir:
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class TestFindRocmHome(common.TestCase):
+    """Guess #2 must prefer devel over core when ROCM_HOME/ROCM_PATH are unset.
+
+    PyTorch ROCm CI exports those env vars, so TestMemPool never reaches this
+    path. These mocks are what actually guards the TheRock JIT include bug.
+    """
+
+    def _spec(self, origin: str):
+        spec = mock.Mock()
+        spec.origin = origin
+        return spec
+
+    def _find_home(self, specs, env_home=None):
+        def find_spec(name, *args, **kwargs):
+            origin = specs.get(name)
+            return None if origin is None else self._spec(origin)
+
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ROCM_HOME", None)
+            os.environ.pop("ROCM_PATH", None)
+            if env_home is not None:
+                os.environ["ROCM_HOME"] = env_home
+            with (
+                mock.patch(
+                    "torch.utils.cpp_extension.importlib.util.find_spec",
+                    side_effect=find_spec,
+                ),
+                mock.patch(
+                    "torch.utils.cpp_extension.shutil.which", return_value=None
+                ),
+                mock.patch(
+                    "torch.utils.cpp_extension.os.path.exists", return_value=False
+                ),
+                mock.patch.object(torch.version, "hip", "7.0"),
+            ):
+                return torch.utils.cpp_extension._find_rocm_home()
+
+    def test_prefers_devel_over_core_when_env_unset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            devel = Path(tmp) / "_rocm_sdk_devel"
+            core = Path(tmp) / "_rocm_sdk_core"
+            devel.mkdir()
+            core.mkdir()
+            (devel / "__init__.py").write_text("")
+            (core / "__init__.py").write_text("")
+            home = self._find_home(
+                {
+                    "_rocm_sdk_devel": str(devel / "__init__.py"),
+                    "_rocm_sdk_core": str(core / "__init__.py"),
+                }
+            )
+        self.assertEqual(home, str(devel.resolve()))
+
+    def test_falls_back_to_core_when_devel_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = Path(tmp) / "_rocm_sdk_core"
+            core.mkdir()
+            (core / "__init__.py").write_text("")
+            home = self._find_home({"_rocm_sdk_core": str(core / "__init__.py")})
+        self.assertEqual(home, str(core.resolve()))
+
+    def test_env_rocm_home_wins_over_sdk_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            devel = Path(tmp) / "_rocm_sdk_devel"
+            forced = Path(tmp) / "from-env"
+            devel.mkdir()
+            forced.mkdir()
+            (devel / "__init__.py").write_text("")
+            home = self._find_home(
+                {"_rocm_sdk_devel": str(devel / "__init__.py")},
+                env_home=str(forced),
+            )
+        self.assertEqual(home, str(forced))
 
 
 # There's only one test that runs gradcheck, run slow mode manually
