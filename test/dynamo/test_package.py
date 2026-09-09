@@ -95,27 +95,48 @@ class TestPackage(torch._inductor.test_case.TestCase):
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
 
-    def test_bypassed_entry_refuses_new_registrations(self):
+    def test_bypass_drops_only_the_current_compiles_backend(self):
+        # A bypass discards what the compile that failed to serialize registered
+        # on its entry, not what earlier compiles of the same code object did.
         def fn(x):
             return x + 1
 
-        (backend_id,) = (
-            compiled_region_with_backend_id_for_package_test.__code__.co_names
-        )
+        first_code = compiled_region_with_backend_id_for_package_test.__code__
+        (first_id,) = first_code.co_names
+        second_id = "__compiled_fn_1_00000000_0000_0000_0000_000000000000"
         package = CompilePackage(fn)
         with package.code_context(fn.__code__):
-            package.bypass_current_entry()
-            package.add_guarded_code(
-                b"", compiled_region_with_backend_id_for_package_test.__code__
-            )
-            package.add_backend_id(backend_id)
-            package.add_import_source("alias", "os")
+            package.add_guarded_code(b"", first_code)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(second_id, object())
+            package.bypass_current_compile()
 
+        entry = package.cache_entry().codes[0]
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [first_id])
+        self.assertEqual(len(entry.guarded_codes), 1)
+        self.assertNotIn(second_id, package.cached_backends)
+
+    def test_bypass_of_every_compile_marks_the_entry_bypassed(self):
+        # With nothing installable the entry must NOT look like a trivial
+        # function that install() would skip_code; a later compile that does
+        # record a guarded code makes it installable again.
+        def fn(x):
+            return x + 1
+
+        code = compiled_region_with_backend_id_for_package_test.__code__
+        (backend_id,) = code.co_names
+        package = CompilePackage(fn)
+        with package.code_context(fn.__code__):
+            package.add_backend_id(backend_id)
+            package.bypass_current_compile()
         entry = package.cache_entry().codes[0]
         self.assertTrue(entry.bypassed)
         self.assertEqual(entry.backend_ids, [])
-        self.assertEqual(entry.guarded_codes, [])
-        self.assertEqual(entry.import_sources, {})
+        with package.code_context(fn.__code__):
+            package.add_guarded_code(b"", code)
+        self.assertFalse(entry.bypassed)
+        self.assertEqual(entry.backend_ids, [backend_id])
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -580,9 +601,10 @@ def add(x, y):
         self.assertTrue(any("package bypass" in line for line in logs.output))
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_bypassed_recompile_drops_the_frames_earlier_variants(self):
-        # A bypass marks the frame's whole entry, so a variant that serialized
-        # fine earlier goes with it and install() skips the frame.
+    def test_bypassed_recompile_keeps_the_frames_earlier_variants(self):
+        # A bypass drops only the compile whose guards could not be serialized.
+        # A variant of the same frame that serialized earlier is still saved and
+        # installed on reload; only the bypassed inputs are traced fresh there.
         def fn(x, cfg=None):
             if cfg is not None and cfg.flag == 2.0:
                 x = x + 1
@@ -596,15 +618,17 @@ def add(x, y):
             compiled(x, UnpicklableConfig())
         self.assertTrue(any("package bypass" in line for line in logs.output))
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertEqual(entry["backend_ids"], [])
+        self.assertEqual(len(entry["backend_ids"]), 1)
         torch._dynamo.reset()
         PrecompileContext.clear()
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
         with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
-                compiled(x)
-        self.assertEqual(compiled(x), expected)
+            self.assertEqual(compiled(x), expected)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            cfg = UnpicklableConfig()
+            self.assertEqual(compiled(x, cfg), fn(x, cfg))
+        self.assertTrue(any("package bypass" in line for line in logs.output))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
