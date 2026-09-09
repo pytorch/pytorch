@@ -680,6 +680,34 @@ def _subprocess_save_child_module_artifact(path):
         torch.save(mod.state_dict(), path + ".state_dict")
 
 
+def _subprocess_load_then_compile(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        model(torch.randn(4, 4))
+
+        # A fresh compile in the same process mints its __builtins_dict___N
+        # global from the process-global unique_id counter, still behind the
+        # loaded artifact's baked-in index, so it regenerates a name the load
+        # already seeded. install_global must retry past the taken name; without
+        # the retry this AssertionErrors in CleanupHook.create.
+        def later(x):
+            return x + 1
+
+        torch.compile(later, fullgraph=True, backend="eager")(torch.randn(3))
+
+
 class RedistributeModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -883,6 +911,32 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         msg = str(cm.exception)
         self.assertIn("cannot pickle", msg)
+        self.assertIn("not picklable", msg)
+        self.assertIn("external_data", msg)
+
+    def test_save_guidance_when_a_locals_class_default_cannot_pickle(self):
+        # A <locals> class instance in __defaults__ rides unpruned and pickles
+        # to "Can't get local object" -- an AttributeError, not a
+        # PicklingError/TypeError -- so without AttributeError in the caught set
+        # a bare AttributeError escaped with no guidance. It is caught too and
+        # gets the same external_data guidance appended.
+        def outer():
+            class Cfg:
+                def __init__(self):
+                    self.v = 1
+
+            def fn(x, cfg=Cfg()):
+                return x + 1
+
+            return fn
+
+        fn = outer()
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((AttributeError, pickle.PicklingError, TypeError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("Can't get local object", msg)
         self.assertIn("not picklable", msg)
         self.assertIn("external_data", msg)
 
@@ -1710,16 +1764,25 @@ from user code:
             backend="eager",
             options={"guard_filter_fn": keep_global_guards},
         )
-        # The load seeds __import_*/__builtins_dict__ aliases into this module's
-        # globals; strip whatever it adds so sibling tests do not inherit them.
+        # A sibling in-process capture may have already leaked __import_*/
+        # __builtins_dict__ aliases into this module's globals; pop them so the
+        # load genuinely has to seed them (otherwise the assertions below pass
+        # trivially against a pre-leaked name). Restore the originals and strip
+        # whatever the load adds in cleanup so sibling tests do not inherit them.
         g = globals()
+        leaked = {
+            k: g.pop(k)
+            for k in [k for k in g if k.startswith(("__import_", "__builtins_dict__"))]
+        }
         preexisting = frozenset(g)
 
         def _restore_globals() -> None:
             for k in [k for k in g if k not in preexisting]:
                 del g[k]
+            g.update(leaked)
 
         self.addCleanup(_restore_globals)
+        self.assertNotIn("__import_torch_dot_nn_dot_modules_dot_module", g)
         with open(path, "rb") as f:
             model._load_aot_compiled_module(f.read())
         (result,) = model.forward.compiled_results
@@ -1733,6 +1796,19 @@ from user code:
         self.assertIs(globals()[builtins_key], get_builtins_dict(globals()))
         x = torch.randn(4, 4)
         self.assertEqual(model(x), mod(x))
+
+    def test_load_then_compile_survives_baked_in_global_collision(self):
+        # output_graph.install_global's retry loop: a fresh process loads a
+        # module artifact (seeding __builtins_dict___0), then a later compile in
+        # that process regenerates index 0 (unique_id is still behind) and
+        # collides. Only a fresh process reproduces it -- once any in-process
+        # compile has run, unique_id is ahead of the baked-in index and the
+        # names never clash, which is why nothing in-suite covers the retry.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
     def test_load_seeds_exactly_the_recorded_import_aliases(self):
         # Loading may add only the aliases the artifact recorded, and must not
@@ -2944,6 +3020,48 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
         self.assertEqual(out.__annotations__, {})
         self.assertEqual(out([1, 2]), [1, 2])
+
+    def test_pickler_does_not_persist_a_wrong_false_across_an_inflight_seed(self):
+        # An in-flight probe must not leave a wrong False in the shared cache.
+        # f is unpicklable via an UNPRUNED slot (a Lock kwdefault); f and g
+        # reference each other, and h carries g. Probing f seeds an optimistic
+        # in-flight state, g re-enters f mid-probe, keeps g.f, dumps f, hits the
+        # lock and raises -- which an earlier version cached as g being
+        # unpicklable, so an UNRELATED h silently lost its .g and died at call
+        # time. The in-flight result is no longer cached, so h keeps g.
+        import threading
+
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            lock = threading.Lock()
+
+            def f(*, k=lock):
+                return k
+
+            def g():
+                return "g!"
+
+            def h():
+                return "h!"
+
+            f.g = g
+            g.f = f
+            h.g = g
+
+            def top(x):
+                return x
+
+            top.f = f  # inserted before h, so f probes (and taints) g first
+            top.h = h
+            return top
+
+        fn = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(fn)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertTrue(hasattr(out.h, "g"))
+        self.assertEqual(out.h.g(), "g!")
 
     def test_pickler_handles_mutually_referencing_annotations(self):
         # Two <locals> functions annotated with each other form an annotation
