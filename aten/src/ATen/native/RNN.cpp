@@ -13,6 +13,9 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
+
+#include <array>
+#include <atomic>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -67,6 +70,46 @@ namespace at::native {
 
 namespace {
 
+// MIOpen RNN kernels are JIT-compiled at first use. A broken runtime compile
+// environment (e.g. device-libs bitcode the bundled comgr cannot read,
+// pytorch/pytorch#189618) surfaces as miopenStatusUnknownError from the first
+// forward on any architecture, so probe per device instead of hard-coding
+// arch lists: the first MIOpen RNN failure on a device marks it broken and
+// RNNs fall back to the native implementation for the rest of the process. A
+// failure after a prior success on the same device is rethrown so real
+// errors (e.g. OOM) are not masked. NB: MIOpen wrappers throw
+// at::native::miopen_exception (a std::runtime_error), not c10::Error, so
+// the dispatch sites below catch std::exception.
+enum miopen_rnn_probe_result : int {
+  miopen_rnn_untried = 0,
+  miopen_rnn_ok = 1,
+  miopen_rnn_broken = 2,
+};
+
+std::atomic<int>& miopen_rnn_probe(at::DeviceIndex device_index) {
+  static std::array<std::atomic<int>, 64> state{};
+  static std::atomic<int> overflow{miopen_rnn_untried};
+  auto idx = static_cast<size_t>(device_index);
+  return idx < state.size() ? state[idx] : overflow;
+}
+
+// Returns true if the failure was absorbed (fall through to native); false
+// means the caller must rethrow.
+bool miopen_rnn_handle_failure(at::DeviceIndex device_index, const char* what) {
+  auto& probe = miopen_rnn_probe(device_index);
+  if (probe.load(std::memory_order_relaxed) == miopen_rnn_ok) {
+    return false;
+  }
+  probe.store(miopen_rnn_broken, std::memory_order_relaxed);
+  TORCH_WARN(
+      "MIOpen RNN failed on device ", static_cast<int>(device_index),
+      "; falling back to the native RNN implementation on this device for the "
+      "rest of the process. This usually indicates a broken MIOpen runtime "
+      "kernel compilation environment "
+      "(https://github.com/pytorch/pytorch/issues/189618). Error: ", what);
+  return true;
+}
+
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
     bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
@@ -78,6 +121,14 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     // native kernels shouldn't be much slower because the output is also
     // likely empty.
     if (input.sym_numel() == 0) return false;
+
+    // Devices where MIOpen RNN already failed fall back to the native
+    // implementation; see miopen_rnn_probe above.
+    if (is_miopen_acceptable &&
+        miopen_rnn_probe(input.device().index()).load(std::memory_order_relaxed) ==
+            miopen_rnn_broken) {
+        return false;
+    }
 
     return is_miopen_acceptable;
 }
@@ -1254,21 +1305,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
     if (use_miopen(_input, dropout_p)) {                                    \
-      Tensor output, hy;                                                    \
-      NAME##_miopen_stub(                                                   \
-          _input.device().type(),                                           \
-          output,                                                           \
-          hy,                                                               \
-          _input,                                                           \
-          hx,                                                               \
-          _params,                                                          \
-          has_biases,                                                       \
-          num_layers,                                                       \
-          dropout_p,                                                        \
-          train,                                                            \
-          bidirectional,                                                    \
-          batch_first);                                                     \
-      return std::make_tuple(std::move(output), std::move(hy));             \
+      try {                                                                 \
+        Tensor output, hy;                                                  \
+        NAME##_miopen_stub(                                                 \
+            _input.device().type(),                                         \
+            output,                                                         \
+            hy,                                                             \
+            _input,                                                         \
+            hx,                                                             \
+            _params,                                                        \
+            has_biases,                                                     \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional,                                                  \
+            batch_first);                                                   \
+        miopen_rnn_probe(_input.device().index())                           \
+            .store(miopen_rnn_ok, std::memory_order_relaxed);               \
+        return std::make_tuple(std::move(output), std::move(hy));           \
+      } catch (const std::exception& e) {                                   \
+        if (!miopen_rnn_handle_failure(_input.device().index(), e.what()))  \
+          throw;                                                            \
+      }                                                                     \
     }                                                                       \
     check_attributes(_input, _params, hx);                                  \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
@@ -1316,21 +1374,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
     if (use_miopen(data, dropout_p)) {                                      \
-      Tensor output, hy;                                                    \
-      NAME##_packed_miopen_stub(                                            \
-          data.device().type(),                                             \
-          output,                                                           \
-          hy,                                                               \
-          data,                                                             \
-          batch_sizes,                                                      \
-          hx,                                                               \
-          _params,                                                          \
-          has_biases,                                                       \
-          num_layers,                                                       \
-          dropout_p,                                                        \
-          train,                                                            \
-          bidirectional);                                                   \
-      return std::make_tuple(std::move(output), std::move(hy));             \
+      try {                                                                 \
+        Tensor output, hy;                                                  \
+        NAME##_packed_miopen_stub(                                          \
+            data.device().type(),                                           \
+            output,                                                         \
+            hy,                                                             \
+            data,                                                           \
+            batch_sizes,                                                    \
+            hx,                                                             \
+            _params,                                                        \
+            has_biases,                                                     \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional);                                                 \
+        miopen_rnn_probe(data.device().index())                             \
+            .store(miopen_rnn_ok, std::memory_order_relaxed);               \
+        return std::make_tuple(std::move(output), std::move(hy));           \
+      } catch (const std::exception& e) {                                   \
+        if (!miopen_rnn_handle_failure(data.device().index(), e.what()))    \
+          throw;                                                            \
+      }                                                                     \
     }                                                                       \
     PackedSequence input{data, batch_sizes};                                \
     auto params = gather_params(_params, has_biases);                       \
@@ -1487,10 +1552,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
   if (use_miopen(_input, dropout_p)) {
     if (!has_projections) {
-      Tensor output, hy, cy;
-      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                num_layers, dropout_p, train, bidirectional, batch_first);
-      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      try {
+        Tensor output, hy, cy;
+        lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                  num_layers, dropout_p, train, bidirectional, batch_first);
+        miopen_rnn_probe(_input.device().index()).store(miopen_rnn_ok, std::memory_order_relaxed);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } catch (const std::exception& e) {
+        if (!miopen_rnn_handle_failure(_input.device().index(), e.what())) {
+          throw;
+        }
+      }
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
@@ -1540,10 +1612,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(data, dropout_p)) {
     if (!has_projections) {
-      Tensor output, hy, cy;
-      lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-              _params, has_biases, num_layers, dropout_p, train, bidirectional);
-      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      try {
+        Tensor output, hy, cy;
+        lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+                _params, has_biases, num_layers, dropout_p, train, bidirectional);
+        miopen_rnn_probe(data.device().index()).store(miopen_rnn_ok, std::memory_order_relaxed);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } catch (const std::exception& e) {
+        if (!miopen_rnn_handle_failure(data.device().index(), e.what())) {
+          throw;
+        }
+      }
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");

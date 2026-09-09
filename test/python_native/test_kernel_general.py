@@ -7,22 +7,31 @@
 # dispatcher stays in the general path and does not pull in the row/col/xcta fast
 # kernels (added in later commits).
 
+import sys
 import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+
+
+# The kernel modules import cutlass at module scope, so the guard precedes the import: otherwise
+# an image without the runtime fails collection for the whole file instead of skipping it.
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+import cutlass
+
+from torch._native.ops._cutedsl import traits as T
+from torch._native.ops.reductions import kernel_general as kg, kernel_xcta as xc
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
-@skipIfNoCuteDSL
 class TestKernelGeneral(TestCase):
     def test_reduce_dim_general_path(self):
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
-
         x = torch.randn(8, 16, 32, device="cuda")
         out = kg.reduce_dim(
             T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
@@ -32,11 +41,6 @@ class TestKernelGeneral(TestCase):
     def test_two_stage_row_ragged_split(self):
         # A PRIME row length: the chunk cannot divide it, so stage 1 has to clamp its
         # fold at the end of each row (ragged_chunk) instead of running into the next.
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
-
         x = torch.randn(8, 65537, device="cuda")
         (out,) = kg._two_stage_row(
             T.SumOps(acc=cutlass.Float32), "smoke_rag", x, [torch.float32], 1
@@ -46,11 +50,6 @@ class TestKernelGeneral(TestCase):
     def test_two_stage_row_index_is_global(self):
         # gidx_from="chunk": the index a chunk reports must be the ABSOLUTE column, and
         # an exact tie must resolve first-wins as aten's argmax does.
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
-
         x = torch.zeros(8, 65537, device="cuda")
         x[:, 40000] = 1.0
         x[:, 50000] = 1.0  # tie with the above -> the lower column must win
@@ -64,11 +63,6 @@ class TestKernelGeneral(TestCase):
         # entirely. A test cannot observe the -O build from here, so what it CAN pin is that each
         # check is a real raise reached on the documented input -- which is what a stripped assert
         # would stop doing. Every check these kernels carry is covered.
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg, kernel_xcta as xc
-
         trait = T.SumOps(acc=cutlass.Float32)
         # reduce-all needs a flat view, so a transposed input has to be refused, not reshaped.
         xt = torch.randn(64, 128, device="cuda").t()
