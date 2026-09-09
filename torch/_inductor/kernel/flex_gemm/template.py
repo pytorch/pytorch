@@ -297,18 +297,15 @@ class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
         description = "default" if quack_config is None else dict(quack_config)
         return f"CuteDSL template {name} (QUACK config={description})"
 
-    def precompile(self, *, wait: bool = True) -> None:
-        """Compile this choice's pinned QuACK kernel through Inductor's worker pool."""
-        from torch._inductor.async_compile import AsyncCompile
+    def precompile(self) -> None:
+        """Compile this choice's pinned QuACK kernel in-process."""
         from torch._inductor.kernel.flex_gemm.runtime import precompile_flex_gemm_kernel
 
-        if not AsyncCompile.wait_process_pool_ready():
-            return
         inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
         run = self.bmreq.make_run_fn(
             *inputs, out=self.bmreq.output_tensor_meta.to_tensor()
         )
-        precompile_flex_gemm_kernel(run, wait=wait)
+        precompile_flex_gemm_kernel(run)
 
 
 class FlexGemmEpilogueTemplate(CuteDSLTemplate):
