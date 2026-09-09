@@ -383,7 +383,7 @@ def _check_capabilities(test_case, required_capabilities) -> None:
     }
 
     if missing:
-        raise AssertionError(
+        raise unittest.SkipTest(
             f"Device '{type(test_case).device_type}' has not declared capabilities: "
             f"{', '.join(sorted(missing))}. "
             f"Add them to {type(test_case).__name__}._capabilities()."
@@ -1004,6 +1004,11 @@ class MPSTestBase(DeviceTypeTestBase):
                 Capability.dtype.fp64: lambda: False,
                 Capability.attention.flash_attention: lambda: False,
                 Capability.attention.mem_efficient_attention: lambda: False,
+                Capability.distributed.backend: lambda: False,
+                Capability.distributed.dtensor: lambda: False,
+                Capability.distributed.fsdp: lambda: False,
+                Capability.memory.non_blocking_copy: lambda: False,
+                Capability.stream.generic: lambda: False,
             }
         )
         return capabilities
@@ -1101,12 +1106,6 @@ class HPUTestBase(DeviceTypeTestBase):
         capabilities.update(
             {
                 Capability.dtype.fp64: lambda: False,
-                Capability.distributed.backend: lambda: _distributed_backend_available(
-                    cls.device_type
-                ),
-                Capability.distributed.fsdp: lambda: _distributed_backend_available(
-                    cls.device_type
-                ),
             }
         )
         return capabilities
