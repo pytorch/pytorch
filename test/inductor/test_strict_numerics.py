@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 """Tests for strict numerics mode."""
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -35,6 +36,39 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import BinaryUfuncInfo, UnaryUfuncInfo
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_reduction_ordering
+
+
+###############################################################################
+# TEMPORARY SURVEY COMMIT -- DO NOT LAND
+#
+# The CI runner stops a shard at the first consistent failure, so a normal run
+# reveals exactly one wrong ledger entry per round-trip -- and the ledger is
+# arch-dependent, so entries for arches we cannot reach locally are only ever
+# found this way. With TORCHINDUCTOR_STRICT_LEDGER_SURVEY=1 no ledger check
+# fails; every disagreement is reported instead, so one run yields the whole
+# ledger for that arch.
+###############################################################################
+# Defaults ON: CI cannot set an env var, and surveying is the whole point of this
+# commit. Set TORCHINDUCTOR_STRICT_LEDGER_SURVEY=0 for normal enforcing behaviour.
+_SURVEY = os.environ.get("TORCHINDUCTOR_STRICT_LEDGER_SURVEY", "1") == "1"
+
+
+def _survey(line):
+    # pytest.ini sets --capture=sys, which swallows print(); fd 2 bypasses it.
+    os.write(2, f"LEDGER-SURVEY {line}\n".encode())
+
+
+@contextlib.contextmanager
+def _survey_guard(op, dtype, what):
+    """Report a crash instead of raising: an error also stops the shard."""
+    if not _SURVEY:
+        yield
+        return
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001
+        key = (_op_id(op), _dtype_label(dtype))
+        _survey(f"CRASH   {key} {what} -- {type(exc).__name__}: {str(exc)[:200]}")
 
 
 def _singleton_input(device):
@@ -1180,6 +1214,13 @@ class PointwiseStrictNumericsTest(TestCase):
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
         r"""Require listed pairs to differ and unlisted pairs to match eager."""
         key = (_op_id(op), _dtype_label(dtype))
+        if _SURVEY:
+            listed = key in xfail
+            if listed and not mismatches:
+                _survey(f"STALE   {xfail_name} {key} {what} -- matches now, remove it")
+            elif not listed and mismatches:
+                _survey(f"MISSING {xfail_name} {key} {what} -- differs, add it")
+            return
         if key in xfail:
             self.assertTrue(
                 mismatches,
@@ -1195,17 +1236,19 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(POINTWISE_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_bitwise(self, device, dtype, op):
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
-        )
+        with _survey_guard(op, dtype, "forward"):
+            mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+            self._assert_ledger(
+                mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
+            )
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
-        )
+        with _survey_guard(op, dtype, "nonfloat"):
+            mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+            self._assert_ledger(
+                mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
+            )
 
     def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
         leaves = []
@@ -1314,10 +1357,11 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(BACKWARD_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_backward(self, device, dtype, op):
-        mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
-        )
+        with _survey_guard(op, dtype, "backward"):
+            mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
+            self._assert_ledger(
+                mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
+            )
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
