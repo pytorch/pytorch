@@ -443,7 +443,6 @@ variable_list get_current_input_grad_buffers(Node* node) {
       "input_grad_buffers does not support "
       "set_override_stale_capture_stream(True)");
 
-  const auto producer_device = node->device();
   const auto opt_producer_stream = node->stream();
 
   variable_list result(node->next_edges().size());
@@ -465,9 +464,7 @@ variable_list get_current_input_grad_buffers(Node* node) {
         : next.function->stream();
     result[i] = input_buffer.get_for_direct_accumulation(
         next.input_nr,
-        producer_device,
         opt_producer_stream,
-        next.function->device(),
         opt_consumer_stream);
   }
   return result;

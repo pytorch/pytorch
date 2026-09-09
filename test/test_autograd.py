@@ -18709,7 +18709,7 @@ class TestInputGradBuffers(TestCase):
         first = Producer.apply(x, False)
         torch.cuda.synchronize()
 
-        with self.assertRaisesRegex(RuntimeError, "same device"):
+        with self.assertRaisesRegex(RuntimeError, "same stream"):
             torch.autograd.backward(
                 (direct, first), (torch.ones_like(direct), torch.ones_like(first))
             )

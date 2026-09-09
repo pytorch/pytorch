@@ -209,9 +209,7 @@ void InputBuffer::validate_direct_accumulation(
 
 Variable InputBuffer::get_for_direct_accumulation(
     size_t pos,
-    const at::Device& producer_device,
     const std::optional<c10::Stream>& opt_producer_stream,
-    const at::Device& consumer_device,
     const std::optional<c10::Stream>& opt_consumer_stream) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
   auto& var = buffer[pos];
@@ -224,18 +222,13 @@ Variable InputBuffer::get_for_direct_accumulation(
   }
 
   const auto device = var.device();
-  TORCH_CHECK(
-      device == producer_device && device == consumer_device,
-      "Direct InputBuffer accumulation requires the producer, buffer, and "
-      "consumer to use the same device");
-
   if (at::accelerator::isAccelerator(device.type())) {
     TORCH_INTERNAL_ASSERT(
-        opt_producer_stream && opt_consumer_stream &&
         pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
         pos < ready_streams.size() && ready_streams[pos]);
     TORCH_CHECK(
-        *opt_producer_stream == *opt_consumer_stream &&
+        opt_producer_stream && opt_consumer_stream &&
+            *opt_producer_stream == *opt_consumer_stream &&
             *opt_producer_stream == *opt_accum_streams[pos] &&
             *opt_producer_stream == *ready_streams[pos],
         "Direct InputBuffer accumulation requires the producer, buffer, and "

@@ -63,9 +63,7 @@ struct InputBuffer {
 
   TORCH_API Variable get_for_direct_accumulation(
       size_t pos,
-      const at::Device& producer_device,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const at::Device& consumer_device,
       const std::optional<c10::Stream>& opt_consumer_stream);
 
   Variable operator[](size_t pos) {
