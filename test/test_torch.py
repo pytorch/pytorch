@@ -36,6 +36,7 @@ from torch.testing._internal.common_optimizers import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
+    HardwareClassification,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -90,6 +91,7 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
 class TestTorchDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # TODO: move all tensor creation to common ops
@@ -174,26 +176,6 @@ class TestTorchDeviceType(TestCase):
         raw = torch.ones(1024, dtype=torch.uint8, device=device)
         raw.view(dtype).zero_()
         self.assertEqual(raw.count_nonzero().item(), 0)
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    def test_zero_dense_emits_memset(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[16:32].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("Memset" in name for name in names), names)
-
-    @onlyCUDA
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    def test_zero_strided_emits_fill_kernel(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[:, ::2].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
 
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
@@ -1053,15 +1035,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             # t + 1 allocates a new tensor for result using empty
             t + 1
-
-    @onlyCUDA
-    def test_dtypetensor_warnings(self, device):
-        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
-        with self.assertWarnsOnceRegex(UserWarning, msg):
-            torch.cuda.FloatTensor([0])
-
-        with self.assertWarnsOnceRegex(UserWarning, msg):
-            torch.cuda.DoubleTensor([0])
 
     def test_set_default_tensor_type_warnings(self, device):
         msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
@@ -1943,22 +1916,6 @@ class TestTorchDeviceType(TestCase):
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
-
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
-    @skipIfRocm
-    @onlyCUDA
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
-        def fn():
-            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
-            grid = torch.empty(1, 1, 1, 2, device=device)
-            with torch.backends.cudnn.flags(enabled=True):
-                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
-                res.backward(torch.ones_like(res))
-
-        self.check_nondeterministic_alert(
-            fn,
-            'cudnn_grid_sampler_backward')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
@@ -3416,18 +3373,6 @@ class TestTorchDeviceType(TestCase):
             dense.to(torch.float32).view(torch.uint8),
             strided.to(torch.float32).view(torch.uint8))
 
-    @onlyCUDA
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bfloat16, torch.half)
-    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
-        src = make_tensor((1024, 1024), dtype=dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            src.to(torch.float32)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
     def test_copy_math_view(self, device):
@@ -4618,17 +4563,6 @@ class TestTorchDeviceType(TestCase):
             RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    # FIXME: move to test distributions
-    @deviceCountAtLeast(2)
-    @onlyCUDA
-    @skipIfTorchInductor("FIXME: error not thrown")
-    def test_multinomial_gpu_device_constrain(self, devices):
-        x = torch.empty(3, device=devices[0])
-        y = torch.empty(3, device=devices[1], dtype=torch.long)
-        self.assertRaisesRegex(
-            RuntimeError, "Expected all tensors to be on the same device",
-            lambda: torch.multinomial(x, 2, out=y))
-
     # FIXME: convert this to an automated OpInfo test
     @deviceCountAtLeast(2)
     @onlyCUDA
@@ -4735,41 +4669,6 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(t.is_xpu, True)
             else:
                 self.assertEqual(t.is_xpu, False)
-
-    # Note - reports a leak of 512 bytes on CUDA device 1
-    @deviceCountAtLeast(2)
-    @skipCUDAMemoryLeakCheckIf(True)
-    @onlyCUDA
-    def test_tensor_set_errors_multigpu(self, devices):
-        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
-        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
-
-        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
-        self.assertRaises(RuntimeError,
-                          lambda: f_cuda0.set_(f_cuda1.storage(), 0, f_cuda1.size(), f_cuda1.stride()))
-        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
-
-    # FIXME: move to test_serialization
-    @onlyCUDA
-    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
-    def test_serialization(self, devices):
-        def _test_serialization(filecontext_lambda):
-            t0 = torch.cuda.FloatTensor(5).fill_(1)
-            with torch.cuda.device(devices[-1]):
-                tn = torch.cuda.FloatTensor(3).fill_(2)
-            torch.cuda.set_device(devices[0])
-            b = (t0, tn)
-            with filecontext_lambda() as f:
-                torch.save(b, f)
-                f.seek(0)
-                c = torch.load(f)
-                self.assertEqual(b, c, atol=0, rtol=0)
-                u0, un = c
-                self.assertEqual(str(u0.device), devices[0])
-                self.assertEqual(str(un.device), devices[-1])
-
-        _test_serialization(tempfile.NamedTemporaryFile)
-        _test_serialization(BytesIOContext)
 
     # FIXME: move memory format tests to their own test class/suite
     def test_memory_format_preserved_after_permute(self, device):
@@ -6707,6 +6606,7 @@ class TestTorchDeviceType(TestCase):
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # FIXME: move to indexing test suite
@@ -6941,6 +6841,7 @@ def disable_gc():
         yield
 
 class TestTorch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     exact_dtype = True
 
     def test_dir(self):
@@ -11356,10 +11257,119 @@ def add_neg_dim_tests():
 # TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
 
 class TestTensorDeviceOps(TestCase):
-    pass
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
+class TestTorchDeviceSpecific(TestCase):
+    hw_classification = HardwareClassification.CUDA
+    exact_dtype = True
+
+    @onlyCUDA
+    def test_dtypetensor_warnings(self, device):
+        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.cuda.FloatTensor([0])
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            torch.cuda.DoubleTensor([0])
+
+    @onlyCUDA
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[16:32].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @onlyCUDA
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_strided_emits_fill_kernel(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[:, ::2].zero_()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipIfRocm
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
+        def fn():
+            input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
+            grid = torch.empty(1, 1, 1, 2, device=device)
+            with torch.backends.cudnn.flags(enabled=True):
+                res = torch.nn.functional.grid_sample(input, grid, align_corners=True)
+                res.backward(torch.ones_like(res))
+
+        self.check_nondeterministic_alert(
+            fn,
+            'cudnn_grid_sampler_backward')
+
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            src.to(torch.float32)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+
+    # FIXME: move to test distributions
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    @skipIfTorchInductor("FIXME: error not thrown")
+    def test_multinomial_gpu_device_constrain(self, devices):
+        x = torch.empty(3, device=devices[0])
+        y = torch.empty(3, device=devices[1], dtype=torch.long)
+        self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device",
+            lambda: torch.multinomial(x, 2, out=y))
+
+    # Note - reports a leak of 512 bytes on CUDA device 1
+    @deviceCountAtLeast(2)
+    @skipCUDAMemoryLeakCheckIf(True)
+    @onlyCUDA
+    def test_tensor_set_errors_multigpu(self, devices):
+        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
+        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
+
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cuda0.set_(f_cuda1.storage(), 0, f_cuda1.size(), f_cuda1.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
+
+    # FIXME: move to test_serialization
+    @onlyCUDA
+    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
+    def test_serialization(self, devices):
+        def _test_serialization(filecontext_lambda):
+            t0 = torch.cuda.FloatTensor(5).fill_(1)
+            with torch.cuda.device(devices[-1]):
+                tn = torch.cuda.FloatTensor(3).fill_(2)
+            torch.cuda.set_device(devices[0])
+            b = (t0, tn)
+            with filecontext_lambda() as f:
+                torch.save(b, f)
+                f.seek(0)
+                c = torch.load(f)
+                self.assertEqual(b, c, atol=0, rtol=0)
+                u0, un = c
+                self.assertEqual(str(u0.device), devices[0])
+                self.assertEqual(str(un.device), devices[-1])
+
+        _test_serialization(tempfile.NamedTemporaryFile)
+        _test_serialization(BytesIOContext)
+
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
@@ -11368,6 +11378,7 @@ add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestTorchDeviceSpecific, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 
 if __name__ == '__main__':
