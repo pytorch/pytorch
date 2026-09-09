@@ -1,9 +1,3 @@
-diff --git a/pyproject.toml b/pyproject.toml
-index 14d004d..0d9931b 100644
---- a/pyproject.toml
-+++ b/pyproject.toml
-@@ -14,0 +15 @@ dependencies = [
-+    "cloudpickle",
 diff --git a/quack/autotuner.py b/quack/autotuner.py
 index 6787558..8ed8511 100644
 --- a/quack/autotuner.py
@@ -50,16 +44,6 @@ index 8c9f655..823ba7e 100644
 @@ -70,0 +93,2 @@ __all__ = [
 +    "cache_dir_override",
 +    "get_cache_dir",
-diff --git a/quack/cache/async_compile.py b/quack/cache/async_compile.py
-index 7e2a11b..3532a6b 100644
---- a/quack/cache/async_compile.py
-+++ b/quack/cache/async_compile.py
-@@ -47 +47 @@ import pickle
--from concurrent.futures import Future, ProcessPoolExecutor
-+from concurrent.futures import Executor, Future, ProcessPoolExecutor
-@@ -381 +381 @@ class CompilePool:
--    def __init__(self, jobs: Optional[int] = None, executor: Optional[ProcessPoolExecutor] = None):
-+    def __init__(self, jobs: Optional[int] = None, executor: Optional[Executor] = None):
 diff --git a/quack/cache/jit.py b/quack/cache/jit.py
 index 7106526..6ce345f 100644
 --- a/quack/cache/jit.py
@@ -549,31 +533,6 @@ index 2440581..0d260b7 100644
 +    return [candidate.kwargs["config"] for candidate in survivors]
 +
 +
-diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
-index 14bb369..e9b8038 100644
---- a/quack/gemm_runtime/identity.py
-+++ b/quack/gemm_runtime/identity.py
-@@ -31,0 +32 @@ import sysconfig
-+import threading
-@@ -231,0 +233 @@ TORCH_OP_TRANSFORM_MODS: dict[str, object] = {}
-+_CLOUDPICKLE_BY_VALUE_LOCK = threading.Lock()
-@@ -264 +266,15 @@ class LocalModRegistry:
--        data = cloudpickle.dumps(self._mods[digest])
-+        mod = self._mods[digest]
-+        fn = getattr(mod, "fn", None)
-+        module = sys.modules.get(getattr(fn, "__module__", None))
-+        if module is None:
-+            data = cloudpickle.dumps(mod)
-+        else:
-+            with _CLOUDPICKLE_BY_VALUE_LOCK:
-+                registered = module.__name__ in cloudpickle.list_registry_pickle_by_value()
-+                if not registered:
-+                    cloudpickle.register_pickle_by_value(module)
-+                try:
-+                    data = cloudpickle.dumps(mod)
-+                finally:
-+                    if not registered:
-+                        cloudpickle.unregister_pickle_by_value(module)
 diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
 index 3c89e3d..3cd074d 100644
 --- a/quack/gemm_runtime/torch_op.py
