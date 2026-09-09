@@ -19418,12 +19418,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if torch.cuda.get_device_capability()[0] < 10:
             self.skipTest("experimental large OUTER plan is restricted to SM100+")
 
-        x = torch.randn(
-            5247, 96, 128, device=self.device, dtype=torch.bfloat16
-        )
-        y = torch.randn(
-            5247, 96, 128, device=self.device, dtype=torch.bfloat16
-        )
+        x = torch.randn(5247, 96, 128, device=self.device, dtype=torch.bfloat16)
+        y = torch.randn(5247, 96, 128, device=self.device, dtype=torch.bfloat16)
         stats = torch.rand(5247, 96, 1, device=self.device, dtype=torch.float32)
 
         def f(x, y, stats):

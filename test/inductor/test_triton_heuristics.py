@@ -220,13 +220,10 @@ class TestTritonHeuristics(TestCase):
             result = _reduction_configs(
                 size_hints={"x": x, "r0_": r},
                 inductor_meta=meta,
-                triton_meta={
-                    "device": self._fake_cuda_device_properties(major=major)
-                },
+                triton_meta={"device": self._fake_cuda_device_properties(major=major)},
             )
             return {
-                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps)
-                for c in result
+                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps) for c in result
             }
 
         outer_meta = {
@@ -256,9 +253,7 @@ class TestTritonHeuristics(TestCase):
         no_autotune_outer = config_set(
             meta={"reduction_hint": ReductionHint.OUTER_NO_SPLIT}
         )
-        no_autotune_default = config_set(
-            meta={"reduction_hint": ReductionHint.DEFAULT}
-        )
+        no_autotune_default = config_set(meta={"reduction_hint": ReductionHint.DEFAULT})
         self.assertEqual(no_autotune_outer, no_autotune_default)
 
         # Runtime decorator callsites historically use False when no explicit
@@ -325,8 +320,7 @@ class TestTritonHeuristics(TestCase):
                     },
                 )
             return {
-                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps)
-                for c in result
+                (c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps) for c in result
             }
 
         self.assertIn(candidate, config_set())

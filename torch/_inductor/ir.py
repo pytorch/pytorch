@@ -1734,9 +1734,9 @@ class Reduction(Loops):
                 for var in reduction_vars
                 if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
-            indices = []
-            broadcasted_reduction_indices = []
-            source_dtypes = []
+            indices: list[Expr] = []
+            broadcasted_reduction_indices: list[Expr] = []
+            source_dtypes: list[torch.dtype | None] = []
             has_partial_output_broadcast_read = False
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
@@ -1828,12 +1828,10 @@ class Reduction(Loops):
                 producer_profitable = False
                 if split_large_outer:
                     opcount = r.inner_fn_opcount()
-                    producer_profitable = (
-                        Reduction._is_experimental_large_output_outer_producer_profitable(
-                            opcount.num_ops,
-                            opcount.nontrivial_read_count,
-                            has_partial_output_broadcast_read,
-                        )
+                    producer_profitable = Reduction._is_experimental_large_output_outer_producer_profitable(
+                        opcount.num_ops,
+                        opcount.nontrivial_read_count,
+                        has_partial_output_broadcast_read,
                     )
                 if (
                     split_large_outer
