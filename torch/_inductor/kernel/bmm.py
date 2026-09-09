@@ -178,6 +178,24 @@ class BlackwellBMMConfig:
     two_ctas: bool = False
 
 
+def is_blackwell_bmm_2cta_compatible(
+    *,
+    output_batch_rows: int,
+    block_m: int,
+    flatten_output: bool,
+    tma_store: bool,
+) -> bool:
+    """Whether the current paired-CTA output contract is safe.
+
+    The 2CTA template pairs adjacent M tiles.  Its flattened rank-2 output
+    representation is safe only when every physical batch contains complete
+    CTA pairs; otherwise the padded tile aliases the following batch.  The
+    current implementation also relies on TMA output stores for cross-CTA
+    publication and does not support the rank-3 pointer-store fallback.
+    """
+    return flatten_output and tma_store and output_batch_rows % (2 * block_m) == 0
+
+
 BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
     BlackwellBMMConfig(64, 64, 128, 5, 4),
     BlackwellBMMConfig(128, 128, 128, 3, 8),

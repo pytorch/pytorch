@@ -23,6 +23,7 @@ from ...kernel.bmm import (
     BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
     blackwell_ws_persistent_tma_bmm_template,
     bmm_template,
+    is_blackwell_bmm_2cta_compatible,
 )
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
@@ -38,6 +39,7 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    can_use_tma,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
@@ -3132,6 +3134,12 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
 
+        # Each logical batch is addressed through a rank-2 TMA descriptor.  In
+        # particular, every matrix-leading stride and every per-batch base must
+        # retain the 16-byte alignment required by TMA.
+        if not can_use_tma(mat1, mat2):
+            return
+
         batch, m, k = map(int, mat1.get_size())
         batch_b, k_b, n = map(int, mat2.get_size())
         if batch != batch_b or k != k_b:
@@ -3150,6 +3158,13 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "Blackwell BMM requires one contiguous matrix dimension"
             )
 
+        output_layout = kernel_inputs.output_layout()
+        flatten_output = len(output_layout.size) == 2
+        tma_store = (
+            flatten_output
+            and config.triton.enable_template_tma_store
+            and can_use_tma(output_layout=output_layout)
+        )
         descriptor_options = {
             "BATCH_SIZE": batch,
             "LOGICAL_M": m,
@@ -3166,12 +3181,19 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
-            "FLATTEN_OUTPUT": False,
-            "tma_store": False,
+            "FLATTEN_OUTPUT": flatten_output,
+            "tma_store": tma_store,
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in self.bmm_configs:
             two_ctas = use_meta_ws and candidate.two_ctas
+            if two_ctas and not is_blackwell_bmm_2cta_compatible(
+                output_batch_rows=m,
+                block_m=candidate.block_m,
+                flatten_output=flatten_output,
+                tma_store=tma_store,
+            ):
+                continue
             template_kwargs = {
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
