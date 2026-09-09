@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_abc.py b/test/cpython/v3_13/test_abc.py
-index 5ce57cc209ea85c63c04e860cc0919cfa917f60e..30a38bbf4b360b01618861646a1e6636d9c3988e 100644
+index 5ce57cc209ea85c63c04e860cc0919cfa917f60e..4a55ffbb5dba4b53c0956e2bbe15d767eaa257cf 100644
 --- a/test/cpython/v3_13/test_abc.py
 +++ b/test/cpython/v3_13/test_abc.py
 @@ -1,3 +1,21 @@
@@ -51,7 +51,15 @@ index 5ce57cc209ea85c63c04e860cc0919cfa917f60e..30a38bbf4b360b01618861646a1e6636
          def test_works_with_init_subclass(self):
              class abc_ABC(metaclass=abc_ABCMeta):
                  __slots__ = ()
-@@ -690,4 +708,4 @@ TestLegacyAPI_C, TestABC_C, TestABCWithInitSubclass_C = test_factory(_py_abc.ABC
+@@ -684,10 +702,12 @@ def test_factory(abc_ABCMeta, abc_get_cache_token):
+ 
+     return TestLegacyAPI, TestABC, TestABCWithInitSubclass
+ 
++test_factory.__test__ = False
++
+ TestLegacyAPI_Py, TestABC_Py, TestABCWithInitSubclass_Py = test_factory(abc.ABCMeta,
+                                                                         abc.get_cache_token)
+ TestLegacyAPI_C, TestABC_C, TestABCWithInitSubclass_C = test_factory(_py_abc.ABCMeta,
                                                                       _py_abc.get_cache_token)
  
  if __name__ == "__main__":

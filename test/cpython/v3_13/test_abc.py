@@ -702,6 +702,8 @@ def test_factory(abc_ABCMeta, abc_get_cache_token):
 
     return TestLegacyAPI, TestABC, TestABCWithInitSubclass
 
+test_factory.__test__ = False
+
 TestLegacyAPI_Py, TestABC_Py, TestABCWithInitSubclass_Py = test_factory(abc.ABCMeta,
                                                                         abc.get_cache_token)
 TestLegacyAPI_C, TestABC_C, TestABCWithInitSubclass_C = test_factory(_py_abc.ABCMeta,
