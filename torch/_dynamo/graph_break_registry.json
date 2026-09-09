@@ -583,6 +583,17 @@
   ],
   "GB0057": [
     {
+      "Gb_type": "Call to a time function",
+      "Context": "Called `{fn_name}()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `{fn_name}()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Hints": [
+        "Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0058": [
+    {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
       "Context": "{self.value}(args={args}, kwargs={kwargs})",
       "Explanation": "Currently not supported",
@@ -593,7 +604,7 @@
       ]
     }
   ],
-  "GB0058": [
+  "GB0059": [
     {
       "Gb_type": "Can't convert torch._check*() message closure",
       "Context": "str(message_vt)",
@@ -605,7 +616,7 @@
       ]
     }
   ],
-  "GB0059": [
+  "GB0060": [
     {
       "Gb_type": "Can't extract message from torch._check*()",
       "Context": "str(message_vt)",
@@ -615,7 +626,7 @@
       ]
     }
   ],
-  "GB0060": [
+  "GB0061": [
     {
       "Gb_type": "Cannot check Tensor object identity without its fake value",
       "Context": "str(fake_tensor)",
@@ -625,7 +636,7 @@
       ]
     }
   ],
-  "GB0061": [
+  "GB0062": [
     {
       "Gb_type": "Caught non-Exception value",
       "Context": "str(exc_instance)",
@@ -635,7 +646,7 @@
       ]
     }
   ],
-  "GB0062": [
+  "GB0063": [
     {
       "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
       "Context": "str(self.value)",
@@ -643,7 +654,7 @@
       "Hints": []
     }
   ],
-  "GB0063": [
+  "GB0064": [
     {
       "Gb_type": "Comparison on compile-time-only id or hash value",
       "Context": "FakeIdVariable({self.value}) {op} {type(other).__name__}",
@@ -655,7 +666,7 @@
       ]
     }
   ],
-  "GB0064": [
+  "GB0065": [
     {
       "Gb_type": "Comprehension analysis failed: No END_FOR",
       "Context": "",
@@ -663,7 +674,7 @@
       "Hints": []
     }
   ],
-  "GB0065": [
+  "GB0066": [
     {
       "Gb_type": "Comprehension analysis failed: No matches",
       "Context": "pre_store_ops={pre_store_ops}, store_targets={store_targets}, iterator_vars={iterator_vars}",
@@ -671,7 +682,7 @@
       "Hints": []
     }
   ],
-  "GB0066": [
+  "GB0067": [
     {
       "Gb_type": "Comprehension analysis failed: ambiguous result store",
       "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
@@ -679,7 +690,7 @@
       "Hints": []
     }
   ],
-  "GB0067": [
+  "GB0068": [
     {
       "Gb_type": "ComptimeContext graph break",
       "Context": "msg",
@@ -687,7 +698,7 @@
       "Hints": []
     }
   ],
-  "GB0068": [
+  "GB0069": [
     {
       "Gb_type": "ContextVar mutation not supported",
       "Context": "ContextVar('{self.cv_obj.name}').{name}()",
@@ -697,7 +708,7 @@
       ]
     }
   ],
-  "GB0069": [
+  "GB0070": [
     {
       "Gb_type": "ContextVar.get() with non-constant default",
       "Context": "ContextVar('{self.cv_obj.name}').get(...)",
@@ -707,7 +718,7 @@
       ]
     }
   ],
-  "GB0070": [
+  "GB0071": [
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "tp_getattro_impl {self} {name}",
@@ -719,7 +730,7 @@
       ]
     }
   ],
-  "GB0071": [
+  "GB0072": [
     {
       "Gb_type": "Custom metaclass with __getattribute__",
       "Context": "type({self.value}) = {metacls}",
@@ -727,7 +738,7 @@
       "Hints": []
     }
   ],
-  "GB0072": [
+  "GB0073": [
     {
       "Gb_type": "Custom op missing fake impl during tracing",
       "Context": "{node.target}",
@@ -737,7 +748,7 @@
       ]
     }
   ],
-  "GB0073": [
+  "GB0074": [
     {
       "Gb_type": "Data dependent operator",
       "Context": "str(cause.func)",
@@ -745,7 +756,7 @@
       "Hints": []
     }
   ],
-  "GB0074": [
+  "GB0075": [
     {
       "Gb_type": "Data pointer comparison",
       "Context": "tp_richcompare_impl {self} {op} {other}",
@@ -753,7 +764,7 @@
       "Hints": []
     }
   ],
-  "GB0075": [
+  "GB0076": [
     {
       "Gb_type": "Data pointer truth value",
       "Context": "nb_bool_impl {self}",
@@ -761,7 +772,7 @@
       "Hints": []
     }
   ],
-  "GB0076": [
+  "GB0077": [
     {
       "Gb_type": "Data-dependent assertion failed (cannot compile partial graph)",
       "Context": "value: {value}",
@@ -777,7 +788,7 @@
       ]
     }
   ],
-  "GB0077": [
+  "GB0078": [
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
@@ -785,7 +796,7 @@
       "Hints": []
     }
   ],
-  "GB0078": [
+  "GB0079": [
     {
       "Gb_type": "Data-dependent branching with non-constant __bool__",
       "Context": "value: {value}, result: {result}",
@@ -793,7 +804,7 @@
       "Hints": []
     }
   ],
-  "GB0079": [
+  "GB0080": [
     {
       "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
       "Context": "torch.uint64 tensor-backed size",
@@ -803,7 +814,7 @@
       ]
     }
   ],
-  "GB0080": [
+  "GB0081": [
     {
       "Gb_type": "Dynamic shape operator",
       "Context": "str(cause.func)",
@@ -814,7 +825,7 @@
       ]
     }
   ],
-  "GB0081": [
+  "GB0082": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
       "Context": "str(cause.func)",
@@ -824,7 +835,7 @@
       ]
     }
   ],
-  "GB0082": [
+  "GB0083": [
     {
       "Gb_type": "Dynamo recompile limit exceeded",
       "Context": "Limit type: {limit_type}",
@@ -837,7 +848,7 @@
       ]
     }
   ],
-  "GB0083": [
+  "GB0084": [
     {
       "Gb_type": "Encountered aliasing during higher order op tracing",
       "Context": "context",
@@ -849,7 +860,7 @@
       ]
     }
   ],
-  "GB0084": [
+  "GB0085": [
     {
       "Gb_type": "Encountered input mutation during higher order op tracing",
       "Context": "context",
@@ -860,7 +871,7 @@
       ]
     }
   ],
-  "GB0085": [
+  "GB0086": [
     {
       "Gb_type": "Encountered non user function variable during invoke_subgraph HOP tracing",
       "Context": "str(fn_vt)",
@@ -870,7 +881,7 @@
       ]
     }
   ],
-  "GB0086": [
+  "GB0087": [
     {
       "Gb_type": "Encountered non-PT2-compliant op",
       "Context": "",
@@ -878,7 +889,7 @@
       "Hints": []
     }
   ],
-  "GB0087": [
+  "GB0088": [
     {
       "Gb_type": "Encountered strided NestedTensor in automatic dynamic dim determination",
       "Context": "",
@@ -886,7 +897,7 @@
       "Hints": []
     }
   ],
-  "GB0088": [
+  "GB0089": [
     {
       "Gb_type": "Encountered tensor.is_inference() during tracing",
       "Context": "",
@@ -896,7 +907,7 @@
       ]
     }
   ],
-  "GB0089": [
+  "GB0090": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
       "Context": "",
@@ -906,7 +917,7 @@
       ]
     }
   ],
-  "GB0090": [
+  "GB0091": [
     {
       "Gb_type": "Encountered unconverted argument when attempting to inline",
       "Context": "func: {func}, arg: {v}",
@@ -916,7 +927,7 @@
       ]
     }
   ],
-  "GB0091": [
+  "GB0092": [
     {
       "Gb_type": "Error when attempting to resolve op packet",
       "Context": "",
@@ -924,7 +935,7 @@
       "Hints": []
     }
   ],
-  "GB0092": [
+  "GB0093": [
     {
       "Gb_type": "Exception with bad expected type",
       "Context": "str(expected_exc_types)",
@@ -934,7 +945,7 @@
       ]
     }
   ],
-  "GB0093": [
+  "GB0094": [
     {
       "Gb_type": "Exception with non-type expectation",
       "Context": "str(expected_type)",
@@ -944,7 +955,7 @@
       ]
     }
   ],
-  "GB0094": [
+  "GB0095": [
     {
       "Gb_type": "Excessive RestartAnalysis() calls",
       "Context": "",
@@ -952,7 +963,7 @@
       "Hints": []
     }
   ],
-  "GB0095": [
+  "GB0096": [
     {
       "Gb_type": "FSDP with use_orig_params=False",
       "Context": "",
@@ -960,7 +971,7 @@
       "Hints": []
     }
   ],
-  "GB0096": [
+  "GB0097": [
     {
       "Gb_type": "Failed to convert args/kwargs to proxy",
       "Context": "call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
@@ -968,7 +979,7 @@
       "Hints": []
     }
   ],
-  "GB0097": [
+  "GB0098": [
     {
       "Gb_type": "Failed to make weakref to User Object",
       "Context": "user_object: {value}",
@@ -976,7 +987,7 @@
       "Hints": []
     }
   ],
-  "GB0098": [
+  "GB0099": [
     {
       "Gb_type": "Failed to make weakref to graph-created external object",
       "Context": "user_object: {example_value}",
@@ -984,7 +995,7 @@
       "Hints": []
     }
   ],
-  "GB0099": [
+  "GB0100": [
     {
       "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
@@ -995,7 +1006,7 @@
       ]
     }
   ],
-  "GB0100": [
+  "GB0101": [
     {
       "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
       "Context": "setattr({obj}, {name}, {val})",
@@ -1006,7 +1017,7 @@
       ]
     }
   ],
-  "GB0101": [
+  "GB0102": [
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
@@ -1017,7 +1028,7 @@
       ]
     }
   ],
-  "GB0102": [
+  "GB0103": [
     {
       "Gb_type": "Failed to set tensor attribute",
       "Context": "setattr({obj}, {name}, {val})",
@@ -1028,7 +1039,7 @@
       ]
     }
   ],
-  "GB0103": [
+  "GB0104": [
     {
       "Gb_type": "Failed to trace builtin operator",
       "Context": "builtin {fn.__name__} {arg_types} {has_kwargs}",
@@ -1042,7 +1053,7 @@
       ]
     }
   ],
-  "GB0104": [
+  "GB0105": [
     {
       "Gb_type": "Failed to unpack object for BUILD_LIST_UNPACK",
       "Context": "str(seq)",
@@ -1052,7 +1063,7 @@
       ]
     }
   ],
-  "GB0105": [
+  "GB0106": [
     {
       "Gb_type": "Failed to unpack object for UNPACK_EX",
       "Context": "str(seq)",
@@ -1062,7 +1073,7 @@
       ]
     }
   ],
-  "GB0106": [
+  "GB0107": [
     {
       "Gb_type": "Fake tensor propagation exception",
       "Context": "str(e.reason)",
@@ -1070,7 +1081,7 @@
       "Hints": []
     }
   ],
-  "GB0107": [
+  "GB0108": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
       "Context": "value={self.value}, method={name}",
@@ -1081,7 +1092,7 @@
       ]
     }
   ],
-  "GB0108": [
+  "GB0109": [
     {
       "Gb_type": "Forced graph break on leaf function",
       "Context": "",
@@ -1091,7 +1102,7 @@
       ]
     }
   ],
-  "GB0109": [
+  "GB0110": [
     {
       "Gb_type": "Generator reconstruction with mutations",
       "Context": "mutating object: {item}",
@@ -1102,7 +1113,7 @@
       ]
     }
   ],
-  "GB0110": [
+  "GB0111": [
     {
       "Gb_type": "Graph break in inlined function",
       "Context": "",
@@ -1110,7 +1121,7 @@
       "Hints": []
     }
   ],
-  "GB0111": [
+  "GB0112": [
     {
       "Gb_type": "Graph break under GenericContextWrappingVariable",
       "Context": "Active generic context managers: {self.active_generic_context_managers}",
@@ -1121,7 +1132,7 @@
       ]
     }
   ],
-  "GB0112": [
+  "GB0113": [
     {
       "Gb_type": "HOP body output unsupported",
       "Context": "non-tensor outputs: {non_tensor_output}",
@@ -1131,7 +1142,7 @@
       ]
     }
   ],
-  "GB0113": [
+  "GB0114": [
     {
       "Gb_type": "HOP body taking non-Tensor as input",
       "Context": "str(sub_args)",
@@ -1141,7 +1152,7 @@
       ]
     }
   ],
-  "GB0114": [
+  "GB0115": [
     {
       "Gb_type": "HOP: Non-nullified side effect",
       "Context": "Attribute '{name}' was not restored to its original value",
@@ -1151,7 +1162,7 @@
       ]
     }
   ],
-  "GB0115": [
+  "GB0116": [
     {
       "Gb_type": "HOP: Unsafe side effect",
       "Context": "Attempted to mutate {item}",
@@ -1164,7 +1175,7 @@
       ]
     }
   ],
-  "GB0116": [
+  "GB0117": [
     {
       "Gb_type": "HOP: non torch.Tensor leaf",
       "Context": "args types: {[type(a.realize()) for a in args]}",
@@ -1172,7 +1183,7 @@
       "Hints": []
     }
   ],
-  "GB0117": [
+  "GB0118": [
     {
       "Gb_type": "HOP: non-callable variable",
       "Context": "arg name: {arg_name}, func_var type: {str(func_var)}",
@@ -1180,7 +1191,7 @@
       "Hints": []
     }
   ],
-  "GB0118": [
+  "GB0119": [
     {
       "Gb_type": "Hashability mismatch",
       "Context": "raise_unhashable {arg}",
@@ -1190,7 +1201,7 @@
       ]
     }
   ],
-  "GB0119": [
+  "GB0120": [
     {
       "Gb_type": "Illegal __getitem__ invocation in strict mode",
       "Context": "mp_subscript_impl {self} {key}",
@@ -1198,7 +1209,7 @@
       "Hints": []
     }
   ],
-  "GB0120": [
+  "GB0121": [
     {
       "Gb_type": "Illegal method invocation in strict mode",
       "Context": "call_method {self} {name} {args} {kwargs}",
@@ -1206,7 +1217,7 @@
       "Hints": []
     }
   ],
-  "GB0121": [
+  "GB0122": [
     {
       "Gb_type": "Import failure",
       "Context": "module_name: {module_name}, fromlist: {fromlist}, level={level}",
@@ -1216,7 +1227,7 @@
       ]
     }
   ],
-  "GB0122": [
+  "GB0123": [
     {
       "Gb_type": "Indexing torch.Size with non-scalar tensor",
       "Context": "get_item_dyn {self} {arg}",
@@ -1226,7 +1237,7 @@
       ]
     }
   ],
-  "GB0123": [
+  "GB0124": [
     {
       "Gb_type": "Inline attempt with __self__",
       "Context": "str(func)",
@@ -1234,7 +1245,7 @@
       "Hints": []
     }
   ],
-  "GB0124": [
+  "GB0125": [
     {
       "Gb_type": "Inplace op on input tensor",
       "Context": "",
@@ -1245,7 +1256,7 @@
       ]
     }
   ],
-  "GB0125": [
+  "GB0126": [
     {
       "Gb_type": "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
       "Context": "Input={input_spec_vt}, offending type <{type_name}>.",
@@ -1256,7 +1267,7 @@
       ]
     }
   ],
-  "GB0126": [
+  "GB0127": [
     {
       "Gb_type": "Invalid call to __build_class__",
       "Context": "Non-constant args to __build_class__: {args} {kwargs}",
@@ -1266,7 +1277,7 @@
       ]
     }
   ],
-  "GB0127": [
+  "GB0128": [
     {
       "Gb_type": "Invalid input type for nonstrict_trace-ed function",
       "Context": "Encountered input of type <{type_name}>.",
@@ -1279,7 +1290,7 @@
       ]
     }
   ],
-  "GB0128": [
+  "GB0129": [
     {
       "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
       "Context": "mp_subscript_impl: {self} {key}",
@@ -1289,7 +1300,7 @@
       ]
     }
   ],
-  "GB0129": [
+  "GB0130": [
     {
       "Gb_type": "Invalid use of pytree_flatten with nonstrict_trace-ed function",
       "Context": "Input={input_spec_vt}, offending type <{type_name}>.",
@@ -1304,7 +1315,7 @@
       ]
     }
   ],
-  "GB0130": [
+  "GB0131": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",
       "Context": "",
@@ -1312,7 +1323,7 @@
       "Hints": []
     }
   ],
-  "GB0131": [
+  "GB0132": [
     {
       "Gb_type": "Invoking an nn.Module inside a higher order operator",
       "Context": "Higher order op name: {self.source_target}",
@@ -1320,7 +1331,7 @@
       "Hints": []
     }
   ],
-  "GB0132": [
+  "GB0133": [
     {
       "Gb_type": "Keyword args passed to exception constructor",
       "Context": "{self} with kwargs {init_kwargs}",
@@ -1330,7 +1341,7 @@
       ]
     }
   ],
-  "GB0133": [
+  "GB0134": [
     {
       "Gb_type": "LOAD_FAST_CHECK on uninitialized variable",
       "Context": "inst.argval",
@@ -1340,7 +1351,7 @@
       ]
     }
   ],
-  "GB0134": [
+  "GB0135": [
     {
       "Gb_type": "Limitation of `nonstrict_trace",
       "Context": "{self}",
@@ -1351,7 +1362,7 @@
       ]
     }
   ],
-  "GB0135": [
+  "GB0136": [
     {
       "Gb_type": "MAKE_CELL on a free variable name",
       "Context": "MAKE_CELL {inst.argval}",
@@ -1361,7 +1372,7 @@
       ]
     }
   ],
-  "GB0136": [
+  "GB0137": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_1 handler",
       "Context": "CALL_INTRINSIC_1 operand: {inst.argval}",
@@ -1371,7 +1382,7 @@
       ]
     }
   ],
-  "GB0137": [
+  "GB0138": [
     {
       "Gb_type": "Missing CALL_INTRINSIC_2 handler",
       "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
@@ -1381,7 +1392,7 @@
       ]
     }
   ],
-  "GB0138": [
+  "GB0139": [
     {
       "Gb_type": "Missing FakeTensor example value",
       "Context": "str(node)",
@@ -1391,7 +1402,7 @@
       ]
     }
   ],
-  "GB0139": [
+  "GB0140": [
     {
       "Gb_type": "Missing attribute on torch.autograd.Function subclass",
       "Context": "{self.fn_cls.__qualname__}.{name}",
@@ -1401,7 +1412,7 @@
       ]
     }
   ],
-  "GB0140": [
+  "GB0141": [
     {
       "Gb_type": "Missing attribute when running call_method node",
       "Context": "",
@@ -1411,7 +1422,7 @@
       ]
     }
   ],
-  "GB0141": [
+  "GB0142": [
     {
       "Gb_type": "Missing bytecode handler",
       "Context": "{opname} with args {args}",
@@ -1423,7 +1434,7 @@
       ]
     }
   ],
-  "GB0142": [
+  "GB0143": [
     {
       "Gb_type": "Missing hash_impl override",
       "Context": "hash_impl {self}",
@@ -1433,7 +1444,7 @@
       ]
     }
   ],
-  "GB0143": [
+  "GB0144": [
     {
       "Gb_type": "Missing nb_bool_impl override",
       "Context": "nb_bool_impl {self}",
@@ -1443,7 +1454,7 @@
       ]
     }
   ],
-  "GB0144": [
+  "GB0145": [
     {
       "Gb_type": "Missing tp_iternext",
       "Context": "next({self.python_type_name()})",
@@ -1453,7 +1464,7 @@
       ]
     }
   ],
-  "GB0145": [
+  "GB0146": [
     {
       "Gb_type": "Missing tp_richcompare_impl override",
       "Context": "tp_richcompare_impl {self} {op}",
@@ -1463,7 +1474,7 @@
       ]
     }
   ],
-  "GB0146": [
+  "GB0147": [
     {
       "Gb_type": "Module-level backwards hooks require compiled autograd.",
       "Context": "",
@@ -1473,7 +1484,7 @@
       ]
     }
   ],
-  "GB0147": [
+  "GB0148": [
     {
       "Gb_type": "Non-constant GetAttrVariable hash",
       "Context": "hash_impl {self}",
@@ -1483,7 +1494,7 @@
       ]
     }
   ],
-  "GB0148": [
+  "GB0149": [
     {
       "Gb_type": "Non-constant __hash__ return",
       "Context": "hash_impl {self}",
@@ -1494,7 +1505,7 @@
       ]
     }
   ],
-  "GB0149": [
+  "GB0150": [
     {
       "Gb_type": "Non-function or method in subclass of torch.autograd.Function",
       "Context": "call_apply {self} {args} {kwargs}",
@@ -1505,7 +1516,7 @@
       ]
     }
   ],
-  "GB0150": [
+  "GB0151": [
     {
       "Gb_type": "Not a Python constant",
       "Context": "guard_as_python_constant {self}",
@@ -1513,7 +1524,7 @@
       "Hints": []
     }
   ],
-  "GB0151": [
+  "GB0152": [
     {
       "Gb_type": "NotImplementedError/UnsupportedFakeTensorException when running FX node",
       "Context": "",
@@ -1521,7 +1532,7 @@
       "Hints": []
     }
   ],
-  "GB0152": [
+  "GB0153": [
     {
       "Gb_type": "Observed exception",
       "Context": "raised exception {curr_exc.debug_repr()}",
@@ -1531,7 +1542,7 @@
       ]
     }
   ],
-  "GB0153": [
+  "GB0154": [
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {real_obj_type}. Method name: '{name}'",
@@ -1542,7 +1553,7 @@
       ]
     }
   ],
-  "GB0154": [
+  "GB0155": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
       "Context": "{real_obj_type.__name__} with custom __getattr__",
@@ -1550,7 +1561,7 @@
       "Hints": []
     }
   ],
-  "GB0155": [
+  "GB0156": [
     {
       "Gb_type": "Operator does not support running with fake tensors",
       "Context": "unsupported operator: {cause.func}",
@@ -1562,7 +1573,7 @@
       ]
     }
   ],
-  "GB0156": [
+  "GB0157": [
     {
       "Gb_type": "P2P compilation disabled for P2POp construction",
       "Context": "torch.distributed.P2POp",
@@ -1572,7 +1583,7 @@
       ]
     }
   ],
-  "GB0157": [
+  "GB0158": [
     {
       "Gb_type": "P2P compilation disabled for batch_isend_irecv",
       "Context": "{self.fn}",
@@ -1582,7 +1593,7 @@
       ]
     }
   ],
-  "GB0158": [
+  "GB0159": [
     {
       "Gb_type": "P2P compilation disabled for isend/irecv",
       "Context": "{self.fn}",
@@ -1592,7 +1603,7 @@
       ]
     }
   ],
-  "GB0159": [
+  "GB0160": [
     {
       "Gb_type": "P2POp mutation",
       "Context": "object={self}, name={name}, value={value}",
@@ -1602,7 +1613,7 @@
       ]
     }
   ],
-  "GB0160": [
+  "GB0161": [
     {
       "Gb_type": "Pydantic dataclass constructor",
       "Context": "{self.value}",
@@ -1610,7 +1621,7 @@
       "Hints": []
     }
   ],
-  "GB0161": [
+  "GB0162": [
     {
       "Gb_type": "Read uninitialized cell",
       "Context": "str(cellvar)",
@@ -1620,7 +1631,7 @@
       ]
     }
   ],
-  "GB0162": [
+  "GB0163": [
     {
       "Gb_type": "Reconstruct user defined class without a source",
       "Context": "Class: {var.python_type().__name__}",
@@ -1630,7 +1641,7 @@
       ]
     }
   ],
-  "GB0163": [
+  "GB0164": [
     {
       "Gb_type": "Reconstruction failure",
       "Context": "str(value)",
@@ -1644,7 +1655,7 @@
       ]
     }
   ],
-  "GB0164": [
+  "GB0165": [
     {
       "Gb_type": "Reconstruction failure (self-referential)",
       "Context": "str(self)",
@@ -1658,7 +1669,7 @@
       ]
     }
   ],
-  "GB0165": [
+  "GB0166": [
     {
       "Gb_type": "Reconstruction failure: source.reconstruct not implemented",
       "Context": "str(source)",
@@ -1668,7 +1679,7 @@
       ]
     }
   ],
-  "GB0166": [
+  "GB0167": [
     {
       "Gb_type": "Reconstruction of FakeIdVariable",
       "Context": "str(self.value)",
@@ -1678,7 +1689,7 @@
       ]
     }
   ],
-  "GB0167": [
+  "GB0168": [
     {
       "Gb_type": "RuntimeError when trying to get real value from fx.Node",
       "Context": "",
@@ -1688,7 +1699,7 @@
       ]
     }
   ],
-  "GB0168": [
+  "GB0169": [
     {
       "Gb_type": "STORE_GLOBAL in non-module globals",
       "Context": "name",
@@ -1698,7 +1709,7 @@
       ]
     }
   ],
-  "GB0169": [
+  "GB0170": [
     {
       "Gb_type": "Shape mismatch with out= list of tensor variants",
       "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
@@ -1708,7 +1719,7 @@
       ]
     }
   ],
-  "GB0170": [
+  "GB0171": [
     {
       "Gb_type": "Shape mismatch with out= tensor variant",
       "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
@@ -1718,7 +1729,7 @@
       ]
     }
   ],
-  "GB0171": [
+  "GB0172": [
     {
       "Gb_type": "Side effect on existing deque with limited maxlen",
       "Context": "",
@@ -1728,7 +1739,7 @@
       ]
     }
   ],
-  "GB0172": [
+  "GB0173": [
     {
       "Gb_type": "Skip calling `torch.compiler.disable()`d function",
       "Context": "str(self.value)",
@@ -1738,7 +1749,7 @@
       ]
     }
   ],
-  "GB0173": [
+  "GB0174": [
     {
       "Gb_type": "Skip inlining `torch.compiler.disable()`d function",
       "Context": "str(func.get_function())",
@@ -1748,7 +1759,7 @@
       ]
     }
   ],
-  "GB0174": [
+  "GB0175": [
     {
       "Gb_type": "Sparse tensor creation not supported",
       "Context": "function: {fn_name}",
@@ -1758,7 +1769,7 @@
       ]
     }
   ],
-  "GB0175": [
+  "GB0176": [
     {
       "Gb_type": "Storing Tensor hook handle in globals",
       "Context": "name",
@@ -1766,7 +1777,7 @@
       "Hints": []
     }
   ],
-  "GB0176": [
+  "GB0177": [
     {
       "Gb_type": "Storing Tensor hook handle in globals (inline call)",
       "Context": "inst.argval",
@@ -1774,7 +1785,7 @@
       "Hints": []
     }
   ],
-  "GB0177": [
+  "GB0178": [
     {
       "Gb_type": "Strict mode banned op",
       "Context": "tp_getattro_impl {self} {name}",
@@ -1785,7 +1796,7 @@
       ]
     }
   ],
-  "GB0178": [
+  "GB0179": [
     {
       "Gb_type": "Tensor device mismatch",
       "Context": "{op} {node.target}",
@@ -1795,7 +1806,7 @@
       ]
     }
   ],
-  "GB0179": [
+  "GB0180": [
     {
       "Gb_type": "Tensor subclass overridden method call",
       "Context": "{name}",
@@ -1807,7 +1818,7 @@
       ]
     }
   ],
-  "GB0180": [
+  "GB0181": [
     {
       "Gb_type": "Tensor with grad_fn()",
       "Context": "tp_getattro_impl {self} grad_fn",
@@ -1815,7 +1826,7 @@
       "Hints": []
     }
   ],
-  "GB0181": [
+  "GB0182": [
     {
       "Gb_type": "Tensor.numpy() with trace_numpy=False",
       "Context": "call_method {self} numpy",
@@ -1826,7 +1837,7 @@
       ]
     }
   ],
-  "GB0182": [
+  "GB0183": [
     {
       "Gb_type": "Tensor.numpy() without NumPy installed",
       "Context": "call_method {self} numpy",
@@ -1836,7 +1847,7 @@
       ]
     }
   ],
-  "GB0183": [
+  "GB0184": [
     {
       "Gb_type": "Tensor.random_ op",
       "Context": "Tensor.random_(args={args}, kwargs={kwargs})",
@@ -1847,7 +1858,7 @@
       ]
     }
   ],
-  "GB0184": [
+  "GB0185": [
     {
       "Gb_type": "Tensor.retain_grad() with AOTDispatcher",
       "Context": "tp_getattro_impl {self} retain_grad",
@@ -1855,7 +1866,7 @@
       "Hints": []
     }
   ],
-  "GB0185": [
+  "GB0186": [
     {
       "Gb_type": "Tensor.tolist() with non-integer tensor",
       "Context": "call_method {self} to_list",
@@ -1866,7 +1877,7 @@
       ]
     }
   ],
-  "GB0186": [
+  "GB0187": [
     {
       "Gb_type": "Tensor.uniform_ op called with `from` keyword",
       "Context": "Tensor.uniform_(args={args}, kwargs={kwargs})",
@@ -1877,7 +1888,7 @@
       ]
     }
   ],
-  "GB0187": [
+  "GB0188": [
     {
       "Gb_type": "TypeError from user code",
       "Context": "call_function({self.value}, {args}, {kwargs})",
@@ -1887,7 +1898,7 @@
       ]
     }
   ],
-  "GB0188": [
+  "GB0189": [
     {
       "Gb_type": "TypeError when making fake tensor call",
       "Context": "TypeError {node.target}: {cause}",
@@ -1897,7 +1908,7 @@
       ]
     }
   ],
-  "GB0189": [
+  "GB0190": [
     {
       "Gb_type": "TypedDict with optional keys",
       "Context": "str(self.value)",
@@ -1908,7 +1919,7 @@
       ]
     }
   ],
-  "GB0190": [
+  "GB0191": [
     {
       "Gb_type": "Unexpected failure during itertools.groupby() iteration",
       "Context": "call_function {self} {args} {kwargs}",
@@ -1918,7 +1929,7 @@
       ]
     }
   ],
-  "GB0191": [
+  "GB0192": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
       "Context": "{value_type.__module__}.{value_type.__qualname__}",
@@ -1928,7 +1939,7 @@
       ]
     }
   ],
-  "GB0192": [
+  "GB0193": [
     {
       "Gb_type": "Unexpected type of data placeholder op for parameter construction",
       "Context": "data_node.op={data_node.op}",
@@ -1938,7 +1949,7 @@
       ]
     }
   ],
-  "GB0193": [
+  "GB0194": [
     {
       "Gb_type": "Unhandled args for method",
       "Context": "call_method {self} {name} {args} {kwargs}",
@@ -1946,7 +1957,7 @@
       "Hints": []
     }
   ],
-  "GB0194": [
+  "GB0195": [
     {
       "Gb_type": "Unhandled tensor method",
       "Context": "call_method {self} {name} {args} {kwargs}",
@@ -1956,7 +1967,7 @@
       ]
     }
   ],
-  "GB0195": [
+  "GB0196": [
     {
       "Gb_type": "Unhinted data-dependent torch.Size element in torch._C._infer_size",
       "Context": "symbolic size: {item.sym_num}",
@@ -1966,7 +1977,7 @@
       ]
     }
   ],
-  "GB0196": [
+  "GB0197": [
     {
       "Gb_type": "Unimplemented next() call",
       "Context": "next({self})",
@@ -1976,7 +1987,7 @@
       ]
     }
   ],
-  "GB0197": [
+  "GB0198": [
     {
       "Gb_type": "Uninitialized nn.Module",
       "Context": "typestr(value)",
@@ -1987,7 +1998,7 @@
       ]
     }
   ],
-  "GB0198": [
+  "GB0199": [
     {
       "Gb_type": "Unresolved GetAttrVariable comparison",
       "Context": "tp_richcompare_impl {self} {op}",
@@ -1997,7 +2008,7 @@
       ]
     }
   ],
-  "GB0199": [
+  "GB0200": [
     {
       "Gb_type": "UnspecializedNNModuleVariable missing method",
       "Context": "call_method: {self} {name} {args} {kwargs}",
@@ -2008,7 +2019,7 @@
       ]
     }
   ],
-  "GB0200": [
+  "GB0201": [
     {
       "Gb_type": "Unsupported SourceType",
       "Context": "MutationType.__init__ {self} {typ}",
@@ -2019,7 +2030,7 @@
       ]
     }
   ],
-  "GB0201": [
+  "GB0202": [
     {
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
@@ -2029,7 +2040,7 @@
       ]
     }
   ],
-  "GB0202": [
+  "GB0203": [
     {
       "Gb_type": "Unsupported Tensor.item() call with capture_scalar_outputs=False",
       "Context": "call_method {self} item {args} {kwargs}",
@@ -2041,7 +2052,7 @@
       ]
     }
   ],
-  "GB0203": [
+  "GB0204": [
     {
       "Gb_type": "Unsupported Tensor.requires_grad_() call",
       "Context": "call_method {self} requires_grad_",
@@ -2049,7 +2060,7 @@
       "Hints": []
     }
   ],
-  "GB0204": [
+  "GB0205": [
     {
       "Gb_type": "Unsupported Tensor.resize_() call",
       "Context": "call_method {self} resize_ {args} {kwargs}",
@@ -2057,7 +2068,7 @@
       "Hints": []
     }
   ],
-  "GB0205": [
+  "GB0206": [
     {
       "Gb_type": "Unsupported Tensor.resize_as_() call",
       "Context": "call_method {self} resize_as_ {args} {kwargs}",
@@ -2065,7 +2076,7 @@
       "Hints": []
     }
   ],
-  "GB0206": [
+  "GB0207": [
     {
       "Gb_type": "Unsupported Tensor.set_() call",
       "Context": "call_method {self} set_ {args} {kwargs}",
@@ -2075,7 +2086,7 @@
       ]
     }
   ],
-  "GB0207": [
+  "GB0208": [
     {
       "Gb_type": "Unsupported Tensor.share_memory_() call",
       "Context": "call_method {self} share_memory_",
@@ -2086,7 +2097,7 @@
       ]
     }
   ],
-  "GB0208": [
+  "GB0209": [
     {
       "Gb_type": "Unsupported Tensor.sparse_resize_() call",
       "Context": "call_method {self} sparse_resize_ {args} {kwargs}",
@@ -2094,7 +2105,7 @@
       "Hints": []
     }
   ],
-  "GB0209": [
+  "GB0210": [
     {
       "Gb_type": "Unsupported Tensor.sparse_resize_and_clear_() call",
       "Context": "call_method {self} sparse_resize_and_clear_ {args} {kwargs}",
@@ -2102,7 +2113,7 @@
       "Hints": []
     }
   ],
-  "GB0210": [
+  "GB0211": [
     {
       "Gb_type": "Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
       "Context": "code name: {code.co_name}, args: {args}",
@@ -2110,7 +2121,7 @@
       "Hints": []
     }
   ],
-  "GB0211": [
+  "GB0212": [
     {
       "Gb_type": "Unsupported argument type in tensor method call",
       "Context": "call_method {self} {name} {args} {kwargs}",
@@ -2120,7 +2131,7 @@
       ]
     }
   ],
-  "GB0212": [
+  "GB0213": [
     {
       "Gb_type": "Unsupported arguments for itertools.groupby",
       "Context": "call_function {self} {args} {kwargs}",
@@ -2131,35 +2142,25 @@
       ]
     }
   ],
-  "GB0213": [
+  "GB0214": [
     {
       "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
-      "Context": "call_method {self} {name}",
+      "Context": "call_method {self} mark_dirty",
       "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
-  "GB0214": [
+  "GB0215": [
     {
       "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
-      "Context": "call_method {self} {name}",
+      "Context": "call_method {self} save_for_backward",
       "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
       "Hints": [
         "Ensure that the `saved_tensors` attribute is properly ",
         "initialized before calling `save_for_backward`. ",
         "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`."
-      ]
-    }
-  ],
-  "GB0215": [
-    {
-      "Gb_type": "Unsupported autograd.Function context method",
-      "Context": "call_method {self} {name}",
-      "Explanation": "Dynamo does not support calling the method `{name}` on `autograd.Function` context objects. Supported methods are `__setattr__`, `save_for_backward`, `mark_dirty` and `mark_non_differentiable`.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3979,9 +3980,9 @@
   ],
   "GB0394": [
     {
-      "Gb_type": "super() first argument is not a constant type",
-      "Context": "call_super {args}",
-      "Explanation": "Dynamo could not resolve super()'s first argument to a constant type.",
+      "Gb_type": "super() with non-constant type argument",
+      "Context": "super({typevar}, {obj})",
+      "Explanation": "Dynamo cannot trace super() with a non-constant type argument.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -4220,16 +4221,6 @@
       "Explanation": "Attempted to call `wrap_triton`/`capture_triton` with > 1 args. Dynamo does not support this.",
       "Hints": [
         "Remove the wrap_triton/capture_triton call or its additional args.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB4452": [
-    {
-      "Gb_type": "super() with non-constant type argument",
-      "Context": "super({typevar}, {obj})",
-      "Explanation": "Dynamo cannot trace super() with a non-constant type argument.",
-      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
