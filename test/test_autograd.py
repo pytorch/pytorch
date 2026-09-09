@@ -13133,6 +13133,20 @@ class TestAutogradForwardMode(TestCase):
 
             dual = fwAD.make_dual(foo, tangent[1:])
 
+    @parametrize("p", [0, 0.5, 1, 1.5, 2, 3, float("inf")])
+    def test_norm_full_reduction_jvp(self, p):
+        # The no-dim norm overloads return a scalar primal, so their jvp must
+        # fully reduce the tangent instead of keeping singleton dims (#191787)
+        x = torch.randn(2, 3, 4, dtype=torch.double, requires_grad=True)
+
+        ops = [
+            lambda x: torch.ops.aten.norm.Scalar(x, p),
+            lambda x: torch.ops.aten.norm.ScalarOpt_dtype(x, p, dtype=torch.double),
+            lambda x: torch.ops.aten._foreach_norm.Scalar([x], p)[0],
+        ]
+        for op in ops:
+            gradcheck(op, (x,), check_forward_ad=True)
+
     def test_metadata_check_checks_storage_numel(self):
         primal = torch.randn(5)[:4].detach()
         self.assertEqual(len(primal.storage()), 5)
@@ -18387,6 +18401,7 @@ instantiate_device_type_tests(
 )
 
 instantiate_parametrized_tests(TestAutograd)
+instantiate_parametrized_tests(TestAutogradForwardMode)
 instantiate_parametrized_tests(TestNestedCheckpoint)
 
 if __name__ == "__main__":
