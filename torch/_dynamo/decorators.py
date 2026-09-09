@@ -55,7 +55,6 @@ if TYPE_CHECKING:
     import sympy
 
     from torch._C._dynamo.eval_frame import (  # noqa: F401
-        reset_code,
         set_eval_frame,
         set_guard_complete_hook,
         set_guard_error_hook,
@@ -66,7 +65,9 @@ if TYPE_CHECKING:
     from .variables import VariableTracker
 else:
     for name in dir(torch._C._dynamo.eval_frame):
-        if name.startswith("__"):
+        # reset_code must go through eval_frame.reset_code, which takes
+        # compile_lock; do not re-export the raw binding under the same name.
+        if name.startswith("__") or name == "reset_code":
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
