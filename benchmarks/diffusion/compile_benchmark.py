@@ -194,7 +194,6 @@ def flux_benchmark(mode, backend="inductor"):
 
 BENCHMARKS = {
     "auraflow": auraflow_benchmark,
-    "auroflow": auraflow_benchmark,
     "wan": wan_benchmark,
     "ltx": ltx_benchmark,
     "flux": flux_benchmark,
