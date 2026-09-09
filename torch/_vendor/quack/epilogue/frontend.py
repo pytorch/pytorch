@@ -180,7 +180,6 @@ from torch._vendor.quack.epilogue.ops import (
 )
 from torch._vendor.quack.epilogue.math import F2, F16Lanes, Pair, pack, unpack  # noqa: F401  (re-exports)
 from torch._vendor.quack.epilogue.visit import _EpiModMixinBase
-from torch._vendor.quack.grouped_reduce import GroupedFeedMainMixin
 from torch._vendor.quack.gemm_runtime.host import (
     GemmEpiPlan,
     build_gemm_epi_plan,
@@ -640,7 +639,6 @@ class EpiMod:
         cls = type(
             cls_name,
             (
-                GroupedFeedMainMixin,
                 _FragmentEpiModMixin if self.fragmentwise else _EpiModMixinBase,
                 _SM_BASE[sm],
             ),
@@ -803,7 +801,7 @@ class EpiMod:
                 raise ValueError("split_k requires the D output tensor")
         if swap_ab:
             # Swap-at-trace requires dense element mode, B (k, n), and
-            # orientation-aware EpiOps. GroupedLocalReduce owns the
+            # orientation-aware EpiOps (supports_swap_ab) that own their
             # transposed physical geometry.
             if not b_kn:
                 raise ValueError("swap_ab requires b_kn=True (B passed (k, n))")
