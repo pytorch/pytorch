@@ -40,9 +40,9 @@ class TopN:
 
     def __init__(self, at_most: int = 25) -> None:
         self.at_most = at_most
-        self.heap: list[tuple[int, object]] = []
+        self.heap: list[tuple[int, str]] = []
 
-    def add(self, key: object, val: int) -> None:
+    def add(self, key: str, val: int) -> None:
         # Push if we haven't reached the max size, else push and pop the smallest
         fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
         fn(self.heap, (val, key))
@@ -50,7 +50,7 @@ class TopN:
     def __len__(self) -> int:
         return len(self.heap)
 
-    def __iter__(self) -> Iterator[tuple[object, int]]:
+    def __iter__(self) -> Iterator[tuple[str, int]]:
         return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
@@ -158,7 +158,7 @@ class MetricsContext:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = {}
-        cast(dict[str, object], self._metrics[metric])[key] = value
+        cast("dict[str, object]", self._metrics[metric])[key] = value
 
     def update(self, values: dict[str, object], overwrite: bool = False) -> None:
         """
@@ -195,9 +195,9 @@ class MetricsContext:
             raise RuntimeError(f"Cannot add {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = set()
-        cast(set[object], self._metrics[metric]).add(value)
+        cast("set[object]", self._metrics[metric]).add(value)
 
-    def add_top_n(self, metric: str, key: object, val: int) -> None:
+    def add_top_n(self, metric: str, key: str, val: int) -> None:
         """
         Records a metric as a TopN set of values.
         """

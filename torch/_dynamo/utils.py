@@ -552,7 +552,7 @@ class CompileEventLogger:
 
     @staticmethod
     def add_to_set(
-        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: object
     ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
@@ -587,7 +587,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set_toplevel(
         key: str,
-        value: Any,
+        value: object,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ) -> None:
         """
