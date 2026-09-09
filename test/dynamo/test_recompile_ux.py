@@ -651,7 +651,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """
 
         def f(x):
-            return x.sin() + x.cos()
+            # numel bakes the static shape into the graph, so serving the wrong
+            # entry gives a wrong answer rather than an interchangeable one.
+            return x.sin() + x.numel()
 
         cnt = torch._dynamo.testing.CompileCounter()
         opt = torch.compile(f, backend=cnt, dynamic=False)
@@ -745,8 +747,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         (a GIL-holding wedge hangs the process instead). Stress test; not a
         deterministic reproduction. It pins that the
         install / owner-reset / lookup paths stay consistent under contention:
-        every lookup serves the right graph or misses cleanly, and the trailing
-        owner resets leave no entry behind.
+        every lookup serves the right graph (a precompile hit must be the
+        shape-matching graph; a precompile guard miss falls through to the
+        matching cache entry -- the cache entries are never evicted here, so no
+        caller recompiles), and the parked owner resets leave no entry behind.
         """
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -756,7 +760,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
 
         def f(x):
-            return x.sin() + x.cos()
+            # numel bakes the static shape into the graph, so a mis-dispatched
+            # entry is a wrong answer, not an interchangeable one.
+            return x.sin() + x.numel()
 
         code = f.__code__
         opt = torch.compile(f, backend="eager", dynamic=False)
@@ -843,11 +849,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         while not iters.empty():
             total_iters += iters.get_nowait()
         self.assertGreater(total_iters, 20, "callers never interleaved with installers")
-        # A reset that raced an in-flight lookup was parked (on the raised
-        # cache_python_depth, or a failed try-lock during the snapshot window);
-        # the entry reader applies whatever is still parked, nothing survives.
-        for owner in owners:
-            _reset_precompile_entries_for_owner(code, -1, owner)
+        # Every installer ends its loop with its own owner reset; one that raced
+        # an in-flight lookup was parked (on the raised cache_python_depth, or a
+        # failed try-lock during the snapshot window). With every thread joined
+        # the entry reader below drains whatever is still parked, so nothing
+        # survives without any further reset.
         self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
         self.assertEqual(opt(args[0]), expected[0])
 
