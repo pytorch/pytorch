@@ -804,6 +804,13 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -822,6 +829,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -829,6 +838,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
