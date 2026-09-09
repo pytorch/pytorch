@@ -213,7 +213,7 @@ class TileReduce:
         nouts=1,
         final=True,
         unroll=_ROLL_UNROLL,
-        vec=None,
+        vec: int | None = None,
         use_tma=False,
         combine=False,
         pc=True,
@@ -255,7 +255,14 @@ class TileReduce:
             if axis == "row"
             else None
         )
-        self.vec = self.tilemap.vec if axis == "row" else vec
+        if axis == "row":
+            self.vec = self.tilemap.vec
+        elif vec is None:
+            # The col axis takes `vec` from its DRIVER (accumulators per thread, not a load
+            # width), so there is nothing here to derive it from.
+            raise ValueError("the col axis needs an explicit vec")
+        else:
+            self.vec = vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
         # columns, each with its own accumulator, on the col axis
         self.nslots = 1 if axis == "row" else self.vec
