@@ -106,8 +106,18 @@ class RecursingGuardedDefault:
         self.inner = inner
 
     def __reduce__(self):
-        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        # Hands pickle a fresh instance every time as a reduce ARGUMENT, so
+        # nothing is ever memoized and the recursion never ends; self.inner only
+        # keeps the reduce well-formed.
         return type(self), (type(self)(),)
+
+
+class UnpicklableGuardedDefault:
+    def __init__(self):
+        self.flag = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("guarded default cannot pickle")
 
 
 def global_add(obj, x):
@@ -169,10 +179,31 @@ class StaticHolder:
 class GetattrProxy:
     # __getattr__ dynamically serves the bound function's name; probing
     # getattr(self, name) to check resolution would run user code (and recurse).
+    probed: list[str] = []
+
     def __getattr__(self, name):
+        GetattrProxy.probed.append(name)
         if name == "global_add":
             return global_add
         raise AttributeError(name)
+
+
+class RaisingProbes:
+    # Any attribute probe of the instance (isinstance reads __class__, so that
+    # one is served) raises something other than AttributeError.
+    def __getattribute__(self, name):
+        if name == "__class__":
+            return object.__getattribute__(self, name)
+        raise RuntimeError(f"probed {name}")
+
+
+class PlainMethods:
+    def add(self, x):
+        return x
+
+    @classmethod
+    def make(cls):
+        return cls()
 
 
 def _global_func_wrong_fqn(x):
@@ -573,6 +604,24 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
+    def test_reduce_preserves_a_self_referential_cell(self):
+        # A recursive local function's cell holds the function itself. With the
+        # contents as a reduce ARGUMENT, fn -> __closure__ -> cell -> fn recursed
+        # until the pickler overflowed (a package bypass); as STATE the cell is
+        # memoized before its contents, so the cycle terminates.
+        def outer():
+            def fact(n):
+                return 1 if n <= 1 else n * fact(n - 1)
+
+            return fact
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(out.__closure__[0].cell_contents, out)
+        self.assertEqual(out(5), 120)
+
     def test_bound_method_under_a_name_self_lacks(self):
         # types.MethodType can bind a function under a name self has no
         # attribute for. _reduce_bound_method looked that name up unguarded,
@@ -608,10 +657,29 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # carries the function and self explicitly without reading the instance.
         m = types.MethodType(global_add, GetattrProxy())
         buf = io.BytesIO()
+        GetattrProxy.probed.clear()
         GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        self.assertEqual(GetattrProxy.probed, [])
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
+
+    def test_bound_method_whose_probe_raises_is_carried_explicitly(self):
+        # A __getattribute__ override (or a property, or a metaclass
+        # __getattr__) can raise anything from the resolution probe; that must
+        # fall back to the explicit reduce, not escape the reducer.
+        m = types.MethodType(global_add, RaisingProbes())
+        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        reduced = pickler._reduce_bound_method(m)
+        self.assertIsNotNone(reduced)
+        self.assertIs(reduced[1][0], global_add)
+
+    def test_bound_method_the_class_resolves_falls_through(self):
+        # A method the class MRO resolves back to, and a classmethod, take
+        # pickle's default getattr() reconstruction.
+        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        self.assertIsNone(pickler._reduce_bound_method(PlainMethods().add))
+        self.assertIsNone(pickler._reduce_bound_method(PlainMethods.make))
 
     def test_bound_method_over_a_staticmethod_name(self):
         # getattr(self, name) resolves, but to the raw function: pickle's default
@@ -635,15 +703,21 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     def test_bound_method_of_a_module_keeps_its_function(self):
         # nn.Module defines __getattr__, so every module method is carried
-        # explicitly. That is also what keeps the right function: the rebuilt
-        # receiver is a bare nn.Module, on which a getattr() reconstruction
-        # would resolve "forward" to nn.Module's own placeholder.
-        mod = torch.nn.Linear(2, 2)
+        # explicitly. That is also what keeps the right function: a module whose
+        # class cannot be pickled by reference is rebuilt as a bare nn.Module, on
+        # which a getattr() reconstruction would resolve "forward" to
+        # nn.Module's own placeholder.
+        class Local(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        mod = Local()
         buf = io.BytesIO()
         GuardsStatePickler({id(mod): mod}, {}, {}, buf).dump({"m": mod.forward})
         out = pickle.loads(buf.getvalue())["m"]
-        self.assertIs(out.__func__, torch.nn.Linear.forward)
-        self.assertIsInstance(out.__self__, torch.nn.Module)
+        self.assertIs(type(out.__self__), torch.nn.Module)
+        self.assertTrue(out.__func__.__qualname__.endswith("Local.forward"))
+        self.assertEqual(out(torch.ones(1)), torch.ones(1) + 1)
 
 
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -680,6 +754,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3)
         ref, loaded = self._test_serialization("TENSOR_MATCH", foo, f, x)
         self._test_check_fn(ref, loaded, {"f": f, "x": x}, True)
+
+    def test_unserializable_guarded_value_is_a_package_error(self):
+        # Whatever the pickler raises for a value some guard reads -- here a
+        # RuntimeError from the value's own __reduce__ -- surfaces as a
+        # PackageError: a bypass for non-strict callers, never a compiler
+        # crash. strict_precompile is on for this class, so it re-raises.
+        def fn(x, cfg=UnpicklableGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
 
     def test_recursing_guarded_value_overflow_is_a_package_error(self):
         # A recursion overflow while pickling a guarded value -- here a
@@ -778,7 +865,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return m(x)
 
         with self.assertRaisesRegex(
-            TypeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
 
