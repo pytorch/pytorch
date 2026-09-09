@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import re
 import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
@@ -1005,6 +1006,122 @@ def helper(x):
         _, code = run_and_get_code(torch.compile(fn), x)
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
+
+    def _skip_unless_annotation_is_literal(self):
+        """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
+
+        Earlier versions carry it as a ``pointer_range_32`` field on a descriptor
+        object, so asserting on the literal string would pass whatever the code did.
+        """
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        if (
+            get_triton_attrs_descriptor_version()
+            != TritonAttrsDescriptorVersion.V4_DICT
+        ):
+            self.skipTest(
+                "tt.pointer_range is only literal with the V4 attrs descriptor"
+            )
+
+    @staticmethod
+    def _flex_inputs(requires_grad=False):
+        return [
+            torch.randn(
+                1,
+                4,
+                256,
+                64,
+                device=GPU_TYPE,
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+            for _ in range(3)
+        ]
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_applied_to_template_kernel(self):
+        """A template kernel without atomics must still be tagged.
+
+        The positive half of the two tests below: without it, a regression that
+        dropped the annotation for every template kernel -- losing buffer ops on
+        every matmul and attention kernel on ROCm -- would leave them all green.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        self.assertTrue(
+            any("tt.pointer_range" in x for x in templates),
+            "template kernel without atomics should carry tt.pointer_range",
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_pointer_range_disabled_for_template_kernels(self):
+        """The config flag must reach template kernels, not just the pointwise path.
+
+        Template kernels build their own triton_meta in
+        TritonTemplateKernel.jit_lines() rather than going through
+        TritonKernel.codegen_kernel(), so the two can disagree.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        for kernel in templates:
+            self.assertNotIn("tt.pointer_range", kernel)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_applied_to_template_kernel_with_atomics(self):
+        """Kernels using atomics must not be tagged, including template kernels.
+
+        A score_mod capturing a tensor that requires grad makes the flex_attention
+        backward accumulate into it with tl.atomic_add. Tagging that kernel lets the
+        backend pick buffer atomics, which are far slower than global atomics when
+        many lanes target the same address.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs(requires_grad=True)
+        bias = torch.randn(4, device=GPU_TYPE, dtype=torch.float16, requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        def fwd_bwd(q, k, v):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, score_mod=score_mod
+            )
+            out.sum().backward()
+            return out
+
+        _, kernels = run_and_get_kernels(fwd_bwd, q, k, v, remove_quote=True)
+        atomic = [x for x in kernels if re.search(r"tl\.atomic_\w+", x)]
+        # the whole point is the *template* kernel, so a pointwise atomic kernel
+        # alone would not exercise this
+        self.assertTrue(
+            any("triton_tem_" in x for x in atomic),
+            "no template kernel using atomics was generated",
+        )
+        for kernel in atomic:
+            self.assertNotIn("tt.pointer_range", kernel)
 
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
