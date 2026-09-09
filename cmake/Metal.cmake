@@ -13,6 +13,10 @@ endif()
 file(GLOB METAL_HEADER_DEPS CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/c10/metal/*.h"
      "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/mps/kernels/*.h")
+# Headers outside those directories that .metal sources include directly.
+list(APPEND METAL_HEADER_DEPS
+     "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/Distributions.h"
+     "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/Math.h")
 
 function(metal_to_air SRC TARGET FLAGS)
     add_custom_command(COMMAND xcrun metal -c ${SRC} -I ${CMAKE_SOURCE_DIR} -I ${CMAKE_SOURCE_DIR}/aten/src -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
