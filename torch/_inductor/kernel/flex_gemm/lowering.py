@@ -438,13 +438,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         verbose=True,
     )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce,
-        local_reduce_out_index,
-        combine=epimod_source.local_reduce_combine,
-        finalize=epimod_source.local_reduce_finalize,
-        store_finalize=epimod_source.local_reduce_store_finalize,
-        prepass_combine=epimod_source.local_reduce_prepass_combine,
-        prepass_finalize=epimod_source.local_reduce_prepass_finalize,
+        outputs.local_reduce, local_reduce_out_index, epimod_source
     )
     epilogue_arg_indices = tuple(
         range(

@@ -12,10 +12,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
-    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
-    validate_local_reduce_feed_main_capability,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
@@ -94,10 +92,6 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
-        if self.feeds_main and not (
-            self.axis == 1 and self.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
-        ):
-            validate_local_reduce_feed_main_capability(self.axis, self.group)
 
     @property
     def group(self) -> int:
@@ -162,7 +156,7 @@ def flex_gemm_epimod(
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
     }
-    ops = {}
+    ops: dict[str, Any] = {}
     for index, (arg, kind) in enumerate(
         zip(epilogue_args, epilogue_arg_kinds, strict=True)
     ):
@@ -183,7 +177,7 @@ def flex_gemm_epimod(
         )
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
-    sinks = {}
+    sinks: dict[str, Any] = {}
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
@@ -341,36 +335,26 @@ def gemm_epimod(
         )
     initialize_local_reduce_out = None
     if local_reduce is not None:
-        from torch._vendor.quack import grouped_reduce
-
+        # QuACK's host_validate checks the compressed buffer against the GEMM
+        # problem; only the caller-owned carrier view is built here.
         local_reduce_out = local_reduce.out
-        if local_reduce_out is not None:
-            if local_reduce.output_layout is None:
-                grouped_reduce.validate_grouped_reduce_out(
-                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
-                    local_reduce_out,
-                    a.shape[-2],
-                    b.shape[-1],
-                    local_reduce.group,
-                    local_reduce.axis,
+        if local_reduce_out is not None and local_reduce.output_layout is not None:
+            grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
+            if grouped_dim % local_reduce.group:
+                raise ValueError(
+                    f"group {local_reduce.group} must divide the grouped dim "
+                    f"{grouped_dim} (axis={local_reduce.axis})"
                 )
-            else:
-                grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
-                if grouped_dim % local_reduce.group:
-                    raise ValueError(
-                        f"group {local_reduce.group} must divide the grouped dim "
-                        f"{grouped_dim} (axis={local_reduce.axis})"
-                    )
-                rows, cols = (
-                    (a.shape[-2], b.shape[-1] // local_reduce.group)
-                    if local_reduce.axis == 1
-                    else (a.shape[-2] // local_reduce.group, b.shape[-1])
-                )
-                if local_reduce_out.numel() != rows * cols:
-                    initialize_local_reduce_out = local_reduce_out
-                local_reduce_out = local_reduce.output_layout.runtime_view(
-                    local_reduce_out, 1, rows, cols
-                )
+            rows, cols = (
+                (a.shape[-2], b.shape[-1] // local_reduce.group)
+                if local_reduce.axis == 1
+                else (a.shape[-2] // local_reduce.group, b.shape[-1])
+            )
+            if local_reduce_out.numel() != rows * cols:
+                initialize_local_reduce_out = local_reduce_out
+            local_reduce_out = local_reduce.output_layout.runtime_view(
+                local_reduce_out, 1, rows, cols
+            )
         if local_reduce.prepass is not None:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
             if local_reduce.out is not None:

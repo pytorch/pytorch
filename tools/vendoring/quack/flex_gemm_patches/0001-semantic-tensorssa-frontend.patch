@@ -62,10 +62,10 @@ index 7106526..6ce345f 100644
 +        cache_dir = Path(cache_root)
 diff --git a/quack/epi_math.py b/quack/epi_math.py
 new file mode 100644
-index 0000000..53e0c8b
+index 0000000..8d56c74
 --- /dev/null
 +++ b/quack/epi_math.py
-@@ -0,0 +1,334 @@
+@@ -0,0 +1,237 @@
 +"""Tuple-polymorphic pointwise math for :mod:`quack.epilogue.frontend` functions.
 +
 +Values are Float32 scalars or two-lane tuple values such as ``F2`` and ``Pair``.
@@ -76,18 +76,11 @@ index 0000000..53e0c8b
 +
 +from __future__ import annotations
 +
-+import math
-+
-+import cutlass
 +import cutlass.cute as cute
 +from cutlass import const_expr, Float32
 +
 +from quack import activation
 +from quack.cute_dsl_utils import torch2cute_dtype_map
-+from quack.rounding import (
-+    cvt_f32x2_ue8m0x2_rp_satfinite,
-+    cvt_f32x2_ue8m0x2_rz,
-+)
 +
 +
 +def _pair_like(value, lo, hi):
@@ -216,16 +209,6 @@ index 0000000..53e0c8b
 +    return cute.arch.fmax(a, b, nan=True)
 +
 +
-+def min(a, b):
-+    """Alias for :func:`minimum` matching the pointwise vocabulary."""
-+    return minimum(a, b)
-+
-+
-+def max(a, b):
-+    """Alias for :func:`maximum` matching the pointwise vocabulary."""
-+    return maximum(a, b)
-+
-+
 +def clamp(x, min=None, max=None):
 +    """Clamp ``x`` to its optional inclusive lower and upper bounds."""
 +    if const_expr(min is not None):
@@ -243,71 +226,6 @@ index 0000000..53e0c8b
 +def clamp_max(x, max):
 +    """Clamp ``x`` above by ``max``."""
 +    return minimum(x, max)
-+
-+
-+def _mx_e8m0_input(x, max_value, rounding):
-+    """Prepare one scalar for the selected packed E8M0 conversion."""
-+    if const_expr(rounding == "rceil"):
-+        return x / max_value
-+    max_power = const_expr(math.floor(math.log2(max_value)))
-+    scaled = x * (2.0**-max_power)
-+    if const_expr(max_power > 0):
-+        replacement = Float32(2.0 ** (128 - max_power))
-+        scaled = Float32(cutlass.select_(scaled == Float32(float("inf")), replacement, scaled))
-+    return scaled
-+
-+
-+def mx_e8m0_scale(x, max_value=448.0, rounding="rceil"):
-+    """Encode an MX scale with exact packed FLOOR or saturating RCEIL conversion."""
-+    if const_expr(rounding not in ("floor", "rceil")):
-+        raise ValueError(f"unsupported MX scale rounding {rounding!r}")
-+    is_pair = const_expr(isinstance(x, tuple))
-+    lo = _mx_e8m0_input(x[0] if is_pair else x, max_value, rounding)
-+    hi = _mx_e8m0_input(x[1] if is_pair else Float32(0.0), max_value, rounding)
-+    convert = (
-+        cvt_f32x2_ue8m0x2_rz if const_expr(rounding == "floor") else cvt_f32x2_ue8m0x2_rp_satfinite
-+    )
-+    result = convert(lo, hi)
-+    return _pair_like(x, *result) if is_pair else result[0]
-+
-+
-+def nvfp4_e4m3_scale(x, max_value=6.0, rounding="nearest"):
-+    """Encode an NVFP4 E4M3 scale and return its decoded Float32 value."""
-+    if const_expr(rounding != "nearest"):
-+        raise ValueError(f"unsupported NVFP4 scale rounding {rounding!r}")
-+    if const_expr(isinstance(x, tuple)):
-+        return _pair_like(
-+            x,
-+            nvfp4_e4m3_scale(x[0], max_value, rounding),
-+            nvfp4_e4m3_scale(x[1], max_value, rounding),
-+        )
-+    scaled = clamp(
-+        x / max_value,
-+        min=0.015625,
-+        max=448.0,
-+    )
-+    return to_dtype(scaled, cutlass.Float8E4M3FN)
-+
-+
-+def _nvfp4_e2m1_code(x):
-+    """Return one finite E2M1 nibble with round-to-nearest-even ties."""
-+    magnitude = abs(x)
-+    code = where(magnitude > 0.25, Float32(1.0), Float32(0.0))
-+    code = where(magnitude >= 0.75, Float32(2.0), code)
-+    code = where(magnitude > 1.25, Float32(3.0), code)
-+    code = where(magnitude >= 1.75, Float32(4.0), code)
-+    code = where(magnitude > 2.5, Float32(5.0), code)
-+    code = where(magnitude >= 3.5, Float32(6.0), code)
-+    code = where(magnitude > 5.0, Float32(7.0), code)
-+    return code + where(x < 0.0, Float32(8.0), Float32(0.0))
-+
-+
-+def nvfp4_pack(x):
-+    """Pack adjacent Float32 lanes into native E2M1 Uint8 storage."""
-+    if const_expr(isinstance(x, tuple)):
-+        return _nvfp4_e2m1_code(x[0]) + Float32(16.0) * _nvfp4_e2m1_code(x[1])
-+    packed = x.to(cutlass.Float4E2M1FN).bitcast(cutlass.Uint8)
-+    return packed.reshape((cute.size(packed.shape), 1, 1))
 +
 +
 +def eq(a, b):
@@ -378,11 +296,6 @@ index 0000000..53e0c8b
 +    return a if condition else b
 +
 +
-+def select(condition, a, b):
-+    """Alias for :func:`where`."""
-+    return where(condition, a, b)
-+
-+
 +def to_dtype(x, dtype):
 +    """Round through a torch or CuTe ``dtype`` while retaining Float32 SSA."""
 +    if const_expr(isinstance(x, tuple)):
@@ -390,16 +303,6 @@ index 0000000..53e0c8b
 +    target_dtype = torch2cute_dtype_map.get(dtype, dtype)
 +    converted = x.to(target_dtype)
 +    return converted if const_expr(target_dtype is Float32) else converted.to(Float32)
-+
-+
-+def convert_element_type(x, dtype):
-+    """Alias for :func:`to_dtype` matching the FX primitive name."""
-+    return to_dtype(x, dtype)
-+
-+
-+def store_cast(x, dtype):
-+    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
-+    return to_dtype(x, dtype)
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
 index 1b56f44..283c131 100644
 --- a/quack/epilogue/frontend.py
@@ -688,34 +591,6 @@ index 1b56f44..283c131 100644
 +    return wrap
 +
 +
-diff --git a/quack/epilogue/library.py b/quack/epilogue/library.py
-index 631ff1c..9096a86 100644
---- a/quack/epilogue/library.py
-+++ b/quack/epilogue/library.py
-@@ -10,2 +10 @@ Sections:
--  * packed-polymorphic math helpers (pexp) — raw cute.math fns are not
--    F2/Pair-aware; wrap transcendentals like this does.
-+  * tuple-polymorphic scalar math is shared through ``quack.epi_math``;
-@@ -29 +27,0 @@ import functools
--
-@@ -31,0 +30 @@ from cutlass import Int32
-+from quack import epi_math
-@@ -58 +57 @@ from quack.epilogue.rotary import rotary_cos_sin_load
--from quack.epilogue.math import pack, pexp, unpack
-+from quack.epilogue.math import pack, unpack
-@@ -276 +275 @@ def lse_partial_epi(acc, scale):
--    return {"D": acc, "sexp": pexp(acc * scale)}
-+    return {"D": acc, "sexp": epi_math.exp(acc * scale, fast=True)}
-@@ -318 +317 @@ def rstd_lse_epi(acc, rstd):
--@gemm_epilogue(reduces={"amax": ColVecReduce("amax", combine="max_abs")})
-+@gemm_epilogue(reduces={"amax": ColVecReduce("amax", combine="max")})
-@@ -321,3 +320,3 @@ def amax_epi(acc):
--    max_abs folds raw inputs with the fused PTX max.abs operation; OOB zeros
--    are its identity, so ragged last N tiles need no per-element mask."""
--    return {"D": acc, "amax": acc}
-+    |x| >= 0, so the zero OOB accumulator lanes of a ragged last tile can't
-+    corrupt the max (see VecReduce.combine note)."""
-+    return {"D": acc, "amax": epi_math.abs(acc, fast=True)}
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
 index b7e4ae2..4874d18 100644
 --- a/quack/epilogue/ops.py
@@ -1337,69 +1212,6 @@ index 3c89e3d..1da5f85 100644
 +            config_constraints=constraints,
 @@ -278,0 +335 @@ def compile_call(
 +            concat_layout=concat_layout,
-diff --git a/quack/rounding.py b/quack/rounding.py
-index 7e425c4..87ebf7d 100644
---- a/quack/rounding.py
-+++ b/quack/rounding.py
-@@ -35 +35 @@ from cutlass._mlir import ir
--from cutlass._mlir.dialects import llvm, vector
-+from cutlass._mlir.dialects import arith, llvm, vector
-@@ -66,0 +67,55 @@ def _asm(res_type, ptx: str, constraints: str, args):
-+def _decode_ue8m0x2_to_f32(packed, *, loc=None, ip=None) -> tuple[Float32, Float32]:
-+    """Decode packed E8M0 codes through BF16, which represents them exactly."""
-+    pair_type = ir.VectorType.get([2], cutlass.BFloat16.mlir_type, loc=loc)
-+    pair = llvm.bitcast(pair_type, packed, loc=loc, ip=ip)
-+    return tuple(
-+        Float32(
-+            arith.extf(
-+                Float32.mlir_type,
-+                vector.extract(
-+                    pair,
-+                    dynamic_position=[],
-+                    static_position=[index],
-+                    loc=loc,
-+                    ip=ip,
-+                ),
-+                loc=loc,
-+                ip=ip,
-+            )
-+        )
-+        for index in range(2)
-+    )
-+
-+
-+def _cvt_f32x2_ue8m0x2(
-+    a: Float32,
-+    b: Float32,
-+    instruction: str,
-+    *,
-+    loc=None,
-+    ip=None,
-+) -> tuple[Float32, Float32]:
-+    """Convert two Float32 values to E8M0 and decode the resulting scales."""
-+    packed = _asm(
-+        T.i32(),
-+        (f"{{ .reg .b16 scale; {instruction} scale, $2, $1; cvt.rn.bf16x2.ue8m0x2 $0, scale; }}"),
-+        "=r,f,f",
-+        [Float32(a).ir_value(loc=loc, ip=ip), Float32(b).ir_value(loc=loc, ip=ip)],
-+    )
-+    return _decode_ue8m0x2_to_f32(packed, loc=loc, ip=ip)
-+
-+
-+@dsl_user_op
-+def cvt_f32x2_ue8m0x2_rp_satfinite(
-+    a: Float32, b: Float32, *, loc=None, ip=None
-+) -> tuple[Float32, Float32]:
-+    """Packed saturating round-up conversion used by the MX RCEIL recipe."""
-+    return _cvt_f32x2_ue8m0x2(a, b, "cvt.rp.satfinite.ue8m0x2.f32", loc=loc, ip=ip)
-+
-+
-+@dsl_user_op
-+def cvt_f32x2_ue8m0x2_rz(a: Float32, b: Float32, *, loc=None, ip=None) -> tuple[Float32, Float32]:
-+    """Packed round-toward-zero conversion used by the MX FLOOR recipe."""
-+    return _cvt_f32x2_ue8m0x2(a, b, "cvt.rz.ue8m0x2.f32", loc=loc, ip=ip)
-+
-+
 diff --git a/tests/test_cache.py b/tests/test_cache.py
 index 0dbab27..f34e8b3 100644
 --- a/tests/test_cache.py
@@ -1725,10 +1537,10 @@ index 6b599ae..4d7bfbd 100644
 -from quack.epilogue.frontend import gemm_epilogue  # noqa: E402
 diff --git a/tests/test_epi_math.py b/tests/test_epi_math.py
 new file mode 100644
-index 0000000..cda62d7
+index 0000000..15bb25a
 --- /dev/null
 +++ b/tests/test_epi_math.py
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,152 @@
 +"""CUDA numerical coverage for tuple-polymorphic EpiMod pointwise math."""
 +
 +import pytest
@@ -1772,9 +1584,11 @@ index 0000000..cda62d7
 +    ne = epi_math.where(epi_math.ne(x, x), -x, x)
 +    le = epi_math.where(epi_math.le(x, 0.0), x, -x)
 +    gt = epi_math.where(epi_math.gt(x, 0.0), x, -x)
-+    ge = epi_math.select(epi_math.ge(x, 0.0), x, -x)
++    ge = epi_math.where(epi_math.ge(x, 0.0), x, -x)
 +    bounded = epi_math.clamp_max(
-+        epi_math.clamp_min(epi_math.max(epi_math.min(eq + ne + le + gt + ge, 1.5), -1.5), -1.0),
++        epi_math.clamp_min(
++            epi_math.maximum(epi_math.minimum(eq + ne + le + gt + ge, 1.5), -1.5), -1.0
++        ),
 +        1.0,
 +    )
 +    return epi_math.clamp(bounded, min=-1.0, max=1.0) + epi_math.where(
@@ -1783,7 +1597,7 @@ index 0000000..cda62d7
 +
 +
 +def _casts(x):
-+    return epi_math.store_cast(epi_math.convert_element_type(x, Float16), Float32)
++    return epi_math.to_dtype(epi_math.to_dtype(x, Float16), Float32)
 +
 +
 +def _torch_dtype_casts(x):
@@ -1879,104 +1693,6 @@ index 0000000..cda62d7
 +
 +    acc = torch.einsum("lmk,lnk->lmn", a.float(), b.float())
 +    torch.testing.assert_close(out.float(), reference(acc), rtol=rtol, atol=2e-2)
-diff --git a/tests/test_epi_quant.py b/tests/test_epi_quant.py
-new file mode 100644
-index 0000000..435300b
---- /dev/null
-+++ b/tests/test_epi_quant.py
-@@ -0,0 +1,92 @@
-+"""Numeric contracts for quantization helpers used by generated EpiMods."""
-+
-+import torch
-+
-+from quack import epi_math
-+from quack.epilogue.frontend import gemm_epilogue
-+
-+
-+@gemm_epilogue(outputs=("scale",))
-+def mx_rceil_epi(acc):
-+    """Encode each accumulator value with the MX RCEIL recipe."""
-+    return {"scale": epi_math.mx_e8m0_scale(acc, 448.0, "rceil")}
-+
-+
-+@gemm_epilogue(outputs=("scale",))
-+def mx_floor_epi(acc):
-+    """Encode each accumulator value with the MX FLOOR recipe."""
-+    return {"scale": epi_math.mx_e8m0_scale(acc, 448.0, "floor")}
-+
-+
-+@gemm_epilogue(outputs=("scale",))
-+def nvfp4_scale_epi(acc):
-+    """Encode each accumulator value with the NVFP4 E4M3 scale recipe."""
-+    return {"scale": epi_math.nvfp4_e4m3_scale(acc, 6.0, "nearest")}
-+
-+
-+def mx_reference(values, rounding):
-+    """Return the eager E8M0 byte encoding for one MX rounding recipe."""
-+    values = values.float()
-+    if rounding == "floor":
-+        extracted = ((values.view(torch.int32) >> 23) & 0xFF) - 127
-+        encoded = (torch.clamp(extracted - 8, min=-127, max=128) + 127).to(torch.uint8)
-+        return torch.where(torch.isnan(values), torch.full_like(encoded, 255), encoded)
-+    descale = values / 448.0
-+    bits = descale.view(torch.int32)
-+    exponent = (bits >> 23) & 0xFF
-+    mantissa = bits & 0x7FFFFF
-+    encoded = exponent + (mantissa != 0).to(torch.int32)
-+    encoded = torch.where(
-+        (exponent == 0) & (mantissa <= 0x400000),
-+        torch.zeros_like(encoded),
-+        encoded,
-+    )
-+    encoded = torch.clamp(encoded, max=254).to(torch.uint8)
-+    return torch.where(torch.isnan(descale), torch.full_like(encoded, 255), encoded)
-+
-+
-+def run_scale_mod(mod, values, dtype):
-+    """Run one scale EpiMod on exactly representable GEMM values."""
-+    m, logical_n, n, k = 128, values.numel(), max(16, values.numel()), 8
-+    A = torch.zeros((m, k), device="cuda", dtype=torch.bfloat16)
-+    B = torch.zeros((k, n), device="cuda", dtype=torch.bfloat16)
-+    A[:, 0] = 1
-+    B[0, :logical_n] = values.to(device="cuda", dtype=torch.bfloat16)
-+    out = torch.empty((m, n), device="cuda", dtype=dtype)
-+    result = mod(A, B, out={"scale": out}, store_d=False, tuned=False)["scale"]
-+    return result[:, :logical_n]
-+
-+
-+def test_epi_math_mx_scale_matches_reference_bytes():
-+    values = torch.tensor(
-+        [
-+            0.0,
-+            448.0,
-+            449.0,
-+            500.0,
-+            511.0,
-+            512.0,
-+            float("inf"),
-+            float("nan"),
-+        ],
-+        dtype=torch.float32,
-+    )
-+    for rounding, mod in (("rceil", mx_rceil_epi), ("floor", mx_floor_epi)):
-+        actual = run_scale_mod(mod, values, torch.float8_e8m0fnu)[0].view(torch.uint8)
-+        expected = mx_reference(values.to(torch.bfloat16), rounding)
-+        torch.testing.assert_close(actual.cpu(), expected)
-+
-+
-+def test_epi_math_nvfp4_scale_matches_reference_bytes():
-+    values = torch.tensor(
-+        [0.0, 0.09375, 1.0, 6.0, 7.0, 2688.0, float("inf"), float("nan")],
-+        dtype=torch.float32,
-+    )
-+    actual = run_scale_mod(nvfp4_scale_epi, values, torch.float8_e4m3fn)[0].view(torch.uint8)
-+    expected = torch.clamp(
-+        values.to(torch.bfloat16).float() / 6.0,
-+        min=torch.finfo(torch.float8_e4m3fn).tiny,
-+        max=torch.finfo(torch.float8_e4m3fn).max,
-+    ).to(torch.float8_e4m3fn)
-+    torch.testing.assert_close(actual[:-1].cpu(), expected.view(torch.uint8)[:-1])
-+    assert torch.isnan(actual[-1].view(torch.float8_e4m3fn))
 diff --git a/tests/test_epilogue_iface.py b/tests/test_epilogue_iface.py
 index 2ac168d..5bbcce3 100644
 --- a/tests/test_epilogue_iface.py
@@ -2237,10 +1953,10 @@ index e490843..bc46d70 100644
 +
 diff --git a/tests/test_grouped_main.py b/tests/test_grouped_main.py
 new file mode 100644
-index 0000000..3b9f04d
+index 0000000..acb1897
 --- /dev/null
 +++ b/tests/test_grouped_main.py
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,153 @@
 +"""Grouped-main output coverage for the direct TensorSSA epilogue frontend."""
 +
 +from types import SimpleNamespace
@@ -2376,11 +2092,13 @@ index 0000000..3b9f04d
 +        vectorize=False,
 +    )
 +    def pack_main(acc):
-+        return {"main": epi_math.nvfp4_pack(acc)}
++        lo = epi_math.clamp(acc[0], min=0.0, max=15.0)
++        hi = epi_math.clamp(acc[1], min=0.0, max=15.0)
++        return {"main": lo + 16.0 * hi}
 +
 +    m, n, k = 128, 256, 128
 +    A = torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
-+    B = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
++    B = torch.randint(0, 16, (k, n), device="cuda").to(torch.bfloat16)
 +    result = pack_main(
 +        A,
 +        B,
@@ -2389,20 +2107,6 @@ index 0000000..3b9f04d
 +        tuned=False,
 +        config_constraints={"swap_ab": False, "cluster_n": 1},
 +    )["main"]
-+    values = B.float().view(m, -1, 2)
-+    magnitude = values.abs()
-+    codes = torch.where(magnitude > 0.25, 1, 0)
-+    codes = torch.where(magnitude >= 0.75, 2, codes)
-+    codes = torch.where(magnitude > 1.25, 3, codes)
-+    codes = torch.where(magnitude >= 1.75, 4, codes)
-+    codes = torch.where(magnitude > 2.5, 5, codes)
-+    codes = torch.where(magnitude >= 3.5, 6, codes)
-+    codes = torch.where(magnitude > 5.0, 7, codes)
-+    codes = codes.to(torch.uint8) + (values < 0).to(torch.uint8) * 8
++    codes = B.to(torch.uint8).view(m, -1, 2)
 +    reference = codes[..., 0] | (codes[..., 1] << 4)
-+    mismatch = result != reference
-+    assert not mismatch.any(), (
-+        mismatch.sum().item(),
-+        result[mismatch][:16],
-+        reference[mismatch][:16],
-+    )
++    torch.testing.assert_close(result, reference)

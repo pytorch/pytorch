@@ -2214,22 +2214,44 @@ class RowVecReduce(VecReduce):
 class GroupedColStatsBase(EpiOp):
     """Deterministic per-(tile row, N-group) prepass statistics.
 
-    The prepass folds values into register accumulators derived from the actual
-    M/N register layouts, including interleaved layouts. At prepass end each
-    local group is reduced across its contiguous N-lane subgroup and written
-    once to the corresponding (row, group, warp_n) shared-memory plane. The
-    prepass barrier publishes those raw planes; consumers combine warp_n planes
-    in fixed order, so the statistic is bitwise reproducible run to run.
+    Prepass-sink + main-phase value-port base: the prepass fn returns the
+    statistic input under this op's name; the fold accumulates per
+    (row, group of ``group_cols`` N columns) with NO float atomics and NO
+    per-subtile smem traffic. ``combine`` (class attribute) selects the fold:
+    "add" (default, identity 0.0) or "max" (identity -inf: a TRUE max, never
+    clamped). "max" caveat: the prepass folds the raw accumulator fragment
+    with no OOB masking, so a ragged last N tile's OOB zeros (predicated
+    loads) would contaminate the max — keep the group span tile-divisible
+    (scaled_exp enforces this via its writer's host_validate).
+    The sweep folds each thread's run into REGISTER accumulators derived from
+    the actual M/N register layouts (including interleaved layouts) — the
+    register index is static: rows from the (compile-time) epi_m coordinate,
+    N visits from epi_n, and the thread's local groups by their flat register
+    slots. At prepass end (``fn_prepass_end``) each slot is butterflied across
+    the contiguous N-lane subgroup (fixed tree) and the subgroup leader stores
+    it ONCE to its (row, group, warp_n) smem plane — single writer, absolute
+    group recovered from the coordinate partition. Smem uniformly holds RAW
+    per-warp_n partials. The prepass barrier orders those stores before every
+    consumer warp folds the planes in fixed order, applies ``stat_value``, and
+    keeps its finalized values in ``rAcc``. No second barrier is needed because
+    the resolved values are thread-private registers. GroupedColStatsOut
+    independently folds the same raw planes once per output slot and writes
+    the finalized value directly to gmem.
+    Statistics never leave the kernel — the in-kernel counterpart to
+    VecReduce's per-tile gmem partials.
 
-    The default host schema accepts either a group width integer or a 1-D tensor
-    whose length is the group width. Stats-only subclasses can set ``combine``
-    and override ``stat_value``. Tensorless or resource-carrying subclasses can
-    override the host methods and ``fn_prepare`` while retaining the stats state
-    as element 0 of their begin/begin_loop state.
+    Default host schema: a group width integer, or a 1-D host tensor whose
+    length is the group width (a real per-group resource like an rmsnorm
+    weight, or a dummy that only fixes the width). Stats-only subclasses just
+    set ``combine`` and define ``stat_value`` (per-row value from the finalized
+    statistic); tensorless or resource-carrying subclasses override the host
+    methods / ``begin``/``begin_loop``/``fn_prepare``, keeping the stats state
+    from ``stats_begin``/``stats_slice`` as element 0 of their state
+    (``fn_sink_flush`` reads it there).
     """
 
     fn_port = "value"
-    combine = "add"
+    combine = "add"  # class attribute; "max" folds with fmax from a -inf identity
 
     def stats_identity(self):
         """Identity value for register and shared-memory statistic slots."""
@@ -2268,7 +2290,14 @@ class GroupedColStatsBase(EpiOp):
         return None if isinstance(value, int) else value
 
     def host_validate(self, value, *, n, tile_N, **_):
-        """Validate that complete, globally aligned groups cover N and tile_N."""
+        """Validate the reduction-group geometry independently of optional
+        consumers such as GroupedColStatsOut.
+
+        A group is a complete, globally aligned N interval. Both the CTA tile
+        and GEMM N must therefore contain an integer number of groups; silently
+        flooring either would merge a partial group into the wrong statistic
+        or finalize it with the wrong denominator.
+        """
         if isinstance(value, int):
             group_cols = value
         elif value.ndim != 1:
@@ -2293,7 +2322,7 @@ class GroupedColStatsBase(EpiOp):
         return cutlass.Constexpr[int] if const else Optional[cute.Tensor]
 
     def host_arg_form(self, value):
-        return "Const" if isinstance(value, int) else ""
+        return "Const" if isinstance(value, int) else ""  # suffix must stay symbol-name-safe
 
     def _group_cols(self, arg):
         return arg if isinstance(arg, int) else arg.shape[0]
@@ -2304,7 +2333,10 @@ class GroupedColStatsBase(EpiOp):
     def to_params(self, gemm, args):
         tensor = getattr(args, self.name)
         # One statistics slot per (tile row, group, warp_n). Sizing by tile_M
-        # matters on SM90, whose epi tiles can be only 64 rows.
+        # (not epi_tile[0]) matters on SM90, whose epi tiles are 64 rows:
+        # epi_M > 1 subtiles land on distinct rows and must not alias. The
+        # warp_n axis keeps a single deterministic writer per slot when the
+        # epi warp layout splits N (SM120 always; SM100 2-CTA 64-row tiles).
         rows = gemm.cta_tile_shape_mnk[0]
         groups = gemm.cta_tile_shape_mnk[1] // self._group_cols(tensor)
         setattr(gemm, self._stats_shape_attr(), (rows, groups, gemm.epi_smem_warp_shape_mnk()[1]))
@@ -2327,7 +2359,9 @@ class GroupedColStatsBase(EpiOp):
 
     @cute.jit
     def stats_begin(self, gemm, smem_tensor, ctx, group_cols):
-        """Build coordinate/layout geometry and initialize statistic storage."""
+        """Coordinate partition, row/column-broadcast reference layouts, lane/warp
+        geometry, and identity-filled accumulators (+ barrier) — everything the
+        fold and read-back need."""
         assert gemm.arch in (90, 100, 120), (
             f"{type(self).__name__} needs the acc prepass (SM90/SM100/SM120)"
         )
@@ -2353,9 +2387,11 @@ class GroupedColStatsBase(EpiOp):
         lanes_in_N, warps_in_N, warp_n_idx, is_lane_n_leader = _lane_warp_info_n(
             tiled_copy, reference_src, ctx.tidx
         )
-
-        # Warp-N coordinates contribute partials to the same row/group, while
-        # every other epilogue warp must partition M and own disjoint rows.
+        # Reduction ownership is factored by the actual tiled-copy layout:
+        # warp-N coordinates contribute partials to the SAME (row, group);
+        # every other epilogue warp must partition M and therefore own
+        # DISJOINT rows. This rules out an unmodelled replicated/spatial warp
+        # mode whose writers would race in the same smem plane.
         _, warp_layout_MN = _get_lane_warp_layouts(tiled_copy, reference_src)
         warps_in_M = const_expr(cute.size(warp_layout_MN, mode=[0]))
         num_epi_warps = const_expr(ctx.num_epi_threads // cute.arch.WARP_SIZE)
@@ -2365,9 +2401,14 @@ class GroupedColStatsBase(EpiOp):
         assert warps_in_N == const_expr(cute.size(smem_tensor, mode=[2])), (
             "grouped-stats smem plane count must match the tiled-copy warp-N layout"
         )
-
-        # A warp whose layout misses a group leaves the identity in that plane;
-        # persistent tiles also reuse this shared storage.
+        # Fill the smem planes with the fold identity: begin runs before the
+        # driver prepass sweep. Needed even though fn_prepass_end STOREs (not
+        # adds): a warp whose column interleave misses a group never writes
+        # that plane, and persistent tiles reuse the smem — readers must see
+        # the identity there.
+        # Strided: the flat extent can exceed the epilogue thread count
+        # (e.g. 192-row tiles under pingpong's single 128-thread warpgroup,
+        # whose exclusive epilogue window covers the shared smem).
         identity = const_expr(self.stats_identity())
         total = const_expr(cute.size(smem_tensor.shape))
         sFlat = cute.make_tensor(smem_tensor.iterator, cute.make_layout(total))
@@ -2377,10 +2418,12 @@ class GroupedColStatsBase(EpiOp):
                 sFlat[i] = Float32(identity)
         ctx.epilogue_barrier.arrive_and_wait()
         lane_info = (lanes_in_N, warps_in_N, warp_n_idx, is_lane_n_leader)
-
-        # Register accumulators for the sweep. ``visit`` identifies an N
-        # subtile set; ``group_slots`` maps each row/group to its actual flat
-        # register indices, including interleaved M64 layouts.
+        # Register-resident statistics for the sweep: (rows_total, N visits,
+        # local groups). ``visit`` identifies an N subtile set; ``group_slots``
+        # maps each row/group to its actual flat register indices, including
+        # interleaved M64 layouts. Static indexing requires each thread's
+        # per-subtile run to lie in one group, and subtile/group boundaries to
+        # nest.
         epi_shape = cute.zipped_divide(
             cute.make_layout((ctx.tile_M, ctx.tile_N)), ctx.epi_tile
         ).shape
@@ -2440,6 +2483,8 @@ class GroupedColStatsBase(EpiOp):
     def stats_slice(self, state, epi_coord):
         smem_tensor, tDcC, ref_layout, group_cols, lane_info, rAcc, geom = state
         rows_sub, n_e = geom[0], geom[1]
+        # Static register indices for this subtile: row base from epi_m, and
+        # the N visit from epi_n.
         row_base = const_expr(epi_coord[0] * rows_sub)
         visit_n = const_expr((epi_coord[1] * n_e) // max(group_cols, n_e))
         return (
@@ -2456,7 +2501,9 @@ class GroupedColStatsBase(EpiOp):
 
     @cute.jit
     def fn_sink_flush(self, gemm, state, frag):
-        """Fold one prepass fragment into static row/visit/group registers."""
+        """Prepass sink: fold frag (the statistic input) into the register
+        statistics at static (row, visit, group) slots — no smem and no shuffles
+        in the sweep; fn_prepass_end exchanges and stores once per slot."""
         stats = state[0]
         rAcc, row_base, visit_n, geom = stats[5], stats[6], stats[7], stats[8]
         combine_fn = const_expr(self.stats_combine_fn())
@@ -2472,7 +2519,11 @@ class GroupedColStatsBase(EpiOp):
 
     @cute.jit
     def fn_prepass_end(self, gemm, state):
-        """Reduce lane subgroups and publish raw warp-N planes to shared memory."""
+        """Prepass-end flush: butterfly each register slot across the N-lane
+        subgroup (fixed tree), retain a finalized register value immediately when
+        no cross-warp fold is needed, and store the RAW partial once to its
+        (row, group, warp_n) smem plane. The driver's barrier after this hook
+        publishes all raw planes before cross-warp register resolution."""
         smem_tensor, tDcC, _, group_cols, lane_info, rAcc, geom = state[0]
         _, warps_in_N, warp_n_idx, _ = lane_info
         rows_sub, n_e, epi_m_cnt, n_visits = geom[:4]
@@ -2496,12 +2547,17 @@ class GroupedColStatsBase(EpiOp):
                             smem_tensor[coord[0], coord[1] // group_cols, warp_n_idx] = total
 
     def prepass_resolve_needed(self, gemm):
-        """Whether raw warp-N planes need a post-barrier register resolution."""
+        """Cross-warp register resolution is needed exactly when the epilogue
+        warp layout splits N. The driver's first prepass barrier has already
+        made every raw partial plane visible."""
         return getattr(gemm, self._stats_shape_attr())[2] > 1
 
     @cute.jit
     def fn_prepass_resolve(self, gemm, state):
-        """Resolve cross-warp statistics into each consumer's register slots."""
+        """Post-barrier all-reduce (warps_n > 1): every consumer lane folds
+        the raw smem planes for its own (row, group) slots in fixed order,
+        applies ``stat_value``, and overwrites its thread-private rAcc.
+        No shared writes means no second barrier."""
         stats = state[0]
         _, tDcC, _, group_cols, _, rAcc, geom = stats
         rows_sub, n_e, epi_m_cnt, n_visits = geom[:4]
@@ -2529,6 +2585,10 @@ class GroupedColStatsBase(EpiOp):
             total = combine_fn(total, smem_tensor[row, group, w])
         return total
 
+    # --- Stats-only defaults: the host arg fixes the group width; the value
+    # port broadcasts a per-row function of the finalized statistic.
+    # Subclasses with extra per-element resources override all three, keeping
+    # the stats state as element 0 (fn_sink_flush reads it there). ---
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
         return (self.stats_begin(gemm, smem_tensor, ctx, const_expr(self._group_cols(param))),)
@@ -2538,11 +2598,14 @@ class GroupedColStatsBase(EpiOp):
         return [self.stats_slice(state[0], epi_coord)]
 
     def stat_value(self, total, group_cols):
-        """Finalize one statistic before broadcasting or writing it."""
+        """Per-row Float32 value derived from the finalized (row, group)
+        statistic — the default ``fn_prepare``'s only hook. ``group_cols``
+        is the compile-time group width (for mean-style finalizes)."""
         raise NotImplementedError
 
     def out(self, name):
-        """Return a companion global-memory writer for finalized statistics."""
+        """Companion gmem writer for this op's finalized values — declare it
+        in ``extra_ops``; see GroupedColStatsOut."""
         return GroupedColStatsOut(name, self)
 
     @cute.jit
@@ -2560,6 +2623,9 @@ class GroupedColStatsBase(EpiOp):
         num_rows, group_slots, groups_per_run = geom[0], geom[4], geom[5]
         for r in cutlass.range_constexpr(num_rows):
             for g in cutlass.range_constexpr(groups_per_run):
+                # Finalized values are register-resident for both the single-
+                # and multi-warp_n paths; fn_prepass_end / fn_prepass_resolve
+                # wrote them back to rAcc before the main sweep.
                 value = rAcc[row_base + r, visit_n, g]
                 slots = const_expr(group_slots[r][g])
                 for j in cutlass.range_constexpr(len(slots)):
@@ -2568,7 +2634,19 @@ class GroupedColStatsBase(EpiOp):
 
 
 class GroupedColStatsOut(EpiOp):
-    """Write a sibling GroupedColStatsBase statistic to global memory."""
+    """Companion gmem writer for a GroupedColStatsBase op: write the sibling's
+    finalized per-(row, group) values (``stat_value``) to a
+    (l?, m, N/group_cols) buffer.
+
+    The sibling's smem contains raw per-warp_n partial planes after the prepass
+    barrier. At the first main-phase subtile this op elects one flat writer per
+    (row, group), folds those planes in fixed order, finalizes, and writes
+    directly to gmem — no finalized-smem publication or second barrier.
+    This is outside the per-element hot path (contrast: routing the value port
+    through a reduce sink costs a combine per element, and a reduce slot is per
+    (row, n-tile) — too coarse for sub-tile groups like per-head rstd).
+    Declare via ``extra_ops`` alongside the stats op (the fn never sees it);
+    the buffer arg is optional — absent, the op is compiled out."""
 
     def __init__(self, name, stats_op):
         super().__init__(name)
@@ -2585,6 +2663,8 @@ class GroupedColStatsOut(EpiOp):
         return make_fake_tensor(dtype, shape, leading_dim=ndim - 1, divisibility=1)
 
     def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
+        """Buffer shape from the sibling's group width (its arg): (l?, m, n/width),
+        with the groups nesting in N and in the tile."""
         descriptor = epi_args[self.stats_op.name]
         self.stats_op.host_validate(descriptor, n=n, tile_N=tile_N)
         width = self.stats_op._group_cols(descriptor)
@@ -2600,6 +2680,7 @@ class GroupedColStatsOut(EpiOp):
         return {self.name: assume_stride_divisibility(getattr(args, self.name))}
 
     def get_smem_tensor(self, gemm, params, storage_epi):
+        # The SIBLING's stats planes (its to_params stashed the shape).
         return getattr(storage_epi, f"s_{self.stats_op.name}").get_tensor(
             cute.make_layout(getattr(gemm, self.stats_op._stats_shape_attr()))
         )

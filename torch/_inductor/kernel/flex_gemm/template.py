@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
@@ -18,6 +18,10 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpiModSource
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,14 +43,9 @@ class FlexGemmEpilogueLocalReduceConfig:
         cls,
         local_reduce: Any | None,
         out_index: int | None,
-        *,
-        combine: str | None = None,
-        finalize: str | None = None,
-        store_finalize: str | None = None,
-        prepass_combine: str | None = None,
-        prepass_finalize: str | None = None,
+        source: "FlexGemmEpiModSource",
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Translate lowering's output-consumer plan into template metadata."""
+        """Pair lowering's output-consumer plan with the generated callback names."""
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
@@ -54,11 +53,11 @@ class FlexGemmEpilogueLocalReduceConfig:
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
-            combine,
-            finalize,
-            store_finalize,
-            prepass_combine,
-            prepass_finalize,
+            source.local_reduce_combine,
+            source.local_reduce_finalize,
+            source.local_reduce_store_finalize,
+            source.local_reduce_prepass_combine,
+            source.local_reduce_prepass_finalize,
         )
 
 
