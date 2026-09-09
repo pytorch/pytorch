@@ -695,10 +695,17 @@ class AOTCompiledModel:
         # here would, when all of them opted out, fall through to the first
         # result below and silently serve the wrong graph.
         for result in self.compiled_results:
-            # A guard that raises did not match; _no_match_message names the
-            # raiser, so the scan tolerates it the same way the report does.
+            # A call the signature cannot bind is a caller error no ModelInput
+            # could fix: let bind_locals' TypeError propagate as the plain module
+            # call would. Only a raising guard tree counts as "did not match";
+            # _no_match_message names the raiser, so the scan tolerates it the
+            # same way the report does.
+            f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+            guard_manager = result._artifacts.guard_manager
+            if guard_manager is None:
+                raise AssertionError("guard_manager must not be None")
             try:
-                matched = result.guard_check(self.model, *args, **kwargs)
+                matched = guard_manager.check(f_locals)
             except Exception:
                 continue
             if matched:
