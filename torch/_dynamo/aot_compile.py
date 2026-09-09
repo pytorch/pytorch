@@ -65,7 +65,7 @@ class _ProbeState:
     """Shared by an AOTCompilePickler and the throwaway probe picklers its
     _dumps_cleanly spawns, so the whole probe tree sees one memo."""
 
-    # id(value) -> picklable; probing nested functions is exponential without it.
+    # id(value) -> picklable; without the memo a probe tree is exponential.
     cache: dict[int, bool] = dataclasses.field(default_factory=dict)
     # Ids being probed right now, for cycle-breaking.
     inflight: set[int] = dataclasses.field(default_factory=set)
@@ -143,6 +143,8 @@ class AOTCompilePickler(FunctionPicklerBase):
         # pickler of this exact class keeps external_data/persistent_id behaviour
         # identical to the real dump. A recursion overflow counts as unpicklable
         # (the value is pruned) rather than re-raising, matching the guard side.
+        if value is None or type(value) in (str, int, bytes, bool, float):
+            return True
         state = self._probe_state
         vid = id(value)
         cached = state.cache.get(vid)
@@ -168,7 +170,8 @@ class AOTCompilePickler(FunctionPicklerBase):
         state.leaned = False
         try:
             probe.dump(value)
-        except Exception:
+        except Exception as exc:
+            log.debug("pruning unpicklable %r from a nested function: %s", value, exc)
             result = False
         else:
             # persistent_id records nn.Module instances rather than raising, so
@@ -176,6 +179,8 @@ class AOTCompilePickler(FunctionPicklerBase):
             # treat it as unpicklable so it is pruned now instead of failing the
             # whole dump later.
             result = not probe.errors
+            if not result:
+                log.debug("pruning unmarked nn.Module %r from a nested function", value)
         finally:
             state.inflight.discard(vid)
         leaned = state.leaned
@@ -321,8 +326,6 @@ class AOTCompiledFunction:
     def serialize(
         cls, fn: "AOTCompiledFunction", external_data: dict[str, Any] | None = None
     ) -> AOTCompileSaveResult:
-        from torch._dynamo.package import SerializedCode
-
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
         state["runtime_env"] = dataclasses.replace(
@@ -345,20 +348,19 @@ class AOTCompiledFunction:
             # guidance. Mutate args and re-raise rather than type(e)(msg): a
             # TypeError subclass from a user __reduce__ may take a non-message
             # constructor, so reconstructing would swap the real error for a
-            # constructor failure. AttributeError is caught too: the default C
-            # _pickle accelerator raises a bare AttributeError "Can't get local
-            # object" for a <locals> class in a default/kwdefault (only the pure-
-            # Python pickler re-wraps it as PicklingError), and some CPython
-            # versions raise PicklingError "Can't pickle local object" instead,
-            # so without AttributeError in the set that path lost its guidance.
-            prefix = f"{e}\n" if str(e) else ""
+            # constructor failure. AttributeError is caught too: the C _pickle
+            # accelerator raises a bare AttributeError "Can't get local object"
+            # for a <locals> class in a default/kwdefault (3.14+ raises
+            # PicklingError), so it needs the same guidance.
+            message = str(e)
+            prefix = f"{message}\n" if message else ""
             e.args = (
                 prefix + "Some value reached by the artifact is not picklable (a "
                 "closure cell, a default/kwdefault, or the top-level function's "
                 "own signature annotations, which ride unpruned, are the common "
                 "sources). Mark it as external data by using "
                 "`external_data={'key': ...}`.",
-            ) + e.args[1:]
+            )
             raise
         if pickler.errors:
             raise RuntimeError(
@@ -374,8 +376,6 @@ class AOTCompiledFunction:
         f_globals: dict[str, object] | None = None,
         external_closure_data: dict[str, Any] | None = None,
     ) -> "AOTCompiledFunction":
-        from torch._dynamo.package import SerializedCode
-
         f = io.BytesIO(data)
         f.seek(0)
         unpickler = AOTCompileUnpickler(external_closure_data or {}, f)

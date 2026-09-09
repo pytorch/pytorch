@@ -4398,12 +4398,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
-            # A sentinel __builtins__ is harmless: FunctionType({}, ...) binds
-            # builtins from the interpreter (CPython >= 3.10) before this applies.
             snapshot = {
                 name: self._prune(value, "unguarded function global")
                 for name, value in f_globals.items()
             }
+            # The builtins module, not the sentinel: a function the rebuilt one
+            # creates at call time reads its builtins from __globals__.
+            snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 

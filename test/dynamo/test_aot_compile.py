@@ -11,6 +11,7 @@ import pickle
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
@@ -574,7 +575,6 @@ def wrap_forward_function(fn: Callable):
     return wrapped
 
 
-@torch._dynamo.config.patch("enable_aot_compile", True)
 def _aot_wraps_deco(f):
     @functools.wraps(f)
     def wrapper(x):
@@ -592,8 +592,21 @@ def _aot_wraps_base(x):
 _aot_wraps_helper = _aot_wraps_deco(_aot_wraps_base)
 
 
+@torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
+    def path(self):
+        path = os.path.join(cache_dir(), f"package_{self.id()}")
+        os.makedirs(path, exist_ok=True)
+        return os.path.join(path, "model.pt")
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
+
     def test_aot_compile_rebuilds_a_wraps_wrapper_of_a_module_level_function(self):
         # Pickling the wrapper by reference finds the base function instead
         # ("not the same object"), so it is rebuilt from its code object, the
@@ -617,17 +630,43 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(x), fn(x))
 
-    def path(self):
-        path = os.path.join(cache_dir(), f"package_{self.id()}")
-        os.makedirs(path, exist_ok=True)
-        return os.path.join(path, "model.pt")
+    def test_aot_compile_rebuilt_wrapper_keeps_its_own_module_scope(self):
+        # functools.wraps copies __module__ from the wrappee, but the wrapper's
+        # code was compiled against the decorator's module: an escaped wrapper
+        # must reload with THAT scope, not the wrappee's (same-named globals
+        # would otherwise read the wrong value silently).
+        deco_mod = types.ModuleType("_aot_deco_mod_for_scope_test")
+        deco_mod.SCALE = 100
+        exec(
+            "import functools\n"
+            "def deco(f):\n"
+            "    @functools.wraps(f)\n"
+            "    def wrapper(x):\n"
+            "        return f(x) * SCALE\n"
+            "    return wrapper\n",
+            deco_mod.__dict__,
+        )
+        sys.modules[deco_mod.__name__] = deco_mod
+        self.addCleanup(sys.modules.pop, deco_mod.__name__, None)
+        helper = deco_mod.deco(_aot_wraps_base)
+        self.assertEqual(helper.__module__, __name__)
 
-    def setUp(self):
-        super().setUp()
+        def outer():
+            def fn(x):
+                return x + 1, helper
+
+            return fn
+
+        fn = outer()
+        x = torch.randn(3)
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager").aot_compile(
+            ((x,), {})
+        )
+        compiled.save_compiled_function(self.path())
         torch._dynamo.reset()
-        torch._dynamo.utils.counters.clear()
-        DynamoCache.clear()
-        PrecompileContext.clear()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(x)[1](1), (1 + 1) * 100)
 
     def test_aot_compile_basic_fn(self):
         def fn(x, y):
@@ -2236,8 +2275,6 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         # lock and raises -- which an earlier version cached as g being
         # unpicklable, so an UNRELATED h silently lost its .g and died at call
         # time. The in-flight result is no longer cached, so h keeps g.
-        import threading
-
         from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
 
         def outer():
