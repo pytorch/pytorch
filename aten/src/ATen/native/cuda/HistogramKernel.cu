@@ -8,6 +8,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Histogram.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/irange.h>
 
@@ -28,6 +29,7 @@ namespace at::native {
 namespace {
 
 constexpr int histogram_threads = 256;
+constexpr int histogram_blocks_per_sm = 4;
 
 template <typename scalar_t, typename index_t, bool linear_bins>
 __device__ index_t histogram_bin(
@@ -40,8 +42,9 @@ __device__ index_t histogram_bin(
   }
 
   if constexpr (linear_bins) {
-    const scalar_t estimate =
-        (value - edges[0]) / (edges[num_bins] - edges[0]) * num_bins;
+    // This is only an estimate; validate against the original scalar_t edges.
+    const float estimate = static_cast<float>(value - edges[0]) /
+        static_cast<float>(edges[num_bins] - edges[0]) * num_bins;
     if (estimate >= 0 && estimate < num_bins) {
       const index_t pos = static_cast<index_t>(estimate);
       if (value >= edges[pos] && value < edges[pos + 1]) {
@@ -61,7 +64,7 @@ __device__ index_t histogram_bin(
   index_t first = 0;
   index_t last = num_edges;
   while (first < last) {
-    const index_t mid = first + (last - first) / 2;
+    const index_t mid = c10::cuda::compat::midpoint(first, last);
     if (value < edges[mid]) {
       last = mid;
     } else {
@@ -98,7 +101,7 @@ __global__ void histogramdd_cuda_kernel(
     for (index_t bin = threadIdx.x; bin < replicas * num_bins; bin += blockDim.x) {
       shared_hist[bin] = 0;
     }
-    accumulation = shared_hist + ((threadIdx.x / warpSize) & (replicas - 1)) * num_bins;
+    accumulation = shared_hist + ((threadIdx.x / C10_WARP_SIZE) & (replicas - 1)) * num_bins;
     __syncthreads();
   }
 
@@ -128,21 +131,25 @@ __global__ void histogramdd_cuda_kernel(
     if (in_range) {
       scalar_t value = weighted ? weight[sample * weight_stride] : scalar_t(1);
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && !defined(USE_ROCM)
-      const auto peers = __match_any_sync(__activemask(), histogram_index);
       if constexpr (weighted) {
         // Reduce uniform warps without serializing their floating-point atomics.
-        if (peers == 0xffffffffu) {
-          for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        const auto peers = __activemask();
+        if (peers == 0xffffffffu &&
+            __all_sync(peers, histogram_index == __shfl_sync(peers, histogram_index, 0))) {
+          for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
             value += __shfl_down_sync(peers, value, offset);
           }
-          if (threadIdx.x % warpSize == 0) {
+          if (threadIdx.x % C10_WARP_SIZE == 0) {
             gpuAtomicAddNoReturn(accumulation + histogram_index, value);
           }
         } else {
           gpuAtomicAddNoReturn(accumulation + histogram_index, value);
         }
-      } else if ((threadIdx.x % warpSize) == __ffs(peers) - 1) {
-        gpuAtomicAddNoReturn(accumulation + histogram_index, static_cast<scalar_t>(__popc(peers)));
+      } else {
+        const auto peers = __match_any_sync(__activemask(), histogram_index);
+        if ((threadIdx.x % C10_WARP_SIZE) == __ffs(peers) - 1) {
+          gpuAtomicAddNoReturn(accumulation + histogram_index, static_cast<scalar_t>(__popc(peers)));
+        }
       }
 #else
       gpuAtomicAddNoReturn(accumulation + histogram_index, value);
@@ -208,12 +215,15 @@ void histogramdd_out_cuda_template(
       }
       const auto* properties = at::cuda::getCurrentDeviceProperties();
       const int blocks = static_cast<int>(std::min<int64_t>(
-          (num_samples - 1) / histogram_threads + 1, properties->multiProcessorCount * 4));
+          (num_samples - 1) / histogram_threads + 1, properties->multiProcessorCount * histogram_blocks_per_sm));
       const auto stream = at::cuda::getCurrentCUDAStream();
       const auto shared_bytes = histogram.numel() * sizeof(scalar_t);
+      const size_t replica_budget = std::min<size_t>(
+          properties->sharedMemPerBlock,
+          properties->sharedMemPerMultiprocessor / histogram_blocks_per_sm);
       int replicas = 1;
       while (replicas * 2 <= histogram_threads / properties->warpSize &&
-             shared_bytes * replicas * 2 <= properties->sharedMemPerBlock) {
+             shared_bytes * replicas * 2 <= replica_budget) {
         replicas *= 2;
       }
       const scalar_t* weight_data = weights.defined() ? weights.const_data_ptr<scalar_t>() : nullptr;
