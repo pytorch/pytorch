@@ -58,6 +58,7 @@ jobs:
       compiler: clang21
       cuda-version: cpu
     secrets: inherit
+# probe: trigger dynamo_wrapped matrix to capture per-version skip failures
 
   dynamo-test:
     name: dynamo-test
@@ -74,4 +75,5 @@ jobs:
       python-version: ${{ matrix.python-version }}
       compiler: clang21
       cuda-version: cpu
+      timeout-minutes: 360
     secrets: inherit
