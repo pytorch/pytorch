@@ -11,6 +11,7 @@ import copy
 import dataclasses
 import functools
 import importlib.util
+import logging
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -21,6 +22,7 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
+from torch._logging import warning_once
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 
@@ -33,7 +35,7 @@ from ...lowering import (
     register_lowering,
     view,
 )
-from ...utils import _IntLike, ceildiv
+from ...utils import _IntLike, ceildiv, is_bf16x9_matmul
 from ..gemm_epilogue_utils import statically_known_equal, statically_known_shape_equal
 from .configs import flex_gemm_default_config, flex_gemm_search_space
 from .constraints import (
@@ -53,6 +55,9 @@ from .debug import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+log = logging.getLogger(__name__)
 
 
 def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
@@ -1002,12 +1007,40 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or a backend template."""
     backend = kernel_options.get("backend", "TRITON")
-    if backend == "NVGEMM":
-        decompose_nvgemm_additive_gemm(subgraph.graph_module)
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="NVGEMM",
+    if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
+        mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
+        if isinstance(mat1, TensorBox) and is_bf16x9_matmul(
+            mat1.get_device_or_error().type, mat1.get_dtype()
         ):
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+            warning_once(
+                log,
+                f"FlexGEMM {backend} does not support bfx9 precision; using ATen/cuBLAS instead.",
+            )
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
+    if backend == "NVGEMM":
+        unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+            ("backend", "tuned")
+        )
+        if unsupported_options:
+            raise NotImplementedError(
+                f"Unsupported NVGEMM FlexGEMM options: {unsupported_options}"
+            )
+        tuned = kernel_options.get("tuned", False)
+        if not isinstance(tuned, bool):
+            raise NotImplementedError("NVGEMM FlexGEMM tuned must be a bool")
+        decompose_nvgemm_additive_gemm(subgraph.graph_module)
+        nvgemm_config: dict[str, Any] = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "NVGEMM",
+        }
+        if tuned:
+            nvgemm_config.update(
+                nvgemm_max_profiling_configs=None,
+                nvgemm_supplement_configs=True,
+                nvgemm_swap_ab=True,
+            )
+        with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
     if backend == "QUACK":
