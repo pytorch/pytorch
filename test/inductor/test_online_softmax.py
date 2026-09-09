@@ -539,8 +539,8 @@ class TestOnlineSoftmax(TestCase):
 @requires_nvidia_cuda
 @inductor_config.patch(SCALAR_ACCUMULATOR_CONFIG)
 @instantiate_parametrized_tests
-class TestScalarOnlineSoftmax(TestCase):
-    """Per-row max/sum accumulators for large non-persistent online softmax."""
+class TestScalarAccumulators(TestCase):
+    """Per-row accumulators for large non-persistent inner reductions."""
 
     MARKER = "online_softmax_reduce_scalar_combine"
     HINT = "AutotuneHint.SCALAR_ACCUMULATORS"
@@ -677,8 +677,9 @@ class TestScalarOnlineSoftmax(TestCase):
 
     def test_arg_reductions(self):
         def f(x):
+            xmax, xsum = _prepare_softmax(x, -1)
             values, indices = torch.min(x, -1)
-            return x.logsumexp(-1), x.argmax(-1), values, indices, x.sum(-1)
+            return xmax, xsum, x.argmax(-1), values, indices, x.sum(-1)
 
         x = torch.randn(64, 8193, device=GPU_TYPE)
         x[3, 4097] = float("nan")
@@ -689,10 +690,27 @@ class TestScalarOnlineSoftmax(TestCase):
         self.assertIn("_block = triton_helpers.min_with_index(", code)
         self.assertIn("tl.full([XBLOCK, 1], ", code)
 
-    @parametrize("dtype", [torch.int32, torch.int64, torch.bfloat16])
-    def test_paired_and_plain_reductions(self, dtype):
+    def test_arg_reductions_alone_stay_vector(self):
+        x = torch.randn(64, 8193, device=GPU_TYPE)
+        f = lambda t: (t.argmax(-1), t.sum(-1))  # noqa: E731
+        _, code = self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
+        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
+
+    def test_scalar_loop_ops(self):
         def f(x):
-            return torch.max(x, -1).values, x.argmin(-1), x.sum(-1)
+            xmax, xsum = _prepare_softmax(x, -1)
+            y = (1 + x / 4096).double()
+            return xmax, xsum, x.amax(-1), x.amin(-1), y.prod(-1)
+
+        x = torch.randn(16, 8200, device=GPU_TYPE)
+        _, code = self.check_codegen(f, x, marker=self.HINT)
+        self.assertEqual(code.count("tl.full([XBLOCK, 1], "), 3)
+
+    @parametrize("dtype", [torch.int32, torch.int64, torch.bfloat16])
+    def test_reductions_beside_softmax(self, dtype):
+        def f(x):
+            xmax, xsum = _prepare_softmax(x.float(), -1)
+            return xmax, xsum, torch.max(x, -1).values, x.argmin(-1), x.sum(-1)
 
         x = torch.randint(-50, 50, (16, 8200), device=GPU_TYPE).to(dtype)
         if dtype.is_floating_point:
@@ -709,9 +727,8 @@ class TestScalarOnlineSoftmax(TestCase):
     @inductor_config.patch(strict_signed_zero=True)
     def test_strict_signed_zero_max_stays_vector(self):
         x = torch.randn(4, 8193, device=GPU_TYPE)
-        _, code = self.check_codegen(
-            lambda t: (t.amax(-1), t.argmax(-1)), x, uses_scalar=False, marker=self.HINT
-        )
+        f = lambda t: (*_prepare_softmax(t, -1), t.amax(-1))  # noqa: E731
+        _, code = self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
         self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])

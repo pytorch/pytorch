@@ -2208,7 +2208,8 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Use per-row scalar accumulators for large CUDA inner reduction loops.
+    # Per-row scalar accumulators for large CUDA inner reduction loops that hold
+    # an online softmax.
     scalar_accumulators: bool = (
         os.environ.get("TORCHINDUCTOR_SCALAR_ACCUMULATORS", "1") == "1"
     )

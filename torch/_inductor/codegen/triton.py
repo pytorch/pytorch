@@ -3318,10 +3318,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         TensorDescriptorOptions
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
-    # Reductions carrying a pair per row; their vector accumulators are what
-    # spills in large inner loops, so a kernel needs one to take the scalar path.
-    PAIRED_REDUCTION_TYPES = (
-        "online_softmax_reduce",
+    # Reductions that may share a scalar kernel with an online softmax. Alone
+    # they keep the vector path until their shapes are swept like softmax was.
+    SCALAR_ARG_REDUCTION_TYPES = (
         "argmax",
         "argmin",
         "argmax_value",
@@ -5420,11 +5419,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
         Per-row accumulators for every reduction of a large inner reduction
         loop: each block is reduced along the reduction dim before it is folded
-        into the running state, so only the per-row state stays live. Plain
-        sums and maxes alone gain nothing from this and lose for a few very
-        long rows, so a kernel takes the path only around an arg reduction or
-        online softmax. The size, load and full-size output limits come from
-        the performance sweep of fused softmax kernels.
+        into the running state, so only the per-row state stays live. The path
+        is taken around an online softmax, whose shapes were swept; the arg and
+        plain reductions fused with it (Domino cross entropy) are scalarized
+        alongside. The size, load and full-size output limits come from that
+        sweep.
         """
         features = self.features
         if (
@@ -5443,17 +5442,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or V.graph.sizevars.optimization_hint(features.reduction_numel) <= 4096
         ):
             return False
-        paired = False
+        allowed = self.SCALAR_ARG_REDUCTION_TYPES + self.SCALAR_LOOP_REDUCTION_TYPES
+        has_online_softmax = False
         for node in features.reduction_nodes():
             buf = node.node
+            # tl.reduce cannot take int1; bool outputs cast after the vector loop.
             if not isinstance(buf, ir.ComputedBuffer) or buf.get_dtype() == torch.bool:
                 return False
             reduction_type = buf.get_reduction_type()
-            if reduction_type in self.PAIRED_REDUCTION_TYPES:
-                paired = True
-            elif reduction_type not in self.SCALAR_LOOP_REDUCTION_TYPES:
+            if reduction_type == "online_softmax_reduce":
+                has_online_softmax = True
+            elif reduction_type not in allowed:
                 return False
-        if not paired:
+        if not has_online_softmax:
             return False
         nodes = OrderedSet(features.scheduler_nodes())
         produced = OrderedSet(
@@ -5536,6 +5537,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and reduction_type in ("sum", "prod")
         )
         strict_reduction_loop = strict_reduction and not self.persistent_reduction
+        # Ordered signed-zero ties need the tuple-reduce arg helpers.
+        strict_suffix = "_strict" if config.strict_signed_zero else ""
         # Combiner for the persistent strict path: "+" for sum, "*" for prod
         # (identity 0.0 / 1.0 comes from `default`); the loop uses combine_fn.
         strict_op = "*" if reduction_type == "prod" else "+"
@@ -5661,7 +5664,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer.splice(f"{result_var} = {value}")
 
         def final_argreduce(buffer, result_var, value, index, result_kind="index"):
-            strict = "_strict" if config.strict_signed_zero else ""
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
                 buffer,
@@ -5674,7 +5676,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_value, result_index = result_var
                 buffer.splice(
                     f"""\
-                    {result_value}, {result_index} = triton_helpers.{root_op}_with_index{strict}({value}, {index}, {dim})
+                    {result_value}, {result_index} = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
                     {result_value} = {self.reduction_resize(f"{result_value}")}
                     {result_index} = {self.reduction_resize(f"{result_index}")}
                     """
@@ -5682,14 +5684,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif result_kind == "value":
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_val")}
                     """
                 )
             else:
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index{strict_suffix}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                     """
                 )
@@ -5969,7 +5971,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     block_index = f"tl.broadcast_to({where_cond(index_var, index_max)}, {self.dense_size_str()})"
                     self.compute.splice(
                         f"""\
-                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{root_op}_with_index(
+                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{root_op}_with_index{strict_suffix}(
                         {where_cond(value, default)}, {block_index}, {dim}
                     )
                     {accumulator}, {accumulator_index} = triton_helpers.{root_op}imum_with_index(
