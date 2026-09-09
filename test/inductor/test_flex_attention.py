@@ -4674,7 +4674,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         """A caller-supplied kpack/matrix_instr_nonkdim/waves_per_eu has to win
         over the heuristic's, in each of the forward, backward and decoding
         templates.
+
+        Asserted on what reaches ``triton.compile``. These are backend compile
+        options, so arriving in its ``options`` argument is the only thing that
+        makes them take effect -- the templates also declare them as ``tl.constexpr``
+        but never read those names, so finding them in the generated source would
+        prove nothing.
         """
+        import triton
+
         from torch._inductor.heuristics.template.triton import get_default_kpack
 
         # kpack's default is architecture dependent (1 on gfx942, 2 elsewhere), so
@@ -4682,15 +4690,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         kpack = 1 if get_default_kpack() != 1 else 2
         kernel_options = {"kpack": kpack, "matrix_instr_nonkdim": 16, "waves_per_eu": 3}
 
-        def check_templates(code):
-            templates = [c for c in code if "triton_tem_fused" in c]
-            self.assertTrue(templates, "no template kernel was generated")
-            for kernel_code in templates:
-                FileCheck().check(f"kpack : tl.constexpr = {kpack}").run(kernel_code)
-                FileCheck().check("matrix_instr_nonkdim : tl.constexpr = 16").run(
-                    kernel_code
-                )
-                FileCheck().check("waves_per_eu : tl.constexpr = 3").run(kernel_code)
+        captured: list[dict[str, object]] = []
+        real_compile = triton.compile
+
+        def spy(*args, **kwargs):
+            options = dict(kwargs.get("options") or {})
+            captured.append({k: options[k] for k in kernel_options if k in options})
+            return real_compile(*args, **kwargs)
+
+        def assert_reached_compiler(what):
+            self.assertIn(
+                kernel_options,
+                captured,
+                f"{what}: kernel_options never reached triton.compile, got {captured}",
+            )
 
         compiled = torch.compile(flex_attention, fullgraph=True)
         make_tensor = functools.partial(
@@ -4702,22 +4715,30 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
 
-        _, code = run_and_get_code(
-            lambda: compiled(q, k, v, kernel_options=kernel_options).sum().backward()
+        # compile_threads=1 keeps compilation in-process so the spy sees it.
+        compile_in_process = config.patch(
+            {"compile_threads": 1, "force_disable_caches": True}
         )
+
+        with compile_in_process, patch.object(triton, "compile", side_effect=spy):
+            _, code = run_and_get_code(
+                lambda: compiled(q, k, v, kernel_options=kernel_options)
+                .sum()
+                .backward()
+            )
         self.assertIn(
             "flex_attention_backward", "\n".join(code), "backward kernel not built"
         )
-        check_templates(code)
+        assert_reached_compiler("forward/backward")
 
         # a single query token routes to the decoding template, which carries its
         # own copy of the same logic
+        captured.clear()
         with torch.no_grad():
             q = torch.randn(2, 2, 1, 64, device=device, dtype=torch.float16)
-            _, code = run_and_get_code(
-                compiled, q, k.detach(), v.detach(), kernel_options=kernel_options
-            )
-        check_templates(code)
+            with compile_in_process, patch.object(triton, "compile", side_effect=spy):
+                compiled(q, k.detach(), v.detach(), kernel_options=kernel_options)
+        assert_reached_compiler("decoding")
 
     @supported_platform
     @skip_on_cpu
