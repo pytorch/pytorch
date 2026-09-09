@@ -140,7 +140,7 @@ class ChunkingApplier:
             raise AssertionError("expected non-empty subgraph body")
 
     def replace_tangent_to_one(self) -> None:
-        for idx, node in enumerate(self.overriden_tangent):
+        for _idx, node in enumerate(self.overriden_tangent):
             if not is_tangent_node(node):
                 raise AssertionError(f"expected tangent node, got {node}")
 
@@ -161,7 +161,7 @@ class ChunkingApplier:
         input needs to be chunked.
         E.g. the weight for matmul does not need to be chunked.
         """
-        for node_idx, subgraph_input in enumerate(self.subgraph_input):
+        for _node_idx, subgraph_input in enumerate(self.subgraph_input):
             meta = get_chunking_meta(subgraph_input)
             if meta is None:
                 raise AssertionError("expected chunking meta for subgraph input")
@@ -232,7 +232,7 @@ class ChunkingApplier:
             new_node.meta = {"val": fake_tensor}
             return new_node
 
-        for node_idx, input_node in enumerate(self.subgraph_input):
+        for _node_idx, input_node in enumerate(self.subgraph_input):
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():

@@ -20,7 +20,7 @@ def main():
     g = huge_graph()
 
     def fn():
-        for n in g.graph.nodes:
+        for _n in g.graph.nodes:
             pass
 
     t = min(timeit.repeat(fn, number=K, repeat=3))

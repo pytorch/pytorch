@@ -10,7 +10,7 @@ class TestConsumeOp(unittest.TestCase):
         iters = 6
 
         def foo(x):
-            for i in range(iters):
+            for _i in range(iters):
                 result = torch.ops.operator_benchmark._consume(torch.sum(x))
             return result
 
@@ -28,7 +28,7 @@ class TestConsumeOp(unittest.TestCase):
         iters = 6
 
         def foo(x):
-            for i in range(iters):
+            for _i in range(iters):
                 result = torch.ops.operator_benchmark._consume(torch.chunk(x, 2))
             return result
 

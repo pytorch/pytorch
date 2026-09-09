@@ -681,7 +681,7 @@ class GraphModule(torch.nn.Module):
 
         def fn(t):
             s = 0
-            for b, p in itertools.product(whoo(t), itertools.permutations((4, 5))):
+            for b, _p in itertools.product(whoo(t), itertools.permutations((4, 5))):
                 s += b
             return s
 

@@ -366,7 +366,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         # Split each key-group into dependency-free sub-buckets so fusing never
         # makes a bucketed collective's input depend on its own output.
         sub_buckets: list[list[fx.Node]] = []
-        for key, key_nodes in grouped_collectives.items():
+        for key_nodes in grouped_collectives.values():
             sub_buckets.extend(self._split_independent_collectives(key_nodes, nodes))
 
         for sub_bucket in sub_buckets:
@@ -563,7 +563,7 @@ class ManualOverlapScheduler(OverlapScheduler):
     def _manual_bucket_collectives(self) -> None:
         """Bucket nodes in each module_bucket from module_bucket_plans."""
         self._obtain_nodes_in_subgraph()
-        for i, nodes in enumerate(self.nodes_in_subgraph):
+        for _i, nodes in enumerate(self.nodes_in_subgraph):
             self.bucketer.manual_bucket_collectives(nodes=nodes)
 
         self.graph.lint()

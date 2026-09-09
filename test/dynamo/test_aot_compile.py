@@ -1593,13 +1593,13 @@ from user code:
             """
             torch.manual_seed(seed)
             getattr(torch, GPU_TYPE).manual_seed(seed)
-            for name, param in module.named_parameters():
+            for _name, param in module.named_parameters():
                 if param.requires_grad:
                     local_param = (
                         param.to_local() if isinstance(param, DTensor) else param
                     )
                     local_param.data.normal_(mean=0.0, std=0.02)
-            for name, buf in module.named_buffers():
+            for _name, buf in module.named_buffers():
                 local_buf = buf.to_local() if isinstance(buf, DTensor) else buf
                 local_buf.data.normal_(mean=0.0, std=0.02)
 

@@ -2488,7 +2488,7 @@ class TestFrozenOptimizations(JitTestCase):
         use_tracing = [True, False]
         bn_running_stats = [True, False]
 
-        for modules, tracing, track_stats in product(
+        for modules, tracing, _track_stats in product(
             module_pairs, use_tracing, bn_running_stats
         ):
 

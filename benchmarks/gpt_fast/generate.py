@@ -105,7 +105,7 @@ def decode_n_tokens(
     **sampling_kwargs,
 ):
     new_tokens, new_probs = [], []
-    for i in range(num_new_tokens):
+    for _i in range(num_new_tokens):
         with torch.nn.attention.sdpa_kernel(
             torch.nn.attention.SDPBackend.MATH
         ):  # Actually better for Inductor to codegen attention here
@@ -172,7 +172,7 @@ def _load_model(x: GPTModelConfig, device="cuda", precision=torch.bfloat16):
 # Only count activated parameters and buffers.
 def _get_model_size(model):
     model_size = 0
-    for name, child in model.named_children():
+    for _name, child in model.named_children():
         if not isinstance(child, torch.nn.Embedding):
             model_size += sum(
                 p.numel() * p.dtype.itemsize
