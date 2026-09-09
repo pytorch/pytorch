@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
 import gc
 import importlib
 import inspect
@@ -69,6 +70,37 @@ class UnpicklableConfig:
 
     def __reduce__(self):
         raise RuntimeError("config cannot pickle")
+
+
+def _bound_method_guard_target(self, x):
+    return x
+
+
+@functools.wraps(_bound_method_guard_target)
+def _bound_method_guard_wrapper(self, x):
+    return x * 3
+
+
+class _BoundMethodGuardRecv:
+    pass
+
+
+class BoundMethodNameGuardModule(torch.nn.Module):
+    # self.other and self.cb wrap the SAME (fqn-mismatched) function, and
+    # self.other is inserted first, so the pickle reaches the function before
+    # the bound method. Unless the method's __func__ is seeded into
+    # guard_tree_values when its guard manager is built, the function memoizes
+    # as an fqn-mismatch _Missing that the method's __func__ then loads back as,
+    # so the __name__ guard AttributeErrors at load.
+    def __init__(self):
+        super().__init__()
+        self.other = _bound_method_guard_wrapper
+        self.cb = types.MethodType(_bound_method_guard_wrapper, _BoundMethodGuardRecv())
+
+    def forward(self, x):
+        if self.cb.__name__ == "_bound_method_guard_target":
+            x = x + 1
+        return x * 2
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -838,6 +870,29 @@ def add(x, y):
             ):
                 compiled(x, other_cache)
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_bound_method_name_guard_survives_func_reached_first(self):
+        # Regression: a guard on a bound method's __name__ where the method's
+        # __func__ is ALSO reachable (self.other) and inserted first, so the
+        # pickle memoizes the fqn-mismatched function as _Missing before it
+        # reaches the method. Seeding the method's __func__ into
+        # guard_tree_values makes the save order-independent; without it the
+        # method's __func__ loads back as _Missing and the __name__ guard
+        # AttributeErrors at torch.compile() wrap time in the reloading process.
+        mod = BoundMethodNameGuardModule()
+        x = torch.randn(3)
+        expected = mod(x)
+        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = BoundMethodNameGuardModule.forward.__code__
+        self.assertGreater(len(_debug_get_precompile_entries(code)), 0)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), expected)
+
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):
         # A guarded value that cannot be pickled is a package bypass, not a
@@ -863,9 +918,14 @@ def add(x, y):
         # Wrapping is what reloads the cache; the bypassed entry installs nothing.
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+        # The reloaded entry is already flagged bypassed, so the recompile that
+        # reuses it skips guard serialization outright (convert_frame gates
+        # `save` on current_entry_bypassed()) -- it does NOT re-pickle the
+        # unpicklable guard just to bypass again. The frame still runs; there is
+        # simply no second "package bypass" warning to re-detect what load
+        # already knew.
+        with self.assertNoLogs("torch._dynamo.output_graph", level="WARNING"):
             self.assertEqual(compiled(x), expected)
-        self.assertTrue(any("package bypass" in line for line in logs.output))
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_recompile_drops_the_frames_earlier_variants(self):
@@ -893,6 +953,45 @@ def add(x, y):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled(x)
         self.assertEqual(compiled(x), expected)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypass_then_serializable_recompile_skips_serialization(self):
+        # bypass->success: a frame bypassed by an unpicklable guard stays
+        # bypassed for the rest of the process, so a later recompile that WOULD
+        # serialize fine must not re-pay guard serialization only for
+        # add_guarded_code to discard it. convert_frame gates `save` on the
+        # entry's bypassed flag; the observable difference from the old
+        # per-OutputGraph gate is a second serialize_guards call, not a warning.
+        from torch._dynamo import guards as guards_mod
+
+        calls = [0]
+        orig = guards_mod.CheckFunctionManager.serialize_guards
+
+        def counting(self, *args, **kwargs):
+            calls[0] += 1
+            return orig(self, *args, **kwargs)
+
+        def fn(x, cfg=None):
+            if cfg is not None and cfg.flag == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        with patch.object(
+            guards_mod.CheckFunctionManager, "serialize_guards", counting
+        ):
+            compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+            with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+                compiled(x, UnpicklableConfig())
+            self.assertTrue(any("package bypass" in line for line in logs.output))
+            after_bypass = calls[0]
+            # cfg=None recompiles the SAME code object; the entry is already
+            # bypassed, so serialization is skipped and no bypass is re-detected.
+            with self.assertNoLogs("torch._dynamo.output_graph", level="WARNING"):
+                self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(calls[0], after_bypass)
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_saving_does_not_bypass_the_live_entry(self):
@@ -1516,6 +1615,68 @@ def add(x, y):
                 }
             ),
         )
+
+    def test_add_function_dedups_function_name(self):
+        # Two installs of one artifact re-add the same resume function under the
+        # same name. Appending it twice makes _resume_global_renames raise on
+        # the duplicate, which the failed-install fallback turns into a hard
+        # crash; _add_function must skip a name already present.
+        from torch._dynamo.package import _FunctionId
+
+        def fn(x):
+            return x + 1
+
+        def resume(x):
+            return x
+
+        pkg = CompilePackage(fn)
+        code = resume.__code__
+        name = _FunctionId("__resume_at_2_1")
+        pkg._add_function(
+            code, resume.__module__, function_name=name, install_to_global=True
+        )
+        pkg._add_function(
+            code, resume.__module__, function_name=name, install_to_global=True
+        )
+        self.assertEqual(pkg._codes[code].function_names, [name])
+
+    def test_resume_global_renames_rejects_duplicate_name(self):
+        # Two install_to_global entries in one package sharing a capture-time
+        # resume name would collapse onto one token-suffixed global (second
+        # wins). Surface it as a RuntimeError -- recoverable by the failed-
+        # install fallback -- rather than silently rebinding.
+        from torch._dynamo.package import (
+            _DynamoCodeCacheEntry,
+            _FunctionId,
+            _resume_global_renames,
+            SerializedCode,
+        )
+
+        def fn(x):
+            return x
+
+        def one(x):
+            return x
+
+        def two(x):
+            return x + 0
+
+        name = _FunctionId("__resume_at_6_1")
+        entries = [
+            _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(f.__code__),
+                python_module=f.__module__,
+                function_names=[name],
+                guarded_codes=[],
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=True,
+            )
+            for f in (one, two)
+        ]
+        with self.assertRaisesRegex(RuntimeError, "duplicate resume-function name"):
+            _resume_global_renames(entries, "tok")
 
     def test_serving_package_records_nothing_and_still_recompiles(self):
         def fn(x):
