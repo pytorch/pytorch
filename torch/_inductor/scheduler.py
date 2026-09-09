@@ -8936,15 +8936,25 @@ class Scheduler:
         if not common_buffer_names:
             return -1
 
+        reordered = False
         if config.loop_ordering_after_fusion:
             score = self._try_reorder_loops_for_candidates(node1, node2)
             if score >= 0:
                 return score
+            reordered = self._try_reorder_broadcast(node1, node2)
 
-        # Try broadcast-aware reordering or reindexing to match the reduction.
-        # Retry ordinary reordering afterwards: its normalize() comparison
-        # handles different loop counts in fused groups after reindexing.
-        if not self._try_align_pointwise_for_reduction(node1, node2):
+        # If reordering did not work (or loop ordering is disabled),
+        # try reindexing the pointwise to match the reduction's iteration
+        # domain (e.g., [1024, 8192] -> [65536, 128] for RMS norm with
+        # reshape), then retry loop reordering if enabled. The retry is
+        # needed because FusedSchedulerNodes may have more loop vars than
+        # the reindexed pointwise (e.g., 3 vs 2), and only the normalize()
+        # comparison in _try_reorder_loops_for_candidates handles that
+        # num_vars mismatch.
+        if not reordered and (
+            not config.loop_reindexing_after_fusion
+            or not self._try_reindex_pointwise_for_reduction(node1, node2)
+        ):
             return -1
 
         if config.loop_ordering_after_fusion:
@@ -9152,20 +9162,22 @@ class Scheduler:
             return True
         return False
 
-    def _try_align_pointwise_for_reduction(
+    def _try_reindex_pointwise_for_reduction(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
     ) -> bool:
-        r"""_try_align_pointwise_for_reduction(node1, node2) -> bool
+        """
+        Reindex a pointwise's iteration loops to match a reduction's
+        groups. After reindexing, the shared reads have identical index
+        expressions, enabling the codegen to CSE loads.
 
-        Reorder broadcast dimensions or reindex pointwise loops to match a
-        reduction. Return ``True`` if a loop transformation was retained.
+        Returns True if reindexing was applied.
         """
         from .codegen.simd import SIMDKernel
 
         # Keep this consistent with shared_data_after_reordering_loop(): CPU
-        # loop transformations are not validated yet.
+        # reindexing is not validated yet.
         if node1.is_cpu() or node2.is_cpu():
             return False
 
@@ -9188,7 +9200,8 @@ class Scheduler:
             return False
         snodes = typing.cast(list[SchedulerNode], pw_node.get_nodes())
 
-        # All snodes must cover the reduction's full iteration domain.
+        # All snodes must have the same total iteration numel matching
+        # the reduction's numel * rnumel so they can be reindexed identically.
         if not all(
             V.graph.sizevars.statically_known_equals(
                 sympy_product(sn._sizes[0]), target_numel
@@ -9197,33 +9210,19 @@ class Scheduler:
         ):
             return False
 
-        # Nothing to change if the pointwise already uses the reduction split.
+        if not all(
+            SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
+            for sn in snodes
+        ):
+            return False
+
+        # Nothing to reindex if the pointwise already uses the reduction split.
         target_iter_sizes = (red_numel, red_rnumel)
         if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
             return False
 
-        order: list[int] | None = None
-        if not all(
-            SIMDKernel.is_compatible(target_iter_sizes, sn.get_ranges())
-            for sn in snodes
-        ):
-            # Child reordering can invalidate internal fused dependencies.
-            if not config.loop_ordering_after_fusion or len(snodes) != 1:
-                return False
-            sn = snodes[0]
-            order = self._broadcast_dims_last_order(
-                sn, reduction_node.get_buffer_names()
-            )
-            if order is None or not SIMDKernel.is_compatible(
-                target_iter_sizes,
-                (ir.same_reorder(order)(sn._sizes[0]), sn._sizes[1]),
-            ):
-                return False
-        elif not config.loop_reindexing_after_fusion:
-            return False
-
         # Measure each node's memory access before mutating any loops, so the
-        # coalescing guard below can compare against the original kernels.
+        # coalescing guard below can compare against the un-reindexed kernels.
         unfused_memory: tuple[MemoryCoalescing, ...] | None = None
         memory = tuple(self._selected_tiling_memory([node]) for node in (node1, node2))
         if all(m is not None for m in memory):
@@ -9231,21 +9230,18 @@ class Scheduler:
 
         # Local rollback is still needed even with _LoopMutationTracker: this
         # helper is also used by shared_data_after_reordering_loop(), where a
-        # failed attempt returns -1 and the caller may keep evaluating
+        # failed reindex attempt returns -1 and the caller may keep evaluating
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
-        if order is not None:
-            snodes[0].apply_new_loop_order(order)
-        else:
-            for sn in snodes:
-                sn.apply_loop_reindexing(target_iter_sizes)
+        for sn in snodes:
+            sn.apply_loop_reindexing([red_numel, red_rnumel])
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
             refresh_group_node_dependencies(pw_node)
 
-        # Verify the transformed nodes have matching shared deps.
+        # Verify reindexing actually increases shared deps.
         common_names = (
             node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
         )
@@ -9260,8 +9256,9 @@ class Scheduler:
             return False
 
         # TODO: Measure fused memory first so coalesced fusions skip per-node analysis.
-        # Aligning the pointwise with the reduction can make its own accesses
-        # uncoalesced. Undo the change when that outweighs the fusion savings.
+        # Reindexing the pointwise onto the reduction's split can make its own
+        # accesses uncoalesced. Undo the reindex when that costs more than the
+        # traffic saved by fusing.
         if self._reindexing_regresses_memory_coalescing(node1, node2, unfused_memory):
             rollback_snapshot.restore()
             return False
@@ -9277,6 +9274,67 @@ class Scheduler:
             if isinstance(pw_node, FusedSchedulerNode):
                 refresh_group_node_dependencies(pw_node)
 
+        return True
+
+    def _try_reorder_broadcast(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        r"""_try_reorder_broadcast(node1, node2) -> bool
+
+        Move a pointwise consumer's broadcast dimensions last to match a
+        reduction. Restore its original loops if the attempt is rejected.
+        """
+        from .codegen.simd import SIMDKernel
+
+        if any(node.is_cpu() or node.is_foreach() for node in (node1, node2)):
+            return False
+        if node1.is_reduction() and not node2.is_reduction():
+            reduction_node, pw_node = node1, node2
+        elif node2.is_reduction() and not node1.is_reduction():
+            reduction_node, pw_node = node2, node1
+        else:
+            return False
+
+        snodes = pw_node.get_nodes()
+        # Reordering children independently can invalidate fused dependencies.
+        if len(snodes) != 1 or not isinstance(snodes[0], SchedulerNode):
+            return False
+        sn = snodes[0]
+        target_sizes = reduction_node.group[1]
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(sn._sizes[0]), sympy_product(target_sizes)
+        ) or SIMDKernel.is_compatible(target_sizes, sn.get_ranges()):
+            return False
+
+        order = self._broadcast_dims_last_order(sn, reduction_node.get_buffer_names())
+        if order is None or not SIMDKernel.is_compatible(
+            target_sizes, (ir.same_reorder(order)(sn._sizes[0]), sn._sizes[1])
+        ):
+            return False
+
+        # Measure the original access patterns before changing any loops.
+        unfused_memory: tuple[MemoryCoalescing, ...] | None = None
+        memory = tuple(self._selected_tiling_memory([node]) for node in (node1, node2))
+        if all(m is not None for m in memory):
+            unfused_memory = typing.cast("tuple[MemoryCoalescing, ...]", memory)
+
+        snapshot = _LoopStateSnapshot.create((pw_node,))
+        sn.apply_new_loop_order(order)
+        if isinstance(pw_node, FusedSchedulerNode):
+            pw_node.group = sn.group
+            refresh_group_node_dependencies(pw_node)
+
+        common_names = (
+            node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+        )
+        deps1 = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        deps2 = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+        if not any(
+            self.deps_match_normalized(deps1[name], deps2[name])
+            for name in common_names
+        ) or self._reindexing_regresses_memory_coalescing(node1, node2, unfused_memory):
+            snapshot.restore()
+            return False
         return True
 
     @staticmethod
@@ -10053,16 +10111,18 @@ class Scheduler:
 
             # Vertical fusion failed - the iteration domains may not
             # match (e.g. pointwise reads buf[x//32] while reduction
-            # writes buf[x]). Try aligning the pointwise with the reduction
-            # and retry. A staged plan keeps its original frame because loop
+            # writes buf[x]). Try broadcast reordering, then reindexing the
+            # pointwise. A staged plan keeps its original frame because loop
             # transformations would invalidate its exact matches.
-            if (
-                plan is None
-                and (
+            if plan is None and (
+                (
                     config.loop_ordering_after_fusion
-                    or config.loop_reindexing_after_fusion
+                    and self._try_reorder_broadcast(node1, node2)
                 )
-                and self._try_align_pointwise_for_reduction(node1, node2)
+                or (
+                    config.loop_reindexing_after_fusion
+                    and self._try_reindex_pointwise_for_reduction(node1, node2)
+                )
             ):
                 return (
                     self.can_fuse_vertical(node1, node2)

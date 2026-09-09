@@ -1664,6 +1664,16 @@ class LoopOrderingDeviceTest(TestCase):
         self.assertEqual(fn(x, True), torch.compile(fn)(x, True))
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    def test_broadcast_reorder_normalizes_dependencies(self, device):
+        def fn(x, y):
+            scale = x.abs().amax(1).clamp(min=1e-6).reshape(6, 1, 7, 1)
+            return y / scale
+
+        x = torch.randn(42, 256, device=device)
+        y = torch.randn(6, 16, 7, 16, device=device)
+        self.assertEqual(fn(x, y), torch.compile(fn, fullgraph=True)(x, y))
+        self.assertEqual(1, metrics.generated_kernel_count)
+
     @parametrize("size", (6, 7))
     def test_square_block_fused_consumer_dependencies(self, device, size):
         def fn(x, a, b, c):

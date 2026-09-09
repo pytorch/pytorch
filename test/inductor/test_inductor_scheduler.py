@@ -1201,8 +1201,11 @@ class TestScheduler(TestCase):
             side_effect=AssertionError("staged fusion must use staged legality")
         )
         scheduler._can_fuse_vertical_impl = Mock(return_value=vertical_fusion_legal)
-        scheduler._try_align_pointwise_for_reduction = Mock(
-            side_effect=AssertionError("staged plan must prevent loop alignment")
+        scheduler._try_reindex_pointwise_for_reduction = Mock(
+            side_effect=AssertionError("staged plan must prevent reindexing")
+        )
+        scheduler._try_reorder_broadcast = Mock(
+            side_effect=AssertionError("staged plan must prevent broadcast reordering")
         )
         backend = Mock()
         backend.can_fuse_vertical.return_value = True
@@ -1238,9 +1241,11 @@ class TestScheduler(TestCase):
         scheduler.get_expand_dim_for_pointwise_nodes.assert_not_called()
         scheduler.shared_data_after_reordering_loop.assert_not_called()
         scheduler.shared_data_after_inverting_indexing.assert_not_called()
-        scheduler._try_align_pointwise_for_reduction.assert_not_called()
+        scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
+        scheduler._try_reorder_broadcast.assert_not_called()
 
-    def test_vertical_fusion_retries_after_reindexing(self):
+    @parametrize("reorder_succeeds", (False, True))
+    def test_vertical_fusion_retries_after_loop_transformation(self, reorder_succeeds):
         producer = self._mock_base_snode("producer", torch.device("cuda"))
         consumer = self._mock_base_snode("consumer", torch.device("cuda"))
         producer.has_strict_reduction.return_value = False
@@ -1254,7 +1259,8 @@ class TestScheduler(TestCase):
         scheduler._fusion_blocked_by_placement = Mock(return_value=False)
         scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
         scheduler.can_fuse_vertical = Mock(side_effect=[False, True])
-        scheduler._try_align_pointwise_for_reduction = Mock(return_value=True)
+        scheduler._try_reorder_broadcast = Mock(return_value=reorder_succeeds)
+        scheduler._try_reindex_pointwise_for_reduction = Mock(return_value=True)
         backend = Mock()
         backend.can_fuse_vertical.return_value = True
         scheduler.get_backend = Mock(return_value=backend)
@@ -1268,14 +1274,20 @@ class TestScheduler(TestCase):
             V.set_choices_handler(choices),
             patch.object(NestedReduction, "is_candidate", return_value=False),
             patch.object(NestedReduction, "_is_enabled_for", return_value=False),
-            inductor_config.patch(loop_reindexing_after_fusion=True),
+            inductor_config.patch(
+                loop_ordering_after_fusion=True, loop_reindexing_after_fusion=True
+            ),
         ):
             self.assertTrue(Scheduler._can_fuse(scheduler, producer, consumer))
 
         self.assertEqual(scheduler.can_fuse_vertical.call_count, 2)
-        scheduler._try_align_pointwise_for_reduction.assert_called_once_with(
-            producer, consumer
-        )
+        scheduler._try_reorder_broadcast.assert_called_once_with(producer, consumer)
+        if reorder_succeeds:
+            scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
+        else:
+            scheduler._try_reindex_pointwise_for_reduction.assert_called_once_with(
+                producer, consumer
+            )
 
     def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
         grouped = Mock()
