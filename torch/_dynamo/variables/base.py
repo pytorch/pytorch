@@ -502,6 +502,7 @@ def store_attr_mutation(
 ) -> None:
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
+    item = item.realize()
     if not se.is_attribute_mutation(item):
         if item.source is not None:
             raise AssertionError(
