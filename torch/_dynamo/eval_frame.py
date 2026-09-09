@@ -309,10 +309,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from torch._C._dynamo.eval_frame import (
-                _debug_get_cache_entry_list,
-                _debug_get_precompile_entries,
-            )
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
             from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
             message = (
@@ -321,7 +318,12 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 + f"function name: '{frame.f_code.co_name}', "
                 + f"line number: {frame.f_lineno}"
             )
-            cache_entries = _debug_get_cache_entry_list(frame.f_code)
+            # The buckets the lookup consulted: the region's own, then the
+            # default bucket an isolated region falls back to.
+            region_id = get_eval_frame_isolate_recompiles_id()
+            cache_entries = _get_cache_entries_for_region(frame.f_code, region_id)
+            if region_id >= 0:
+                cache_entries += _get_cache_entries_for_region(frame.f_code, -1)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
                     cache_entries,
@@ -338,7 +340,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             precompile_entries = [
                 e
                 for e in _debug_get_precompile_entries(frame.f_code)
-                if e.isolate_recompiles_id == get_eval_frame_isolate_recompiles_id()
+                if e.isolate_recompiles_id == region_id
             ]
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
@@ -713,23 +715,17 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
-    from .convert_frame import compile_lock
+    if isinstance(f, types.CodeType):
+        reset_code(f)
+    elif hasattr(f, "__code__"):
+        reset_code(f.__code__)
+    elif hasattr(getattr(f, "forward", None), "__code__"):
+        reset_code(f.forward.__code__)
+    else:
+        from . import reset  # type: ignore[attr-defined]
 
-    # Under compile_lock, like torch._dynamo.reset(): an in-flight compile
-    # holds a snapshot of this code's cache entries (recompile-reason logging,
-    # cache-size accounting) and reset_code frees them in place.
-    with compile_lock:
-        if isinstance(f, types.CodeType):
-            _reset_code(f)
-        elif hasattr(f, "__code__"):
-            _reset_code(f.__code__)
-        elif hasattr(getattr(f, "forward", None), "__code__"):
-            _reset_code(f.forward.__code__)
-        else:
-            from . import reset  # type: ignore[attr-defined]
-
-            reset()
-            log.warning("could not determine __code__ for %s", f)
+        reset()
+        log.warning("could not determine __code__ for %s", f)
 
 
 def nothing() -> None:
