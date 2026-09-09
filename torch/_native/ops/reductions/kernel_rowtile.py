@@ -444,7 +444,9 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
     # faults; so would a compact input at a non-zero STORAGE OFFSET, whose strides are fine but
     # whose base pointer is not. Declare what the pointer meets and key on it, since cache_sig
     # has no alignment field of its own.
-    align = tile.align_bytes(N, x.element_size())
+    # What N allows, narrowed to what the base pointer meets: a wider claim than the pointer
+    # honours is rejected at launch, and N alone cannot see a storage offset.
+    align = _declared_align(x, tile.align_bytes(N, x.element_size()))
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
     fake_in = _L.fake_compact(dt, (_L.sym(), N), order=(1, 0), align=align)
     fake_1d = lambda t: _L.fake_compact(  # noqa: E731
@@ -500,6 +502,19 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
     return tuple(outs)
 
 
+def _declared_align(x, natural: int) -> int:
+    """The alignment the wrap may DECLARE for `x`: what N allows, narrowed to what its base
+    pointer meets. Both are powers of two, so halving terminates at the element width.
+    """
+    # const_data_ptr, so reading the address does not materialize a COW tensor.
+    with torch._C.DisableTorchFunctionSubclass():
+        ptr = x.const_data_ptr()
+    align = natural
+    while align > x.element_size() and ptr % align:
+        align //= 2
+    return align
+
+
 def reduce_row_tile(
     trait,
     trait_key,
@@ -551,7 +566,12 @@ def reduce_row_tile(
     nt = max(tpr, cfg.nt) if nt is None else nt
     nt -= nt % tpr  # rows_per_block must be whole
     if use_tma is None:
-        use_tma = tpr == 1 and tma_ok(N, x.element_size(), M, x.device)
+        natural = tile.align_bytes(N, x.element_size())
+        use_tma = (
+            tpr == 1
+            and _declared_align(x, natural) == natural
+            and tma_ok(N, x.element_size(), M, x.device)
+        )
     dt = torch2cute[x.dtype]
     op = tile.TileReduce(
         trait,
@@ -576,7 +596,12 @@ def reduce_row_tile(
     # RUNTIME, wrapping with both extents dynamic so one kernel serves a vec class; the TMA box
     # shape is compile-time, so that variant bakes N.
     isz = x.element_size()
-    align = op.tilemap.align_bytes(isz) if use_tma else tile.align_bytes(N, isz)
+    # Narrowed to what the base pointer meets; use_tma already required the natural claim.
+    align = (
+        op.tilemap.align_bytes(isz)
+        if use_tma
+        else _declared_align(x, tile.align_bytes(N, isz))
+    )
 
     def _fake():
         # Compile-time descriptors: 2D row-major, both extents dynamic (the inner one divisible by
@@ -600,7 +625,10 @@ def reduce_row_tile(
             _stream(),
         )
 
-    key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
+    # align is part of the KEY now that it depends on the pointer: two calls of the same shape
+    # can differ in it, and the declared value is baked into the kernel.
+    dts = tuple(out_dtypes[:ndst])
+    key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     # The real operands: read_only on the INPUT, or a COW input materializes on export. The other
