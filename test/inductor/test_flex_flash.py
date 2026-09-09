@@ -33,6 +33,7 @@ from torch.testing._internal.common_cuda import (
     SM120OrLater,
     SM80OrLater,
     SM90OrLater,
+    with_tf32_off,
     xfailIfSM120OrLater,
     xfailIfSM12X,
 )
@@ -416,6 +417,7 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
     result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
+@with_tf32_off
 def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2, *, dynamic=False):
     compiled_fn = torch.compile(flex_attention, dynamic=dynamic)
     enable_gqa = q.shape[1] != k.shape[1]
@@ -2002,6 +2004,7 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
+    @with_tf32_off
     def test_flash_attention_shared_captured_buffers(self, device, dtype):
         B, H, Q_LEN, KV_LEN, D = 2, 1, 512, 512, 64
 
@@ -2419,6 +2422,7 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
+    @with_tf32_off
     def test_flash_backend_return_lse_matches_triton_and_reference(self, device, dtype):
         torch.manual_seed(0)
         q, k, v = create_test_tensors(
@@ -2461,6 +2465,7 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
+    @with_tf32_off
     def test_flash_backend_supports_grad_logsumexp(self, device, dtype):
         torch.manual_seed(0)
         q, k, v = create_test_tensors(
@@ -3046,6 +3051,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             mask_mod, 2, None, q_len, kv_len, device="cuda"
         )
 
+    @with_tf32_off
     def test_dynamic_scalar_closure_in_mask_mod(self):
         if not flash_supports_aux_scalars():
             self.skipTest(
