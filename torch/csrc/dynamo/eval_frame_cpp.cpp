@@ -542,6 +542,12 @@ PyObject* dynamo__custom_eval_frame(
     // Presence-only: the marker's VALUE is not read, so setting the attribute
     // to anything (including False) forces the callback. This matches the
     // hasattr convention for the marker.
+    // Precondition: only set this marker on a callback that returns to eager
+    // cleanly on a miss (e.g. one that raises), never on one that can compile.
+    // Forcing the callback defeats a RUN_ONLY action, whose whole purpose after
+    // a recompile-limit hit is to skip the callback on a miss; a compiling
+    // callback would instead re-enter on every call, never add an entry, and
+    // so never clear the condition.
     force_callback_on_cache_miss = static_cast<bool>(
         lookup_optional(callback, force_callback_marker_name));
   }
