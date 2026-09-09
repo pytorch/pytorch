@@ -30,6 +30,7 @@ from torch._dynamo.guards import (
     GuardsStatePickler,
 )
 from torch._dynamo.package import CompilePackage
+from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
@@ -639,6 +640,19 @@ class GetattrProxy:
         raise AttributeError(name)
 
 
+class SlottedLoudGetattr:
+    # No instance __dict__: a plain getattr(self, "__dict__") lands here and
+    # raises something other than AttributeError.
+    __slots__ = ("val",)
+
+    def __getattr__(self, name):
+        if name == "global_add":
+            return global_add
+        if name == "__dict__":
+            raise RuntimeError("user __getattr__ ran for '__dict__'")
+        raise AttributeError(name)
+
+
 def _global_func_wrong_fqn(x):
     return x + 1
 
@@ -1042,12 +1056,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # through a capture, so none of TestGuardSerialization's setup applies.
 
     def test_reducer_handles_an_empty_cell_reached_directly(self):
-        # _prune_cell only sees cells of a reconstructed function. A cell
-        # reached directly -- a guarded __closure__ tuple, or the cell itself
-        # -- goes through reducer_override's CellType branch, which read
-        # cell_contents unguarded and raised ValueError out of the pickler.
-        # Pickler-level because a guard cannot root at a raw cell through a
-        # capture: CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
+        # _prune_cell only sees cells of a reconstructed function; a cell reached
+        # directly (a guarded __closure__ tuple, or the cell itself) goes through
+        # reducer_override's CellType branch, which read cell_contents unguarded.
+        # Pickler-level: CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
         empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
@@ -1068,11 +1080,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     def test_reduce_keeps_the_function_dict_key_set(self):
         # __dict__ must round-trip with its key set intact: an unguarded value
-        # prunes to _Missing IN PLACE, exactly like the sibling containers
-        # (__defaults__/__kwdefaults__/__annotations__). Dropping the key
-        # instead shrinks the dict, so a guard reading its shape rebakes against
-        # the smaller dict at load and never matches again. See the attributes
-        # branch in _reduce_function_by_value.
+        # prunes to _Missing IN PLACE like the sibling containers. Dropping the
+        # key would shrink the dict, so a guard on its shape rebakes against the
+        # smaller dict at load and never matches (see _reduce_function_by_value).
         def base(x):
             return x
 
@@ -1389,6 +1399,15 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
+
+    def test_bound_method_on_a_slotted_getattr_proxy_is_not_probed(self):
+        # No instance __dict__: the receiver probe must read the slot, not getattr.
+        m = types.MethodType(global_add, SlottedLoudGetattr())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, SlottedLoudGetattr)
 
     def test_unpicklable_value_error_names_the_attribute_path(self):
         # A type alone ("cannot pickle 'generator' object") is not actionable in
@@ -1764,11 +1783,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     @torch._dynamo.config.patch(strict_precompile=True)
     def test_recursing_guarded_value_overflow_is_a_package_error(self):
-        # A recursion overflow while pickling a guarded value -- here a
-        # pathological __reduce__ that never memoizes -- is a serialization
-        # limit, not a compiler crash. It surfaces as a PackageError (a bypass
-        # without strict_precompile), never a raw RecursionError that hard-fails
-        # a program that compiled fine before.
+        # A recursion overflow while pickling a guarded value (a pathological
+        # __reduce__ that never memoizes) is a serialization limit, not a compiler
+        # crash: a PackageError bypass, never a raw RecursionError.
         mod = DecoratedRecursingGuardedDefaultForwardModule()
         with self.assertRaisesRegex(
             torch._dynamo.exc.PackageError, "exceeded the recursion limit"
@@ -1889,37 +1906,50 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_fqn_mismatched_function_prunes_an_unpicklable_called_default(self):
         # The call-site default binding (DefaultsSource, base = the function)
         # registers the __defaults__ tuple via SEQUENCE_LENGTH, but the generic
-        # container->element edge keys on the function, not the tuple, so the
-        # tuple is carried verbatim and drags in the unpicklable sibling default.
-        # This shape is unreachable through _test_serialization: its guard filter
-        # drops the whole-tuple SEQUENCE_LENGTH guard, so the tuple is never
-        # _keep and gets pruned regardless. Only the full compile path (all
-        # guards live) puts the tuple in guard_tree_values while the guarded
-        # element is rooted at the function -- so drive a real compile here.
+        # container->element edge keys on the function, so the tuple was carried
+        # verbatim with its unpicklable sibling. _test_serialization's guard
+        # filter drops the whole-tuple guard, so only a full compile (all guards
+        # live) reaches this shape -- drive a real compile here.
         mod = DecoratedCalledDefaultForwardModule()
+        PrecompileContext.clear()
         # Serializes cleanly with the edge recorded on the tuple; without it this
-        # raises PackageError("cannot pickle '_thread.lock' object").
+        # raises PackageError("cannot pickle '_thread.lock' object"). Pin that
+        # the frame was captured rather than bypassed.
         torch.compile(mod, backend="eager")(torch.randn(3))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_fqn_mismatched_function_prunes_a_verbatim_dict_read(self):
         # A guard that reads the WHOLE __dict__ (DunderDict keeps the mapping)
-        # plus an element through it records no child edge on __dict__ under the
-        # generic rule (it keys on the function, not its dict), so the mapping
-        # was carried verbatim and an unpicklable unguarded sibling (func.cache)
-        # bypassed the frame. Like the called-default shape this only survives
-        # the full compile path -- _test_serialization's filter drops the
-        # whole-dict guard. The mapping edge in get_guard_manager_from_source
-        # prunes per value; without it this raises PackageError on the lock.
+        # plus an element through it recorded no child edge on __dict__ (the
+        # generic rule keys on the function), so an unpicklable unguarded
+        # sibling (func.cache) bypassed the frame. Full-compile only, like the
+        # called-default shape; without the mapping edge this raises PackageError.
         mod = DecoratedWholeDictAttributeForwardModule()
+        PrecompileContext.clear()
         torch.compile(mod, backend="eager")(torch.randn(3))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_attribute_guard_on_a_slotted_receiver_runs_no_user_getattr(self):
+        # The mapping edge reads the receiver's __dict__; on a __slots__ receiver
+        # a plain getattr fell through to the user's __getattr__, whose
+        # non-AttributeError escaped guard creation (outside the bypass).
+        obj = SlottedLoudGetattr()
+        obj.val = 2.0
+
+        def fn(o, x):
+            return x + 1 if o.val == 2.0 else x
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(obj, x), x + 1)
 
     def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):
-        # The container->element edge is recorded on the source, not the
-        # element's value, so a guard rooted at a None-valued default still
-        # prunes the tuple per value and drops the unpicklable sibling. Gating
-        # the edge on `value is not None` would carry the tuple verbatim and
-        # bypass the whole package on this ordinary `cfg=None` shape.
+        # The container->element edge is recorded on the source, not the value,
+        # so a guard rooted at a None-valued default still prunes the tuple per
+        # value; gating on `value is not None` would bypass this `cfg=None` shape.
         mod = DecoratedNoneDefaultForwardModule()
         ref, loaded = self._test_serialization("CONSTANT_MATCH", mod, torch.randn(3))
         inner = type(mod).forward.__wrapped__

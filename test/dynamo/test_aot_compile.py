@@ -775,8 +775,62 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        with self.assertRaises((TypeError, pickle.PicklingError)):
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
             AOTCompilePickler({}, buf).dump(fn)
+        self.assertIn("cannot pickle", str(cm.exception))
+
+    def test_pickler_breaks_a_dict_cycle_between_nested_functions(self):
+        # Two nested functions whose __dict__ entries point at each other
+        # re-enter _dumps_cleanly mid-probe: the in-flight short-circuit breaks
+        # the cycle, the unpicklable sibling is still pruned, and the rebuilt
+        # pair still refers to itself.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        def outer():
+            def g(x):
+                return x + 1
+
+            def h(x):
+                return x + 2
+
+            g.h, h.g, g.lock = h, g, threading.Lock()
+            return g
+
+        g = outer()
+        buf = io.BytesIO()
+        AOTCompilePickler({}, buf).dump(g)
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.h.g, out)
+        self.assertFalse(hasattr(out, "lock"))
+        self.assertEqual((out(1), out.h(1)), (2, 3))
+
+    def test_pickler_prunes_an_unmarked_module_from_a_nested_functions_dict(self):
+        # persistent_id records an nn.Module rather than raising, so a Module
+        # reached through a nested function's __dict__ would dump here and then
+        # poison serialize(); _dumps_cleanly prunes it instead -- unless the user
+        # marked it as external data, in which case it is kept by reference.
+        from torch._dynamo.aot_compile import AOTCompilePickler, AOTCompileUnpickler
+
+        mod = torch.nn.Linear(1, 1)
+
+        def outer():
+            def helper(x):
+                return x
+
+            helper.mod = mod
+            return helper
+
+        fn = outer()
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler({}, buf)
+        pickler.dump(fn)
+        self.assertEqual(pickler.errors, {})
+        out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
+        self.assertFalse(hasattr(out, "mod"))
+        buf = io.BytesIO()
+        AOTCompilePickler({"mod": mod}, buf).dump(fn)
+        out = AOTCompileUnpickler({"mod": mod}, io.BytesIO(buf.getvalue())).load()
+        self.assertIs(out.mod, mod)
 
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
@@ -916,12 +970,12 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
     def test_save_guidance_when_a_locals_class_default_cannot_pickle(self):
         # A <locals> class instance in __defaults__ rides unpruned and pickle
-        # rejects it: the default C _pickle accelerator raises AttributeError
-        # "Can't get local object" (the pure-Python pickler would re-wrap it as
-        # PicklingError; some CPython versions raise PicklingError "Can't pickle
-        # local object"). All three are caught, and the shared "local object"
-        # substring is asserted so the test does not pin one pickler's wording;
-        # it gets the external_data guidance appended.
+        # rejects it. The C pickler AOTCompilePickler subclasses raises
+        # AttributeError "Can't get local object" (3.13 and earlier) or
+        # PicklingError "Can't pickle local object" (3.14+); serialize() catches
+        # both, and the shared "local object" substring is asserted so the test
+        # does not pin one version's wording. It gets the external_data guidance
+        # appended.
         def outer():
             class Cfg:
                 def __init__(self):
@@ -1406,6 +1460,7 @@ from user code:
         self.assertIn("[1]", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input.
         self.assertEqual(len(message.splitlines()), 4)
+        self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_survives_a_raising_guard(self):
         # __call__ has already established that nothing matched; re-evaluating
@@ -1417,7 +1472,7 @@ from user code:
                 self._inner = inner
 
             def check(self, f_locals):
-                return self._inner.check(f_locals)
+                raise KeyError("G['SOME_GLOBAL']")
 
             def check_verbose(self, f_locals):
                 raise KeyError("G['SOME_GLOBAL']")
@@ -1676,6 +1731,30 @@ from user code:
         finally:
             AOT_POOL_MODE = saved
 
+    def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
+        # Loaded without f_globals, a function artifact's guard scope is the
+        # live module dict rebuilt from the serialized bytecode; when a guarded
+        # global is then missing, the failure says how to supply it.
+        x = torch.randn(4, 8)
+        with _set_pool_mode("sum"):
+            compiled_fn = torch.compile(
+                global_rebind_fn,
+                fullgraph=True,
+                backend="inductor",
+                options={"guard_filter_fn": keep_global_guards},
+            ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        saved = globals().pop("AOT_POOL_MODE")
+        try:
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            with self.assertRaisesRegex(RuntimeError, "pass f_globals"):
+                loaded(x)
+        finally:
+            globals()["AOT_POOL_MODE"] = saved
+
     def test_aot_compile_module_absent_global_fails_guard(self):
         # A guarded global the loading process does not have has to fail the
         # guard. Falling back to the serialized scope would make the guard a
@@ -1706,6 +1785,7 @@ from user code:
                 reloaded(x)
             self.assertIn("No AOT compiled graph matched", str(ctx.exception))
             self.assertIn("AOT_ABSENT_WEIGHT", str(ctx.exception))
+            self.assertIn("load with an f_globals", str(ctx.exception))
         finally:
             globals()["AOT_ABSENT_WEIGHT"] = saved
 
@@ -2450,6 +2530,31 @@ from user code:
         with self.assertRaisesRegex(RuntimeError, "0.0.0-fake"):
             artifacts.check_compatibility()
 
+    def test_aot_compile_samples_the_codegen_target_under_the_wrappers_config(self):
+        # torch.compile(options={"cpp.simdlen": ...}) patches inductor config
+        # only while the backend runs; aot_compile re-applies it while sampling
+        # the fingerprint so the recorded simdlen is the one the kernels were
+        # tiled for, and the ambient config is untouched afterwards.
+        def fake_target():
+            simdlen = torch._inductor.config.cpp.simdlen
+            return ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), simdlen, None)
+
+        def fn(x):
+            return x + 1
+
+        self.assertIsNone(torch._inductor.config.cpp.simdlen)
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=fake_target,
+        ):
+            compiled = torch.compile(
+                fn, fullgraph=True, backend="inductor", options={"cpp.simdlen": 256}
+            ).aot_compile(((torch.randn(3, 3),), {}))
+        target = compiled._artifacts.system_info.cpu_codegen_target
+        self.assertIsNotNone(target)
+        self.assertEqual(target[4], 256)
+        self.assertIsNone(torch._inductor.config.cpp.simdlen)
+
     def test_check_compatibility_triton_and_gpu_exempt_off_artifact(self):
         # The Triton/GPU checks must exempt off the ARTIFACT (self), not the
         # host (other). An artifact built with Triton must be rejected on a
@@ -2473,6 +2578,16 @@ from user code:
             with self.assertRaisesRegex(RuntimeError, "different GPU"):
                 make((3, 5), "A100").check_compatibility(make((3, 5), "H100"), "cuda")
             make((3, 5), None).check_compatibility(make((3, 5), "H100"), "cuda")
+            # check_codegen=False skips the toolkit/Triton/GPU-model checks (they
+            # describe generated code) but not device existence.
+            make((3, 5), "A100").check_compatibility(
+                make((3, 5), "H100"), "cuda", check_codegen=False
+            )
+        with patch.object(torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "cuda is not available"):
+                make((0, 0), None).check_compatibility(
+                    make((0, 0), None), "cuda", check_codegen=False
+                )
 
     def test_inductor_cpu_capture_records_cpu_codegen_target(self):
         # Pins the recording side: a regression that records None silently
