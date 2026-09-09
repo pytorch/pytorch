@@ -597,6 +597,7 @@ class NestedReduction:
     class GroupedAxis(enum.Enum):
         R = enum.auto()
         X = enum.auto()
+        NATIVE_FULL_X = enum.auto()
 
     @dataclasses.dataclass(frozen=True)
     class PointwiseDomainContext:
@@ -819,7 +820,7 @@ class NestedReduction:
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
-        if outer_node.is_native_matmul() and grouped_axis is cls.GroupedAxis.X:
+        if grouped_axis is cls.GroupedAxis.NATIVE_FULL_X:
             return group_size > cls.MAX_NON_INNER_GROUP_SIZE
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
@@ -934,22 +935,25 @@ class NestedReduction:
         )
         if grouped_axis is None:
             return False
-        parent_grouped_axis = (
-            outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
-        )
         iter_ranges, _ = grouped_reduction.get_ranges()
-        if len(iter_ranges) == 2:
-            grouped_axis_groups = (
-                iter_ranges[1] if grouped_axis is cls.GroupedAxis.R else iter_ranges[0]
+        if grouped_axis is not cls.GroupedAxis.NATIVE_FULL_X:
+            parent_grouped_axis = (
+                outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
             )
-            if not V.graph.sizevars.statically_known_equals(
-                FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+            if len(iter_ranges) == 2:
+                grouped_axis_groups = (
+                    iter_ranges[1]
+                    if grouped_axis is cls.GroupedAxis.R
+                    else iter_ranges[0]
+                )
+                if not V.graph.sizevars.statically_known_equals(
+                    FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+                ):
+                    return False
+            elif not V.graph.sizevars.statically_known_equals(
+                sympy.Mod(parent_grouped_axis, group_size), 0
             ):
                 return False
-        elif not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(parent_grouped_axis, group_size), 0
-        ):
-            return False
         group_size_int = int(group_size)
         if not (1 <= group_size_int and is_power_of_2(group_size_int)):
             return False
@@ -992,25 +996,11 @@ class NestedReduction:
         sizevars = V.graph.sizevars
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
         if outer_node is not None and outer_node.is_native_matmul():
-            outer_reductions = [
-                sn for sn in outer_node.get_nodes() if sn.is_reduction()
-            ]
-            if len(outer_reductions) == 1 and isinstance(
-                outer_reductions[0], SchedulerNode
+            if cls._is_native_full_x_reduction(
+                outer_node, grouped_reduction, group_size
             ):
-                outer_iter_ranges, _ = outer_reductions[0].get_ranges()
-                if (
-                    len(outer_iter_ranges) == 2
-                    and len(iter_ranges) == 1
-                    and len(reduce_ranges) == 1
-                    and sizevars.statically_known_equals(
-                        outer_iter_ranges[0], iter_ranges[0]
-                    )
-                    and sizevars.statically_known_equals(
-                        outer_iter_ranges[1], group_size
-                    )
-                ):
-                    return cls.GroupedAxis.X
+                return cls.GroupedAxis.NATIVE_FULL_X
+            return None
         if len(iter_ranges) != 2 or len(reduce_ranges) != 1:
             if len(iter_ranges) == 1 and len(reduce_ranges) == 1:
                 if not sizevars.statically_known_equals(reduce_ranges[0], group_size):
@@ -1049,6 +1039,61 @@ class NestedReduction:
         if outer_node is not None:
             return cls._get_grouped_axis_from_loop_body(outer_node, grouped_reduction)
         return None
+
+    @classmethod
+    def _is_native_full_x_reduction(
+        cls,
+        outer_node: BaseSchedulerNode,
+        grouped_reduction: SchedulerNode,
+        group_size: sympy.Expr,
+    ) -> bool:
+        """Check that the grouped reduction consumes complete native X rows."""
+        from torch._inductor.loop_body import MemoryUsageType
+
+        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
+        if len(outer_reductions) != 1 or not isinstance(
+            outer_reductions[0], SchedulerNode
+        ):
+            return False
+        outer_iter_ranges, _ = outer_reductions[0].get_ranges()
+        iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        body = grouped_reduction._body
+        if not (
+            len(outer_iter_ranges) == 2
+            and len(iter_ranges) == 1
+            and len(reduce_ranges) == 1
+            and len(body.iter_vars) == 1
+            and len(body.reduce_vars) == 1
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[0], iter_ranges[0]
+            )
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[1], reduce_ranges[0]
+            )
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[1], group_size
+            )
+        ):
+            return False
+
+        row, column = body.iter_vars[0], body.reduce_vars[0]
+        expected_index = row * group_size + column
+        outer_numel = V.graph.sizevars.simplify(sympy_product(outer_iter_ranges))
+        full_size_reads: list[sympy.Expr] = []
+        for entry in body.memory_usage[MemoryUsageType.LOAD]:
+            if entry.buffer_name is None:
+                continue
+            buffer = V.graph.get_buffer(entry.buffer_name)
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(buffer.get_size()), outer_numel
+            ):
+                continue
+            full_size_reads.append(body.indexing_exprs[entry.index_name])
+
+        return bool(full_size_reads) and all(
+            V.graph.sizevars.statically_known_equals(index, expected_index)
+            for index in full_size_reads
+        )
 
     @classmethod
     def _get_grouped_axis_from_loop_body(
@@ -2423,6 +2468,25 @@ class SchedulerNode(BaseSchedulerNode):
             self._loop_state_gen,
         ) = state
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
+
+    @contextlib.contextmanager
+    def use_default_loop_body(self) -> Iterator[None]:
+        """Temporarily restore the IR node's unsimplified loop ordering."""
+        if not isinstance(self.node, ir.ComputedBuffer):
+            raise AssertionError("expected a ComputedBuffer")
+        state = self.snapshot_loop_state()
+        try:
+            self._before_loop_state_mutation()
+            self._sizes, self._body, _ = self.node.get_default_sizes_body()
+            device = self.node.get_device_or_error()
+            self.group = (
+                device,
+                self.scheduler.get_backend(device).group_fn(self._sizes),
+            )
+            self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+            yield
+        finally:
+            self.restore_loop_state(state)
 
     def _before_loop_state_mutation(self) -> None:
         if self._loop_mutation_listener is not None:
@@ -5797,7 +5861,6 @@ class Scheduler:
             reduction_block = (
                 reduction_epilogue.block if reduction_epilogue is not None else None
             )
-            template_local_reduction = reduction_block is not None
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if reduction_block is not None:
@@ -5887,9 +5950,7 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = (
-                config.benchmark_epilogue_fusion and not template_local_reduction
-            )
+            bench_epilogue = config.benchmark_epilogue_fusion
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -6119,9 +6180,6 @@ class Scheduler:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
                     else:
-                        if template_local_reduction and res:
-                            ms_fused_choice = choice
-                            break
                         fusible_choice = (
                             min_choice == choice
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
@@ -8219,16 +8277,13 @@ class Scheduler:
             return True
         reduction_epilogue = None
         reduction_epilogue_supported = False
-        if node1.is_template() and node2.is_reduction():
+        if node1.is_template():
             backend = self.get_backend(node1.get_device())
-            reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
-            reduction_epilogue_supported = reduction_epilogue is not None
-            if not reduction_epilogue_supported:
-                reduction_epilogue_supported = backend.can_fuse_reduction_epilogue(
-                    node1, node2
-                )
-                if reduction_epilogue_supported:
-                    return True
+            if backend.can_fuse_reduction_epilogue(node1, node2):
+                return True
+            if node1.is_reduction() or node2.is_reduction():
+                reduction_epilogue = backend.analyze_reduction_epilogue(node1, node2)
+                reduction_epilogue_supported = reduction_epilogue is not None
         if isinstance(node1, GroupedSchedulerNode) or isinstance(
             node2, GroupedSchedulerNode
         ):
@@ -8407,6 +8462,11 @@ class Scheduler:
             backend = self.get_backend(node1.get_device())
             if (
                 (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
+                or (
+                    node1.is_reduction()
+                    and atomic_add_mutation_epilogue
+                    and reduction_epilogue is None
+                )
                 or (node2.is_reduction() and not reduction_epilogue_supported)
                 or not _is_epilogue_fusion_enabled(node1)
             ):
@@ -8525,6 +8585,7 @@ class Scheduler:
             # reduction's domain and retry.
             if (
                 reduction_epilogue is None
+                and not node1.is_template()
                 and config.loop_reindexing_after_fusion
                 and self._try_reindex_pointwise_for_reduction(node1, node2)
             ):

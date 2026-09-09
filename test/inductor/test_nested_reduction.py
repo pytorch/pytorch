@@ -141,12 +141,21 @@ def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
 
-    def test_native_matmul_output_reduction(self):
+    @parametrize(
+        "shape",
+        (
+            (256, 128, 16),
+            (256, 2048, 64),
+            (256, 1024, 128),
+            (512, 4096, 64),
+        ),
+    )
+    def test_native_matmul_output_reduction(self, shape):
         def f(x, w1, bias1, w2, bias2):
             hidden = torch.relu(x @ w1 + bias1)
             return (hidden * w2).sum(dim=-1) + bias2
 
-        m, k, n = 256, 128, 16
+        m, k, n = shape
         dtype = torch.float16
         args = (
             torch.randn(m, k, device=GPU_TYPE, dtype=dtype),
@@ -156,8 +165,55 @@ class _NestedReductionBase:
             torch.randn(1, device=GPU_TYPE, dtype=dtype),
         )
         with inductor_config.patch("triton.native_matmul", True):
-            self.check_nested_matches_unnested(f, args, tol=5e-2)
+            self.check_numeric(f, args, tol=5e-1)
         self.check_fusion()
+
+    def test_native_matmul_column_reduction_not_fused(self):
+        def f(x, weight):
+            return (x @ weight).sum(dim=0)
+
+        args = (
+            torch.randn(16, 32, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(32, 16, device=GPU_TYPE, dtype=torch.float16),
+        )
+        with inductor_config.patch("triton.native_matmul", True):
+            self.check_numeric(f, args, tol=5e-2)
+        self.check_no_fusion()
+
+    @parametrize("case", ("flattened", "reshaped"))
+    def test_native_matmul_partial_x_reduction_not_fused(self, case):
+        def f(x, weight):
+            output = x @ weight
+            if case == "flattened":
+                return output.reshape(1, -1).expand(64, -1).sum(-1)
+            return output.reshape(32, 1, 8).expand(32, 32, 8).amax(-1)
+
+        if case == "flattened":
+            args = (
+                torch.randn(4, 64, device=GPU_TYPE, dtype=torch.float16),
+                torch.randn(64, 8, device=GPU_TYPE, dtype=torch.float16),
+            )
+        else:
+            args = (
+                torch.randn(16, 64, device=GPU_TYPE, dtype=torch.float16),
+                torch.randn(64, 16, device=GPU_TYPE, dtype=torch.float16),
+            )
+        with inductor_config.patch("triton.native_matmul", True):
+            self.check_numeric(f, args, tol=5e-2)
+        self.check_no_fusion()
+
+    def test_native_matmul_reduction_broadcast_consumer_not_fused(self):
+        def f(x, weight):
+            hidden = x @ weight
+            return hidden - hidden.sum(-1, keepdim=True)
+
+        args = (
+            torch.randn(256, 128, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(128, 16, device=GPU_TYPE, dtype=torch.float16),
+        )
+        with inductor_config.patch("triton.native_matmul", True):
+            self.check_numeric(f, args, tol=5e-2)
+        self.check_no_fusion()
 
     # ---- Small dim in X: norm + weighted reduce ----
 

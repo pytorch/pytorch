@@ -189,6 +189,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate non-persistent reduction autotuning configs."""
         from torch._inductor.runtime.triton_heuristics import (
+            _enforce_native_matmul_config_min_xblock,
             get_total_reduction_numel,
             make_matmul_triton_config,
             triton_config_reduction,
@@ -217,17 +218,20 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         if triton_meta.get("native_matmul"):
             if len(size_hints) == 3:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_mm_configs
                 ]
             elif len(size_hints) == 4:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_bmm_configs
                 ]
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            return _enforce_native_matmul_config_min_xblock(
+                configs, inductor_meta.get("min_xblock")
+            )
 
         def make_config(
             x,
@@ -366,6 +370,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             from torch._inductor.runtime.hints import native_matmul_persistent_rblock
             from torch._inductor.runtime.triton_heuristics import (
                 _cap_native_matmul_configs,
+                _enforce_native_matmul_config_min_xblock,
             )
 
             native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
@@ -377,15 +382,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             elif len(size_hints) == 4:
                 configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            configs = _cap_native_matmul_configs(configs, native_matmul_rblock)
+            return _enforce_native_matmul_config_min_xblock(
+                configs,
+                inductor_meta.get("min_xblock"),
+                r0_block=native_matmul_rblock,
+            )
 
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
             "max_autotune_pointwise"

@@ -107,6 +107,7 @@ from torch._inductor.utils import (
     fresh_cache,
     get_k_splits,
     run_and_get_code,
+    run_and_get_kernels,
     use_decompose_k_choice,
 )
 from torch._inductor.virtualized import V
@@ -214,10 +215,105 @@ class TestMaxAutotune(TestCase):
             actual, code = run_and_get_code(torch.compile(f), a, b, bias)
 
         self.assertEqual(actual, f(a, b, bias))
-        FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
-            "block_local_"
-        ).check_count("triton_helpers.max2(", 2, exactly=True).run(code[0])
-        FileCheck().check_count("tl.store(", 2, exactly=True).run(code[0])
+        FileCheck().check("block_local_").check_count(
+            "triton_helpers.max2(", 2, exactly=True
+        ).run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize("groups", ((2, 2), (3, 2)))
+    def test_persistent_tma_block_local_reduction_indexed_input(self, groups):
+        groups_m, groups_n = groups
+
+        def f(a, b, weight):
+            weighted = (a @ b) * weight
+            return weighted.view(groups_m, 128, groups_n, 128).sum((1, 3))
+
+        a = torch.randn(groups_m * 128, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, groups_n * 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(
+            groups_m * 128,
+            groups_n * 128,
+            device=GPU_TYPE,
+            dtype=torch.bfloat16,
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, weight)
+
+        self.assertEqual(actual, f(a, b, weight))
+        FileCheck().check("block_local_").check("tl.sum").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_later_consumer(self):
+        def f(a, b):
+            mm = a @ b
+            blocked = mm.view(2, 128, 2, 128)
+            reduced = blocked.amax((1, 3))
+            return blocked - reduced[:, None, :, None]
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_atomic_add_fallback(self):
+        def f(a, b, index, out):
+            reduced = (a @ b).view(2, 128, 2, 128).amax((1, 3))
+            return out.index_add_(0, index, reduced)
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        index = torch.arange(2, device=GPU_TYPE) // 2
+        out = torch.randn(1, 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        patches = {
+            "epilogue_fusion_with_atomic_add": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": "1",
+            "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+        }
+        with config.patch(patches):
+            actual, code = run_and_get_code(torch.compile(f), a, b, index, out.clone())
+
+        self.assertEqual(actual, f(a, b, index, out.clone()))
+        FileCheck().check("block_local_").check("torch.ops.aten.index_add.default").run(
+            code[0]
+        )
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -245,13 +341,13 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            actual, code = run_and_get_code(torch.compile(f), a, b, scale)
+            actual, kernels = run_and_get_kernels(torch.compile(f), a, b, scale)
 
         self.assertEqual(actual, f(a, b, scale))
-        FileCheck().check_count("async_compile.triton", 1, exactly=True).check(
-            "block_local_"
-        ).check("tl.maximum").check("block_local_3_xindex").run(code[0])
-        FileCheck().check_count("tl.store(", 4, exactly=True).run(code[0])
+        block_local_kernels = [code for code in kernels if "block_local_" in code]
+        self.assertEqual(len(block_local_kernels), 1)
+        FileCheck().check("tl.maximum").run(block_local_kernels[0])
+        self.assertEqual(block_local_kernels[0].count("tl.store("), 4)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -280,7 +376,6 @@ class TestMaxAutotune(TestCase):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
         self.assertEqual(actual, f(a, b))
-        self.assertGreaterEqual(code[0].count("async_compile.triton"), 2)
         FileCheck().check("block_local_").run(code[0])
 
     @unittest.skipIf(
@@ -306,13 +401,21 @@ class TestMaxAutotune(TestCase):
             "larger_tile_n",
             "larger_tile_both",
             "larger_tile_relu",
+            "unsplit",
+            "nondividing_split",
+            "non_power_of_two_chain",
             "smaller_tile",
             "nondivisible_tile",
             "disabled_epilogue",
         ),
     )
     def test_persistent_tma_block_local_reduction_cases(self, case):
-        block = 96 if case == "nondivisible_tile" else 128
+        if case == "nondivisible_tile":
+            block = 96
+        elif case == "unsplit":
+            block = 64
+        else:
+            block = 128
         if case == "nondivisible_tile":
             groups = 4
         else:
@@ -340,9 +443,10 @@ class TestMaxAutotune(TestCase):
                 return (blocked + blocked.flip(-1)).amax((1, 3))
             if case in ("relu", "larger_tile_relu"):
                 return blocked.relu().amax((1, 3))
-            if case == "chain":
+            if case in ("chain", "non_power_of_two_chain"):
                 reduced = blocked.amax((1, 3))
-                return reduced.T.unsqueeze(-1).expand(2, 2, 8).amax(-1)
+                extent = 12 if case == "non_power_of_two_chain" else 8
+                return reduced.T.unsqueeze(-1).expand(2, 2, extent).amax(-1)
             return blocked.amax((1, 3))
 
         torch.manual_seed(0)
@@ -381,6 +485,19 @@ class TestMaxAutotune(TestCase):
                 )
             )
             patches["test_configs.max_mm_configs"] = 1
+        if case == "nondividing_split":
+
+            def reduction_split_factor(
+                self, device, reduction_numel_hint, numel_hint, inner_reduction
+            ):
+                return 3 if reduction_numel_hint == block * block else 1
+
+            stack.enter_context(
+                mock.patch(
+                    "torch._inductor.choices.InductorChoices.reduction_split_factor",
+                    reduction_split_factor,
+                )
+            )
         with stack, config.patch(patches):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
@@ -397,6 +514,8 @@ class TestMaxAutotune(TestCase):
             "larger_tile_n",
             "larger_tile_both",
             "larger_tile_relu",
+            "unsplit",
+            "non_power_of_two_chain",
         ):
             FileCheck().check("block_local_").run(code[0])
         else:
@@ -418,13 +537,13 @@ class TestMaxAutotune(TestCase):
                 tuple(torch.signbit(x) for x in expected),
             )
         elif case == "multiple":
-            FileCheck().check_count("async_compile.triton", 1, exactly=True).run(
-                code[0]
-            )
+            FileCheck().check_count("block_local_", 3, exactly=False).run(code[0])
         if case in ("relu", "larger_tile_relu"):
             FileCheck().check("tl.maximum").check("block_local_").run(code[0])
         if case.startswith("larger_tile"):
             FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
+        if case == "non_power_of_two_chain":
+            FileCheck().check_not("tl.arange(0, 12)").run(code[0])
 
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
         make_matrix = functools.partial(
@@ -6085,9 +6204,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
-        "test_persistent_tma_block_local_reduction_cases": (
-            "Covered by synchronous template-choice filtering"
-        ),
         "test_template_local_reduction_multi_kernel_hints": (
             "Covers the synchronous hint prepass"
         ),

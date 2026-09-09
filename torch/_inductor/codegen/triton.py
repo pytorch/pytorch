@@ -8196,6 +8196,24 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         return "\n".join(new_src_lines)
 
 
+@dataclasses.dataclass(frozen=True)
+class _TemplateLocalReductionRoot:
+    node: SchedulerNode
+    prevalidated_dep_names: frozenset[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class _TemplateLocalReductionPlan:
+    block: tuple[int, int]
+    roots: tuple[_TemplateLocalReductionRoot, ...]
+
+    def root_for(self, node: SchedulerNode) -> _TemplateLocalReductionRoot | None:
+        return next(
+            (root for root in self.roots if root.node is node),
+            None,
+        )
+
+
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
@@ -8228,7 +8246,7 @@ class TritonScheduling(SIMDScheduling):
         return isinstance(
             choice, ir.TritonTemplateCallerBase
         ) and TritonScheduling._template_local_reduction_tile_is_compatible(
-            getattr(choice, "template_local_reduction_tile", None), block
+            choice.template_local_reduction_tile, block
         )
 
     @staticmethod
@@ -8236,16 +8254,20 @@ class TritonScheduling(SIMDScheduling):
         tile: tuple[int, int] | None, block: tuple[int, int]
     ) -> bool:
         return tile is not None and all(
-            tile_size >= block_size and tile_size % block_size == 0
+            tile_size >= block_size
+            and tile_size % block_size == 0
+            and V.graph.sizevars.statically_known_power_of_2(
+                sympy.Integer(tile_size // block_size)
+            )
             for tile_size, block_size in zip(tile, block)
         )
 
     @staticmethod
-    def _template_local_reduction_root_block(
+    def _template_local_reduction_root(
         template: ir.TritonTemplateBuffer,
         node: BaseSchedulerNode,
         local_buffers: OrderedSet[str],
-    ) -> tuple[tuple[int, int], OrderedSet[str]] | None:
+    ) -> tuple[tuple[int, int], frozenset[str]] | None:
         if not (
             isinstance(node, SchedulerNode)
             and node.is_reduction()
@@ -8253,59 +8275,69 @@ class TritonScheduling(SIMDScheduling):
             and isinstance(node.node.data, ir.Reduction)
         ):
             return None
-        reduction = node.node
+        reduction = node.node.get_original_reduction()
         if (
-            reduction._split_size is None
-            or reduction._original_inner_fn is None
-            or reduction._original_ranges is None
-            or reduction._original_reduction_ranges is None
-            or len(reduction._original_ranges) != 2
-            or len(reduction._original_reduction_ranges) != 2
+            reduction is None
+            or reduction.reduction_type not in {"max", "min", "sum"}
+            or len(reduction.ranges) != 2
+            or len(reduction.reduction_ranges) != 2
         ):
             return None
 
         m, n = template.get_size()
-        try:
-            block_m = V.graph.sizevars.optimization_hint(
-                reduction._original_reduction_ranges[0]
+        block_m = V.graph.sizevars.optimization_hint(reduction.reduction_ranges[0])
+        block_n = V.graph.sizevars.optimization_hint(reduction.reduction_ranges[1])
+        if not (
+            V.graph.sizevars.statically_known_equals(
+                reduction.reduction_ranges[0], block_m
             )
-            block_n = V.graph.sizevars.optimization_hint(
-                reduction._original_reduction_ranges[1]
+            and V.graph.sizevars.statically_known_equals(
+                reduction.reduction_ranges[1], block_n
             )
-        except (TypeError, ValueError):
+            and V.graph.sizevars.statically_known_power_of_2(sympy.Integer(block_m))
+            and V.graph.sizevars.statically_known_power_of_2(sympy.Integer(block_n))
+        ):
             return None
         if not (
             V.graph.sizevars.statically_known_equals(sympy.Mod(m, block_m), 0)
             and V.graph.sizevars.statically_known_equals(sympy.Mod(n, block_n), 0)
             and V.graph.sizevars.statically_known_list_equals(
-                reduction._original_ranges,
+                reduction.ranges,
                 (m // block_m, n // block_n),
             )
         ):
             return None
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(node.node.data.ranges)
+            * sympy_product(node.node.data.reduction_ranges),
+            sympy_product(reduction.ranges) * sympy_product(reduction.reduction_ranges),
+        ):
+            return None
 
-        with reduction.with_original_inner_fn():
-            read_writes = reduction.get_read_writes()
-            range_vars = read_writes.range_vars
-            if range_vars is None or len(range_vars) != 4:
-                return None
-            index_m, index_n, reduction_m, reduction_n = range_vars
-            expected_index = template.make_indexer()(
-                (
-                    index_m * block_m + reduction_m,
-                    index_n * block_n + reduction_n,
-                )
+        read_writes = node.node.get_original_reduction_read_writes()
+        if read_writes is None:
+            return None
+        range_vars = read_writes.range_vars
+        if range_vars is None or len(range_vars) != 4:
+            return None
+        index_m, index_n, reduction_m, reduction_n = range_vars
+        expected_index = template.make_indexer()(
+            (
+                index_m * block_m + reduction_m,
+                index_n * block_n + reduction_n,
             )
-            local_reads = [
-                dep for dep in read_writes.reads if dep.name in local_buffers
-            ]
-            if not local_reads or not all(
-                isinstance(dep, MemoryDep)
-                and sympy.simplify(dep.index - expected_index) == 0
-                for dep in local_reads
-            ):
-                return None
-        return (block_m, block_n), OrderedSet(dep.name for dep in local_reads)
+        )
+        local_reads = [dep for dep in read_writes.reads if dep.name in local_buffers]
+        if not local_reads or not all(
+            isinstance(dep, MemoryDep)
+            and V.graph.sizevars.statically_known_equals(dep.index, expected_index)
+            for dep in local_reads
+        ):
+            return None
+        return (
+            (block_m, block_n),
+            frozenset(dep.name for dep in local_reads),
+        )
 
     @staticmethod
     def _template_local_node_numels(
@@ -8326,7 +8358,11 @@ class TritonScheduling(SIMDScheduling):
             reduction = node.node.data
 
         m, n = template.get_size()
-        _, (numel, rnumel) = node.group
+        if reduction is not None:
+            numel = sympy_product(reduction.ranges)
+            rnumel = sympy_product(reduction.reduction_ranges)
+        else:
+            _, (numel, rnumel) = node.group
         if (
             not node.is_reduction()
             and V.graph.sizevars.statically_known_equals(rnumel, 1)
@@ -8344,8 +8380,12 @@ class TritonScheduling(SIMDScheduling):
         znumel = FloorDiv(numel, output_numel)
         numels = {"x": output_m, "y": output_n}
         if not V.graph.sizevars.statically_known_equals(znumel, 1):
+            if not V.graph.sizevars.statically_known_power_of_2(znumel):
+                return None
             numels["z"] = znumel
         if reduction is not None:
+            if not V.graph.sizevars.statically_known_power_of_2(rnumel):
+                return None
             numels["r0_"] = rnumel
             ranges = (reduction.ranges, reduction.reduction_ranges)
         else:
@@ -8358,19 +8398,13 @@ class TritonScheduling(SIMDScheduling):
 
     @staticmethod
     def _template_local_node_dependencies(
-        template: ir.TritonTemplateBuffer,
-        block: tuple[int, int],
         node: SchedulerNode,
         local_buffers: OrderedSet[str],
+        root: _TemplateLocalReductionRoot | None,
+        root_names: frozenset[str],
     ) -> tuple[OrderedSet[str], OrderedSet[str], OrderedSet[str]] | None:
-        root = TritonScheduling._template_local_reduction_root_block(
-            template, node, local_buffers
-        )
         if root is not None:
-            root_block, prevalidated = root
-            if root_block != block:
-                return None
-            return prevalidated, OrderedSet(), OrderedSet()
+            return OrderedSet(root.prevalidated_dep_names), OrderedSet(), OrderedSet()
 
         _, (numel, rnumel) = node.group
         local_deps = [
@@ -8388,10 +8422,7 @@ class TritonScheduling(SIMDScheduling):
             if node.is_reduction() and V.graph.sizevars.statically_known_equals(
                 source_numel, numel * rnumel
             ):
-                if (
-                    isinstance(source, ir.ComputedBuffer)
-                    and source._split_size is not None
-                ):
+                if name in root_names:
                     index_equivalent.add(name)
                     continue
                 return None
@@ -8400,29 +8431,45 @@ class TritonScheduling(SIMDScheduling):
         return OrderedSet(), index_equivalent, OrderedSet(local_dep_counts)
 
     @classmethod
-    def _template_local_reduction_block(
+    def _template_local_reduction_plan(
         cls,
         template: ir.TritonTemplateBuffer,
         nodes: Sequence[BaseSchedulerNode],
-    ) -> tuple[int, int] | None:
+    ) -> _TemplateLocalReductionPlan | None:
         if len(template.get_size()) != 2:
             return None
         blocks = OrderedSet[tuple[int, int]]()
+        roots: list[_TemplateLocalReductionRoot] = []
         local_buffers = OrderedSet([template.get_name()])
         for node in nodes:
-            root = cls._template_local_reduction_root_block(
-                template, node, local_buffers
-            )
+            root = cls._template_local_reduction_root(template, node, local_buffers)
             if root is not None:
-                blocks.add(root[0])
+                block, prevalidated = root
+                blocks.add(block)
+                roots.append(
+                    _TemplateLocalReductionRoot(
+                        node=cast(SchedulerNode, node),
+                        prevalidated_dep_names=prevalidated,
+                    )
+                )
             local_buffers.update(node.get_buffer_names())
-        if len(blocks) != 1:
+        if len(blocks) != 1 or not roots:
             return None
         block = next(iter(blocks))
+        plan = _TemplateLocalReductionPlan(block, tuple(roots))
         for node in nodes:
-            if cls._template_local_node_numels(template, block, node) is None:
+            if not isinstance(node, SchedulerNode):
                 return None
-        return block
+            if (
+                cls._template_local_node_numels(
+                    template,
+                    block,
+                    node,
+                )
+                is None
+            ):
+                return None
+        return plan
 
     def analyze_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -8430,23 +8477,22 @@ class TritonScheduling(SIMDScheduling):
         template = node1.get_template_node()
         if (
             not isinstance(template, ir.TritonTemplateBuffer)
-            or not node2.is_reduction()
             or node2.has_aliasing_or_mutation()
         ):
             return None
         nodes = [node for node in node1.get_nodes() if not node.is_template()]
         nodes.extend(node2.get_nodes())
-        block = self._template_local_reduction_block(template, nodes)
-        if block is None:
+        plan = self._template_local_reduction_plan(template, nodes)
+        if plan is None:
             return None
         if isinstance(template, ir.MultiTemplateBuffer):
-            choice, _ = template.get_min_choice()
-            tile_is_compatible = self._choice_supports_template_local_reduction(
-                choice, block
+            tile_is_compatible = any(
+                self._choice_supports_template_local_reduction(choice, plan.block)
+                for choice in template.choices
             )
         else:
             tile_is_compatible = self._template_local_reduction_tile_is_compatible(
-                template.template_local_reduction_tile, block
+                template.template_local_reduction_tile, plan.block
             )
         if not tile_is_compatible:
             return None
@@ -8455,11 +8501,17 @@ class TritonScheduling(SIMDScheduling):
         index_equivalent = OrderedSet[str]()
         ordinary_local_reads = OrderedSet[str]()
         local_buffers = OrderedSet(node1.get_buffer_names())
+        root_names = frozenset(
+            name for root in plan.roots for name in root.node.get_buffer_names()
+        )
         for node in node2.get_nodes():
             if not isinstance(node, SchedulerNode):
                 return None
             dependencies = self._template_local_node_dependencies(
-                template, block, node, local_buffers
+                node,
+                local_buffers,
+                plan.root_for(node),
+                root_names,
             )
             if dependencies is None:
                 return None
@@ -8473,7 +8525,7 @@ class TritonScheduling(SIMDScheduling):
             ordinary_local_reads |= ordinary_node_reads
             local_buffers.update(node.get_buffer_names())
         return ReductionEpilogueFusion(
-            block,
+            plan.block,
             frozenset(prevalidated),
             frozenset(index_equivalent),
         )
