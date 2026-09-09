@@ -118,7 +118,7 @@ class TestSIMDRangeTrees(TestCase):
                 self.assertEqual(kernel.range_trees, [x_tree, r_tree])
                 self.assertFalse(indexing.has_rmask())
 
-    def test_reduction_numel_reuse_uses_parent_tree_extent(self):
+    def test_derived_reduction_extent_reuses_r_numel(self):
         graph = self._make_graph()
         with V.set_graph_handler(graph):
             reduction_numel = graph.sizevars.shape_env.create_symbol(
@@ -136,17 +136,25 @@ class TestSIMDRangeTrees(TestCase):
             )
             x_tree, r_tree = kernel.range_trees
             derived = self._make_derived_root(r_tree, group_size=sympy.Integer(2))
-            expected = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
+            r_numel_symbol = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
 
             kernel.finalize_indexing([reduction_numel])
+            self.assertEqual(
+                kernel._r_numel_reuse_replacements,
+                {r_numel_symbol: reduction_numel},
+            )
+            self.assertEqual(
+                kernel._r_numel_reuse_eliminated_symbols,
+                OrderedSet([reduction_numel]),
+            )
             with kernel.use_range_trees([x_tree, derived]):
                 self.assertEqual(
                     kernel._replace_reduction_numel_in_index(reduction_numel),
-                    expected,
+                    r_numel_symbol,
                 )
                 self.assertEqual(
                     kernel._replace_reduction_numel_in_index(derived.numel),
-                    FloorDiv(expected, 2),
+                    FloorDiv(r_numel_symbol, 2),
                 )
 
     def test_reduction_numel_reuse_supports_multiple_reduction_trees(self):

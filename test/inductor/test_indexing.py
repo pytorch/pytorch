@@ -9,7 +9,7 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
@@ -1279,7 +1279,9 @@ class ReductionInvariantIndexingTests(InductorTestCase):
 
         self.assertEqual(expected, actual)
         self.assertEqual(1, len(kernels))
-        FileCheck().check("r0_1 + r0_numel*x0").check_not("ks0").run(kernels[0])
+        kernel = metrics._parse_proper_kernel_fn_code(kernels[0])
+        self.assertEqual(6, metrics._count_args(kernel))
+        FileCheck().check("r0_1 + r0_numel*x0").check_not("ks0").run(kernel)
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     def test_reuse_second_reduction_numel_for_indexing(self):
