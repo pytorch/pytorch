@@ -3295,6 +3295,9 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
+        # pyrefly: ignore [not-iterable]
+        if not all(isinstance(k, str) for k in kwargsvars):
+            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
