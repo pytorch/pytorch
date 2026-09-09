@@ -32,7 +32,7 @@ import cutlass.cute as cute
 from cutlass import Float32, Uint32, Uint64
 from cutlass.base_dsl.arch import Arch
 from cutlass._mlir import ir
-from cutlass._mlir.dialects import arith, llvm, vector
+from cutlass._mlir.dialects import llvm, vector
 from cutlass._mlir_helpers.arith import bitcast as _bitcast
 from cutlass.cutlass_dsl import dsl_user_op, Int32, T
 
@@ -62,61 +62,6 @@ def _asm(res_type, ptx: str, constraints: str, args):
     return llvm.inline_asm(
         res_type, args, ptx, constraints, has_side_effects=False, is_align_stack=False
     )
-
-
-def _decode_ue8m0x2_to_f32(packed, *, loc=None, ip=None) -> tuple[Float32, Float32]:
-    """Decode packed E8M0 codes through BF16, which represents them exactly."""
-    pair_type = ir.VectorType.get([2], cutlass.BFloat16.mlir_type, loc=loc)
-    pair = llvm.bitcast(pair_type, packed, loc=loc, ip=ip)
-    return tuple(
-        Float32(
-            arith.extf(
-                Float32.mlir_type,
-                vector.extract(
-                    pair,
-                    dynamic_position=[],
-                    static_position=[index],
-                    loc=loc,
-                    ip=ip,
-                ),
-                loc=loc,
-                ip=ip,
-            )
-        )
-        for index in range(2)
-    )
-
-
-def _cvt_f32x2_ue8m0x2(
-    a: Float32,
-    b: Float32,
-    instruction: str,
-    *,
-    loc=None,
-    ip=None,
-) -> tuple[Float32, Float32]:
-    """Convert two Float32 values to E8M0 and decode the resulting scales."""
-    packed = _asm(
-        T.i32(),
-        (f"{{ .reg .b16 scale; {instruction} scale, $2, $1; cvt.rn.bf16x2.ue8m0x2 $0, scale; }}"),
-        "=r,f,f",
-        [Float32(a).ir_value(loc=loc, ip=ip), Float32(b).ir_value(loc=loc, ip=ip)],
-    )
-    return _decode_ue8m0x2_to_f32(packed, loc=loc, ip=ip)
-
-
-@dsl_user_op
-def cvt_f32x2_ue8m0x2_rp_satfinite(
-    a: Float32, b: Float32, *, loc=None, ip=None
-) -> tuple[Float32, Float32]:
-    """Packed saturating round-up conversion used by the MX RCEIL recipe."""
-    return _cvt_f32x2_ue8m0x2(a, b, "cvt.rp.satfinite.ue8m0x2.f32", loc=loc, ip=ip)
-
-
-@dsl_user_op
-def cvt_f32x2_ue8m0x2_rz(a: Float32, b: Float32, *, loc=None, ip=None) -> tuple[Float32, Float32]:
-    """Packed round-toward-zero conversion used by the MX FLOOR recipe."""
-    return _cvt_f32x2_ue8m0x2(a, b, "cvt.rz.ue8m0x2.f32", loc=loc, ip=ip)
 
 
 class RoundingMode(IntEnum):
