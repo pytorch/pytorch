@@ -7304,7 +7304,8 @@ def scaled_addmm(
         scale_recipe_b: Scaling recipe for ``mat2``.
         swizzle_a: Swizzling pattern, if any, for ``scale_a``.
         swizzle_b: Swizzling pattern, if any, for ``scale_b``.
-        contraction_dim: Dimensions contracted by the matrix multiply.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
         use_fast_accum: Whether to enable tensor-core fast accumulation.
         beta: Multiplier for ``input``.
         alpha: Multiplier for the scaled matrix product.

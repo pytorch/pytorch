@@ -174,6 +174,12 @@ TORCH_META_FUNC(_scaled_addmm)(
   TORCH_CHECK_VALUE(
       !alpha.isComplex() && !beta.isComplex(),
       "torch._scaled_addmm only supports real alpha and beta values");
+  TORCH_CHECK_VALUE(
+      contraction_dim.empty() ||
+          (contraction_dim.size() == 2 &&
+           (contraction_dim[0] == 1 || contraction_dim[0] == -1) &&
+           (contraction_dim[1] == 0 || contraction_dim[1] == -2)),
+      "torch._scaled_addmm only supports contraction_dim=(1, 0)");
   TORCH_CHECK_VALUE(self.dim() == 2, "input must be a matrix");
   validate_scaled_mm_meta_inputs(
       mat1,

@@ -2004,10 +2004,10 @@ void scaled_gemm(
     preference.setAttribute(
         CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
         detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr)));
-    preference.setAttribute(
-        CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
-        detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr)));
   }
+  preference.setAttribute(
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr)));
 #endif
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
