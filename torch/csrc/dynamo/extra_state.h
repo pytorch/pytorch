@@ -351,10 +351,12 @@ void destroy_extra_state(void* obj);
 // which holds no compile_lock. The compile_lock ordering therefore does NOT
 // cover that deferred drain: a COMPILE that snapshotted raw entry pointers via
 // _get_cache_entries_for_region (non-owning py::cast wrappers, not counted by
-// the lookup-snapshot mechanism) can race it. Reaching this needs a park (a
-// reset() racing a depth>0 lookup) concurrent with a compile on a third
-// thread; the durable fix is to hand back owning references there the way
-// lookup()/create_cache_entry now do.
+// the lookup-snapshot mechanism) can race it. Reaching this needs a parked
+// clear (a reset() racing a depth>0 lookup) whose deferred drain runs while a
+// compile still holds those snapshotted pointers -- including on the compiling
+// thread itself, which drains pending evictions as it looks up, so no third
+// thread is required. The durable fix is to hand back owning references there
+// the way lookup()/create_cache_entry now do.
 // The same non-owning-handout shape applies to extract_cache_entry, which
 // returns a borrowed CacheEntry* used by dynamo_call_callback after cache_mutex
 // releases at depth 0; it needs the same owning-reference fix and is tracked
