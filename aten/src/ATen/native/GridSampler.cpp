@@ -38,6 +38,37 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
 
+  // compute_coordinates with the reflection parity taken by fmod rather than
+  // through an int, which is undefined once the fold count passes INT_MAX. It
+  // forms the same bounds as compute_coordinates and clips the same way, so the
+  // two answer alike wherever the merged helper is defined, and the CUDA twin
+  // reaches the same voxel where it is not.
+  template <typename scalar_t, typename index_t>
+  static inline scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+                                                   GridSamplerPadding padding_mode,
+                                                   bool align_corners) {
+    if (padding_mode == GridSamplerPadding::Border) {
+      coord = clip_coordinates(coord, size);
+    } else if (padding_mode == GridSamplerPadding::Reflection) {
+      // the bounds reflect_coordinates halves, reached without doubling an extent
+      // the type may not represent
+      const scalar_t low =
+          align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+      const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+      if (span == 0) {
+        coord = 0;
+      } else {
+        const scalar_t in = std::fabs(coord - low);
+        const scalar_t extra = std::fmod(in, span);
+        const bool odd =
+            std::fmod(std::floor(in / span), static_cast<scalar_t>(2)) != 0;
+        coord = odd ? span - extra + low : extra + low;
+      }
+      coord = clip_coordinates(coord, size);
+    }
+    return coord;
+  }
+
   // The four cubic taps one axis contributes at `coord`: the Keys coefficients of its fractional
   // part, the index each tap reads at, and, when `coeffs_grad` is given, the derivative the grid
   // gradient needs. The taps sit around the UNCLIPPED index; a clipped one would place them around
@@ -62,7 +93,8 @@ namespace {
       get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
     }
     for (const auto i : c10::irange(4)) {
-      const scalar_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
+      const scalar_t tap =
+          compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
       // the comparison decides, not the cast: a coordinate that is not finite fails
       // both sides, where converting it is undefined
       indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
