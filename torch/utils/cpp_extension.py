@@ -1237,7 +1237,7 @@ class BuildExtension(_LazyBuildExt):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = ['-std=c++20']
+                cuda_cflags = []
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -1255,6 +1255,10 @@ class BuildExtension(_LazyBuildExt):
                     cuda_post_cflags = win_hip_flags(cuda_post_cflags)
                 else:
                     cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
+                # NVCC does not allow multiple -std to be passed, so we avoid
+                # overriding the option if the user explicitly passed it.
+                if not any(flag.startswith('-std=') for flag in cuda_post_cflags):
+                    cuda_cflags.insert(0, '-std=c++20')
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
             if with_cuda:
