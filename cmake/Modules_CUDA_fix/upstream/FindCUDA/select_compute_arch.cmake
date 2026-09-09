@@ -41,7 +41,6 @@ if(CUDA_VERSION VERSION_GREATER "10.5")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "8.0")
 
   if(CUDA_VERSION VERSION_LESS "11.1")
-    set(CUDA_LIMIT_GPU_ARCHITECTURE "8.0")
     list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "8.0+PTX")
   endif()
 endif()
@@ -49,10 +48,8 @@ endif()
 if(NOT CUDA_VERSION VERSION_LESS "11.1")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "8.6")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "8.6")
-  set(CUDA_LIMIT_GPU_ARCHITECUTRE "8.6")
 
   if(CUDA_VERSION VERSION_LESS "11.8")
-    set(CUDA_LIMIT_GPU_ARCHITECTURE "8.9")
     list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "8.6+PTX")
   endif()
 endif()
@@ -98,6 +95,14 @@ if(CUDA_VERSION VERSION_GREATER_EQUAL "13.4")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "10.7")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "10.7a")
 endif()
+
+# Newest arch this toolkit can compile for, used below to clamp autodetection.
+# Numeric max, not file order: arch numbers are not monotonic per CUDA release
+# (e.g. Rubin's 10.7 is below Blackwell's 12.0).
+set(_cuda_plain_archs ${CUDA_ALL_GPU_ARCHITECTURES})
+list(FILTER _cuda_plain_archs INCLUDE REGEX "^[0-9]+\\.[0-9]+$")
+list(SORT _cuda_plain_archs COMPARE NATURAL)
+list(GET _cuda_plain_archs -1 CUDA_LIMIT_GPU_ARCHITECTURE)
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
@@ -157,10 +162,9 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
     set(CUDA_GPU_DETECT_OUTPUT_FILTERED "")
     separate_arguments(CUDA_GPU_DETECT_OUTPUT)
     foreach(ITEM IN ITEMS ${CUDA_GPU_DETECT_OUTPUT})
-        if(CUDA_LIMIT_GPU_ARCHITECTURE AND (ITEM VERSION_GREATER CUDA_LIMIT_GPU_ARCHITECTURE OR
-                                            ITEM VERSION_EQUAL CUDA_LIMIT_GPU_ARCHITECTURE))
-        list(GET CUDA_COMMON_GPU_ARCHITECTURES -1 NEWITEM)
-        string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${NEWITEM}")
+      if(CUDA_LIMIT_GPU_ARCHITECTURE AND ITEM VERSION_GREATER CUDA_LIMIT_GPU_ARCHITECTURE)
+        # Too new for SASS; fall back to the newest known arch's PTX for JIT.
+        string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${CUDA_LIMIT_GPU_ARCHITECTURE}+PTX")
       else()
         string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${ITEM}")
       endif()
