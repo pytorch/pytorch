@@ -540,7 +540,10 @@ void initDynamoBindings(PyObject* torch) {
         // set_code_exec_strategy_with_token below) is the same TOCTOU that
         // keeps compare_and_set_code_exec_strategy from creating-on-absent:
         // init_and_set_extra_state CHECK-aborts if the slot filled in between.
-        // It is atomic under the GIL, so unreachable on a normal build; on a
+        // No intentional Python runs between the CHECK and the install, so it
+        // is effectively atomic on a normal build; init_and_set_extra_state's
+        // ExtraState ctor still does PyDict_New for frame_state, whose GC pass
+        // could fire a finalizer in that window (pre-existing). On a
         // free-threaded build these two would have to serialize, deferred here.
         ExtraState* extra = get_extra_state(code_obj);
         if (extra == nullptr) {
