@@ -1391,8 +1391,9 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_tree_values: dict[int, Any] = {}
         # Container id -> ids of elements a guard source is rooted at THROUGH it.
         self.guard_tree_children: dict[int, set[int]] = {}
-        # Ids of values a guard bakes whole (EQUALS_MATCH); never pruned per value.
-        self.guard_tree_verbatim: set[int] = set()
+        # Values a guard bakes whole (EQUALS_MATCH), keyed by id and pinned so an
+        # id cannot be recycled; never pruned per value.
+        self.guard_tree_verbatim: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1756,14 +1757,11 @@ class GuardBuilder(GuardBuilderBase):
                 self.guard_tree_children.setdefault(id(base_example_value), set()).add(
                     id(example_value)
                 )
-                # The generic edge above keys on id(base_example_value): obj.attr
-                # records its edge on the OBJECT, not obj.__dict__, but a whole
-                # __dict__ read (DunderDictVariable registers AttrSource(base,
-                # "__dict__")) makes _keep(mapping) True, so without an edge on the
-                # mapping it would be carried verbatim with an unpicklable sibling.
-                # Mirror the DefaultsSource repair below on the instance __dict__,
-                # read via the plain slot so no user __getattr__ runs (annotation
-                # reads key on the __annotations__ dict and take the generic edge).
+                # The generic edge keys on id(base_example_value), the OBJECT, but
+                # a whole __dict__ read (DunderDictVariable registers
+                # AttrSource(base, "__dict__")) makes _keep(mapping) True, so the
+                # mapping would go verbatim with an unpicklable sibling. Mirror the
+                # DefaultsSource repair below on the instance __dict__ (slot read).
                 if isinstance(source, AttrSource):
                     mapping = _instance_dict(base_example_value)
                     if mapping is not None and source.member in mapping:
@@ -2907,7 +2905,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if self.save_guards:
-            self.guard_tree_verbatim.add(id(val))
+            self.guard_tree_verbatim[id(val)] = val
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -4267,7 +4265,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         missing_values: dict[int, Any],
         *args: Any,
         guard_tree_children: dict[int, set[int]] | None = None,
-        guard_tree_verbatim: set[int] | None = None,
+        guard_tree_verbatim: dict[int, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -4278,7 +4276,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # Absent for the pickler-level unit tests, which never root a guard at a
         # kept container, so an empty map keeps their containers verbatim.
         self.guard_tree_children = guard_tree_children or {}
-        self.guard_tree_verbatim = guard_tree_verbatim or set()
+        self.guard_tree_verbatim = guard_tree_verbatim or {}
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4437,8 +4435,8 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> bool:
         """Whether a function container (__defaults__/__dict__/...) is carried whole.
 
-        A dict/tuple SUBCLASS is always verbatim: its type/identity must survive
-        for the guard reading the slot. A plain dict/tuple is verbatim when a
+        A kept dict/tuple SUBCLASS is always verbatim: its type/identity must
+        survive for the guard reading the slot. A plain one is verbatim when a
         guard bakes it whole (guard_tree_verbatim: EQUALS_MATCH, which a pruned
         element would break forever, silently) or when no guard is rooted at an
         element THROUGH it (guard_tree_children); only the remaining case prunes
@@ -4746,12 +4744,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
                 return self._reduce_function_by_value(obj)
-            resolved: Any = None
-            if obj.__module__ in sys.modules:
-                resolved = sys.modules[obj.__module__]
-                for name in obj.__qualname__.split("."):
-                    resolved = getattr(resolved, name, None)
-            if resolved is not obj:
+            if not self._fqn_resolves(obj):
                 # See Note [Reconstructing a function a guard is rooted at].
                 # A module absent from sys.modules (exec-created, __module__ None)
                 # is an fqn mismatch too -- pickling by reference could not round
