@@ -2296,11 +2296,11 @@ class GraphModule(torch.nn.Module):
         mul: "TensorWithCounter(f32[4, 4])" = l_x_ * 2;  l_x_ = None
         add: "TensorWithCounter(f32[4, 4])" = mul + 1;  mul = None
 
+        getattr_1 = add._counter;  getattr_1 = None
+
         get_counter = add.get_counter();  get_counter = None
 
         get_size_store = add.get_size_store();  get_size_store = None
-
-        getattr_1 = add._counter;  getattr_1 = None
 
         mul_1: "TensorWithCounter(f32[4, 4])" = add * 3;  add = None
         add_1: "TensorWithCounter(f32[4, 4])" = mul_1 + 3;  mul_1 = None

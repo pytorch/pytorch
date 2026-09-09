@@ -2903,6 +2903,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         ).run(code)
         self.assertEqual(out, compiled_out)
 
+    @skipIfXpu(msg="XPU deterministic mode does not use the aten.index_put_ fallback")
     @skipCUDAIf(
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
