@@ -5307,6 +5307,20 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]

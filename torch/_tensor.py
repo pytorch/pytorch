@@ -1566,7 +1566,7 @@ class Tensor(torch._C.TensorBase):
             stream (integer or None): An optional Python integer representing a
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this make it safe to access from
+                shares its storage with the tensor this makes it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack
@@ -1587,16 +1587,9 @@ class Tensor(torch._C.TensorBase):
 
             read_only (bool): If True, the exported capsule is marked read-only
                 (``DLPACK_FLAG_BITMASK_READ_ONLY``) and the data is exported
-                through the storage's const data pointer, so a copy-on-write
-                tensor is not materialized. The consumer must not mutate the
-                data. Requires the versioned DLPack protocol
-                (``max_version >= (1, 0)``).
-
-        .. note::
-            ``data`` is the base address of the tensor's storage and
-            ``byte_offset`` the tensor's offset into that storage in bytes;
-            consumers must add ``byte_offset`` to ``data`` to reach the first
-            element.
+                through ``const_data_ptr()`` so a copy-on-write tensor is not
+                materialized. The consumer must not mutate the data. Requires
+                the versioned DLPack protocol (``max_version >= (1, 0)``).
         """
         if has_torch_function_unary(self):
             args = (self,)

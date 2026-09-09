@@ -9,6 +9,25 @@ import torch
 __all__: list[str] = []
 
 
+def _empty_with_matching_layout(
+    query: torch.Tensor, shape: tuple[int, ...]
+) -> torch.Tensor:
+    """Allocate an output with the query's dimension order."""
+    if tuple(query.shape) == shape:
+        return torch.empty_like(query)
+
+    fill_order = sorted(
+        range(query.dim()),
+        key=lambda idx: query.stride()[idx] if query.stride()[idx] else math.inf,
+    )
+    strides = [0] * len(fill_order)
+    stride = 1
+    for idx in fill_order:
+        strides[idx] = stride
+        stride *= shape[idx]
+    return torch.empty_strided(shape, strides, dtype=query.dtype, device=query.device)
+
+
 def _input_requires_grad(*tensors: torch.Tensor) -> bool:
     """Returns True if any of the tensors requires grad"""
     return any(t.requires_grad for t in tensors)
