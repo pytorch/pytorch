@@ -9,12 +9,16 @@ import torch
 from torch._inductor import inductor_prims, ir
 from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.lowering import register_lowering
-from torch._inductor.utils import get_num_sms
+from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
-from .bmm import blackwell_ws_persistent_tma_bmm_template, BlackwellBMMConfig
+from .bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+    is_blackwell_bmm_2cta_compatible,
+)
 
 
 USE_META_WS = meta_ws_enabled()
@@ -172,6 +176,15 @@ def _blackwell_decompose_k_partial_kwargs(
 
     use_meta_ws = meta_ws_enabled()
     two_ctas = use_meta_ws and config.two_ctas
+    if two_ctas and not is_blackwell_bmm_2cta_compatible(
+        output_batch_rows=m_pad,
+        block_m=config.block_m,
+        flatten_output=True,
+        tma_store=True,
+    ):
+        raise NotImplementedError(
+            "2CTA Blackwell decompose-K requires complete paired M tiles"
+        )
     m_tiles = m_pad // config.block_m
     kwargs = {
         "BLOCK_M": config.block_m,
@@ -256,6 +269,10 @@ def lower_blackwell_decompose_k_partial(
         [int(k_split) * int(m_pad), n],
         [n, 1],
     )
+    if not can_use_tma(mat1, mat2, output_layout=layout):
+        raise NotImplementedError(
+            "Blackwell decompose-K requires TMA-compatible inputs and output"
+        )
 
     template_kwargs = _blackwell_decompose_k_partial_kwargs(
         mat1,
