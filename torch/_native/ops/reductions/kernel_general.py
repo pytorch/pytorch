@@ -13,6 +13,7 @@
 # is O(op x dtype x pair-count) rather than O(distinct shapes).
 
 import math
+from collections.abc import Sequence
 
 import cutlass
 import cutlass.cute as cute
@@ -541,7 +542,7 @@ def _try_fast_row(
     return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
-def _as_shape(out: torch.Tensor, out_shape: list[int]) -> torch.Tensor:
+def _as_shape(out: torch.Tensor, out_shape: Sequence[int]) -> torch.Tensor:
     # Give the flat output its n-D shape WITHOUT leaving it a view: the kernels allocate their own
     # buffer, and an aten reduction never aliases -- OpInfo's python-ref tests check that.
     if tuple(out.shape) == tuple(out_shape):
