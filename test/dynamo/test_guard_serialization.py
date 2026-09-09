@@ -106,8 +106,18 @@ class RecursingGuardedDefault:
         self.inner = inner
 
     def __reduce__(self):
-        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        # Hands pickle a fresh instance every time as a reduce ARGUMENT, so
+        # nothing is ever memoized and the recursion never ends; self.inner only
+        # keeps the reduce well-formed.
         return type(self), (type(self)(),)
+
+
+class UnpicklableGuardedDefault:
+    def __init__(self):
+        self.flag = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("guarded default cannot pickle")
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -549,6 +559,24 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
+    def test_reduce_preserves_a_self_referential_cell(self):
+        # A recursive local function's cell holds the function itself. With the
+        # contents as a reduce ARGUMENT, fn -> __closure__ -> cell -> fn recursed
+        # until the pickler overflowed (a package bypass); as STATE the cell is
+        # memoized before its contents, so the cycle terminates.
+        def outer():
+            def fact(n):
+                return 1 if n <= 1 else n * fact(n - 1)
+
+            return fact
+
+        fn = outer()
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(out.__closure__[0].cell_contents, out)
+        self.assertEqual(out(5), 120)
+
 
 @torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(TestGuardSerializationBase):
@@ -584,6 +612,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3)
         ref, loaded = self._test_serialization("TENSOR_MATCH", foo, f, x)
         self._test_check_fn(ref, loaded, {"f": f, "x": x}, True)
+
+    def test_unserializable_guarded_value_is_a_package_error(self):
+        # Whatever the pickler raises for a value some guard reads -- here a
+        # RuntimeError from the value's own __reduce__ -- surfaces as a
+        # PackageError: a bypass for non-strict callers, never a compiler
+        # crash. strict_precompile is on for this class, so it re-raises.
+        def fn(x, cfg=UnpicklableGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
 
     def test_recursing_guarded_value_overflow_is_a_package_error(self):
         # A recursion overflow while pickling a guarded value -- here a
@@ -668,7 +709,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return m(x)
 
         with self.assertRaisesRegex(
-            TypeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
 
