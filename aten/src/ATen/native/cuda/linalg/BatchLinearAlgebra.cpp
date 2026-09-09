@@ -12,8 +12,6 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
@@ -25,13 +23,8 @@
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/linalg_eigh.h>
-#include <ATen/ops/linalg_eigvalsh.h>
 #include <ATen/ops/linalg_solve_triangular.h>
-#include <ATen/ops/zeros.h>
-#include <ATen/ops/_linalg_check_errors.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -1117,7 +1110,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // AT_MAGMA_ENABLED() || !defined(USE_ROCM)
+#endif // !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
   }
 }
 
@@ -1193,7 +1186,7 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see MAGMA's documentation for GEEV routine.
 */
-#if defined(USE_ROCM) || !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702))
+#if !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) && !(defined(USE_ROCM) && ROCM_VERSION >= 71400)
 template <typename scalar_t>
 void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -1279,11 +1272,11 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
   // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
-#if !defined(USE_ROCM) && defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
   _warn_once_magma_deprecation("linalg.eig");
   linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 #else
-  // hipSolver does not have `geev`
+  // hipSolver < 3.5.0 does not have `geev`
   _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
 #endif

@@ -154,7 +154,7 @@ class Status(Enum):
         )
 
 
-# Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
+# Sometimes the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
 # TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
 TYPE_OVERRIDES: dict[str, list[Any]] = {
@@ -178,18 +178,6 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "batch_aten_div": {},
             "group_linear": {"require_fbgemm": True},
         },
-    ],
-    "autoheuristic_collect": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
-    ],
-    "autoheuristic_use": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
     ],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
@@ -491,8 +479,6 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
         "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
         "enabled_metric_tables": DEFAULT,  # Typing
-        "triton.debug_sync_graph": DEFAULT,  # Known Failure
-        "triton.debug_sync_kernel": DEFAULT,  # Known Failure
         "profile_bandwidth_regex": DEFAULT,  # Known Failure
         "disable_cpp_codegen": DEFAULT,  # Known Failure
         "trace.save_real_tensors": DEFAULT,  # Known Failure
@@ -575,8 +561,6 @@ class ConfigFuzzer:
     ```
 
     The list of known failures on inductor config are:
-    cpp_wrapper, triton_debug_sync_graph
-    cpp_wrapper, triton_debug_sync_kernel
     cpp_wrapper, disable_cpp_codegen
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
     trace.enabled, trace.save_real_tensors
@@ -909,8 +893,10 @@ def visualize_results(
     Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
     """
     # TODO support more dimensions
-    assert n == 2
-    assert len(results) > 0
+    if n != 2:
+        raise AssertionError(f"expected n == 2, got {n}")
+    if len(results) <= 0:
+        raise AssertionError("expected non-empty results")
 
     input_set: OrderedSet[str] = OrderedSet({})
     for key in results.keys():  # noqa: SIM118

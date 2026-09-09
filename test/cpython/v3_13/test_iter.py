@@ -12,10 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    skipIfTorchDynamo,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -692,7 +689,6 @@ class TestCase(__TestCase):
                 pass
 
     # Test zip()'s use of iterators.
-    @skipIfTorchDynamo("infinite loop")
     def test_builtin_zip(self):
         self.assertEqual(list(zip()), [])
         self.assertEqual(list(zip(*[])), [])

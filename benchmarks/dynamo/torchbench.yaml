@@ -69,6 +69,8 @@ tolerance:
   # segmentation models where small floating-point differences get thresholded
   # into boolean masks.
   use_iou_for_bool_masks:
+    - detectron2_maskrcnn_r_101_fpn
+    - detectron2_maskrcnn_r_50_c4
     - sam
     - sam_fast
     - vision_maskrcnn

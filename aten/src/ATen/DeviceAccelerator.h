@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 
 #include <ATen/accelerator/Graph.h>
+#include <ATen/core/Generator.h>
 #include <optional>
 
 namespace at::accelerator {
@@ -112,6 +113,10 @@ TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }
+
+TORCH_API const at::Generator& getDefaultGenerator(
+    c10::DeviceIndex device_index);
+
 } // namespace at::accelerator
 
 namespace at {

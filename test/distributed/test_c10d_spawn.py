@@ -52,7 +52,7 @@ class AbstractProcessGroupShareTensorTest:
             self.assertEqual(
                 expected,
                 result,
-                msg=f"Expect rank {pid} to receive tensor {expected} but got {result}.",
+                msg=lambda msg: f"{msg}\nExpect rank {pid} to receive tensor {expected} but got {result}.",
             )
 
         for _ in range(ws):

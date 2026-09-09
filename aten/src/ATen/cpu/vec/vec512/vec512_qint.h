@@ -356,8 +356,7 @@ __FORCE_INLINE void QuantizeAvx512(
     // using std::round because it does rounding away from zero in halfway
     // cases.
     transformed = zero_point + std::nearbyint(transformed);
-    float clipped =
-        std::min(std::max(transformed, float(min_val)), float(max_val));
+    float clipped = std::clamp(transformed, float(min_val), float(max_val));
     dst[i] = clipped;
   }
 }

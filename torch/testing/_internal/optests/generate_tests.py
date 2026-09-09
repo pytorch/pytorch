@@ -109,13 +109,13 @@ def safe_aot_autograd_check(
     rtol: float | None = None,
     atol: float | None = None,
 ) -> Any:
-    # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
-    # inputs.
+    # NB: the copy_inputs argument to this wrapper is ignored: safe AOT checks
+    # always need to copy inputs because they run func(*args, **kwargs) multiple
+    # times.
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
     def func(*args, **kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
         return op(*args, **kwargs)
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
@@ -133,6 +133,7 @@ def safe_aot_autograd_check(
         dynamic,
         check_gradients="auto",
         assert_equals_fn=assert_equals_fn,
+        copy_inputs=True,
     )
 
 
@@ -729,7 +730,7 @@ def generate_repro(
     else:
         args_kwargs = (
             "# If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1\n"
-            "# we will fill them in same (args, kwargs) as in your test\n"
+            "# we will fill in the same (args, kwargs) as in your test\n"
             "args = ()  # args to the operator\n"
             "kwargs = {}  # kwargs to the operator"
         )

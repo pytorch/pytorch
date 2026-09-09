@@ -2,6 +2,8 @@
 
 #include <ATen/Tensor.h>
 
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace at::functionalization {
@@ -26,8 +28,22 @@ enum class InverseReturnMode {
     return #TYPE;                             \
   }
 
-#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
-  using SerializableTuple = std::tuple<__VA_ARGS__>
+template <class T>
+struct tuple_elements_are_owning;
+
+template <class... Ts>
+struct tuple_elements_are_owning<std::tuple<Ts...>>
+    : std::bool_constant<(std::is_same_v<std::decay_t<Ts>, Ts> && ...)> {};
+
+#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...)                \
+  using SerializableTuple = std::tuple<__VA_ARGS__>;                      \
+  static_assert(                                                          \
+      ::at::functionalization::tuple_elements_are_owning<                 \
+          SerializableTuple>::value,                                      \
+      "FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE elements must be "   \
+      "owning value types (no references or cv-qualifiers); a reference " \
+      "element would dangle in to_serializable_tuple() and in the data "  \
+      "member it initializes.")
 
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
@@ -39,7 +55,7 @@ enum class InverseReturnMode {
 //   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
 //   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
 //       bool /* reapply_views */,
-//       const std::vector<int64_t>&);
+//       std::vector<int64_t>);
 //
 //   view1_ViewMeta(const SerializableTuple& tpl)
 //       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
@@ -88,6 +104,21 @@ struct ViewMeta {
 
   virtual ~ViewMeta() = default;
 
+  // Note [multi-output view replay]
+  //
+  // A multi-output view rebuilds just the output this ViewMeta describes,
+  // rather than replaying the whole operation and discarding the sibling views:
+  // one output of `unbind` comes back as a `select` of the base. Replaying the
+  // operation is O(number of outputs), so rebuilding every view of one base
+  // that way is quadratic.
+  //
+  // The one thing the replayed operation provides that a `select` does not is
+  // autograd's restriction on mutating an output of a multi-output view.
+  // apply_view_meta_sequence restores that directly, through the marker
+  // torch/csrc/autograd registers with setMultiOutputViewMarker, which sets
+  // CreationMeta::MULTI_OUTPUT_NODE on the regenerated view. The grad_fn is a
+  // SelectBackward rather than an UnbindBackward, which computes the same
+  // gradient.
   virtual Tensor forward(const Tensor& base) = 0;
   virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;
 

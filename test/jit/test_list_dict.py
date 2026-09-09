@@ -57,6 +57,26 @@ class TestList(JitTestCase):
         self.checkScript(ternary_predicate, ([1, 2, 3],))
         self.checkScript(ternary_predicate, ([],))
 
+    def test_bare_container_annotation(self):
+        err = r"Attempted to use list without a contained type"
+
+        with self.assertRaisesRegex(RuntimeError, err):
+
+            @torch.jit.script
+            def bare_list_empty():
+                x: list = []
+                return x
+
+        # `isinstance` against a bare container is still valid (it is a
+        # type-erased runtime check, not a value's element type).
+        @torch.jit.script
+        def uses_isinstance(x: List[int]):
+            if isinstance(x, list):
+                return len(x)
+            return 0
+
+        self.assertEqual(uses_isinstance([1, 2, 3]), 3)
+
     def test_in_check(self):
         def int_in(x: List[int]) -> bool:
             return 2 in x

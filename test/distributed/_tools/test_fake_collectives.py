@@ -116,6 +116,7 @@ class CollectiveTest(TorchDispatchMode):
         c10d.barrier.default,
         c10d.monitored_barrier_.default,
         _c10d_functional.wait_tensor.default,
+        _c10d_functional.wait_tensors.default,
     }
 
     def __init__(self, test: TestFakeCollectives, _dispatch_key=None):
@@ -126,7 +127,10 @@ class CollectiveTest(TorchDispatchMode):
         res = func(*args, **(kwargs or {}))
 
         if func in collective_ops:
-            if func != _c10d_functional.wait_tensor.default:
+            if func not in (
+                _c10d_functional.wait_tensor.default,
+                _c10d_functional.wait_tensors.default,
+            ):
                 pg = CollectiveOp.get_process_group(func, args)
                 self.test.assertIsInstance(
                     pg, ProcessGroup, "Error: pg is not an instance of ProcessGroup"
@@ -137,7 +141,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     pg.size(),
                     4,
-                    f"Error: Expected pg.size() to be 4, but got {pg.size()}",
+                    lambda msg: f"{msg}\nError: Expected pg.size() to be 4, but got {pg.size()}",
                 )
                 self.test.assertNotEqual(
                     pg.name(), "", "Error: pg.name() should not be an empty string"
@@ -153,7 +157,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     computed_size,
                     expected_size,
-                    msg=f"Size mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
+                    msg=lambda msg: f"{msg}\nSize mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
                 )
 
         if (

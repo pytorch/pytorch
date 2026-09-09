@@ -191,12 +191,22 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       inputs_metadata.emplace_back(c10::Scalar(stack[idx].toBool()), arg_order);
     } else if (stack[idx].isDevice()) {
       inputs_metadata.emplace_back(stack[idx].toDevice(), arg_order);
+    } else if (stack[idx].isIntList()) {
+      // Covers schema params declared `int[]` and `SymInt[]` (the latter
+      // materializes as IntList when dynamic shapes are off).
+      inputs_metadata.emplace_back(stack[idx].toIntList().vec(), arg_order);
+    } else if (stack[idx].isNone()) {
+      // Optional parameter explicitly passed as None (e.g.,
+      // `aten.mean.dim`'s `int[1]? dim`). Emit no metadata entry; the
+      // resulting shorter metadata vector differentiates None from a
+      // concrete value, mirroring the optional-tensor branch above.
     } else {
       TORCH_CHECK_NOT_IMPLEMENTED(
           false,
           "Not implemented for operations that contain a parameter which is ",
           "not one of the following types: at::Tensor, at::TensorList, ",
-          "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>> and c10::Scalar.",
+          "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>>, "
+          "c10::Scalar, std::string, c10::Device and IntList.",
           "The input type is ",
           stack[idx].type()->str());
     }
@@ -375,6 +385,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       bool is_device = metadata.contains("device_type_value");
       bool is_dtype = metadata.contains("dtype_value");
       bool is_layout = metadata.contains("layout_value");
+      bool is_int_list = metadata.contains("int_list_value");
 
       if (is_tensor_list) {
         // Tensor List
@@ -448,6 +459,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
             reinterpret_cast<THPLayout*>(layout_value_obj.ptr())->layout;
         parameter_metadata_list.emplace_back(
             c10::Scalar(static_cast<int>(layout_value)), arg_idx);
+      } else if (is_int_list) {
+        auto metadata = item_metadata.cast<py::dict>();
+        auto int_list_value =
+            metadata["int_list_value"].cast<std::vector<int64_t>>();
+        parameter_metadata_list.emplace_back(
+            std::move(int_list_value), arg_idx);
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();

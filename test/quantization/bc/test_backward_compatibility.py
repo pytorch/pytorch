@@ -278,7 +278,7 @@ class TestSerialization(TestCase):
         get_attrs = _get_get_attr_target_strings(mq)
         self.assertTrue(
             get_attrs == expected_get_attrs,
-            f"get_attrs: expected {expected_get_attrs}, got {get_attrs}",
+            lambda msg: f"{msg}\nget_attrs: expected {expected_get_attrs}, got {get_attrs}",
         )
         output_tensor = mq(input_tensor)
         self.assertTrue(torch.allclose(output_tensor, expected_output_tensor))

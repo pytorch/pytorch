@@ -245,7 +245,6 @@ class GemmSm120(GemmSm90):
                 else varlen_params.mAIdx.shape[0]
             ),
             len_k_static=Int32(cute.size(mA_mkl, mode=[1])),
-            len_n_static=Int32(cute.size(mB_nkl, mode=[0])),
         )
 
         TileSchedulerCls = partial(

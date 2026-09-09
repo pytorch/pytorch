@@ -138,7 +138,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
   }
   oss << "and " << tensors[tensors.size() - 1].numel()
       << " elements respectively";
-  return oss.str();
+  return std::move(oss).str();
 }
 
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {

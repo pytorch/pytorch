@@ -4,7 +4,7 @@ set -ex
 
 if [ -n "${UBUNTU_VERSION}" ]; then
   apt update
-  apt-get install -y clang doxygen git graphviz nodejs npm libtinfo5
+  apt-get install -y doxygen git graphviz nodejs npm libtinfo5
 fi
 
 # Do shallow clone of PyTorch so that we can init lintrunner in Docker build context

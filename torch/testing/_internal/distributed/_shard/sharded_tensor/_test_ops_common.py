@@ -14,36 +14,30 @@ from torch.distributed._shard.sharding_spec._internals import (
 )
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+def _placement(rank):
+    if device_type == "cpu":
+        return f"rank:{rank}/cpu"
+    return f"rank:{rank}/{device_type}:{rank}"
+
+
 def generate_chunk_sharding_specs_for_test(sharding_dim):
     return [
         ChunkShardingSpec(
             dim=sharding_dim,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
+            placements=[_placement(0), _placement(1), _placement(2), _placement(3)],
         ),
         # Test different ordering. (Case 1)
         ChunkShardingSpec(
             dim=sharding_dim,
-            placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-            ],
+            placements=[_placement(2), _placement(3), _placement(0), _placement(1)],
         ),
         # Test different ordering. (Case 2)
         ChunkShardingSpec(
             dim=sharding_dim,
-            placements=[
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-            ],
+            placements=[_placement(3), _placement(0), _placement(1), _placement(2)],
         ),
     ]
 
@@ -55,22 +49,22 @@ def generate_enumerable_sharding_specs_for_test():
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=_placement(0),
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=_placement(1),
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=_placement(2),
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=_placement(3),
                 ),
             ]
         )

@@ -12,6 +12,7 @@ from torch.ao.pruning._experimental.pruner import (
     SaliencyPruner,
 )
 from torch.nn.utils import parametrize
+from torch.testing._internal.common_device_type import dtypes
 from torch.testing._internal.common_pruning import (
     Conv2dActivation,
     Conv2dBias,
@@ -29,16 +30,11 @@ from torch.testing._internal.common_pruning import (
     SimpleLinear,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TestCase,
 )
-
-
-DEVICES = {
-    torch.device("cpu"),
-    torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
-}
 
 
 class SimplePruner(BaseStructuredSparsifier):
@@ -72,13 +68,20 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
                 mask.data = new_mask.data
 
 
-class TestSaliencyPruner(TestCase):
-    def test_saliency_pruner_update_mask(self):
+class TestSaliencyPrunerDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @dtypes(torch.float)
+    def test_saliency_pruner_update_mask(self, device, dtype):
         """Test that we prune out the row with the lowest saliency (first row)"""
-        model = SimpleLinear()
+        model = SimpleLinear().to(device)
         with torch.no_grad():
             model.linear1.weight = nn.Parameter(
-                torch.Tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]])
+                torch.tensor(
+                    [[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]],
+                    dtype=dtype,
+                    device=device,
+                )
             )
         pruning_config = [{"tensor_fqn": "linear1.weight", "sparsity_level": 0.5}]
         pruner = SaliencyPruner({})
@@ -88,7 +91,9 @@ class TestSaliencyPruner(TestCase):
         pruner.step()
         pruned_model = pruner.prune()
 
-        expected = torch.Tensor([[3, 3, 3, 3], [4, 4, 4, 4]])
+        expected = torch.tensor(
+            [[3, 3, 3, 3], [4, 4, 4, 4]], dtype=dtype, device=device
+        )
         pruned = pruned_model.linear1.weight
 
         if expected.shape != pruned.shape:
@@ -96,21 +101,24 @@ class TestSaliencyPruner(TestCase):
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-    def test_lstm_saliency_pruner_update_mask(self):
+    @dtypes(torch.float)
+    def test_lstm_saliency_pruner_update_mask(self, device, dtype):
         model = LSTMLinearModel(
             input_dim=2,
             hidden_dim=2,
             output_dim=2,
             num_layers=1,
-        )
+        ).to(device)
 
-        manual_weights = torch.Tensor(
-            [[1, 1], [2, 2], [2, 2], [1, 1], [-1, -1], [-2, -2], [-2, -2], [-1, -1]]
+        manual_weights = torch.tensor(
+            [[1, 1], [2, 2], [2, 2], [1, 1], [-1, -1], [-2, -2], [-2, -2], [-1, -1]],
+            dtype=dtype,
+            device=device,
         )
 
         with torch.no_grad():
             model.lstm.weight_ih_l0 = nn.Parameter(manual_weights)
-            model.lstm.weight_hh_l0 = nn.Parameter(torch.Tensor(manual_weights))
+            model.lstm.weight_hh_l0 = nn.Parameter(manual_weights.clone())
             model.lstm.bias_ih_l0 = nn.Parameter(manual_weights[:, 0])
             model.lstm.bias_hh_l0 = nn.Parameter(manual_weights[:, 0])
 
@@ -118,7 +126,7 @@ class TestSaliencyPruner(TestCase):
             {"tensor_fqn": "lstm.weight_ih_l0"},
             {"tensor_fqn": "lstm.weight_hh_l0"},
         ]
-        lstm_input = torch.ones((1, 2))
+        lstm_input = torch.ones((1, 2), device=device)
         fx_pruner = LSTMSaliencyPruner({"sparsity_level": 0.5})
         fx_pruner.prepare(model, config)
         fx_pruner.enable_mask_update = True
@@ -133,21 +141,23 @@ class TestSaliencyPruner(TestCase):
         pruned_model(lstm_input)
 
         # make sure lowest saliency rows are pruned
-        expected = torch.Tensor([[2, 2], [2, 2], [-2, -2], [-2, -2]])
+        expected = torch.tensor(
+            [[2, 2], [2, 2], [-2, -2], [-2, -2]], dtype=dtype, device=device
+        )
         pruned = model.lstm.weight_ih_l0
         if expected.shape != pruned.shape:
             raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-        expected = torch.Tensor([[2], [2], [-2], [-2]])
+        expected = torch.tensor([[2], [2], [-2], [-2]], dtype=dtype, device=device)
         pruned = model.lstm.weight_hh_l0
         if expected.shape != pruned.shape:
             raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
         if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
             raise AssertionError("Expected and pruned tensors are not close")
 
-        expected = torch.Tensor([2, 2, -2, -2])
+        expected = torch.tensor([2, 2, -2, -2], dtype=dtype, device=device)
         for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
             if expected.shape != pruned.shape:
                 raise AssertionError(
@@ -157,7 +167,205 @@ class TestSaliencyPruner(TestCase):
                 raise AssertionError("Expected and pruned tensors are not close")
 
 
-class TestBaseStructuredSparsifier(TestCase):
+class TestBaseStructuredSparsifierCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_prune_lstm_linear_multiple_layer(self):
+        """
+        Test fusion support for LSTM(multi-layer) -> Linear
+        """
+        device = "cpu"
+
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=2,
+        ).to(device)
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+            {"tensor_fqn": "lstm.weight_ih_l1"},
+            {"tensor_fqn": "lstm.weight_hh_l1"},
+        ]
+
+        lstm_input = torch.ones((1, 8), device=device)
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+
+        model.eval()
+        _, _ = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        _, _ = pruned_model(lstm_input)
+
+        expected_params = dict(model.named_parameters())
+        for name, param in model.named_parameters():
+            if name not in expected_params:
+                raise AssertionError(f"Expected parameter '{name}' in expected_params")
+            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
+            # Instead we check that the weights of the new LSTM are a subset of the weights of
+            # the old LSTM
+            if not rows_are_subset(param, expected_params[name]):
+                raise AssertionError(f"Parameter '{name}' rows are not a subset")
+            del expected_params[name]
+
+        # assert we haven't deleted any keys
+        if len(expected_params) != 0:
+            raise AssertionError(
+                f"Expected all params deleted, but {len(expected_params)} remain"
+            )
+
+    def test_prune_lstm_linear_single_layer(self):
+        """
+        Test fusion support for LSTM (single-layer) -> Linear
+        """
+        device = "cpu"
+
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=1,
+        ).to(device)
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+        ]
+
+        lstm_input = torch.ones((1, 8), device=device)
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+        model.eval()
+
+        out_expected, lstm_out_expected = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
+        _, c = lstm_out_expected.size()
+
+        # We cannot check that y_expected == y_pruned as usual because
+        # zeros vs. missing elements yield different numerical results.
+        # Instead that we check that the pruned elements are the first half of the results
+        # since we are using a BottomHalfLSTMPruner
+        if not torch.isclose(
+            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
+        ).all():
+            raise AssertionError("LSTM outputs are not close")
+        # also check that output of linear is the same shape, this means we've resized
+        # linear columns correctly.
+        if out_expected.shape != out_pruned.shape:
+            raise AssertionError(
+                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
+            )
+
+    def test_prune_lstm_layernorm_linear_multiple_layer(self):
+        """
+        Test fusion support for LSTM(multi-layer) -> Linear
+        """
+        device = "cpu"
+
+        model = LSTMLayerNormLinearModel(
+            input_dim=8,
+            output_dim=8,
+            hidden_dim=8,
+            num_layers=2,
+        ).to(device)
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+            {"tensor_fqn": "lstm.weight_ih_l1"},
+            {"tensor_fqn": "lstm.weight_hh_l1"},
+        ]
+
+        lstm_input = torch.ones((1, 8), device=device)
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+
+        model.eval()
+        _, _ = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        _, _ = pruned_model(lstm_input)
+
+        expected_params = dict(model.named_parameters())
+        for name, param in model.named_parameters():
+            if name not in expected_params:
+                raise AssertionError(f"Expected parameter '{name}' in expected_params")
+            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
+            # Instead we check that the weights of the new LSTM are a subset of the weights of
+            # the old LSTM
+            if not rows_are_subset(param, expected_params[name]):
+                raise AssertionError(f"Parameter '{name}' rows are not a subset")
+            del expected_params[name]
+
+        # assert we haven't deleted any keys
+        if len(expected_params) != 0:
+            raise AssertionError(
+                f"Expected all params deleted, but {len(expected_params)} remain"
+            )
+
+    def test_prune_lstm_layernorm_linear_single_layer(self):
+        """
+        Test fusion support for LSTM (single-layer) -> Linear
+        """
+        device = "cpu"
+
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=1,
+        ).to(device)
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+        ]
+
+        lstm_input = torch.ones((1, 8), device=device)
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+        model.eval()
+
+        out_expected, lstm_out_expected = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
+        _, c = lstm_out_expected.size()
+
+        # We cannot check that y_expected == y_pruned as usual because
+        # zeros vs. missing elements yield different numerical results.
+        # Instead that we check that the pruned elements are the first half of the results
+        # since we are using a BottomHalfLSTMPruner
+        if not torch.isclose(
+            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
+        ).all():
+            raise AssertionError("LSTM outputs are not close")
+        # also check that output of linear is the same shape, this means we've resized
+        # linear columns correctly.
+        if out_expected.shape != out_pruned.shape:
+            raise AssertionError(
+                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
+            )
+
+
+class TestBaseStructuredSparsifierDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             module = config["module"]
@@ -256,10 +464,9 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected test value 3, got {pruner.groups[0]['test']}"
             )
 
-    def test_constructor(self):
+    def test_constructor(self, device):
         model = SimpleLinear()
-        for device in DEVICES:
-            self._test_constructor_on_device(model, torch.device(device))
+        self._test_constructor_on_device(model, torch.device(device))
 
     def _test_prepare_linear_on_device(self, model, device):
         model = copy.deepcopy(model).to(device)
@@ -270,16 +477,15 @@ class TestBaseStructuredSparsifier(TestCase):
         if model(x).shape != (128, 10):
             raise AssertionError(f"Expected shape (128, 10), got {model(x).shape}")
 
-    def test_prepare_linear(self):
+    def test_prepare_linear(self, device):
         models = [
             SimpleLinear(),
             LinearBias(),
             LinearActivation(),
             LinearActivationFunctional(),
         ]  # without and with bias
-        for device in DEVICES:
-            for model in models:
-                self._test_prepare_linear_on_device(model, torch.device(device))
+        for model in models:
+            self._test_prepare_linear_on_device(model, torch.device(device))
 
     def _test_prepare_conv2d_on_device(self, model, expected_shape, config, device):
         x = torch.ones((1, 1, 28, 28), device=device)
@@ -291,7 +497,7 @@ class TestBaseStructuredSparsifier(TestCase):
                 f"Expected shape {expected_shape}, got {model(x).shape}"
             )
 
-    def test_prepare_conv2d(self):
+    def test_prepare_conv2d(self, device):
         models = [
             SimpleConv2d(),
             Conv2dBias(),
@@ -307,12 +513,11 @@ class TestBaseStructuredSparsifier(TestCase):
             (1, 52, 3, 3),
         ]
         configs = [None, None, None, None, None]
-        for device in DEVICES:
-            for model, shape, config in zip(models, shapes, configs):
-                model = model.to(device)
-                self._test_prepare_conv2d_on_device(
-                    model, shape, config, torch.device(device)
-                )
+        for model, shape, config in zip(models, shapes, configs):
+            model = model.to(device)
+            self._test_prepare_conv2d_on_device(
+                model, shape, config, torch.device(device)
+            )
 
     def _test_step_linear_on_device(self, model, device):
         model = model.to(device)
@@ -323,16 +528,15 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
 
-    def test_step_linear(self):
+    def test_step_linear(self, device):
         models = [
             SimpleLinear(),
             LinearBias(),
             LinearActivation(),
             LinearActivationFunctional(),
         ]
-        for device in DEVICES:
-            for model in models:
-                self._test_step_linear_on_device(model, torch.device(device))
+        for model in models:
+            self._test_step_linear_on_device(model, torch.device(device))
 
     def _test_step_conv2d_on_device(self, model, expected_shape, config, device):
         model = model.to(device)
@@ -349,7 +553,7 @@ class TestBaseStructuredSparsifier(TestCase):
             )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    def test_step_conv2d(self):
+    def test_step_conv2d(self, device):
         models = [
             SimpleConv2d(),
             Conv2dBias(),
@@ -365,11 +569,8 @@ class TestBaseStructuredSparsifier(TestCase):
             (1, 52, 3, 3),
         ]
         configs = [None, None, None, None, None]
-        for device in DEVICES:
-            for model, shape, config in zip(models, shapes, configs):
-                self._test_step_conv2d_on_device(
-                    model, shape, config, torch.device(device)
-                )
+        for model, shape, config in zip(models, shapes, configs):
+            self._test_step_conv2d_on_device(model, shape, config, torch.device(device))
 
     def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
@@ -418,7 +619,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     f"Expected pruned params ({num_pruned_params}) < original ({num_original_params})"
                 )
 
-    def test_prune_linear_linear(self):
+    def test_prune_linear_linear(self, device):
         r"""test pruning linear-> linear modules"""
         configs, shapes = [], []
         configs.append(
@@ -447,18 +648,17 @@ class TestBaseStructuredSparsifier(TestCase):
             ]
         )
         shapes.append((128, 10))
-        for device in DEVICES:
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_linear_on_device(
-                        SimpleLinear(),
-                        config,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_linear_on_device(
+                    SimpleLinear(),
+                    config,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_linear_bias_linear(self):
+    def test_prune_linear_bias_linear(self, device):
         # linear(bias) -> linear(no bias)
         configs, shapes = [], []
         configs.append(
@@ -488,18 +688,17 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((128, 10))
 
-        for device in DEVICES:
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_linear_on_device(
-                        LinearBias(),
-                        config,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_linear_on_device(
+                    LinearBias(),
+                    config,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_linear_activation_linear(self):
+    def test_prune_linear_activation_linear(self, device):
         config = [
             {"tensor_fqn": "seq.0.weight"},
             {"tensor_fqn": "seq.2.weight"},
@@ -508,24 +707,23 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (128, 10)
 
-        for device in DEVICES:
-            for also_prune_bias in [True, False]:
-                # test version with nn.Modules
-                self._test_linear_on_device(
-                    LinearActivation(),
-                    config,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
-                # test functional version
-                self._test_linear_on_device(
-                    LinearActivationFunctional(),
-                    config,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        for also_prune_bias in [True, False]:
+            # test version with nn.Modules
+            self._test_linear_on_device(
+                LinearActivation(),
+                config,
+                shape,
+                torch.device(device),
+                also_prune_bias,
+            )
+            # test functional version
+            self._test_linear_on_device(
+                LinearActivationFunctional(),
+                config,
+                shape,
+                torch.device(device),
+                also_prune_bias,
+            )
 
     def _test_conv2d_on_device(
         self, model, config, x, expected_shape, device, also_prune_bias
@@ -567,7 +765,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     f"Expected pruned params ({num_pruned_params}) <= original ({num_original_params})"
                 )
 
-    def test_prune_conv2d_conv2d(self):
+    def test_prune_conv2d_conv2d(self, device):
         configs, shapes = [], []
         # all within sequential blocks
         configs.append(
@@ -586,20 +784,19 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 20, 20))
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_conv2d_on_device(
-                        SimpleConv2d(),
-                        config,
-                        x,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_conv2d_on_device(
+                    SimpleConv2d(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_conv2d_bias_conv2d(self):
+    def test_prune_conv2d_bias_conv2d(self, device):
         # Conv2d with Bias and no Activation
         configs, shapes = [], []
         # conv2d(bias) -> conv2d(bias)
@@ -631,20 +828,19 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 18, 18))
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_conv2d_on_device(
-                        Conv2dBias(),
-                        config,
-                        x,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_conv2d_on_device(
+                    Conv2dBias(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_conv2d_activation_conv2d(self):
+    def test_prune_conv2d_activation_conv2d(self, device):
         # Conv2d with Activation and no Bias
         configs, shapes = [], []
 
@@ -682,20 +878,19 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 18, 18))
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_conv2d_on_device(
-                        Conv2dActivation(),
-                        config,
-                        x,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_conv2d_on_device(
+                    Conv2dActivation(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_conv2d_padding_conv2d(self):
+    def test_prune_conv2d_padding_conv2d(self, device):
         # Conv2d with Padded layers after Bias layers
         configs, shapes = [], []
 
@@ -737,20 +932,19 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 24, 24))
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                for config, shape in zip(configs, shapes):
-                    self._test_conv2d_on_device(
-                        Conv2dPadBias(),
-                        config,
-                        x,
-                        shape,
-                        torch.device(device),
-                        also_prune_bias,
-                    )
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            for config, shape in zip(configs, shapes):
+                self._test_conv2d_on_device(
+                    Conv2dPadBias(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
 
-    def test_prune_conv2d_pool_conv2d(self):
+    def test_prune_conv2d_pool_conv2d(self, device):
         # Conv2d with Pooling layers
         config = [
             {"tensor_fqn": "seq.0.weight"},
@@ -760,20 +954,19 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (1, 52, 3, 3)
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                self._test_conv2d_on_device(
-                    Conv2dPool(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            self._test_conv2d_on_device(
+                Conv2dPool(),
+                config,
+                x,
+                shape,
+                torch.device(device),
+                also_prune_bias,
+            )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
-    def test_complex_conv2d(self):
+    def test_complex_conv2d(self, device):
         """Test fusion for models that contain Conv2d & Linear modules.
         Currently supports: Conv2d-Pool2d-Flatten-Linear, Skip-add"""
         config = [
@@ -784,258 +977,74 @@ class TestBaseStructuredSparsifier(TestCase):
         ]
         shape = (1, 13)
 
-        for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28), device=device)
-            for also_prune_bias in [True, False]:
-                self._test_conv2d_on_device(
-                    Conv2dPoolFlattenFunctional(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
-                self._test_conv2d_on_device(
-                    Conv2dPoolFlatten(),
-                    config,
-                    x,
-                    shape,
-                    torch.device(device),
-                    also_prune_bias,
-                )
-
-    def test_prune_lstm_linear_multiple_layer(self):
-        """
-        Test fusion support for LSTM(multi-layer) -> Linear
-        """
-        model = LSTMLinearModel(
-            input_dim=8,
-            hidden_dim=8,
-            output_dim=8,
-            num_layers=2,
-        )
-
-        config = [
-            {"tensor_fqn": "lstm.weight_ih_l0"},
-            {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.weight_ih_l1"},
-            {"tensor_fqn": "lstm.weight_hh_l1"},
-        ]
-
-        lstm_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
-        fx_pruner.prepare(model, config)
-
-        fx_pruner.enable_mask_update = True
-        fx_pruner.step()
-
-        model.eval()
-        _, _ = model(lstm_input)
-        pruned_model = fx_pruner.prune()
-        pruned_model.eval()
-        _, _ = pruned_model(lstm_input)
-
-        expected_params = dict(model.named_parameters())
-        for name, param in model.named_parameters():
-            if name not in expected_params:
-                raise AssertionError(f"Expected parameter '{name}' in expected_params")
-            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
-            # Instead we check that the weights of the new LSTM are a subset of the weights of
-            # the old LSTM
-            if not rows_are_subset(param, expected_params[name]):
-                raise AssertionError(f"Parameter '{name}' rows are not a subset")
-            del expected_params[name]
-
-        # assert we haven't deleted any keys
-        if len(expected_params) != 0:
-            raise AssertionError(
-                f"Expected all params deleted, but {len(expected_params)} remain"
+        x = torch.ones((1, 1, 28, 28), device=device)
+        for also_prune_bias in [True, False]:
+            self._test_conv2d_on_device(
+                Conv2dPoolFlattenFunctional(),
+                config,
+                x,
+                shape,
+                torch.device(device),
+                also_prune_bias,
             )
-
-    def test_prune_lstm_linear_single_layer(self):
-        """
-        Test fusion support for LSTM (single-layer) -> Linear
-        """
-        model = LSTMLinearModel(
-            input_dim=8,
-            hidden_dim=8,
-            output_dim=8,
-            num_layers=1,
-        )
-
-        config = [
-            {"tensor_fqn": "lstm.weight_ih_l0"},
-            {"tensor_fqn": "lstm.weight_hh_l0"},
-        ]
-
-        lstm_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
-        fx_pruner.prepare(model, config)
-        fx_pruner.enable_mask_update = True
-        fx_pruner.step()
-        model.eval()
-
-        out_expected, lstm_out_expected = model(lstm_input)
-        pruned_model = fx_pruner.prune()
-        pruned_model.eval()
-        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        _, c = lstm_out_expected.size()
-
-        # We cannot check that y_expected == y_pruned as usual because
-        # zeros vs. missing elements yield different numerical results.
-        # Instead that we check that the pruned elements are the first half of the results
-        # since we are using a BottomHalfLSTMPruner
-        if not torch.isclose(
-            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
-        ).all():
-            raise AssertionError("LSTM outputs are not close")
-        # also check that output of linear is the same shape, this means we've resized
-        # linear columns correctly.
-        if out_expected.shape != out_pruned.shape:
-            raise AssertionError(
-                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
-            )
-
-    def test_prune_lstm_layernorm_linear_multiple_layer(self):
-        """
-        Test fusion support for LSTM(multi-layer) -> Linear
-        """
-        model = LSTMLayerNormLinearModel(
-            input_dim=8,
-            output_dim=8,
-            hidden_dim=8,
-            num_layers=2,
-        )
-
-        config = [
-            {"tensor_fqn": "lstm.weight_ih_l0"},
-            {"tensor_fqn": "lstm.weight_hh_l0"},
-            {"tensor_fqn": "lstm.weight_ih_l1"},
-            {"tensor_fqn": "lstm.weight_hh_l1"},
-        ]
-
-        lstm_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
-        fx_pruner.prepare(model, config)
-
-        fx_pruner.enable_mask_update = True
-        fx_pruner.step()
-
-        model.eval()
-        _, _ = model(lstm_input)
-        pruned_model = fx_pruner.prune()
-        pruned_model.eval()
-        _, _ = pruned_model(lstm_input)
-
-        expected_params = dict(model.named_parameters())
-        for name, param in model.named_parameters():
-            if name not in expected_params:
-                raise AssertionError(f"Expected parameter '{name}' in expected_params")
-            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
-            # Instead we check that the weights of the new LSTM are a subset of the weights of
-            # the old LSTM
-            if not rows_are_subset(param, expected_params[name]):
-                raise AssertionError(f"Parameter '{name}' rows are not a subset")
-            del expected_params[name]
-
-        # assert we haven't deleted any keys
-        if len(expected_params) != 0:
-            raise AssertionError(
-                f"Expected all params deleted, but {len(expected_params)} remain"
-            )
-
-    def test_prune_lstm_layernorm_linear_single_layer(self):
-        """
-        Test fusion support for LSTM (single-layer) -> Linear
-        """
-        model = LSTMLinearModel(
-            input_dim=8,
-            hidden_dim=8,
-            output_dim=8,
-            num_layers=1,
-        )
-
-        config = [
-            {"tensor_fqn": "lstm.weight_ih_l0"},
-            {"tensor_fqn": "lstm.weight_hh_l0"},
-        ]
-
-        lstm_input = torch.ones((1, 8))
-        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
-        fx_pruner.prepare(model, config)
-        fx_pruner.enable_mask_update = True
-        fx_pruner.step()
-        model.eval()
-
-        out_expected, lstm_out_expected = model(lstm_input)
-        pruned_model = fx_pruner.prune()
-        pruned_model.eval()
-        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
-        _, c = lstm_out_expected.size()
-
-        # We cannot check that y_expected == y_pruned as usual because
-        # zeros vs. missing elements yield different numerical results.
-        # Instead that we check that the pruned elements are the first half of the results
-        # since we are using a BottomHalfLSTMPruner
-        if not torch.isclose(
-            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
-        ).all():
-            raise AssertionError("LSTM outputs are not close")
-        # also check that output of linear is the same shape, this means we've resized
-        # linear columns correctly.
-        if out_expected.shape != out_pruned.shape:
-            raise AssertionError(
-                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
+            self._test_conv2d_on_device(
+                Conv2dPoolFlatten(),
+                config,
+                x,
+                shape,
+                torch.device(device),
+                also_prune_bias,
             )
 
 
-class TestFPGMPruner(TestCase):
+class SimpleConvFPGM(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv2d1 = nn.Conv2d(
+            in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False
+        )
+        # Manually set the filter weights for demonstration purposes
+        """
+        Three filters' weight are manually set to values 3.0, 2.0, and 0.1.
+        Different from the norm-based decision that prunes filter with value 0.1,
+        FPGM will prune the one with value 2.0.
+        """
+        weights = torch.tensor([3.0, 2.0, 0.1])  # Weight weights for each filter
+        weights = weights[:, None, None, None]  # broadcasting
+        self.conv2d1.weight.data.copy_(torch.ones(self.conv2d1.weight.shape) * weights)
+
+        # Second Convolutional Layer
+        self.conv2d2 = nn.Conv2d(
+            in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False
+        )
+        weights = torch.tensor([6.0, 7.0, 0.4, 0.5])
+        weights = weights[:, None, None, None]
+        self.conv2d2.weight.data.copy_(torch.ones(self.conv2d2.weight.shape) * weights)
+
+    def forward(self, x):
+        x = self.conv2d1(x)
+        x = self.conv2d2(x)
+        return x
+
+
+class TestFPGMPrunerCPU(TestCase):
     """
     Test case for the implementation of paper:
     `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
     """
 
-    class SimpleConvFPGM(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.conv2d1 = nn.Conv2d(
-                in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False
-            )
-            # Manually set the filter weights for demonstration purposes
-            """
-            Three filters' weight are manually set to values 3.0, 2.0, and 0.1.
-            Different from the norm-based decision that prunes filter with value 0.1,
-            FPGM will prune the one with value 2.0.
-            """
-            weights = torch.tensor([3.0, 2.0, 0.1])  # Weight weights for each filter
-            weights = weights[:, None, None, None]  # broadcasting
-            self.conv2d1.weight.data.copy_(
-                torch.ones(self.conv2d1.weight.shape) * weights
-            )
+    hw_classification = HardwareClassification.CPU
 
-            # Second Convolutional Layer
-            self.conv2d2 = nn.Conv2d(
-                in_channels=3, out_channels=4, kernel_size=3, padding=1, bias=False
-            )
-            weights = torch.tensor([6.0, 7.0, 0.4, 0.5])
-            weights = weights[:, None, None, None]
-            self.conv2d2.weight.data.copy_(
-                torch.ones(self.conv2d2.weight.shape) * weights
-            )
-
-        def forward(self, x):
-            x = self.conv2d1(x)
-            x = self.conv2d2(x)
-            return x
-
-    def test_compute_distance(self, device="cpu"):
+    def test_compute_distance(self):
         """Test the distance computation function"""
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
+        device = "cpu"
+
+        model = SimpleConvFPGM().to(device)
         pruner = FPGMPruner(0.3)
         dist_conv1 = pruner._compute_distance(model.conv2d1.weight)
 
         # compute the distance matrix using torch.cdist
-        flattened_filters = torch.Tensor(
+        flattened_filters = torch.tensor(
             [
                 [
                     3.0000,
@@ -1070,7 +1079,8 @@ class TestFPGMPruner(TestCase):
                     0.1000,
                     0.1000,
                 ],
-            ]
+            ],
+            device=device,
         )
 
         """
@@ -1090,10 +1100,19 @@ class TestFPGMPruner(TestCase):
         ).all():
             raise AssertionError("Distance computation does not match expected")
 
+
+class TestFPGMPrunerDevice(TestCase):
+    """
+    Test case for the implementation of paper:
+    `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_update_mask_on_single_layer(self, expected_conv1, device):
         """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
         # test pruning with one layer of conv2d
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
+        model = SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
         pruner = FPGMPruner(0.3)
         config = [{"tensor_fqn": "conv2d1.weight"}]
@@ -1132,7 +1151,7 @@ class TestFPGMPruner(TestCase):
         self, expected_conv1, expected_conv2, device
     ):
         # the second setting
-        model = TestFPGMPruner.SimpleConvFPGM().to(device)
+        model = SimpleConvFPGM().to(device)
         x = torch.ones((1, 1, 32, 32), device=device)
         pruner = FPGMPruner(0.3)
         config = [
@@ -1175,18 +1194,15 @@ class TestFPGMPruner(TestCase):
         ).all():
             raise AssertionError("conv2d2 weight does not match expected")
 
-    def test_update_mask(self):
+    def test_update_mask(self, device):
         weights = torch.tensor([3.0, 0.1])
         expected_conv1 = torch.ones((2, 1, 3, 3)) * weights[:, None, None, None]
 
         weights = torch.tensor([7.0, 0.4])
         expected_conv2 = torch.ones((2, 2, 3, 3)) * weights[:, None, None, None]
 
-        for device in DEVICES:
-            self._test_update_mask_on_single_layer(expected_conv1, device)
-            self._test_update_mask_on_multiple_layer(
-                expected_conv1, expected_conv2, device
-            )
+        self._test_update_mask_on_single_layer(expected_conv1, device)
+        self._test_update_mask_on_multiple_layer(expected_conv1, expected_conv2, device)
 
 
 if __name__ == "__main__":

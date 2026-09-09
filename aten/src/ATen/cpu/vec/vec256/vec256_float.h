@@ -5,6 +5,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -163,7 +165,8 @@ class Vectorized<float> {
   }
   Vectorized<float> angle() const {
     const auto zero_vec = _mm256_set1_ps(0.f);
-    const auto nan_vec = _mm256_set1_ps(NAN);
+    const auto nan_vec =
+        _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
     const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
     const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_ps(c10::pi<float>);
@@ -185,8 +188,11 @@ class Vectorized<float> {
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
   }
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> acosh() const {
-    return Vectorized<float>(Sleef_acoshf8_u10(values));
+    return map(std::acosh);
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
@@ -394,14 +400,17 @@ class Vectorized<float> {
   Vectorized<float> sin() const {
     return Vectorized<float>(Sleef_sinf8_u35(values));
   }
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
-    return Vectorized<float>(Sleef_sinhf8_u10(values));
+    return map(std::sinh);
   }
   Vectorized<float> cos() const {
     return Vectorized<float>(Sleef_cosf8_u35(values));
   }
   Vectorized<float> cosh() const {
-    return Vectorized<float>(Sleef_coshf8_u10(values));
+    return map(std::cosh);
   }
   Vectorized<float> ceil() const {
     return _mm256_ceil_ps(values);

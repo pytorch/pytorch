@@ -13,6 +13,20 @@ def mocked_rev_parse(branch: str) -> str:
 
 MAIN_BRANCH = "refs/remotes/origin/main"
 VIABLE_STRICT_BRANCH = "refs/remotes/origin/viable/strict"
+# A full 40-char hex SHA, as `git merge-base` actually outputs; value is opaque
+# to the code (passed through verbatim to the rebase call).
+FORK_POINT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+
+def make_mocked_run_git(push_result: str = "") -> Any:
+    """_run_git stub: merge-base yields a fork point, everything else push_result."""
+
+    def run_git(*args: str) -> str:
+        if args and args[0] == "merge-base":
+            return FORK_POINT
+        return push_result
+
+    return run_git
 
 
 class TestRebase(TestCase):
@@ -28,12 +42,15 @@ class TestRebase(TestCase):
         mocked_gql: Any,
     ) -> None:
         "Tests rebase successfully"
+        mocked_run_git.side_effect = make_mocked_run_git()
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         rebase_onto(pr, repo, MAIN_BRANCH)
+        base_ref = f"refs/remotes/origin/{pr.base_ref()}"
         calls = [
             mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", MAIN_BRANCH, "pull/31093/head"),
+            mock.call("merge-base", base_ref, "pull/31093/head"),
+            mock.call("rebase", "--onto", MAIN_BRANCH, FORK_POINT, "pull/31093/head"),
             mock.call(
                 "push",
                 "-f",
@@ -59,12 +76,17 @@ class TestRebase(TestCase):
         mocked_gql: Any,
     ) -> None:
         "Tests rebase to viable/strict successfully"
+        mocked_run_git.side_effect = make_mocked_run_git()
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         rebase_onto(pr, repo, VIABLE_STRICT_BRANCH, False)
+        base_ref = f"refs/remotes/origin/{pr.base_ref()}"
         calls = [
             mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", VIABLE_STRICT_BRANCH, "pull/31093/head"),
+            mock.call("merge-base", base_ref, "pull/31093/head"),
+            mock.call(
+                "rebase", "--onto", VIABLE_STRICT_BRANCH, FORK_POINT, "pull/31093/head"
+            ),
             mock.call(
                 "push",
                 "-f",
@@ -79,7 +101,7 @@ class TestRebase(TestCase):
         )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
-    @mock.patch("gitutils.GitRepo._run_git", return_value="Everything up-to-date")
+    @mock.patch("gitutils.GitRepo._run_git")
     @mock.patch("gitutils.GitRepo.rev_parse", side_effect=mocked_rev_parse)
     @mock.patch("tryrebase.gh_post_comment")
     def test_no_need_to_rebase(
@@ -90,12 +112,15 @@ class TestRebase(TestCase):
         mocked_gql: Any,
     ) -> None:
         "Tests branch already up to date"
+        mocked_run_git.side_effect = make_mocked_run_git("Everything up-to-date")
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         rebase_onto(pr, repo, MAIN_BRANCH)
+        base_ref = f"refs/remotes/origin/{pr.base_ref()}"
         calls = [
             mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", MAIN_BRANCH, "pull/31093/head"),
+            mock.call("merge-base", base_ref, "pull/31093/head"),
+            mock.call("rebase", "--onto", MAIN_BRANCH, FORK_POINT, "pull/31093/head"),
             mock.call(
                 "push",
                 "-f",
@@ -163,6 +188,45 @@ class TestRebase(TestCase):
         )
         additional_msg = additional_rebase_failure_info(Exception(error))
         self.assertTrue("This is likely because" in additional_msg)
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    @mock.patch("gitutils.GitRepo._run_git")
+    @mock.patch("gitutils.GitRepo.rev_parse", side_effect=mocked_rev_parse)
+    @mock.patch("tryrebase.gh_post_comment")
+    def test_rebase_does_not_replay_trunk_commits(
+        self,
+        mocked_post_comment: Any,
+        mocked_rp: Any,
+        mocked_run_git: Any,
+        mocked_gql: Any,
+    ) -> None:
+        """#187374: rebase must anchor on the fork point (--onto) and never use
+        the 2-arg form, which grafts trunk commits onto the PR."""
+        mocked_run_git.side_effect = make_mocked_run_git()
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        rebase_onto(pr, repo, VIABLE_STRICT_BRANCH)
+        base_ref = f"refs/remotes/origin/{pr.base_ref()}"
+
+        self.assertIn(
+            mock.call("merge-base", base_ref, "pull/31093/head"),
+            mocked_run_git.call_args_list,
+        )
+        rebase_calls = [
+            c for c in mocked_run_git.call_args_list if c.args and c.args[0] == "rebase"
+        ]
+        self.assertEqual(
+            rebase_calls,
+            [
+                mock.call(
+                    "rebase",
+                    "--onto",
+                    VIABLE_STRICT_BRANCH,
+                    FORK_POINT,
+                    "pull/31093/head",
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":

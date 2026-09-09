@@ -358,7 +358,7 @@ class CustomOp:
                 raise RuntimeError(
                     f"impl_backward/impl_save_for_backward: "
                     f"the operator {self._qualname} already has an Autograd kernel "
-                    f"registered to DispatchKey::{key} vi a pre-existing "
+                    f"registered to DispatchKey::{key} via a pre-existing "
                     f"torch.library or TORCH_LIBRARY registration. Please either "
                     f"remove those registrations or don't use the torch._custom_ops APIs"
                 )

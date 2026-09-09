@@ -17,12 +17,6 @@ __all__ = [
     "masked_select",
 ]
 
-# Allowlist these for weights_only load of NJT
-from ._internal.nested_tensor import _rebuild_njt, NestedTensor as _NestedTensor
-
-
-torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
-
 
 def as_nested_tensor(
     ts: Tensor | list[Tensor] | tuple[Tensor, ...],
@@ -61,17 +55,18 @@ def as_nested_tensor(
 
         >>> a = torch.arange(3, dtype=torch.float, requires_grad=True)
         >>> b = torch.arange(5, dtype=torch.float, requires_grad=True)
-        >>> nt = torch.nested.as_nested_tensor([a, b])
+        >>> nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
         >>> nt.is_leaf
         False
-        >>> fake_grad = torch.nested.nested_tensor([torch.ones_like(a), torch.zeros_like(b)])
+        >>> buffer = torch.cat([torch.ones_like(a), torch.zeros_like(b)])
+        >>> fake_grad = torch.nested.nested_tensor_from_jagged(buffer, nt.offsets())
         >>> nt.backward(fake_grad)
         >>> a.grad
         tensor([1., 1., 1.])
         >>> b.grad
         tensor([0., 0., 0., 0., 0.])
         >>> c = torch.randn(3, 5, requires_grad=True)
-        >>> nt2 = torch.nested.as_nested_tensor(c)
+        >>> nt2 = torch.nested.as_nested_tensor(c, layout=torch.jagged)
     """
     is_tensor_list = isinstance(ts, (list, tuple)) and all(
         isinstance(t, Tensor) for t in ts
@@ -244,7 +239,7 @@ def nested_tensor(
 
         >>> a = torch.arange(3, dtype=torch.float, requires_grad=True)
         >>> b = torch.arange(5, dtype=torch.float, requires_grad=True)
-        >>> nt = torch.nested.nested_tensor([a, b], requires_grad=True)
+        >>> nt = torch.nested.nested_tensor([a, b], layout=torch.jagged, requires_grad=True)
         >>> nt.is_leaf
         True
     """
@@ -411,8 +406,8 @@ def nested_tensor_from_jagged(
         >>> offsets = torch.tensor([0, 3, 5, 6, 10, 12])
         >>> nt = nested_tensor_from_jagged(values, offsets)
         >>> # 3D shape with the middle dimension jagged
-        >>> nt.shape
-        torch.Size([5, j2, 5])
+        >>> nt.shape  # xdoctest: +ELLIPSIS
+        torch.Size([5, j..., 5])
         >>> # Length of each item in the batch:
         >>> offsets.diff()
         tensor([3, 2, 1, 4, 2])
@@ -486,8 +481,8 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
         >>> tensor = torch.randn(3, 3)
         >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
         >>> nt = torch.nested.masked_select(tensor, mask)
-        >>> nt.shape
-        torch.Size([3, j4])
+        >>> nt.shape  # xdoctest: +ELLIPSIS
+        torch.Size([3, j...])
         >>> # Length of each item in the batch:
         >>> nt.offsets().diff()
         tensor([1, 2, 1])
@@ -495,8 +490,8 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
         >>> tensor = torch.randn(6, 5)
         >>> mask = torch.tensor([False])
         >>> nt = torch.nested.masked_select(tensor, mask)
-        >>> nt.shape
-        torch.Size([6, j5])
+        >>> nt.shape  # xdoctest: +ELLIPSIS
+        torch.Size([6, j...])
         >>> # Length of each item in the batch:
         >>> nt.offsets().diff()
         tensor([0, 0, 0, 0, 0, 0])

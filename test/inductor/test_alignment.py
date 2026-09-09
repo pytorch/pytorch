@@ -4,6 +4,7 @@ import sys
 import unittest
 
 import torch
+import torch._functorch.config as functorch_config
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -26,9 +27,35 @@ except unittest.SkipTest:
 TestCase = test_torchinductor.TestCase
 check_model = test_torchinductor.check_model
 check_model_gpu = test_torchinductor.check_model_gpu
-skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
 copy_tests = test_torchinductor.copy_tests
 define_custom_op_for_test = test_torchinductor.define_custom_op_for_test
+
+
+def check_alias_of_misaligned_input(self, fn):
+    # https://github.com/pytorch/pytorch/pull/191002: when inductor's runtime
+    # alignment check clones a misaligned input, gen_alias_from_base used to
+    # apply the clone's storage_offset to the original input, returning the
+    # wrong slice of the base tensor.
+    if not torch._inductor.utils.is_gpu(self.device):
+        raise unittest.SkipTest("runtime alignment cloning is GPU-only")
+    fn_c = torch.compile(fn)
+
+    # Compile with an aligned input; the graph then assumes aligned inputs
+    # and only checks (and clones) at runtime.
+    a = torch.randn(1024, device=self.device)
+    torch._dynamo.mark_dynamic(a, 0)
+    fn_c(a)
+
+    # Run with a misaligned view of a fresh base: storage_offset is not
+    # guarded on, so this hits the same graph but takes the clone path.
+    base = torch.randn(1025, device=self.device)
+    y = base[1:]
+    _, view_out = fn_c(y)
+
+    _, expected = fn(y)
+    self.assertEqual(view_out.storage_offset(), expected.storage_offset())
+    self.assertEqual(view_out.data_ptr(), expected.data_ptr())
+    self.assertEqual(view_out, expected)
 
 
 @instantiate_parametrized_tests
@@ -102,9 +129,6 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True, alignment_asserts=True)
-    @skip_if_cpp_wrapper(
-        "Inductor does not generate alignment assertion for cpp_wrapper right now"
-    )
     def test_incorrect_meta_for_custom_op_2d(self):
         def slice2d(x):
             return (3 * x)[..., 1:-15]
@@ -122,8 +146,11 @@ class CommonTemplate:
 
         x = torch.randn(1024, 1024 + 16, device=self.device)
 
-        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
-        with self.assertRaisesRegex(AssertionError, expected_error):
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            "Fail due to storage_offset=1 itemsize=4"
+        )
+        with self.assertRaisesRegex((AssertionError, RuntimeError), expected_error):
             self.common(fn, (x,), check_lowp=False)
 
     def test_slice(self):
@@ -132,6 +159,21 @@ class CommonTemplate:
 
         x = torch.randn(1025, device=self.device)
         self.common(f, (x,))
+
+    def test_alias_of_misaligned_input(self):
+        # chunk on a dynamic dim gives the aliased output a symbolic
+        # ViewMeta, so alias regeneration takes the as_strided fallback.
+        def fn(x):
+            return x + 1, x.chunk(2)[1]
+
+        check_alias_of_misaligned_input(self, fn)
+
+    @functorch_config.patch(view_replay_for_aliased_outputs=False)
+    def test_alias_of_misaligned_input_no_view_replay(self):
+        def fn(x):
+            return x + 1, x[1:]
+
+        check_alias_of_misaligned_input(self, fn)
 
     def test_view_dtype_slice(self):
         def f(x):

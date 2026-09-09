@@ -935,7 +935,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Number | _complex"
+            ret = "Number | _complex | PySymType"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:

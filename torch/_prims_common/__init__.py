@@ -1137,8 +1137,13 @@ _integer_dtypes = (
     torch.int32,
     torch.int64,
 )
-_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
+_low_precision_dtypes = (
+    torch.float16,
+    torch.bfloat16,
+    torch.complex32,
+    torch.bcomplex32,
+)
+_complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -1182,11 +1187,12 @@ _complex_to_real_dtype_map = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
     torch.complex32: torch.float16,
+    torch.bcomplex32: torch.bfloat16,
 }
 
 _real_to_complex_dtype_map = {
     torch.float16: torch.complex32,
-    torch.bfloat16: torch.complex64,
+    torch.bfloat16: torch.bcomplex32,
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
@@ -1233,6 +1239,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     if dtype in _integer_dtypes:
         return sym_int
     if dtype.is_floating_point:
+        # pyrefly: ignore [bad-return]
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -1277,13 +1284,13 @@ def check_fp_or_complex(
 ):
     """
     Checks whether the input is floating point or complex.
-    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
+    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and [b]complex32
     """
-    torch._check(
+    torch._check_not_implemented(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
         lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    torch._check(
+    torch._check_not_implemented(
         allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
         lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
     )
@@ -1375,7 +1382,7 @@ def get_higher_dtype(
         (torch.float16, torch.bfloat16),
         (torch.float32,),
         (torch.float64,),
-        (torch.complex32,),
+        (torch.complex32, torch.bcomplex32),
         (torch.complex64,),
         (torch.complex128,),
     )
@@ -1505,6 +1512,7 @@ _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
     torch.complex32: torch.complex64,
+    torch.bcomplex32: torch.complex64,
 }
 
 
@@ -1612,7 +1620,7 @@ def elementwise_dtypes(
     partially ordered as follows:
 
     bool -> uint8, int8 -> int16 -> int32 -> int64 ->
-      float16, bfloat16 -> float32 -> float64 -> complex32 -> complex64 -> complex128
+      float16, bfloat16 -> float32 -> float64 -> complex32, bcomplex32 -> complex64 -> complex128
 
     The result dtype is selected by:
       - if no tensor's dtype has the same corresponding type as the one selected,
@@ -1632,7 +1640,7 @@ def elementwise_dtypes(
 
     The "corresponding complex dtypes" are:
       float16    -> complex32
-      bfloat16   -> complex64
+      bfloat16   -> bcomplex32
       float32    -> complex64
       float64    -> complex128
       complex32  -> complex32
@@ -1643,7 +1651,7 @@ def elementwise_dtypes(
     dtype by mapping low precision floating point and complex dtypes as follows:
 
       float16   -> float32
-      bfloat16  -> float32
+      bfloat16  -> bcomplex32
       complex32 -> complex64
 
     This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the
@@ -1828,7 +1836,7 @@ def make_contiguous_strides_for(
         if len(shape) < 2:
             return result
         # Use sym_max to handle unbacked symbolic dimensions
-        return result[:-2] + (1, sym_max(shape[-2], 1))
+        return result[:-2] + (1, sym_max(shape[-2], 1))  # type: ignore[return-value]
 
 
 def make_channels_last_1d_strides_for(
@@ -1842,7 +1850,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1862,7 +1870,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1881,7 +1889,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1947,6 +1955,7 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
+    # pyrefly: ignore [bad-return]
     return sym_float(correction)
 
 
@@ -2165,10 +2174,38 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 
-def clone_preserve_strides(x):
+def clone_preserve_strides(x, *, base=None):
+    """Clone x, preserving its size, stride and storage_offset.
+
+    The clone spans storage_offset + span elements and is copied out of x's storage,
+    so it is only meaningful while all of that storage is addressable. That holds in
+    eager, but a tracing backend may materialize an intermediate view as a buffer
+    sized to the view alone, leaving the leading storage_offset elements outside any
+    allocation. Callers tracing a view with a non-zero storage_offset must therefore
+    pass its ``base``, so the clone is taken from the base and x's view re-derived
+    from it -- every access then stays inside one real buffer. See how
+    auto_functionalize clones mutable custom-op args via their bases.
+
+    A ``base`` must span all of x: the buffer is sized to the base's required
+    extent, and x is then re-derived from it at x's own storage_offset. Anything
+    x addresses beyond that extent is not in the clone. Eager catches this when
+    setStorage bounds-checks the re-derive, but under fake tensors it passes and
+    codegens an out-of-bounds read, so the contract is checked explicitly.
+    """
+    src = x if base is None else base
     needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
+        src.size(), src.stride(), src.storage_offset()
     )
+    if base is not None:
+        x_size = compute_required_storage_length(
+            x.size(), x.stride(), x.storage_offset()
+        )
+        torch._check(
+            x_size <= needed_size,
+            lambda: f"clone_preserve_strides: base spans {needed_size} elements but x "
+            f"addresses {x_size}, so cloning through the base would drop what x needs. "
+            f"Pass a base that spans x, or omit base to clone x's own storage.",
+        )
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.
@@ -2182,7 +2219,7 @@ def clone_preserve_strides(x):
         torch._C._dispatch_tls_set_dispatch_key_excluded(
             torch._C.DispatchKey.ADInplaceOrView, True
         )
-        buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+        buffer = torch.as_strided(src, (needed_size,), (1,), 0).clone()
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(

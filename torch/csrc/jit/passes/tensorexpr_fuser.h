@@ -43,7 +43,7 @@ using tensor_type_converter_t =
 //
 // The TypeCheck includes the types of all Tensor inputs to the guarded_node,
 // as processed by the type_converter, a lambda
-// TensorTypePtr(const TensorTypePtr& t). This allows to erase irrelevant
+// TensorTypePtr(const TensorTypePtr& t). This allows erasing irrelevant
 // aspects of the type.
 //
 // The Fallback graph will have the same subgraph as the guarded node (with the

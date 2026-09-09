@@ -134,7 +134,7 @@ In addition to the above entrypoints, `Stateful` objects, as described below, pr
   :members:
 ```
 
-This [example](https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py) shows how to use Pytorch Distributed Checkpoint to save a FSDP model.
+This [example](https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py) shows how to use PyTorch Distributed Checkpoint to save a FSDP model.
 
 The following types define the IO interface used during checkpoint:
 

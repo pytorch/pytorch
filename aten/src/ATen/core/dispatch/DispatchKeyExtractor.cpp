@@ -1,7 +1,9 @@
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
 #include <c10/util/irange.h>
 
+#include <algorithm>
 #include <sstream>
+#include <string>
 
 namespace c10 {
 
@@ -55,16 +57,11 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
 }
 
 std::string DispatchKeyExtractor::dumpState() const {
+  std::string bits = dispatch_arg_indices_reverse_.to_string();
+  std::reverse(bits.begin(), bits.end());
   std::ostringstream oss;
-  for (const auto i : c10::irange(c10::utils::bitset::NUM_BITS())) {
-    if (dispatch_arg_indices_reverse_.get(i)) {
-      oss << '1';
-    } else {
-      oss << '0';
-    }
-  }
-  oss << ' ' << nonFallthroughKeys_ << '\n';
-  return oss.str();
+  oss << bits << ' ' << nonFallthroughKeys_ << '\n';
+  return std::move(oss).str();
 }
 
 void DispatchKeyExtractor::checkInvariants(const FunctionSchema& schema) const {

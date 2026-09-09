@@ -89,6 +89,10 @@ def simple_pool_fill(tensor):
     return tensor.add(1)
 
 
+def raise_keyboard_interrupt(i):
+    raise KeyboardInterrupt
+
+
 def send_tensor(queue, event, device, dtype):
     t = torch.ones(5, 5, device=device, dtype=dtype)
     queue.put(t)
@@ -207,8 +211,12 @@ def requires_grad_variable_sharing(queue, ready):
     queue.put(var.requires_grad)
 
 
-def integer_parameter_serialization(iparam):
+def integer_parameter_serialization(queue, done, finish):
+    iparam = queue.get()
     iparam + 1
+    del iparam
+    done.set()
+    finish.wait()
 
 
 def autograd_sharing(queue, ready, master_modified, device, is_parameter):
@@ -464,14 +472,27 @@ class _MultiprocessingTestMixin:
         )
 
         ctx = mp.get_context("spawn")
-        p = ctx.Process(target=integer_parameter_serialization, args=(param,))
+        done = ctx.Event()
+        finish = ctx.Event()
+        queue = ctx.Queue()
+        p = ctx.Process(
+            target=integer_parameter_serialization, args=(queue, done, finish)
+        )
         p.start()
-        p.join()
+        try:
+            queue.put(param)
+            self.assertTrue(done.wait(MAX_WAITING_TIME_IN_SECONDS))
+            del param
+            if torch.device(device).type == "cuda":
+                torch.cuda.ipc_collect()
+        finally:
+            finish.set()
+            p.join(100)
 
         self.assertEqual(
             0,
             p.exitcode,
-            msg=f'Failed to serialize successfully for "{device}" device!',
+            msg=lambda msg: f'{msg}\nFailed to serialize successfully for "{device}" device!',
         )
 
 
@@ -557,7 +578,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         self.assertTrue(t.is_shared())
 
 
-instantiate_device_type_tests(TestMultiprocessingDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
 
 
 @unittest.skipIf(
@@ -568,6 +589,12 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
     def tearDown(self):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
+
+    def test_spawn_child_keyboard_interrupt(self):
+        # A child interrupted while the parent lives must be reported as a
+        # failure, not exit 0 and be mistaken for success.
+        with self.assertRaisesRegex(mp.ProcessRaisedException, "KeyboardInterrupt"):
+            mp.spawn(raise_keyboard_interrupt, nprocs=1, join=True)
 
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():

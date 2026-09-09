@@ -6,12 +6,14 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
-from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
-from ..ir import ChoiceCaller, Layout, TensorBox
+from ..codegen.wrapper import PythonWrapperCodegen
+from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -20,15 +22,21 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
+    _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
+    GPU_ALIGN_BYTES,
     has_free_symbols,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_template,
 )
 from .mm_common import (
+    _fits_int32_buffer_span,
     _is_static_problem,
     check_supported_striding,
     load_kernel_template,
@@ -53,7 +61,6 @@ _NV_CONFIGS = [
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
             "BLOCK_K": block_size_k,
-            "NUM_CONSUMER_GROUPS": 1,
         },
         num_stages=num_stages,
         num_warps=num_warps,
@@ -74,13 +81,11 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, num_consumer_groups = (
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = (
             kw["BLOCK_M"],
             kw["BLOCK_N"],
             kw["BLOCK_K"],
             config.num_stages,
-            config.num_warps,
-            getattr(config, "num_consumer_groups", 0),
         )
 
         # 1. Prune NV configs depending on g and m.
@@ -107,19 +112,6 @@ def early_config_prune(g, m, dtsize, configs, named_args):
         if required_shared_memory > max_shared_memory:
             continue
 
-        use_warp_specialization = num_consumer_groups >= 1
-
-        # 3. make sure we can partition for ws
-        if use_warp_specialization:
-            if num_warps != 4:
-                continue
-
-            # "tritongpu-warp-spec-data-partition"
-            m_slice = BLOCK_M // num_consumer_groups
-            n_slice = BLOCK_N // num_consumer_groups
-            if m_slice < 64 and n_slice < 256:
-                continue
-
         pruned_configs.append(config)
 
     return pruned_configs
@@ -142,6 +134,179 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
     source=load_kernel_template("cutedsl_mm_grouped"),
 )
 
+flydsl_grouped_mm_template = FlyDSLTemplate(
+    name="grouped_gemm_flydsl",
+    source=load_kernel_template("flydsl_grouped_mm"),
+)
+
+
+def use_flydsl_grouped_mm_template(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: TensorBox | None,
+    bias: TensorBox | None,
+    is_nonzero: bool,
+    scaled: bool,
+) -> bool:
+    """Return whether grouped MM can use the FlyDSL gfx950 template."""
+    if scaled:
+        return False
+    if not is_nonzero or not use_flydsl_gemm_template(layout):
+        return False
+    if not (a_is_2d and not b_is_2d and offs is not None):
+        return False
+    if bias is not None:
+        return False
+    if mat_a.get_dtype() != mat_b.get_dtype() or layout.dtype != mat_a.get_dtype():
+        return False
+
+    sizevars = V.graph.sizevars
+    mat1_stride = mat_a.get_stride()
+    mat2_stride = mat_b.get_stride()
+    out_stride = layout.stride
+    if not sizevars.statically_known_equals(mat1_stride[-1], 1):
+        return False
+    if not sizevars.statically_known_equals(out_stride[-1], 1):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-1], 1):
+        return False
+
+    dtype = mat_a.get_dtype()
+    if dtype not in (torch.float16, torch.bfloat16):
+        return False
+
+    n = mat_b.get_size()[-1]
+    k = mat_a.get_size()[-1]
+    g = mat_b.get_size()[0]
+    if not sizevars.statically_known_equals(mat1_stride[-2], k):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-2], n):
+        return False
+    if not sizevars.statically_known_equals(mat2_stride[-3], k * n):
+        return False
+    if not sizevars.statically_known_equals(out_stride[-2], n):
+        return False
+
+    itemsize = dtype.itemsize
+    aligned_byte_offsets = (
+        mat_a.get_layout().offset * itemsize,
+        mat_b.get_layout().offset * itemsize,
+    )
+    if (
+        is_unaligned(mat_a)
+        or is_unaligned(mat_b)
+        or any(
+            not sizevars.statically_known_multiple_of(offset, GPU_ALIGN_BYTES)
+            for offset in aligned_byte_offsets
+        )
+    ):
+        return False
+
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
+    g_static = PythonWrapperCodegen.statically_known_int_or_none(g)
+    if m_static is None or n_static is None or k_static is None or g_static is None:
+        return False
+    if n_static % 32 != 0 or k_static % 32 != 0:
+        return False
+    tensor_spans = (
+        (m_static, k_static, k_static),
+        (g_static, k_static * n_static, k_static * n_static),
+        (m_static, n_static, n_static),
+    )
+    return all(
+        _fits_int32_buffer_span(rows, stride, cols, itemsize)
+        for rows, stride, cols in tensor_spans
+    )
+
+
+def get_flydsl_grouped_mm_template_kwargs(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+) -> list[dict[str, object]]:
+    """Return supported FlyDSL template configs for grouped matrix multiplication."""
+    from ..heuristics.template.flydsl import (
+        get_grouped_gemm_configs,
+        is_grouped_gemm_config_valid_for_shape,
+    )
+
+    dtype = mat_a.get_dtype()
+    n = mat_b.get_size()[-1]
+    m_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[0])
+    n_static = PythonWrapperCodegen.statically_known_int_or_none(n)
+    k_static = PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[-1])
+    if m_static is None or n_static is None or k_static is None:
+        return []
+
+    from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
+
+    dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
+    return [
+        {
+            **gemm_config,
+            "GEMM_DTYPE_ID": dtype_id,
+            "GEMM_M": m_static,
+            "GEMM_N": n_static,
+            "GEMM_K": k_static,
+        }
+        for gemm_config in get_grouped_gemm_configs()
+        if is_grouped_gemm_config_valid_for_shape(
+            m_static, n_static, k_static, dtype_id, gemm_config
+        )
+    ]
+
+
+def has_grouped_mm_triton_support() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    if torch.version.hip:
+        # The grouped GEMM Triton template is supported on ROCm too. ATen
+        # remains a separate autotune choice when fallback kernels are enabled.
+        return True
+    return torch.cuda.get_device_capability() >= (9, 0)
+
+
+def _rocm_gcn_arch() -> str:
+    return torch.cuda.get_device_properties(
+        torch.cuda.current_device()
+    ).gcnArchName.split(":", 1)[0]
+
+
+def has_rocm_fp8_hardware_support() -> bool:
+    if not torch.version.hip:
+        return False
+
+    # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
+    # this is the production-side equivalent used to gate Triton FP8 lowering.
+    arch = _rocm_gcn_arch()
+    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    if arch.startswith("gfx94"):
+        return True
+    if arch.startswith("gfx120") and rocm_version >= (6, 3):
+        return True
+    if arch.startswith("gfx95") and rocm_version >= (6, 5):
+        return True
+    return False
+
+
+def has_scaled_grouped_mm_triton_support(mat_a: TensorBox, mat_b: TensorBox) -> bool:
+    if not torch.version.hip:
+        return True
+    if not has_rocm_fp8_hardware_support():
+        return False
+
+    arch = _rocm_gcn_arch()
+    # Match ATen's ROCm rowwise scaled grouped GEMM contract: gfx94 uses the
+    # FNUZ FP8 encoding, while newer FP8-capable arches use OCP FP8.
+    expected_dtype = (
+        torch.float8_e4m3fnuz if arch.startswith("gfx94") else torch.float8_e4m3fn
+    )
+    return mat_a.get_dtype() == expected_dtype and mat_b.get_dtype() == expected_dtype
+
 
 def grouped_mm_args(
     mat1: TensorBox,
@@ -158,8 +323,10 @@ def grouped_mm_args(
 
     m1dim, m2dim = len(mat1_size), len(mat2_size)
 
-    assert m1dim == 2 or m1dim == 3
-    assert m2dim == 2 or m2dim == 3
+    if m1dim not in (2, 3):
+        raise AssertionError(f"Expected 2D or 3D mat1, got {m1dim}D")
+    if m2dim not in (2, 3):
+        raise AssertionError(f"Expected 2D or 3D mat2, got {m2dim}D")
 
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -170,7 +337,8 @@ def grouped_mm_args(
 
         if m1dim == 2:
             if m2dim == 2:
-                assert offs is not None
+                if offs is None:
+                    raise AssertionError("offs must be provided for 2D x 2D grouped mm")
                 out_size = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
             else:
                 out_size = [mat1_size[0], mat2_size[-1]]
@@ -179,11 +347,20 @@ def grouped_mm_args(
                 out_size = [mat1_size[1], mat2_size[1]]
             else:
                 out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
-        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if len(out_size) == 2:
-            out_stride = [size_padded, 1]
+        # Match the ATen extern output layout: CUDA pads grouped GEMM outputs for
+        # TMA alignment, while ROCm's ATen path returns contiguous tensors.
+        # TODO: Revisit whether 16-byte alignment would be beneficial for gfx1250.
+        if torch.version.hip:
+            if len(out_size) == 2:
+                out_stride = [out_size[1], 1]
+            else:
+                out_stride = [out_size[1] * out_size[2], out_size[2], 1]
         else:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
+            size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+            if len(out_size) == 2:
+                out_stride = [size_padded, 1]
+            else:
+                out_stride = [out_size[1] * size_padded, size_padded, 1]
 
         layout = FixedLayout(
             mat1.get_device(),
@@ -192,7 +369,8 @@ def grouped_mm_args(
             out_stride,
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
 
     return (mat1_size, mat2_size, layout, mat1, mat2, offs)
 
@@ -220,11 +398,7 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and not torch.version.hip
-    ):
+    if not has_grouped_mm_triton_support():
         return False
     if not has_triton():
         return False
@@ -280,8 +454,12 @@ def _tuned_grouped_mm_common(
     use_fast_accum: bool | None = None,
     layout: Layout | None = None,
 ) -> TensorBox:
-    assert (scale_a is None) == (scale_b is None)
-    assert scale_result is None or scale_a is not None
+    if (scale_a is None) != (scale_b is None):
+        raise AssertionError(
+            "scale_a and scale_b must both be None or both be provided"
+        )
+    if scale_result is not None and scale_a is None:
+        raise AssertionError("scale_result requires scale_a and scale_b")
 
     m1_size, m2_size, layout, mat_a, mat_b, offs = grouped_mm_args(
         mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
@@ -326,6 +504,15 @@ def _tuned_grouped_mm_common(
         use_fast_accum = False
 
     choices: list[ChoiceCaller] = []
+    # Native _grouped_mm accepts FP32 even though its current meta function is
+    # narrower. Keep that path safe when the meta contract is corrected.
+    if is_bf16x9_matmul(mat_a.get_device().type, mat_a.get_dtype()):
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.append(aten_choice)
+        node, _ = autotune_select_algorithm(
+            algorithm_name, choices, input_nodes, layout
+        )
+        return node
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
@@ -364,13 +551,14 @@ def _tuned_grouped_mm_common(
             k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
 
+    scaled = scale_a is not None
+
     if (
         is_nonzero
         and use_triton_template(layout)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
+        and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
-        scaled = scale_a is not None
-
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
 
@@ -379,8 +567,14 @@ def _tuned_grouped_mm_common(
             tl, "_experimental_make_tensor_descriptor"
         )
         use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
+            (
+                triton_has_make_tensor_descriptor
+                or triton_has_experimental_make_tensor_descriptor
+            )
+            and _descriptor_shape_fits_in_int32(mat_a.get_size(), add_guards=True)
+            and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_a, add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_b, add_guards=True)
         )
         kwargs = {
             "SCALED": scaled,
@@ -421,6 +615,25 @@ def _tuned_grouped_mm_common(
                 layout=layout,
                 **kwargs,
                 **asdict(config),
+            )
+
+    if use_flydsl_grouped_mm_template(
+        mat_a,
+        mat_b,
+        layout,
+        a_is_2d,
+        b_is_2d,
+        offs,
+        bias,
+        is_nonzero,
+        scaled,
+    ):
+        for flydsl_kwargs in get_flydsl_grouped_mm_template_kwargs(mat_a, mat_b):
+            flydsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **flydsl_kwargs,
             )
 
     if (

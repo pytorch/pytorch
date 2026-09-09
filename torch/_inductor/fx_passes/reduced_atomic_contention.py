@@ -1,19 +1,25 @@
 # mypy: allow-untyped-defs
 """
-Partitioned Scatter Optimization for Reduced Atomic Contention.
+Partitioned scatter optimization for high-contention index_put operations.
 
-This pass transforms high-contention index_put operations by distributing
-writes across multiple partitions, reducing atomic contention.
+Algorithm:
+  1. Assign each write operation a partition: partition_id = op_id & (P - 1)
+  2. Scatter into an expanded buffer of size P * dim_size along scatter_dim
+  3. Reshape to [..., P, dim_size, ...] and sum across partitions
+  4. Add result to the original input
 """
 
 import logging
 import math
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.fx_passes.memory_estimator import build_memory_profile
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -21,169 +27,457 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._logging import getArtifactLogger
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 
 
 log = logging.getLogger(__name__)
+_artifact_log = getArtifactLogger(__name__, "partitioned_scatter")
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-
-def _get_min_partitions() -> int:
-    """Get minimum partitions from config."""
-    return getattr(config, "partitioned_scatter_min_partitions", 2)
+_INDEX_PUT_TARGETS = (aten.index_put.default, aten.index_put_.default)
 
 
-def _get_max_partitions() -> int:
-    """Get maximum partitions from config."""
-    return getattr(config, "partitioned_scatter_max_partitions", 128)
+@dataclass
+class ScatterCandidate:
+    """An index_put(accumulate=True) op that passed the cheap (non-memory) gates."""
+
+    output_node: fx.Node
+    index_node: fx.Node
+    scatter_dim: int
+    output_size: int
+    index_size: int
+    scatter_dim_size: int
+    element_bytes: int
+    contention_ratio: float
+    dtype: torch.dtype
 
 
-def _get_memory_budget_fraction() -> float:
-    """Get memory budget fraction from config."""
-    return getattr(config, "partitioned_scatter_memory_budget", 0.10)
+@dataclass
+class ScatterMemoryState:
+    # Peak live GPU bytes at each compute node in the original (un-transformed)
+    # graph, taken at the allocation phase (before this node's last-use inputs
+    # are freed) so the expanded scatter buffer is charged against the true peak.
+    peak_mem_by_node: list[int]
+
+    node_to_idx: dict[fx.Node, int]
+
+    # total_gpu_memory - non_model_floor_bytes
+    allowed_peak_bytes: int
+
+    total_gpu_bytes: int
+    non_model_floor_bytes: int
+
+    # Expanded-buffer bytes already granted to scatters transformed earlier in this
+    # invocation. peak_mem_by_node profiles the *original* graph, so without this every
+    # candidate is sized against the same baseline and each claims the whole budget.
+    # A running sum rather than a per-live-range charge because scatters sharing an
+    # input fuse into one kernel, which needs all their expanded buffers live at once.
+    committed_overhead_bytes: int = 0
 
 
-partitioned_scatter_patterns = PatternMatcherPass(
-    pass_name="partitioned_scatter_optimization"
-)
+@dataclass
+class ScatterPassContext:
+    """Per-invocation state, passed to the pattern callbacks via closures."""
+
+    # index_put nodes that survived the cheap pre-scan, keyed by output node.
+    candidates: dict[fx.Node, ScatterCandidate] = field(default_factory=dict)
+
+    # Built lazily, only when at least one candidate survives the pre-scan.
+    memory: "ScatterMemoryState | None" = None
+
+    n_candidates: int = 0
+    n_applied: int = 0
+    skip_reasons: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    applied_partitions: list[int] = field(default_factory=list)
 
 
-def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
+def _record_skip(
+    ctx: ScatterPassContext, reason: str, node_name: str, *args: Any
+) -> None:
+    ctx.skip_reasons[reason] += 1
+    counters["inductor"][f"partitioned_scatter_skipped_{reason}"] += 1
+    if _artifact_log.isEnabledFor(logging.DEBUG):
+        fmt = f"partitioned_scatter: SKIP node=%s reason={reason}"
+        if args:
+            fmt += " " + " ".join(str(a) for a in args)
+        _artifact_log.debug(fmt, node_name)
+
+
+def _evaluate_candidate(
+    output_node: fx.Node, force: bool, ctx: ScatterPassContext
+) -> "ScatterCandidate | None":
     """
-    Apply partitioned scatter optimization to high-contention index_put operations.
-
-    Reduces atomic contention by distributing writes across multiple buffers.
-    Controlled by: config.partitioned_scatter_enabled
+    Cheap (non-memory) gates, in order:
+      1. Single non-None index (multi-axis not supported)
+      2. Valid tensor metadata
+      3. Runs on a CUDA device (this optimization targets GPU atomic contention)
+      4. Non-bool dtype
+      5. scatter_dim in bounds
+      6. Resolvable, non-zero sizes
+      7. index_size >= min_index_size
+      8. contention_ratio >= threshold  (uses scatter_dim_size, not output_numel)
     """
-    if not getattr(config, "partitioned_scatter_enabled", False):
-        return graph
+    node_name = output_node.name
 
-    num_matches = partitioned_scatter_patterns.apply(graph)
-
-    if num_matches > 0:
-        log.info(
-            "partitioned_scatter_optimization: applied to %d operation(s)",
-            num_matches,
-        )
-        graph.lint()
-
-    return graph
-
-
-def validate_match(match: Match) -> bool:
-    """Check if pattern match should be optimized for scatter."""
-    output_node = match.output_node()
-    if not output_node or not hasattr(output_node, "args") or len(output_node.args) < 4:
-        return False
-
-    # Only apply when accumulating
-    if output_node.args[3] is not True:
-        log.debug("Skipping: accumulate=False")
-        return False
-
-    # Extract metadata
     input_node = output_node.args[0]
     indices_arg = output_node.args[1]
 
-    # Validate input_node is an FX Node
     if not isinstance(input_node, fx.Node):
-        return False
+        _record_skip(ctx, "input_not_node", node_name)
+        return None
 
     scatter_dim, index_node = _extract_scatter_dim_and_index(indices_arg)
     if scatter_dim is None or index_node is None:
-        return False
+        _record_skip(ctx, "multi_index", node_name)
+        return None
 
-    # Get tensor shapes and validate
     input_meta = _get_tensor_meta(input_node)
     index_meta = _get_tensor_meta(index_node)
     if not input_meta or not index_meta:
-        return False
+        _record_skip(ctx, "no_meta", node_name)
+        return None
 
-    # Skip unsupported cases
-    if isinstance(input_meta["numel"], torch.SymInt) or isinstance(
-        index_meta["numel"], torch.SymInt
-    ):
-        log.debug("Skipping: dynamic shapes not supported")
-        return False
+    # Only rewrite accelerator ops: the expanded-buffer trade-off targets GPU
+    # atomic contention and is a pessimization on CPU. Matches the non-CPU
+    # device_filter that the memory estimator uses.
+    if input_meta["device"].type == "cpu":
+        _record_skip(ctx, "cpu_device", node_name)
+        return None
 
     if input_meta["dtype"] == torch.bool or index_meta["dtype"] == torch.bool:
-        log.debug("Skipping: bool dtype not supported")
-        return False
+        _record_skip(ctx, "bool_dtype", node_name)
+        return None
 
     if scatter_dim >= len(input_meta["shape"]):
-        log.debug("Skipping: scatter dim %d out of bounds", scatter_dim)
-        return False
+        _record_skip(ctx, "dim_out_of_bounds", node_name)
+        return None
 
-    # Calculate optimal partitions and check memory
-    output_size = input_meta["numel"]
-    index_size = index_meta["numel"]
+    output_size = _resolve_numel(input_meta["numel"])
+    index_size = _resolve_numel(index_meta["numel"])
 
-    # Safety check (also done in _estimate_optimal_partitions)
+    if output_size is None or index_size is None:
+        _record_skip(ctx, "dynamic_no_hint", node_name)
+        return None
+
     if output_size == 0 or index_size == 0:
+        _record_skip(ctx, "zero_size", node_name)
+        return None
+
+    # Contention is per scatter-dim slot, so use scatter_dim_size as denominator.
+    # For a [vocab, dim] output, ratio = N/vocab, not N/(vocab*dim).
+    scatter_dim_size = _resolve_numel(input_meta["shape"][scatter_dim])
+    if scatter_dim_size is None or scatter_dim_size == 0:
+        _record_skip(ctx, "zero_size", node_name)
+        return None
+
+    min_index_size: int = config.partitioned_scatter_min_index_size
+    if not force and index_size < min_index_size:
+        _record_skip(
+            ctx,
+            "index_too_small",
+            node_name,
+            f"index_size={index_size} min={min_index_size}",
+        )
+        return None
+
+    contention_ratio = index_size / scatter_dim_size
+    min_contention: float = config.partitioned_scatter_min_contention_ratio
+    if not force and contention_ratio < min_contention:
+        _record_skip(
+            ctx,
+            "low_contention",
+            node_name,
+            f"contention_ratio={contention_ratio:.3f} threshold={min_contention:.3f}",
+        )
+        return None
+
+    return ScatterCandidate(
+        output_node=output_node,
+        index_node=index_node,
+        scatter_dim=scatter_dim,
+        output_size=output_size,
+        index_size=index_size,
+        scatter_dim_size=scatter_dim_size,
+        element_bytes=input_meta["dtype"].itemsize,
+        contention_ratio=contention_ratio,
+        dtype=input_meta["dtype"],
+    )
+
+
+def _scan_candidates(graph: fx.Graph, ctx: ScatterPassContext) -> None:
+    """
+    Cheap pre-scan for index_put(accumulate=True) ops that could be rewritten.
+
+    Applies every gate that does not require the memory profile (device, dtype,
+    shape, min index size, contention ratio) so we can skip building the
+    memory profile entirely when no op would qualify.
+    """
+    force: bool = config.partitioned_scatter_force
+
+    for node in graph.nodes:
+        if node.op != "call_function" or node.target not in _INDEX_PUT_TARGETS:
+            continue
+        args = node.args
+        if len(args) < 4 or args[3] is not True:
+            continue
+
+        ctx.n_candidates += 1
+        candidate = _evaluate_candidate(node, force, ctx)
+        if candidate is not None:
+            ctx.candidates[node] = candidate
+
+
+def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
+    """
+    Build a per-node peak-memory profile of the original graph.
+    Returns None when CUDA is unavailable or the profile can't be built; the
+    pass then runs unconstrained by the memory budget.
+    """
+    if not torch.cuda.is_available():
+        return None
+
+    _, total_gpu = torch.cuda.mem_get_info()
+
+    floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
+    allowed_peak = max(0, total_gpu - floor_bytes)
+
+    def is_releasable(n: fx.Node) -> bool:
+        return not n.name.startswith("primals")
+
+    # build_memory_profile emits two entries per compute node: the first after
+    # its allocations (the node-local peak, while last-use inputs are still
+    # live) and the second after its deallocations. We key on the allocation
+    # entry so the expanded scatter buffer is charged against the real peak.
+    # Unbacked symbolic sizes have no optimization_hint, so sizing the profile
+    # can raise. Memory gating is a heuristic, so fall back to running the pass
+    # unconstrained rather than failing the compile.
+    try:
+        profile = build_memory_profile(graph, is_releasable)
+    except Exception as e:
+        _artifact_log.debug(
+            "partitioned_scatter: build_memory_profile failed (%s), "
+            "running without memory gating",
+            e,
+        )
+        return None
+
+    compute_nodes = [
+        n for n in graph.nodes if n.op not in ("placeholder", "get_attr", "output")
+    ]
+    node_to_idx: dict[fx.Node, int] = {}
+    peak_mem: list[int] = []
+    for i, node in enumerate(compute_nodes):
+        alloc_idx = 1 + 2 * i
+        if alloc_idx >= len(profile):
+            break
+        node_to_idx[node] = i
+        peak_mem.append(profile[alloc_idx])
+
+    _artifact_log.debug(
+        "partitioned_scatter: memory state built — "
+        "graph_nodes=%d compute_nodes=%d "
+        "total_gpu=%d MB floor=%d MB allowed_peak=%d MB",
+        sum(1 for _ in graph.nodes),
+        len(compute_nodes),
+        total_gpu // 1_000_000,
+        floor_bytes // 1_000_000,
+        allowed_peak // 1_000_000,
+    )
+
+    return ScatterMemoryState(
+        peak_mem_by_node=peak_mem,
+        node_to_idx=node_to_idx,
+        allowed_peak_bytes=allowed_peak,
+        total_gpu_bytes=total_gpu,
+        non_model_floor_bytes=floor_bytes,
+    )
+
+
+def _compute_num_partitions(
+    available_bytes: int,
+    output_size: int,
+    element_bytes: int,
+    min_p: int,
+    max_p: int,
+    index_size: int = 0,
+    scatter_dim_size: int = 0,
+    force: bool = False,
+) -> int:
+    """
+    Return the largest power-of-2 P in [min_p, max_p] satisfying:
+      1. Memory: output_size * element_bytes * (P - 1) <= available_bytes
+      2. Diminishing-returns cap (skipped when force=True):
+         P <= 4 * writes_per_slot, where writes_per_slot = index_size / scatter_dim_size.
+         Past ~4W partitions for a slot taking W writes most partition slots are
+         never written, so the zero-fill and reduce over them buy nothing.
+
+    Returns 0 if min_p doesn't fit. Power-of-2 is required by the bitwise-AND
+    partition assignment.
+    """
+    if available_bytes <= 0 or output_size == 0 or element_bytes == 0:
+        return 0
+
+    max_raw = available_bytes / (output_size * element_bytes) + 1
+    if max_raw < min_p:
+        return 0
+
+    p = 2 ** int(math.log2(max_raw))
+    p = min(p, max_p)
+
+    if not force and index_size > 0 and scatter_dim_size > 0:
+        writes_per_slot = index_size / scatter_dim_size
+        contention_cap = max(min_p, 2 ** int(math.log2(max(1, 4 * writes_per_slot))))
+        p = min(p, contention_cap)
+
+    return p
+
+
+def _check_memory(
+    state: ScatterMemoryState,
+    candidate: ScatterCandidate,
+    force: bool = False,
+) -> int:
+    """
+    Compute num_partitions for this candidate given the peak-memory profile.
+    Returns num_partitions >= min_p, or 0 if the memory constraint cannot be met.
+    """
+    min_p = config.partitioned_scatter_min_partitions
+    max_p = config.partitioned_scatter_max_partitions
+
+    idx = state.node_to_idx.get(candidate.output_node)
+    if idx is None:
+        # No profile entry means we cannot bound this scatter's peak, so fail
+        # closed: granting max_p here would allocate max_p-1 extra copies of the
+        # output with no memory check at all.
+        return 0
+
+    baseline = state.peak_mem_by_node[idx]
+    available = state.allowed_peak_bytes - baseline - state.committed_overhead_bytes
+
+    num_partitions = _compute_num_partitions(
+        available,
+        candidate.output_size,
+        candidate.element_bytes,
+        min_p,
+        max_p,
+        index_size=candidate.index_size,
+        scatter_dim_size=candidate.scatter_dim_size,
+        force=force,
+    )
+
+    if _artifact_log.isEnabledFor(logging.DEBUG):
+        overhead = (
+            candidate.output_size * candidate.element_bytes * max(0, num_partitions - 1)
+        )
+        _artifact_log.debug(
+            "partitioned_scatter: memory check node=%s "
+            "baseline_peak=%d MB committed=%d MB available=%d MB "
+            "expanded_buffer_cost=%d MB num_partitions=%d "
+            "total_gpu=%d MB floor=%d MB allowed_peak=%d MB",
+            candidate.output_node.name,
+            baseline // 1_000_000,
+            state.committed_overhead_bytes // 1_000_000,
+            available // 1_000_000,
+            overhead // 1_000_000,
+            num_partitions,
+            state.total_gpu_bytes // 1_000_000,
+            state.non_model_floor_bytes // 1_000_000,
+            state.allowed_peak_bytes // 1_000_000,
+        )
+
+    return num_partitions
+
+
+def _resolve_numel(numel: Any) -> int | None:
+    """Resolve numel to a concrete int, handling SymInt via optimization_hint."""
+    if isinstance(numel, torch.SymInt):
+        hint = optimization_hint(numel)
+        if hint is None:
+            return None
+        return hint * 2  # 2× safety margin for dynamic shapes
+    return int(numel)
+
+
+def _validate_memory(match: Match, ctx: ScatterPassContext, force: bool) -> bool:
+    """
+    Second-stage gate (the memory budget) for a matched index_put node.
+
+    The cheap gates already ran in the pre-scan; here we only look up the
+    surviving candidate and size the partition count against the memory budget.
+    """
+    output_node = match.output_node()
+    candidate = ctx.candidates.get(output_node)
+    if candidate is None:
+        # Node failed a cheap gate in the pre-scan (already recorded).
         return False
 
-    contention_ratio = index_size / output_size
+    min_p: int = config.partitioned_scatter_min_partitions
+    max_p: int = config.partitioned_scatter_max_partitions
 
-    # Check minimum index size threshold
-    min_index_size = getattr(config, "partitioned_scatter_min_index_size", 4096)
-    if index_size < min_index_size:
-        log.debug(
-            "Skipping: index size %d below threshold %d", index_size, min_index_size
+    if ctx.memory is not None:
+        num_partitions = _check_memory(ctx.memory, candidate, force=force)
+    else:
+        num_partitions = _compute_num_partitions(
+            available_bytes=2**62,
+            output_size=candidate.output_size,
+            element_bytes=candidate.element_bytes,
+            min_p=min_p,
+            max_p=max_p,
+            index_size=candidate.index_size,
+            scatter_dim_size=candidate.scatter_dim_size,
+            force=force,
+        )
+
+    if num_partitions < min_p:
+        _record_skip(
+            ctx,
+            "memory_budget",
+            output_node.name,
+            f"num_partitions={num_partitions} min={min_p}",
         )
         return False
 
-    # Get optimal partitions and adjust for memory constraints
-    num_partitions = _estimate_optimal_partitions(output_size, index_size)
-    num_partitions = _fit_to_memory_budget(
-        output_size, num_partitions, input_meta["dtype"]
-    )
-
-    # If reduced to < min partitions, optimization not worthwhile
-    if num_partitions < _get_min_partitions():
-        log.debug("Skipping: insufficient memory for minimum partitions")
-        return False
-
-    # Store optimization parameters for replacement
     match._num_partitions = num_partitions  # type: ignore[attr-defined]
-    match._scatter_dim = scatter_dim  # type: ignore[attr-defined]
-    match._index_node = index_node  # type: ignore[attr-defined]
+    match._scatter_dim = candidate.scatter_dim  # type: ignore[attr-defined]
+    match._index_node = candidate.index_node  # type: ignore[attr-defined]
+    match._output_size = candidate.output_size  # type: ignore[attr-defined]
+    match._element_bytes = candidate.element_bytes  # type: ignore[attr-defined]
 
-    log.debug(
-        "Applying optimization: %d partitions, dim=%d, contention=%.2f, "
-        "output_size=%d, index_size=%d",
-        num_partitions,
-        scatter_dim,
-        contention_ratio,
-        output_size,
-        index_size,
-    )
+    if _artifact_log.isEnabledFor(logging.DEBUG):
+        _artifact_log.debug(
+            "partitioned_scatter: APPLY node=%s "
+            "num_partitions=%d scatter_dim=%d "
+            "contention_ratio=%.1f (index_size=%d / scatter_dim_size=%d) "
+            "output_size=%d dtype=%s%s",
+            output_node.name,
+            num_partitions,
+            candidate.scatter_dim,
+            candidate.contention_ratio,
+            candidate.index_size,
+            candidate.scatter_dim_size,
+            candidate.output_size,
+            candidate.dtype,
+            " [force]" if force else "",
+        )
 
     return True
 
 
-@register_graph_pattern(
-    CallFunction(aten.index_put.default, Arg(), Arg(), Arg(), True),
-    pass_dict=partitioned_scatter_patterns,  # type: ignore[arg-type]
-    extra_check=validate_match,
-)
-@register_graph_pattern(
-    CallFunction(aten.index_put_.default, Arg(), Arg(), Arg(), True),
-    pass_dict=partitioned_scatter_patterns,  # type: ignore[arg-type]
-    extra_check=validate_match,
-)
-def create_replacement(match: Match, input_tensor, indices, values) -> None:
+def _create_replacement(
+    match: Match, ctx: ScatterPassContext, input_tensor, indices, values
+) -> None:
     """Replace high-contention index_put with partitioned scatter."""
-    # Get optimization parameters (set in validate_match)
     num_partitions: int = match._num_partitions  # type: ignore[attr-defined]
     scatter_dim: int = match._scatter_dim  # type: ignore[attr-defined]
     index_node = match._index_node  # type: ignore[attr-defined]
 
     def repl(input_tensor, index_node, values):
-        """Partitioned scatter implementation that will be traced."""
         dim_size = input_tensor.shape[scatter_dim]
         num_operations = index_node.numel()
 
-        # Flatten if needed
+        # Flatten multi-dimensional indices to 1-D
         if len(index_node.shape) > 1:
             flat_index = index_node.reshape(num_operations)
             values_ndim = len(index_node.shape)
@@ -194,7 +488,7 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
             flat_index = index_node
             flat_values = values
 
-        # Generate operation IDs and assign to partitions
+        # partition_id = op_id & (num_partitions - 1), requires power-of-2
         operation_ids = torch.ops.prims.iota.default(
             num_operations,
             start=0,
@@ -207,7 +501,7 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
             operation_ids, num_partitions - 1
         )
 
-        # Create expanded buffer
+        # Expanded buffer: one copy per partition along scatter_dim
         expanded_shape = list(input_tensor.shape)
         expanded_shape[scatter_dim] *= num_partitions
         expanded_buffer = torch.ops.aten.full.default(
@@ -219,11 +513,10 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
             pin_memory=False,
         )
 
-        # Adjust indices for partitioning
+        # Shift each write into its partition's slice
         partition_offsets = partition_ids * dim_size
         adjusted_index = flat_index + partition_offsets
 
-        # Reconstruct indices list for scatter
         if isinstance(indices, (list, tuple)):
             adjusted_indices = [
                 adjusted_index if i == scatter_dim else idx
@@ -232,144 +525,142 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
         else:
             adjusted_indices = [adjusted_index]
 
-        # Scatter with reduced contention
         scattered_buffer = torch.ops.aten.index_put.default(
             expanded_buffer, adjusted_indices, flat_values, True
         )
 
-        # Reshape for reduction
+        # Reshape to [..., num_partitions, dim_size, ...] then sum partitions
         reduce_shape = list(expanded_shape)
         reduce_shape[scatter_dim] = num_partitions
         reduce_shape.insert(scatter_dim + 1, dim_size)
         reshaped = torch.ops.aten.view.default(scattered_buffer, reduce_shape)
 
-        # Sum across partitions (preserve dtype for int types)
-        if flat_values.dtype in [torch.int8, torch.int16, torch.int32, torch.uint8]:
+        # Preserve dtype for integer types that don't promote during sum
+        if flat_values.dtype in (torch.int8, torch.int16, torch.int32, torch.uint8):
             reduced = torch.ops.aten.sum.dim_IntList(
                 reshaped, [scatter_dim], dtype=flat_values.dtype
             )
         else:
             reduced = torch.ops.aten.sum.dim_IntList(reshaped, [scatter_dim])
 
-        # Add to original input
         return input_tensor + reduced
 
-    counters["inductor"]["partitioned_scatter_applied"] += 1
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [input_tensor, index_node, values])
 
+    # Charge this scatter's expanded buffer so later candidates in the same
+    # invocation see a correspondingly smaller budget.
+    if ctx.memory is not None:
+        output_size: int = match._output_size  # type: ignore[attr-defined]
+        element_bytes: int = match._element_bytes  # type: ignore[attr-defined]
+        ctx.memory.committed_overhead_bytes += (
+            output_size * element_bytes * (num_partitions - 1)
+        )
 
-def _get_max_partitions_for_size(output_size: int) -> int:
+    ctx.n_applied += 1
+    ctx.applied_partitions.append(num_partitions)
+    counters["inductor"]["partitioned_scatter_applied"] += 1
+
+
+def _build_pattern_pass(ctx: ScatterPassContext) -> PatternMatcherPass:
     """
-    Get maximum partitions based on output tensor size.
-
-    Larger tensors use fewer partitions to limit memory overhead.
+    Construct a per-invocation PatternMatcherPass whose callbacks close over
+    `ctx`, avoiding module-level global state (which is unsafe under concurrent
+    compilation).
     """
-    if output_size >= 100_000_000:  # >= 100M elements
-        return 4
-    elif output_size >= 10_000_000:  # >= 10M elements
-        return 8
-    elif output_size >= 1_000_000:  # >= 1M elements
-        return 16
-    else:  # < 1M elements
-        return _get_max_partitions()
+    patterns = PatternMatcherPass(pass_name="partitioned_scatter_optimization")
+    force: bool = config.partitioned_scatter_force
+
+    def extra_check(match: Match) -> bool:
+        return _validate_memory(match, ctx, force)
+
+    def replacement(match: Match, input_tensor, indices, values) -> None:
+        _create_replacement(match, ctx, input_tensor, indices, values)
+
+    for target in _INDEX_PUT_TARGETS:
+        register_graph_pattern(
+            CallFunction(target, Arg(), Arg(), Arg(), True),
+            extra_check=extra_check,
+            pass_dict=patterns,  # type: ignore[arg-type]
+        )(replacement)
+
+    return patterns
 
 
-def _estimate_optimal_partitions(output_size: int, index_size: int) -> int:
-    """Estimate optimal number of partitions based on contention ratio."""
-    # Safety check for edge cases
-    if output_size == 0 or index_size == 0:
-        return _get_min_partitions()
+def _log_summary(ctx: ScatterPassContext, num_matches: int) -> None:
+    if ctx.n_candidates == 0:
+        return
 
-    contention_ratio = index_size / output_size
+    if ctx.memory is not None:
+        log.info(
+            "partitioned_scatter: candidates=%d applied=%d skipped=%d "
+            "partitions_per_op=%s "
+            "skip_breakdown=%s "
+            "total_gpu=%d MB floor=%d MB allowed_peak=%d MB",
+            ctx.n_candidates,
+            ctx.n_applied,
+            ctx.n_candidates - ctx.n_applied,
+            ctx.applied_partitions,
+            dict(ctx.skip_reasons),
+            ctx.memory.total_gpu_bytes // 1_000_000,
+            ctx.memory.non_model_floor_bytes // 1_000_000,
+            ctx.memory.allowed_peak_bytes // 1_000_000,
+        )
+    else:
+        log.info(
+            "partitioned_scatter: candidates=%d applied=%d skipped=%d "
+            "partitions_per_op=%s skip_breakdown=%s (no memory state)",
+            ctx.n_candidates,
+            ctx.n_applied,
+            ctx.n_candidates - ctx.n_applied,
+            ctx.applied_partitions,
+            dict(ctx.skip_reasons),
+        )
 
-    # Size-aware partition limits (larger tensors = fewer partitions to limit memory)
-    max_partitions_for_size = _get_max_partitions_for_size(output_size)
 
-    # Contention-based calculation - square root scaling
-    # Use max to ensure we never go below min_partitions for the base calculation
-    base_partitions = max(_get_min_partitions(), int(math.sqrt(contention_ratio) * 16))
-
-    # Round to power of 2 and apply limits
-    partitions = 2 ** math.ceil(math.log2(base_partitions))
-    return min(partitions, max_partitions_for_size, _get_max_partitions())
-
-
-def _fit_to_memory_budget(
-    output_size: int, num_partitions: int, dtype: torch.dtype
-) -> int:
+def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
     """
-    Reduce partitions to fit memory budget if needed.
-
-    Returns the maximum number of partitions that fit in memory budget.
-    Returns input num_partitions if it fits, or a reduced count, or 0 if
-    even min_partitions doesn't fit.
+    Apply partitioned scatter optimization to high-contention index_put operations.
+    Controlled by config.partitioned_scatter_enabled.
     """
-    if not torch.cuda.is_available():
-        return num_partitions
+    if not config.partitioned_scatter_enabled:
+        return graph
 
-    try:
-        _, total_memory = torch.cuda.mem_get_info()
-        element_bytes = dtype.itemsize if hasattr(dtype, "itemsize") else 4
-        budget = total_memory * _get_memory_budget_fraction()
+    ctx = ScatterPassContext()
 
-        # Try reducing partitions (must be power of 2) until we fit
-        current_partitions = num_partitions
-        min_partitions = _get_min_partitions()
-        while current_partitions >= min_partitions:
-            overhead = output_size * element_bytes * (current_partitions - 1)
+    # Stage 1: cheap pre-scan. If nothing qualifies we avoid building the
+    # (relatively expensive) memory profile entirely.
+    _scan_candidates(graph, ctx)
+    if not ctx.candidates:
+        _log_summary(ctx, 0)
+        return graph
 
-            if overhead <= budget:
-                # Only format debug string if debug logging is enabled
-                if current_partitions < num_partitions and log.isEnabledFor(
-                    logging.DEBUG
-                ):
-                    log.debug(
-                        "Reduced partitions from %d to %d to fit memory budget "
-                        "(%.2fGB / %.2fGB)",
-                        num_partitions,
-                        current_partitions,
-                        overhead / 1e9,
-                        budget / 1e9,
-                    )
-                return current_partitions
+    # Stage 2: build the memory profile and run the pattern matcher.
+    ctx.memory = _build_scatter_memory_state(graph)
+    patterns = _build_pattern_pass(ctx)
+    num_matches = patterns.apply(graph)
 
-            # Reduce by half (maintain power of 2)
-            current_partitions //= 2
+    _log_summary(ctx, num_matches)
 
-        # If min_partitions doesn't fit in memory, return 0
-        if log.isEnabledFor(logging.DEBUG):
-            overhead = output_size * element_bytes * (min_partitions - 1)
-            log.debug(
-                "Insufficient memory even for %d partitions: %.2fGB > %.2fGB",
-                min_partitions,
-                overhead / 1e9,
-                budget / 1e9,
-            )
-        return 0
+    if num_matches > 0:
+        graph.lint()
 
-    except Exception:
-        log.debug("Memory check failed, proceeding with %s", num_partitions)
-        return num_partitions  # Assume we have enough memory if we can't check
+    return graph
 
 
 def _extract_scatter_dim_and_index(
     indices_arg: Any,
 ) -> tuple[int | None, fx.Node | None]:
     """Extract scatter dimension and index node from indices argument."""
-    # Case 1: Single index → dim=0
     if not isinstance(indices_arg, (list, tuple)):
         return 0, indices_arg
 
-    # List with Nones → position of non-None is dim
     index_node = None
     scatter_dim = None
 
-    # Case 2 -> Find the first non-None index as the scatter dimension
     for dim, idx in enumerate(indices_arg):
         if idx is not None:
             if index_node is not None:
-                # Multiple indices not supported
                 return None, None
             index_node = idx
             scatter_dim = dim
@@ -378,12 +669,12 @@ def _extract_scatter_dim_and_index(
 
 
 def _get_tensor_meta(node: fx.Node) -> dict[str, Any] | None:
-    """Extract tensor metadata from FX node."""
+    """Extract tensor metadata from an FX node's meta['val'] FakeTensor."""
     if not hasattr(node, "meta") or "val" not in node.meta:
         return None
 
     val = node.meta["val"]
-    if not isinstance(val, (torch.Tensor, type(val))) or not hasattr(val, "shape"):
+    if not hasattr(val, "shape") or not hasattr(val, "dtype"):
         return None
 
     return {

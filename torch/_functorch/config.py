@@ -368,7 +368,6 @@ generate_fake_kernels_from_real_mismatches = False
 fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
-# TODO: turn on by default
 graphsafe_rng_functionalization = True
 
 # Whether or not to eagerly compile the backward
@@ -422,7 +421,25 @@ guess_tangent_strides_as_outputs = not is_fbcode()
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will ultimately be removed once we share size_hints across ranks through compiler collectives
+# Only the ranks that actually compile reach the partitioner, so with AOTAutogradCache on
+# this needs _sync_cache_decision_cross_ranks below to keep hits unanimous. Without it a
+# partial cache hit hangs the ranks that missed, as it did before that config existed.
 _sync_decision_cross_ranks = False
+
+# Compilation itself issues collectives, for example, when _sync_decision_cross_ranks is
+# set, those collectives only run on the ranks that actually compile, so a cache hit on
+# one rank and a miss on another desyncs the process group and hangs. This config makes
+# the outcome uniform: after every rank has consulted AOTAutogradCache, the hits are discarded
+# unless *all* ranks hit.
+# Synchronizing the outcome rather than the cache key is deliberate. A key only covers
+# whether an entry exists; a rank can find its entry and still miss because the entry's
+# dynamic shape guards do not hold for that rank's hints (`guard_miss`).
+# Precondition: every rank has to reach AOTAutogradCache.try_load for the same compiles,
+# since that is where the collective is issued. try_load runs only for a
+# SerializableAOTDispatchCompiler backend with local or remote caching on, so a rank that
+# differs on enable_autograd_cache, force_disable_caches, or the remote cache JustKnob
+# never joins the all_reduce and hangs the ranks that did.
+_sync_cache_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
 # "donated" buffers are invisible to the user, they are intermediates of the forward graph.

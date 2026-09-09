@@ -85,7 +85,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    # If the users of the wait node are following items, we consinder them
+    # If the users of the wait node are following items, we consider them
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
@@ -180,7 +180,11 @@ def _fuse_allreduce_by_concat(
     with graph.inserting_after(last_input_node):
         cat_inputs = []
         for input_node in all_input_nodes:
-            assert isinstance(input_node.args[0], fx.Node)
+            if not isinstance(input_node.args[0], fx.Node):
+                raise AssertionError(
+                    f"expected input_node.args[0] to be an fx.Node, got "
+                    f"{type(input_node.args[0])}"
+                )
             input_node = input_node.args[0]
             cat_inputs.append(
                 call_function(graph, aten.flatten.using_ints, (input_node,))
@@ -193,7 +197,8 @@ def _fuse_allreduce_by_concat(
     # Insert the fused div node and remove the input div nodes.
     # This is an optimization and is not mandatory for fusion.
     divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
+    if not all(divisor == divisors[0] for divisor in divisors):
+        raise AssertionError("expected all divisors to be equal")
     with graph.inserting_after(cat_node):
         div_node = call_function(graph, last_input_node.target, (cat_node, divisors[0]))
 
@@ -242,7 +247,8 @@ def _fuse_with_coalesced_op(
     # This is an optimization and is not mandatory for fusion.
     dividends = [div.args[0] for div in all_input_nodes]
     divisors = [div.args[1] for div in all_input_nodes]
-    assert all(divisor == divisors[0] for divisor in divisors)
+    if not all(divisor == divisors[0] for divisor in divisors):
+        raise AssertionError("expected all divisors to be equal")
     with graph.inserting_before(last_input_node):
         last_input_node = call_function(
             graph, aten._foreach_div.Scalar, (dividends, divisors[0])
@@ -399,7 +405,8 @@ def _fuse_allreduce(
         all_input_nodes.append(input_node)
         index = node_indices[input_node]
         if index >= last_input_index:
-            assert index != last_input_index
+            if index == last_input_index:
+                raise AssertionError(f"expected index != last_input_index, got {index}")
             last_input_node = input_node
             last_input_index = index
 
@@ -548,9 +555,10 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
         # Find the earliest/first user -- target_node.
-        assert len(allreduce.outputs) >= 1, (
-            f"Found an allreduce that has zero outputs/users -- {allreduce}."
-        )
+        if len(allreduce.outputs) < 1:
+            raise AssertionError(
+                f"Found an allreduce that has zero outputs/users -- {allreduce}."
+            )
         # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31
@@ -566,7 +574,8 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
         for wait_idx, node in enumerate(allreduce.node_list):
             if node == allreduce.wait_nodes[0]:
                 break
-        assert wait_idx >= 0
+        if wait_idx < 0:
+            raise AssertionError(f"expected wait_idx >= 0, got {wait_idx}")
         move_block_before(allreduce.node_list[wait_idx:], target_node)
 
 

@@ -20,7 +20,6 @@
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
@@ -40,41 +39,28 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_chunk_cat_native.h>
-#include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_foreach_copy.h>
-#include <ATen/ops/_fw_primal_copy_native.h>
-#include <ATen/ops/_indices_copy_native.h>
 #include <ATen/ops/_make_dual.h>
-#include <ATen/ops/_make_dual_copy_native.h>
 #include <ATen/ops/_mkldnn_reshape.h>
 #include <ATen/ops/_mkldnn_transpose.h>
-#include <ATen/ops/_neg_view_copy_native.h>
-#include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
 #include <ATen/ops/_reshape_copy_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
-#include <ATen/ops/_sparse_broadcast_to_copy_native.h>
 #include <ATen/ops/_sparse_broadcast_to_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe.h>
-#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_stack_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_unsafe_view_native.h>
-#include <ATen/ops/_values_copy_native.h>
 #include <ATen/ops/adjoint_native.h>
 #include <ATen/ops/alias.h>
-#include <ATen/ops/alias_copy_native.h>
 #include <ATen/ops/alias_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
-#include <ATen/ops/as_strided_copy_native.h>
 #include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/as_strided_scatter_native.h>
 #include <ATen/ops/atleast_1d.h>
@@ -87,13 +73,10 @@
 #include <ATen/ops/cat_meta.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/chunk_native.h>
-#include <ATen/ops/col_indices_copy_native.h>
 #include <ATen/ops/column_stack_native.h>
 #include <ATen/ops/concat_native.h>
 #include <ATen/ops/concatenate_native.h>
-#include <ATen/ops/crow_indices_copy_native.h>
 #include <ATen/ops/dense_dim_native.h>
-#include <ATen/ops/detach_copy_native.h>
 #include <ATen/ops/detach_native.h>
 #include <ATen/ops/diag.h>
 #include <ATen/ops/diag_embed.h>
@@ -113,7 +96,6 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/expand_as_native.h>
-#include <ATen/ops/expand_copy_native.h>
 #include <ATen/ops/expand_native.h>
 #include <ATen/ops/flatten_dense_tensors_native.h>
 #include <ATen/ops/flatten_native.h>
@@ -122,7 +104,6 @@
 #include <ATen/ops/hstack.h>
 #include <ATen/ops/hstack_native.h>
 #include <ATen/ops/index_select_native.h>
-#include <ATen/ops/indices_copy_native.h>
 #include <ATen/ops/lift_fresh_native.h>
 #include <ATen/ops/lift_native.h>
 #include <ATen/ops/mH_native.h>
@@ -136,10 +117,7 @@
 #include <ATen/ops/narrow_copy.h>
 #include <ATen/ops/narrow_copy_native.h>
 #include <ATen/ops/narrow_native.h>
-#include <ATen/ops/new_empty_native.h>
-#include <ATen/ops/new_ones_native.h>
 #include <ATen/ops/numpy_T_native.h>
-#include <ATen/ops/permute_copy_native.h>
 #include <ATen/ops/permute_native.h>
 #include <ATen/ops/ravel_native.h>
 #include <ATen/ops/repeat_native.h>
@@ -149,13 +127,11 @@
 #include <ATen/ops/row_stack_native.h>
 #include <ATen/ops/select.h>
 #include <ATen/ops/select_backward_native.h>
-#include <ATen/ops/select_copy_native.h>
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
-#include <ATen/ops/slice_copy_native.h>
 #include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
 #include <ATen/ops/slice_scatter_native.h>
@@ -168,7 +144,6 @@
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze.h>
-#include <ATen/ops/squeeze_copy_native.h>
 #include <ATen/ops/squeeze_native.h>
 #include <ATen/ops/stack_native.h>
 #include <ATen/ops/sub.h>
@@ -176,34 +151,26 @@
 #include <ATen/ops/sum_to_size_native.h>
 #include <ATen/ops/swapaxes_native.h>
 #include <ATen/ops/swapdims_native.h>
-#include <ATen/ops/t_copy_native.h>
 #include <ATen/ops/t_native.h>
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/tensor_split.h>
 #include <ATen/ops/tensor_split_native.h>
 #include <ATen/ops/tile_native.h>
 #include <ATen/ops/transpose.h>
-#include <ATen/ops/transpose_copy_native.h>
 #include <ATen/ops/transpose_native.h>
 #include <ATen/ops/unbind.h>
 #include <ATen/ops/unbind_copy_native.h>
 #include <ATen/ops/unbind_native.h>
 #include <ATen/ops/unflatten_dense_tensors_native.h>
 #include <ATen/ops/unflatten_native.h>
-#include <ATen/ops/unfold_copy_native.h>
 #include <ATen/ops/unfold_native.h>
 #include <ATen/ops/unsafe_chunk_native.h>
 #include <ATen/ops/unsafe_split_native.h>
 #include <ATen/ops/unsafe_split_with_sizes_native.h>
-#include <ATen/ops/unsqueeze_copy_native.h>
 #include <ATen/ops/unsqueeze_native.h>
-#include <ATen/ops/values_copy_native.h>
 #include <ATen/ops/view_as_complex.h>
-#include <ATen/ops/view_as_complex_copy_native.h>
 #include <ATen/ops/view_as_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/view_as_real_copy_native.h>
-#include <ATen/ops/view_copy_native.h>
 #include <ATen/ops/view_native.h>
 #include <ATen/ops/vsplit_native.h>
 #include <ATen/ops/vstack.h>
@@ -1515,7 +1482,7 @@ Tensor narrow_copy_sparse(
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    new_indices = indices;
+    new_indices = std::move(indices);
     int64_t dense_dim = dim - sparse_dim + 1;
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
@@ -1938,9 +1905,9 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   return self.repeat_symint(reps);
 }
 
-//
-// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
-//
+// Handles both int (ArrayRef<int64_t>/SmallVector<int64_t>) and symbolic
+// (ArrayRef<c10::SymInt>/SymDimVector) shapes and strides; the element type of
+// Vec selects the concrete vs symbolic storage offset.
 template <typename Vec>
 static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
@@ -1957,51 +1924,18 @@ static Tensor alias_with_sizes_and_strides(
         self.key_set(),
         self.dtype(),
         get_qtensorimpl(self)->quantizer());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
         c10::TensorImpl::VIEW,
         Storage(self.storage()),
         self.key_set(),
         self.dtype());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_storage_offset(self.storage_offset());
-    self_tmp_->set_sizes_and_strides(sizes, strides);
   }
-  return self_;
-}
-
-// specialization for symbolic shapes and strides.
-// SymIntArrayRef/ArrayRef<c10::SymInt> and
-// SmallVector<c10::SymInt>/SymDimVector
-template <template <typename...> typename Container>
-static Tensor alias_with_sizes_and_strides(
-    const Tensor& self,
-    const Container<c10::SymInt>& sizes,
-    const Container<c10::SymInt>& strides) {
-  // caller should make sure that sizes and strides are valid for self
-  //(storage is sufficient, strides are non-negative, strides and sizes array
-  // size is the same)
-  Tensor self_;
-  if (self.is_quantized()) {
-    self_ = at::detail::make_tensor<QTensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype(),
-        get_qtensorimpl(self)->quantizer());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+  auto* self_tmp_ = self_.unsafeGetTensorImpl();
+  if constexpr (std::is_same_v<typename Vec::value_type, c10::SymInt>) {
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
   } else {
-    self_ = at::detail::make_tensor<TensorImpl>(
-        c10::TensorImpl::VIEW,
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype());
-    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
-        sizes, strides, self.sym_storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
   return self_;
 }
@@ -2286,10 +2220,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
     result = as_strided_qtensorimpl(
         self, sizes, strides, storage_offset, std::move(quantizer));
   } else {
-    std::vector<c10::SymInt> sizes(
-        self.sym_sizes().begin(), self.sym_sizes().end());
-    std::vector<c10::SymInt> strides(
-        self.sym_strides().begin(), self.sym_strides().end());
+    SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
     auto storage_offset = self.sym_storage_offset() + index * strides[dim];
     sizes.erase(sizes.begin() + dim);
     strides.erase(strides.begin() + dim);
@@ -3406,6 +3338,47 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+Tensor stack_meta(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  if (wrapped_dim < tensors[0].dim()) {
+    auto entry_shape = tensors[0].sym_sizes();
+    for (const auto i : c10::irange(1, tensors.size())) {
+      auto shape = tensors[i].sym_sizes();
+      TORCH_CHECK(
+          shape.size() == entry_shape.size(),
+          "stack expects each tensor to be equal size, but got ",
+          entry_shape,
+          " at entry 0 and ",
+          shape,
+          " at entry ",
+          i);
+      for (const auto d : c10::irange(entry_shape.size())) {
+        TORCH_SYM_CHECK(
+            shape[d].sym_eq(entry_shape[d]),
+            "stack expects each tensor to be equal size, but got ",
+            entry_shape,
+            " at entry 0 and ",
+            shape,
+            " at entry ",
+            i);
+      }
+    }
+    auto result_sizes = entry_shape.vec();
+    result_sizes.insert(
+        result_sizes.begin() + wrapped_dim,
+        c10::SymInt(static_cast<int64_t>(tensors.size())));
+    return at::cat(tensors, wrapped_dim).view_symint(result_sizes);
+  }
+  // dim == tensors[0].dim(): cannot be expressed as a view of cat
+  std::vector<Tensor> unsqueezed;
+  unsqueezed.reserve(tensors.size());
+  for (const Tensor& t : tensors) {
+    unsqueezed.push_back(t.unsqueeze(wrapped_dim));
+  }
+  return at::cat(unsqueezed, wrapped_dim);
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
@@ -3416,8 +3389,8 @@ Tensor stack(TensorList tensors, int64_t dim) {
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
     return out.view(result_sizes); // one can always split a dimension with view
-  } else { // dim = tensors[0].ndimension() cannot be efficiently handled by
-           // view
+  } else {
+    // if dim = tensors[0].ndimension(), view cannot efficiently handle it
     return at::cat(get_stack_inputs(tensors, dim), dim);
   }
 }
@@ -4322,6 +4295,7 @@ Tensor numpy_T(const Tensor& self) {
         "Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
   }
   DimVector transpose_dims;
+  transpose_dims.reserve(n);
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }

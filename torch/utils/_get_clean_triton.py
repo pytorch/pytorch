@@ -156,7 +156,7 @@ def get_clean_triton(
     """Run experiments and output results to file
 
     Args:
-        input_path (Path): Path to inductor generated output codede
+        input_path (Path): Path to inductor generated output code
         output_path (Path): Path to write out the new python file
         auto_generate_params (bool): Whether to automatically generate launch_params if missing
     """
