@@ -2583,6 +2583,9 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
+                # A region that only stores (masked expansion) has no value.
+                if arg is None:
+                    continue
                 if (
                     arg.target != "load"
                     or should_unwrap_unspec_arg(arg.args[1])
@@ -2602,6 +2605,8 @@ class TritonKernelOverrides(TritonOverrides):
         ) as new_mask:
             result = body()
 
+        if result is None:
+            return None
         if need_where:
             # Remove once CSEVariables track the dtype
             if result.bounds.is_bool:
@@ -8359,6 +8364,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.BUCKETIZE,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
+            BackendFeature.MASKED_STORE,
             BackendFeature.SCAN,
             BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
