@@ -1116,6 +1116,8 @@ def forward(self, args_0):
                 msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
 
+
+class TestExperimentCPU(TestCase):
     def _assert_blockmask_partial_replays_bound_tensors(self, device, make_mask_mod):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
@@ -1229,6 +1231,8 @@ def forward(self, args_0):
             )
         )
 
+
+class TestExperimentDevice(TestCase):
     def _test_export_blockmask_with_mask_fn(self, device, make_mask_fn):
         from torch.nn.attention.flex_attention import create_block_mask
 
