@@ -93,6 +93,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
+    RESUME_FN_PREFIX,
     unique_id,
 )
 from .code_context import code_context
@@ -3537,7 +3538,7 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected resume_inst.target to be true")
             resume_inst = resume_inst.target
 
-        resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+        resume_name = unique_id(f"{RESUME_FN_PREFIX}_{resume_inst.offset}")
 
         # More locals may have been pruned in the current/leaf frame
         # after the unsupported instruction (e.g. branch).

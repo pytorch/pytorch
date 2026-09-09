@@ -730,10 +730,6 @@ PyObject* dynamo__custom_eval_frame(
   if (!Py_IsNone(guarded_code)) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra won't be NULL here.
     // The extra object owns the CacheEntry; it is cleaned up when
     // set_extra_state is called. The entry's code (owned) and annotation come
     // back filled under the cache lock: eval_custom() can run Python
