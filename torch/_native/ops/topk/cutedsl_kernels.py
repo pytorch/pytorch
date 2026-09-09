@@ -40,13 +40,18 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32, Int64
+from cutlass import BFloat16, const_expr, Float32, Int32, Int64
 from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op, T
 
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
+
+# ---------------------------------------------------------------------------
+# Radix-select kernel (shared JIT/AOT body) + the AOT build() entry point
+# (tools/native_aot/export.py imports this module and calls build(spec)).
+# ---------------------------------------------------------------------------
 
 _NEG_INF_BITS: int = 0xFF800000
 _N_HIST_BINS: int = 256
@@ -105,14 +110,16 @@ def _smem_scalar(smem: cutlass.utils.SmemAllocator, dtype) -> cute.Tensor:
 
 
 @cute.jit
-def _load_vec_f32(ptr: cute.Pointer, vec_elems: cutlass.Constexpr) -> cute.Tensor:
-    """Vectorized gmem -> rmem load of ``vec_elems`` contiguous fp32.
+def _load_vec(
+    ptr: cute.Pointer, vec_elems: cutlass.Constexpr, dtype: cutlass.Constexpr
+) -> cute.Tensor:
+    """Vectorized gmem -> rmem load of ``vec_elems`` contiguous elements.
 
-    Cute picks the widest safe instruction (e.g. LDG.128 for a 4-wide
-    fp32 tile) from the static shape.
+    Cute picks the widest safe instruction from the static shape
+    (LDG.128 for 4 x fp32, LDG.64 for 4 x bf16).
     """
     gsrc = cute.make_tensor(ptr, cute.make_layout(vec_elems))
-    rvals = cute.make_rmem_tensor(vec_elems, Float32)
+    rvals = cute.make_rmem_tensor(vec_elems, dtype)
     cute.autovec_copy(gsrc, rvals)
     return rvals
 
@@ -178,27 +185,29 @@ def _block_excl_prefix_i32(
 class _RadixSelectTopK:
     """One-CTA-per-row fused radix-select + bitonic sort.
 
-    ``N``, ``K`` and ``deterministic`` are specialised at compile time:
-    the JIT cache keys on ``(N, K, deterministic)`` so a row-length or
-    determinism-mode change forces a recompile.
-
-    When ``deterministic`` is True, phase 2 uses block-wide prefix-sum
-    scans for input-stable gather and phase 3's bitonic comparator uses
-    a lex ``(ord, -idx)`` key. Output matches aten bit-exactly.
-
-    When ``deterministic`` is False, phase 2 uses smem atomic counters
-    for the gather and phase 3 sorts by ord-only. Faster (no extra smem
-    bookkeeping, no per-step block barrier on the gather), but ties at
-    the threshold radix bin are resolved non-deterministically and
-    indices may differ across runs.
+    See the module docstring for the algorithm. Compile-time parameters:
+    ``N``/``K``/``deterministic`` select the shape specialization;
+    ``in_dtype`` is Float32 or BFloat16 (bf16 widens to fp32 at load --
+    exact and monotone -- and narrows back on the phase-4 store);
+    ``index_dtype`` is Int32 (JIT path, staged then widened by the
+    wrapper) or Int64 (AOT path, writes aten's int64 indices directly).
     """
 
     VEC: int = 4
 
-    def __init__(self, N: int, K: int, deterministic: bool = True):
+    def __init__(
+        self,
+        N: int,
+        K: int,
+        deterministic: bool = True,
+        in_dtype=Float32,
+        index_dtype=Int32,
+    ):
         self.N = N
         self.K = K
         self.deterministic = deterministic
+        self.in_dtype = in_dtype
+        self.index_dtype = index_dtype
         self.NUM_THREADS = _num_threads_for_k(K)
         self.NUM_STAGES = int(math.log2(K))
         TILE = self.NUM_THREADS * self.VEC
@@ -236,6 +245,8 @@ class _RadixSelectTopK:
         VEC_TAIL_START = const_expr(self.VEC_TAIL_START)
         SCALAR_TAIL_ITERS = const_expr(self.SCALAR_TAIL_ITERS)
         N_HIST_BINS = const_expr(_N_HIST_BINS)
+        IN_DTYPE = self.in_dtype
+        INDEX_DTYPE = self.index_dtype
 
         smem = cutlass.utils.SmemAllocator()
         s_hist = smem.allocate_tensor(
@@ -249,6 +260,8 @@ class _RadixSelectTopK:
         # totals in registers.
         s_write_ctr = _smem_scalar(smem, Int32)
         s_eq_ctr = _smem_scalar(smem, Int32)
+        # Survivors are staged in fp32 regardless of in_dtype (bf16
+        # widens exactly); phase 4 narrows back on store.
         s_vals = smem.allocate_tensor(
             Float32, cute.make_layout((K,)), byte_alignment=16
         )
@@ -289,9 +302,9 @@ class _RadixSelectTopK:
                 # First pass: decided_mask==0, every element participates.
                 for step in cutlass.range(VEC_ITERS):
                     base = step * NT * VEC + tidx * VEC
-                    rvals = _load_vec_f32(_elem_ptr(mX, (row, base)), VEC)
+                    rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                     for vi in cutlass.range_constexpr(self.VEC):
-                        ords = _f32_to_radix_ord(rvals[vi])
+                        ords = _f32_to_radix_ord(Float32(rvals[vi]))
                         byte_val = ((ords >> Int32(shift)) & Int32(255)) ^ Int32(
                             xor_val
                         )
@@ -299,7 +312,7 @@ class _RadixSelectTopK:
                 for step in cutlass.range(SCALAR_TAIL_ITERS):
                     idx = VEC_TAIL_START + step * NT + tidx
                     if idx < N:
-                        ords = _f32_to_radix_ord(mX[row, idx])
+                        ords = _f32_to_radix_ord(Float32(mX[row, idx]))
                         byte_val = ((ords >> Int32(shift)) & Int32(255)) ^ Int32(
                             xor_val
                         )
@@ -307,9 +320,9 @@ class _RadixSelectTopK:
             else:
                 for step in cutlass.range(VEC_ITERS):
                     base = step * NT * VEC + tidx * VEC
-                    rvals = _load_vec_f32(_elem_ptr(mX, (row, base)), VEC)
+                    rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                     for vi in cutlass.range_constexpr(self.VEC):
-                        ords = _f32_to_radix_ord(rvals[vi])
+                        ords = _f32_to_radix_ord(Float32(rvals[vi]))
                         if (ords & decided_mask) == prefix:
                             byte_val = ((ords >> Int32(shift)) & Int32(255)) ^ Int32(
                                 xor_val
@@ -318,7 +331,7 @@ class _RadixSelectTopK:
                 for step in cutlass.range(SCALAR_TAIL_ITERS):
                     idx = VEC_TAIL_START + step * NT + tidx
                     if idx < N:
-                        ords = _f32_to_radix_ord(mX[row, idx])
+                        ords = _f32_to_radix_ord(Float32(mX[row, idx]))
                         if (ords & decided_mask) == prefix:
                             byte_val = ((ords >> Int32(shift)) & Int32(255)) ^ Int32(
                                 xor_val
@@ -391,7 +404,7 @@ class _RadixSelectTopK:
             eq_base = Int32(0)
             for step in cutlass.range(VEC_ITERS):
                 base = step * NT * VEC + tidx * VEC
-                rvals = _load_vec_f32(_elem_ptr(mX, (row, base)), VEC)
+                rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
 
                 # Hoist per-element classification into per-lane registers
                 # so the count pass and write pass don't redo the radix-ord
@@ -400,7 +413,7 @@ class _RadixSelectTopK:
                 cls_reg = cute.make_rmem_tensor(VEC, Int32)
                 packed_local = Int32(0)
                 for vi in cutlass.range_constexpr(self.VEC):
-                    o = _f32_to_radix_ord(rvals[vi])
+                    o = _f32_to_radix_ord(Float32(rvals[vi]))
                     if o > threshold:
                         cls_reg[vi] = Int32(2)
                         packed_local = packed_local + Int32(1 << 16)
@@ -422,7 +435,7 @@ class _RadixSelectTopK:
                 my_above = above_base + above_pfx
                 my_eq = eq_base + eq_pfx
                 for vi in cutlass.range_constexpr(self.VEC):
-                    val_f32 = rvals[vi]
+                    val_f32 = Float32(rvals[vi])
                     cls = cls_reg[vi]
                     idx = base + Int32(vi)
                     if cls == Int32(2):
@@ -449,7 +462,7 @@ class _RadixSelectTopK:
                 valid = idx < N
                 packed_local = Int32(0)
                 if valid:
-                    ords = _f32_to_radix_ord(mX[row, idx])
+                    ords = _f32_to_radix_ord(Float32(mX[row, idx]))
                     if ords > threshold:
                         packed_local = Int32(1 << 16)
                     elif ords == threshold:
@@ -464,7 +477,7 @@ class _RadixSelectTopK:
                 my_above = above_base + above_pfx
                 my_eq = eq_base + eq_pfx
                 if valid:
-                    val_f32 = mX[row, idx]
+                    val_f32 = Float32(mX[row, idx])
                     ords = _f32_to_radix_ord(val_f32)
                     if ords > threshold:
                         if my_above < Int32(K):
@@ -500,9 +513,9 @@ class _RadixSelectTopK:
             # Non-deterministic atomic-counter gather.
             for step in cutlass.range(VEC_ITERS):
                 base = step * NT * VEC + tidx * VEC
-                rvals = _load_vec_f32(_elem_ptr(mX, (row, base)), VEC)
+                rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                 for vi in cutlass.range_constexpr(self.VEC):
-                    val_f32 = rvals[vi]
+                    val_f32 = Float32(rvals[vi])
                     idx = base + Int32(vi)
                     ords = _f32_to_radix_ord(val_f32)
                     if ords > threshold:
@@ -522,7 +535,7 @@ class _RadixSelectTopK:
             for step in cutlass.range(SCALAR_TAIL_ITERS):
                 idx = VEC_TAIL_START + step * NT + tidx
                 if idx < N:
-                    val_f32 = mX[row, idx]
+                    val_f32 = Float32(mX[row, idx])
                     ords = _f32_to_radix_ord(val_f32)
                     if ords > threshold:
                         pos = cute.arch.atomic_add(_elem_ptr(s_write_ctr, 0), Int32(1))
@@ -606,10 +619,12 @@ class _RadixSelectTopK:
                                 s_idxs[tidx] = p_i
                 cute.arch.barrier()
 
-        # Phase 4: results to gmem.
+        # Phase 4: results to gmem. Values narrow back to the input dtype
+        # (exact for bf16: every survivor originated as a bf16 value);
+        # indices widen to the output index dtype.
         if tidx < K:
-            mValues[row, tidx] = s_vals[tidx]
-            mIndices[row, tidx] = s_idxs[tidx]
+            mValues[row, tidx] = IN_DTYPE(s_vals[tidx])
+            mIndices[row, tidx] = INDEX_DTYPE(s_idxs[tidx])
 
 
 def _make_fake_tensor(dtype, shape, divisibility=1):
@@ -623,6 +638,56 @@ def _make_fake_tensor(dtype, shape, divisibility=1):
         stride=stride,
         assumed_align=divisibility * dtype.width // 8,
     )
+
+
+_DTYPES = {"float32": Float32, "bfloat16": BFloat16}
+_DTYPE_SHORT = {"float32": "f32", "bfloat16": "bf16"}
+
+
+def build(spec: dict) -> dict:
+    """AOT builder: one manifest spec point -> compile inputs + sidecar.
+
+    ``spec`` carries scalar values (one point of the manifest grid):
+    {"dtype": "float32"|"bfloat16", "N": int, "K": int,
+     "deterministic": bool}. Returns {"prefix", "fn", "fake_args",
+    "tensor_args"}; the export tool runs ``cute.compile(fn, *fake_args)``
+    and ``export_to_c`` under ``prefix``, then writes ``tensor_args`` to
+    the marshalling sidecar. AOT kernels always store int64 indices
+    (aten's output dtype), unlike the JIT path's int32-plus-widen.
+    """
+    dtype = _DTYPES[spec["dtype"]]
+    N, K = int(spec["N"]), int(spec["K"])
+    deterministic = bool(spec.get("deterministic", False))
+    batch_sym = cute.sym_int()
+    div_n = math.gcd(4, N)
+    div_k = math.gcd(4, K)
+    x_fake = _make_fake_tensor(dtype, (batch_sym, N), div_n)
+    v_fake = _make_fake_tensor(dtype, (batch_sym, K), div_k)
+    i_fake = _make_fake_tensor(Int64, (batch_sym, K), div_k)
+    det_tag = "det" if deterministic else "nondet"
+    prefix = f"topk_radix_{_DTYPE_SHORT[spec['dtype']]}_n{N}_k{K}_{det_tag}"
+    return {
+        "prefix": prefix,
+        "fn": _RadixSelectTopK(
+            N, K, deterministic=deterministic, in_dtype=dtype, index_dtype=Int64
+        ),
+        "fake_args": [
+            x_fake,
+            v_fake,
+            i_fake,
+            cute.runtime.make_fake_stream(),
+        ],
+        "tensor_args": [
+            {
+                "name": "mX",
+                "dynamic_sizes": [0],
+                "dynamic_strides": [0],
+                "read_only": True,
+            },
+            {"name": "mValues", "dynamic_sizes": [0], "dynamic_strides": [0]},
+            {"name": "mIndices", "dynamic_sizes": [0], "dynamic_strides": [0]},
+        ],
+    }
 
 
 @instrumented_cutedsl_cache(
