@@ -2208,6 +2208,12 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
+    # Use scalar accumulators for online softmax in non-persistent CUDA
+    # reduction loops.
+    scalar_online_softmax_accumulators: bool = (
+        os.environ.get("TORCHINDUCTOR_SCALAR_ONLINE_SOFTMAX_ACCUMULATORS", "1") == "1"
+    )
+
     # Generate code using the tl.make_block_ptr() API for loads/stores. Block
     # pointers were removed from the Triton frontend in triton-lang/triton#10833,
     # so this flag is honored only where the installed Triton still provides the
@@ -2455,6 +2461,11 @@ class aot_inductor:
     # AOTI_RUNTIME_CHECK_INPUTS=1, avoiding errors from the [2+, ...] lowerbound
     # restriction when backed_size_oblivious is off.
     check_lowerbound: bool = True
+
+    # Whether to check upperbound constraints on dynamic shapes during runtime.
+    # The upperbound is inferred from the lowering inputs and the dynamic shape
+    # spec, so it can be tighter than the traffic the model can actually serve.
+    check_upperbound: bool = True
 
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
