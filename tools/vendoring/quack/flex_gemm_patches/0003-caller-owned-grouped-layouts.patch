@@ -1,21 +1,21 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 093e326..f2235d0 100644
+index 4a925e2..a8517af 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1064,0 +1065 @@ class EpiMod:
+@@ -1058,0 +1059 @@ class EpiMod:
 +                        swap_ab=swap_ab,
-@@ -1097,0 +1099 @@ class EpiMod:
+@@ -1091,0 +1093 @@ class EpiMod:
 +                    swap_ab=swap_ab,
-@@ -1146,0 +1149 @@ class EpiMod:
+@@ -1140,0 +1143 @@ class EpiMod:
 +                        swap_ab=swap_ab,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index 5342fb0..85bf548 100644
+index 091bba2..1f49a81 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -2606 +2606 @@ class GroupedColStatsOut(EpiOp):
+@@ -2659 +2659 @@ class GroupedColStatsOut(EpiOp):
 -    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
 +    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
-@@ -3007 +3007 @@ class ColVecSelect(EpiOp):
+@@ -3063 +3063 @@ class ColVecSelect(EpiOp):
 -    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args):
 +    def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
 diff --git a/quack/gemm_base.py b/quack/gemm_base.py
@@ -222,21 +222,18 @@ index e9b8038..2c39d57 100644
 +        semantic_value_key(fn.__defaults__, seen, force_source=False),
 +        semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index d1daf22..a16883f 100644
+index eae88af..cf85937 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
-@@ -112,0 +113 @@ import operator
+@@ -109,0 +110 @@ import operator
 +from dataclasses import dataclass
-@@ -127,0 +129 @@ from quack.epilogue.ops import (
+@@ -124,0 +126 @@ from quack.epilogue.ops import (
 +from quack.gemm_runtime.identity import semantic_value_key
-@@ -245,3 +247,3 @@ def grouped_reduce_out_shape(m: int, n: int, group: int, axis: int, batch: int |
--def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
--    """Physical element count for a batch of padded 128x4 blocked matrices."""
--    return batch * 512 * ((rows + 127) // 128) * ((cols + 3) // 4)
+@@ -241,0 +244,49 @@ def grouped_reduce_out_shape(m: int, n: int, group: int, axis: int, batch: int |
 +@dataclass(frozen=True)
 +class GroupedLocalReduceOutputLayout:
 +    """Caller-owned physical carrier exposed as a logical grouped-output tensor.
-@@ -248,0 +251,28 @@ def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
++
 +    ``tensor_fn(carrier, transposed)`` runs while tracing a concrete GEMM
 +    candidate and returns the rank-3 caller-oriented compressed matrix, or its
 +    transposed kernel orientation. ``carrier_shape_fn(batch, rows, cols)``
@@ -251,6 +248,7 @@ index d1daf22..a16883f 100644
 +    fake_shape_fn: object
 +    carrier_ndim: int
 +    supports_config_fn: object | None = None
++    validate_carrier_fn: object | None = None
 +
 +    def __post_init__(self) -> None:
 +        if not self.name:
@@ -263,15 +261,11 @@ index d1daf22..a16883f 100644
 +            )
 +        if self.supports_config_fn is not None and not callable(self.supports_config_fn):
 +            raise TypeError("output layout config predicate must be callable")
++        if self.validate_carrier_fn is not None and not callable(self.validate_carrier_fn):
++            raise TypeError("output layout carrier validator must be callable")
 +        if self.carrier_ndim <= 0:
 +            raise ValueError("output layout carrier rank must be positive")
-@@ -250,6 +280,9 @@ def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
--def blocked_128x4_carrier_view(carrier, rows: int, cols: int, batch: int = 1):
--    """Attach logical matrix extents to a flat blocked carrier without moving data."""
--    expected = blocked_128x4_numel(rows, cols, batch)
--    if carrier.ndim != 1 or not carrier.is_contiguous() or carrier.numel() != expected:
--        raise ValueError(
--            f"blocked 128x4 carrier must be contiguous rank 1 with {expected} elements"
++
 +    def cache_key(self):
 +        """Return source-derived callback identity for the persistent kernel key."""
 +        return (
@@ -281,12 +275,11 @@ index d1daf22..a16883f 100644
 +            semantic_value_key(self.fake_shape_fn, set(), force_source=True),
 +            self.carrier_ndim,
 +            semantic_value_key(self.supports_config_fn, set(), force_source=True),
-@@ -257,4 +289,0 @@ def blocked_128x4_carrier_view(carrier, rows: int, cols: int, batch: int = 1):
--    return carrier.as_strided(
--        (batch, rows, cols),
--        (expected // batch, 0, 0),
--    )
-@@ -463,0 +493,8 @@ class _GroupedSlice(NamedTuple):
++            semantic_value_key(self.validate_carrier_fn, set(), force_source=True),
++        )
++
++
+@@ -410,0 +462,8 @@ class _GroupedSlice(NamedTuple):
 +class _GroupedOutputLayoutParams(NamedTuple):
 +    """Logical bounds paired with a caller-owned physical output view."""
 +
@@ -295,20 +288,20 @@ index d1daf22..a16883f 100644
 +    logical_groups: object
 +
 +
-@@ -485,0 +523 @@ class GroupedReduceBase(EpiOp):
+@@ -432,0 +492 @@ class GroupedReduceBase(EpiOp):
 +        output_layout: GroupedLocalReduceOutputLayout | None = None,
-@@ -501,0 +540 @@ class GroupedReduceBase(EpiOp):
+@@ -448,0 +509 @@ class GroupedReduceBase(EpiOp):
 +        self.output_layout = output_layout
-@@ -509 +548,5 @@ class GroupedReduceBase(EpiOp):
+@@ -456 +517,5 @@ class GroupedReduceBase(EpiOp):
 -        extra = tuple(sorted(set(vars(self)) - {"name", "axis", "group", "combine", "finalize"}))
 +        extra = tuple(
 +            sorted(
 +                set(vars(self)) - {"name", "axis", "group", "combine", "finalize", "output_layout"}
 +            )
 +        )
-@@ -520,0 +564 @@ class GroupedReduceBase(EpiOp):
+@@ -467,0 +533 @@ class GroupedReduceBase(EpiOp):
 +            None if self.output_layout is None else self.output_layout.cache_key(),
-@@ -524,2 +568,8 @@ class GroupedReduceBase(EpiOp):
+@@ -471,2 +537,8 @@ class GroupedReduceBase(EpiOp):
 -        """Whether a native GEMM config can preserve this grouped geometry."""
 -        return grouped_reduce_supports_config(config, self.axis, self.group)
 +        """Whether a native GEMM config preserves the reduction and output layout."""
@@ -319,7 +312,7 @@ index d1daf22..a16883f 100644
 +            or self.output_layout.supports_config_fn is None
 +            or self.output_layout.supports_config_fn(config, self.axis, self.group)
 +        )
-@@ -528 +578,11 @@ class GroupedReduceBase(EpiOp):
+@@ -475 +547,11 @@ class GroupedReduceBase(EpiOp):
 -        """Describe an unsupported group against the available config frontier."""
 +        """Describe an unsupported group or caller-owned output layout."""
 +        if (
@@ -332,25 +325,36 @@ index d1daf22..a16883f 100644
 +            )
 +        ):
 +            return f"output layout {self.output_layout.name!r} has no supported GemmConfig"
-@@ -557 +617,7 @@ class GroupedReduceBase(EpiOp):
+@@ -504,6 +586,13 @@ class GroupedReduceBase(EpiOp):
 -        if value.ndim not in (2, 3):
+-            raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
+-        if value.stride(-1) != 1:
+-            raise ValueError(
+-                f"{self.name}: compressed aux buffer must be contiguous in its last dim"
+-            )
 +        if self.output_layout is not None:
 +            if value.ndim != self.output_layout.carrier_ndim:
 +                raise ValueError(
 +                    f"{self.name}: {self.output_layout.name} carrier must be rank "
 +                    f"{self.output_layout.carrier_ndim}"
 +                )
-+        elif value.ndim not in (2, 3):
-@@ -578 +644 @@ class GroupedReduceBase(EpiOp):
++        else:
++            if value.ndim not in (2, 3):
++                raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
++            if value.stride(-1) != 1:
++                raise ValueError(
++                    f"{self.name}: compressed aux buffer must be contiguous in its last dim"
++                )
+@@ -525 +614 @@ class GroupedReduceBase(EpiOp):
 -        """Validate compressed output geometry against the GEMM problem."""
 +        """Validate caller-owned carrier geometry against the GEMM problem."""
-@@ -584 +650,4 @@ class GroupedReduceBase(EpiOp):
+@@ -531 +620,4 @@ class GroupedReduceBase(EpiOp):
 -            raise ValueError(f"{self.name}: compressed aux buffer is required")
 +            kind = (
 +                "compressed aux buffer" if self.output_layout is None else "output-layout carrier"
 +            )
 +            raise ValueError(f"{self.name}: {kind} is required")
-@@ -598 +667,14 @@ class GroupedReduceBase(EpiOp):
+@@ -545 +637,14 @@ class GroupedReduceBase(EpiOp):
 -        expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
 +        if self.output_layout is None:
 +            expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
@@ -366,15 +370,17 @@ index d1daf22..a16883f 100644
 +                cols,
 +            )
 +        )
-@@ -601 +683,4 @@ class GroupedReduceBase(EpiOp):
+@@ -548 +653,6 @@ class GroupedReduceBase(EpiOp):
 -            raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
 +            raise ValueError(
 +                f"{self.name}: {self.output_layout.name} carrier must have shape "
 +                f"{expected}, got {actual}"
 +            )
-@@ -607 +691,0 @@ class GroupedReduceBase(EpiOp):
++        if self.output_layout.validate_carrier_fn is not None:
++            self.output_layout.validate_carrier_fn(value)
+@@ -554 +663,0 @@ class GroupedReduceBase(EpiOp):
 -        groups = cute.sym_int()
-@@ -608,0 +693,10 @@ class GroupedReduceBase(EpiOp):
+@@ -555,0 +665,10 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout is not None:
 +            rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
 +            shape = self.output_layout.fake_shape_fn(fctx.l, rows, cols)
@@ -385,7 +391,7 @@ index d1daf22..a16883f 100644
 +                divisibility=1,
 +            )
 +        groups = cute.sym_int()
-@@ -621,0 +716,9 @@ class GroupedReduceBase(EpiOp):
+@@ -568,0 +688,9 @@ class GroupedReduceBase(EpiOp):
 +        if self.output_layout is not None:
 +            tensor = self.output_layout.tensor_fn(tensor, gemm.a_transposed)
 +            assert cute.rank(tensor) == 3
@@ -395,7 +401,7 @@ index d1daf22..a16883f 100644
 +                else (gemm.caller_n, gemm.caller_m // self.group)
 +            )
 +            return {self.name: _GroupedOutputLayoutParams(tensor, logical_extent, logical_groups)}
-@@ -771,0 +875,7 @@ class GroupedReduceBase(EpiOp):
+@@ -718,0 +847,7 @@ class GroupedReduceBase(EpiOp):
 +        if const_expr(self.output_layout is not None):
 +            logical_extent = param.logical_extent
 +            logical_groups = param.logical_groups
@@ -403,7 +409,7 @@ index d1daf22..a16883f 100644
 +        else:
 +            logical_extent = None
 +            logical_groups = None
-@@ -783,2 +893,7 @@ class GroupedReduceBase(EpiOp):
+@@ -730,2 +865,7 @@ class GroupedReduceBase(EpiOp):
 -            limit_groups = mReduce.shape[1]
 -            limit = min(varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M, tile_M)
 +            if const_expr(self.output_layout is not None):
@@ -413,7 +419,7 @@ index d1daf22..a16883f 100644
 +                logical_extent = varlen_manager.len_m(batch_idx)
 +                limit_groups = cute.size(mReduce, mode=[1])
 +            limit = min(logical_extent - tile_coord_mnkl[0] * tile_M, tile_M)
-@@ -787,2 +902,7 @@ class GroupedReduceBase(EpiOp):
+@@ -734,2 +874,7 @@ class GroupedReduceBase(EpiOp):
 -            limit_groups = mReduce.shape[0]
 -            limit = min(cute.size(mReduce, mode=[1]) - tile_coord_mnkl[1] * tile_N, tile_N)
 +            if const_expr(self.output_layout is not None):
@@ -423,124 +429,23 @@ index d1daf22..a16883f 100644
 +                logical_extent = cute.size(mReduce, mode=[1])
 +                limit_groups = cute.size(mReduce, mode=[0])
 +            limit = min(logical_extent - tile_coord_mnkl[1] * tile_N, tile_N)
-@@ -965,97 +1084,0 @@ class GroupedLocalReduce(GroupedReduceBase):
--class Blocked128x4GroupedLocalReduce(GroupedLocalReduce):
--    """Axis-1 grouped sink stored directly into a padded cuBLAS 128x4 carrier.
--
--    The host passes a zero-stride metadata view shaped ``(batch, rows, groups)``
--    over the flat carrier. The kernel ignores those strides, uses the shape for
--    exact tail predicates, and owns the physical swizzle and batch padding.
--    """
--
--    def __init__(self, name, *, axis=1, group, combine="add", finalize=None):
--        if axis != 1:
--            raise NotImplementedError("blocked 128x4 grouped outputs support axis 1 only")
--        super().__init__(name, axis=axis, group=group, combine=combine, finalize=finalize)
--
--    def supports_config(self, config) -> bool:
--        """Start with the SM100 tile family validated by the vendor contract."""
--        return (
--            getattr(config, "device_capacity", None) == 10
--            and config.tile_m in (128, 256)
--            and config.tile_n >= 128
--            and grouped_reduce_supports_config(config, self.axis, self.group)
--        )
--
--    def host_arg_key(self, value):
--        if value is None:
--            return None
--        from quack.cute_dsl_utils import torch2cute_dtype_map
--
--        if value.ndim != 3 or value.stride()[1:] != (0, 0):
--            raise ValueError(
--                f"{self.name}: blocked carrier must use a (batch, rows, groups) metadata view"
--            )
--        return (torch2cute_dtype_map[value.dtype],)
--
--    def host_fake_arg(self, key, fctx):
--        from quack.compile_utils import make_fake_tensor
--
--        (dtype,) = key
--        m, n = (fctx.n, fctx.m) if fctx.swapped else (fctx.m, fctx.n)
--        return make_fake_tensor(
--            dtype,
--            (fctx.l, m, n // self.group),
--            leading_dim=None,
--            divisibility=1,
--        )
--
--    def to_params(self, gemm, args):
--        return {self.name: getattr(args, self.name)}
--
--    @cute.jit
--    def _store_groups(
--        self,
--        gemm,
--        param,
--        state,
--        epi_coord,
--        tile_coord_mnkl,
--        varlen_manager,
--        values,
--        finalize=True,
--    ):
--        """Map caller-oriented group leaders to the blocked carrier index."""
--        tile_M, tile_N = gemm.cta_tile_shape_mnk[:2]
--        physical_axis = state.geom.axis
--        rows, groups = param.shape[1], param.shape[2]
--        row_blocks = cute.ceil_div(rows, 128)
--        col_blocks = cute.ceil_div(groups, 4)
--        batch_stride = 512 * row_blocks * col_blocks
--        raw = cute.make_tensor(
--            param.iterator,
--            cute.make_layout(param.shape[0] * batch_stride),
--        )
--        coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
--        leader_off = const_expr(
--            self.group - state.geom.cols if self._is_temporal(state.geom) else 0
--        )
--        for i in cutlass.range(cute.size(coord), unroll_full=True):
--            row_idx, n_idx = coord[i][0], coord[i][1]
--            pos = n_idx if const_expr(physical_axis == 1) else row_idx
--            if pos % self.group == leader_off:
--                if const_expr(physical_axis == 1):
--                    logical_row = tile_coord_mnkl[0] * tile_M + row_idx
--                    logical_group = (tile_coord_mnkl[1] * tile_N + n_idx) // self.group
--                else:
--                    logical_row = tile_coord_mnkl[1] * tile_N + n_idx
--                    logical_group = (tile_coord_mnkl[0] * tile_M + row_idx) // self.group
--                if logical_row < rows and logical_group < groups:
--                    block = (logical_row // 128) * col_blocks + logical_group // 4
--                    within = (logical_row % 32) * 16 + (logical_row // 32 % 4) * 4
--                    index = (
--                        tile_coord_mnkl[3] * batch_stride + block * 512 + within + logical_group % 4
--                    )
--                    value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
--                    if const_expr(param.element_type != Float32):
--                        value = value.to(param.element_type)
--                    raw[index] = value
--
--
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
-index 833ac3e..2c8ee5c 100644
+index 1c9cbf9..80a7822 100644
 --- a/tests/test_grouped_reduce.py
 +++ b/tests/test_grouped_reduce.py
 @@ -14,0 +15 @@ Two layers:
 +import functools
-@@ -24 +25,4 @@ import torch
+@@ -18,0 +20 @@ from types import SimpleNamespace
++import cutlass
+@@ -23 +25,4 @@ import torch
 -from quack.epilogue.frontend import gemm_epilogue, fragment_epilogue
 +from cutlass.base_dsl.dsl import active_env_manager as _external_layout_helper
 +
 +from quack import epi_math
 +from quack.epilogue.frontend import fragment_epilogue, gemm_epilogue
-@@ -28 +31,0 @@ from quack.grouped_reduce import (
--    Blocked128x4GroupedLocalReduce,
-@@ -31,0 +35 @@ from quack.grouped_reduce import (
+@@ -29,0 +35 @@ from quack.grouped_reduce import (
 +    GroupedLocalReduceOutputLayout,
-@@ -34,2 +37,0 @@ from quack.grouped_reduce import (
--    blocked_128x4_carrier_view,
--    blocked_128x4_numel,
-@@ -42,0 +45,112 @@ from quack.grouped_reduce import (
+@@ -37,0 +44,114 @@ from quack.grouped_reduce import (
 +
 +def _blocked_carrier_shape(batch, rows, cols):
 +    return (batch, (rows + 127) // 128, (cols + 3) // 4, 512)
@@ -618,7 +523,9 @@ index 833ac3e..2c8ee5c 100644
 +
 +
 +def _nvfp4_scale(value):
-+    return epi_math.nvfp4_e4m3_scale(value, 6.0, "nearest")
++    return epi_math.to_dtype(
++        epi_math.clamp(value / 6.0, min=0.015625, max=448.0), cutlass.Float8E4M3FN
++    )
 +
 +
 +def _blocked_supports_config(config, axis, group):
@@ -653,24 +560,44 @@ index 833ac3e..2c8ee5c 100644
 +    _blocked_supports_config,
 +)
 +
-@@ -113,0 +228 @@ def test_epi_mod_digest_tracks_op_config():
+@@ -108,0 +229 @@ def test_epi_mod_digest_tracks_op_config():
 +            dict(axis=1, group=32, output_layout=_BLOCKED_LAYOUT),
-@@ -116 +231 @@ def test_epi_mod_digest_tracks_op_config():
+@@ -111 +232 @@ def test_epi_mod_digest_tracks_op_config():
 -    assert len(digests) == 4
 +    assert len(digests) == 5
-@@ -176,12 +291,20 @@ def test_two_argument_finalizer_rejects_swap_ab():
--def test_blocked_carrier_contract_and_cache_identity():
--    """Blocked storage owns padding, metadata shape, and semantic identity."""
--    assert blocked_128x4_numel(128, 4) == 512
--    assert blocked_128x4_numel(129, 5, batch=2) == 4096
--    carrier = torch.empty(2048)
--    view = blocked_128x4_carrier_view(carrier, 129, 5)
--    assert view.shape == (1, 129, 5)
--    assert view.stride() == (2048, 0, 0)
--    assert view.untyped_storage().data_ptr() == carrier.untyped_storage().data_ptr()
--
--    op = Blocked128x4GroupedLocalReduce("g", group=16)
--    assert op.host_arg_key(view)[0] is cutlass.Float32
+@@ -156,0 +278,317 @@ def test_two_argument_finalizer_rejects_swap_ab():
++def test_output_layout_owns_carrier_stride_contract():
++    """Custom callbacks may interpret strides that dense sinks reject."""
++
++    def tensor_fn(tensor, _transposed):
++        return tensor
++
++    def carrier_shape(batch, rows, cols):
++        return (batch, rows, cols)
++
++    layout = GroupedLocalReduceOutputLayout(
++        "strided",
++        tensor_fn,
++        carrier_shape,
++        carrier_shape,
++        3,
++    )
++    op = GroupedLocalReduce("g", axis=1, group=16, output_layout=layout)
++    carrier = torch.empty(1, 4, 8).transpose(-1, -2)
++    assert carrier.shape == (1, 8, 4)
++    assert carrier.stride(-1) != 1
++    assert op.host_arg_key(carrier)[0] is cutlass.Float32
++    op.host_validate(
++        carrier,
++        m=8,
++        n=64,
++        tile_M=128,
++        tile_N=64,
++        batch=None,
++        varlen_m=False,
++    )
++
++
 +def test_output_layout_carrier_contract_and_cache_identity():
 +    """Callback layouts own their carrier ABI and semantic cache identity."""
 +    global _LAYOUT_GLOBAL_SALT, _LAYOUT_WRAPPER_GLOBAL_MODE
@@ -691,14 +618,9 @@ index 833ac3e..2c8ee5c 100644
 +        batch=None,
 +        varlen_m=False,
 +    )
-@@ -189,5 +312 @@ def test_blocked_carrier_contract_and_cache_identity():
--    with pytest.raises(NotImplementedError, match="axis 1 only"):
--        Blocked128x4GroupedLocalReduce("g", axis=0, group=16)
--    with pytest.raises(ValueError, match="contiguous rank 1"):
--        blocked_128x4_carrier_view(torch.empty(2049), 129, 5)
--    with pytest.raises(ValueError, match="metadata view"):
++    assert op.cache_key() != GroupedLocalReduce("g", axis=1, group=16).cache_key()
 +    with pytest.raises(ValueError, match="must be rank 4"):
-@@ -194,0 +314,260 @@ def test_blocked_carrier_contract_and_cache_identity():
++        op.host_arg_key(torch.empty(1, 129, 5))
 +    with pytest.raises(ValueError, match="carrier must have shape"):
 +        op.host_validate(
 +            torch.empty(1, 1, 1, 512),
@@ -959,26 +881,25 @@ index 833ac3e..2c8ee5c 100644
 +            after,
 +        )
 +    )
-@@ -267,0 +647,5 @@ def test_grouped_sink_config_gate_tracks_epilogue_layout_families():
++
++
+@@ -227,0 +666,5 @@ def test_grouped_sink_config_gate_tracks_epilogue_layout_families():
 +    blocked = GroupedLocalReduce("g", axis=1, group=16, output_layout=_BLOCKED_LAYOUT)
 +    assert blocked.supports_config(config(256, 256, 2))
 +    assert blocked.supports_config(config(256, 256, 2, swap_ab=True))
 +    assert not blocked.supports_config(config(256, 160, 2))
 +    assert not blocked.supports_config(config(256, 256, 2, capacity=12))
-@@ -326,2 +710,2 @@ def _swap_store_mod(axis, group, combine, finalize):
--def _blocked_store_mod(group, combine="add", finalize=None):
--    op = Blocked128x4GroupedLocalReduce(
+@@ -284,0 +728,26 @@ def _swap_store_mod(axis, group, combine, finalize):
 +def _blocked_store_mod(group, combine="add", finalize=None, *, fragmentwise=True):
 +    op = GroupedLocalReduce(
-@@ -328,0 +713 @@ def _blocked_store_mod(group, combine="add", finalize=None):
++        "g",
 +        axis=1,
-@@ -331,0 +717 @@ def _blocked_store_mod(group, combine="add", finalize=None):
++        group=group,
++        combine=combine,
++        finalize=finalize,
 +        output_layout=_BLOCKED_LAYOUT,
-@@ -334,4 +720,12 @@ def _blocked_store_mod(group, combine="add", finalize=None):
--    @fragment_epilogue(outs={"g": op})
--    @cute.jit
--    def grouped_store(acc):
--        return {"D": acc, "g": acc}
++    )
++
 +    if fragmentwise:
 +
 +        @fragment_epilogue(outs={"g": op})
@@ -991,78 +912,91 @@ index 833ac3e..2c8ee5c 100644
 +        @gemm_epilogue(outs={"g": op})
 +        def grouped_store(acc):
 +            return {"D": acc, "g": acc}
-@@ -478,2 +872,2 @@ def test_grouped_store_blocked_128x4():
--    """The EpiOp owns the physical 128x4 swizzle and writes no follow-up kernel."""
--    l, m, n, k, group = 1, 256, 256, 256, 32
++
++    return grouped_store
++
++
+@@ -418,0 +888,149 @@ def test_grouped_store_swap_ab(axis, group, is_dynamic_persistent):
++def test_grouped_store_blocked_128x4():
 +    """The callback preserves the physical swizzle and independent batch carriers."""
 +    l, m, n, k, group = 2, 256, 256, 256, 32
-@@ -483 +877 @@ def test_grouped_store_blocked_128x4():
--        (blocked_128x4_numel(m, n // group),),
++    A, B, x = _inputs(l, m, n, k, seed=43)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
++    carrier = torch.full(
 +        (_blocked_numel(m, n // group, batch=l),),
-@@ -488 +882 @@ def test_grouped_store_blocked_128x4():
--    view = blocked_128x4_carrier_view(carrier, m, n // group)
++        float("nan"),
++        device="cuda",
++        dtype=torch.float32,
++    )
 +    view = _blocked_carrier(carrier, m, n // group, batch=l)
-@@ -500,10 +894 @@ def test_grouped_store_blocked_128x4():
--    reduced = _grouped_ref(D, 1, group, "max", None)[0]
--    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
--    padded[:m, : n // group] = reduced
--    expected = (
--        padded.reshape(2, 128, 2, 4)
--        .permute(0, 2, 1, 3)
--        .reshape(-1, 4, 32, 4)
--        .transpose(1, 2)
--        .reshape(-1)
--    )
++    _blocked_store_mod(group, combine="max").gemm(
++        A,
++        B,
++        D,
++        epi_args=dict(g=view),
++        tile_M=256,
++        tile_N=256,
++        cluster_M=2,
++        cluster_N=1,
++    )
++
 +    reduced = _grouped_ref(D, 1, group, "max", None)
-@@ -511 +896 @@ def test_grouped_store_blocked_128x4():
--    assert torch.equal(carrier, expected)
++    _check(D, x, "D")
 +    assert torch.equal(carrier, _blocked_ref(reduced))
-@@ -520 +905 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
--        (blocked_128x4_numel(m, n // group),),
++
++
++def test_grouped_store_blocked_128x4_zero_fills_padding():
++    """Tail predicates leave the caller-zeroed padded rows and columns untouched."""
++    l, m, n, k, group = 1, 129, 80, 256, 16
++    A, B, x = _inputs(l, m, n, k, seed=47)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
++    carrier = torch.zeros(
 +        (_blocked_numel(m, n // group),),
-@@ -528 +913 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
--        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
++        device="cuda",
++        dtype=torch.float32,
++    )
++    _blocked_store_mod(group, combine="max").gemm(
++        A,
++        B,
++        D,
 +        epi_args=dict(g=_blocked_carrier(carrier, m, n // group)),
-@@ -536,9 +920,0 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
--    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
--    padded[:m, : n // group] = reduced
--    expected = (
--        padded.reshape(2, 128, 2, 4)
--        .permute(0, 2, 1, 3)
--        .reshape(-1, 4, 32, 4)
--        .transpose(1, 2)
--        .reshape(-1)
--    )
-@@ -546 +922 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
--    assert torch.equal(carrier, expected)
++        tile_M=256,
++        tile_N=256,
++        cluster_M=2,
++        cluster_N=1,
++    )
++
++    reduced = _grouped_ref(D, 1, group, "max", None)[0]
++    _check(D, x, "D")
 +    assert torch.equal(carrier, _blocked_ref(reduced))
-@@ -549,3 +925,5 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
--def test_grouped_store_blocked_128x4_swap_ab():
--    """The same logical blocked carrier works for the validated swapped sink."""
--    l, m, n, k, group = 1, 257, 288, 64, 32
++
++
 +@pytest.mark.parametrize("group", [16, 32])
 +@pytest.mark.parametrize("fragmentwise", [False, True])
 +def test_grouped_store_blocked_128x4_swap_ab(group, fragmentwise):
 +    """Both epilogue frontends preserve validated swapped blocked groups."""
 +    l, m, n, k = 1, 257, 288, 64
-@@ -555 +933 @@ def test_grouped_store_blocked_128x4_swap_ab():
--        (blocked_128x4_numel(m, n // group),),
++    A, B, x = _inputs(l, m, n, k, seed=53)
++    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
++    carrier = torch.zeros(
 +        (_blocked_numel(m, n // group),),
-@@ -559 +937 @@ def test_grouped_store_blocked_128x4_swap_ab():
--    _blocked_store_mod(group, combine="max").gemm(
++        device="cuda",
++        dtype=torch.float32,
++    )
 +    _blocked_store_mod(group, combine="max", fragmentwise=fragmentwise).gemm(
-@@ -563 +941 @@ def test_grouped_store_blocked_128x4_swap_ab():
--        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
++        A,
++        B.mT,
++        D,
 +        epi_args=dict(g=_blocked_carrier(carrier, m, n // group)),
-@@ -573,8 +951,64 @@ def test_grouped_store_blocked_128x4_swap_ab():
--    padded = torch.zeros((384, 12), device="cuda", dtype=torch.float32)
--    padded[:m, : n // group] = reduced
--    expected = (
--        padded.reshape(3, 128, 3, 4)
--        .permute(0, 2, 1, 3)
--        .reshape(-1, 4, 32, 4)
--        .transpose(1, 2)
--        .reshape(-1)
++        tile_M=256,
++        tile_N=256,
++        cluster_M=2,
++        cluster_N=1,
++        b_kn=True,
++        swap_ab=True,
++    )
++
++    reduced = _grouped_ref(D, 1, group, "max", None)[0]
 +    _check(D, x, "D")
 +    assert torch.equal(carrier, _blocked_ref(reduced))
 +
@@ -1127,6 +1061,8 @@ index 833ac3e..2c8ee5c 100644
 +        (_grouped_ref(D, 1, group, "max", None)[0] / 6.0)
 +        .clamp(0.015625, 448.0)
 +        .to(torch.float8_e4m3fn)
-@@ -583 +1017 @@ def test_grouped_store_blocked_128x4_swap_ab():
--    assert torch.equal(carrier, expected)
++    )
++    _check(D, x, "D")
 +    assert torch.equal(carrier, _blocked_ref(reduced))
++
++
