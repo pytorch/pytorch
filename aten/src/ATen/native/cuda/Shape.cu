@@ -57,14 +57,10 @@ inline std::tuple<dim3, dim3> getCatGridRocm(unsigned int max_elements_per_tenso
   constexpr unsigned int threads_per_block = 256;
   constexpr unsigned int max_tb_per_sm = 32;
 
-  // 4 elements per thread beats the historical 8 at small output sizes -- 1.385x
-  // on gfx1250 and 1.109x on gfx950 at 524288 total output elements, 8/8
-  // mirrored pairs each -- but the two architectures disagree above ~2M: gfx1250
-  // regresses 7-8% from 4.2M upward while gfx950 stays neutral or wins. The
-  // threshold is therefore the intersection of the two win regions, which costs
-  // gfx1250 nothing. Above the num_sm*max_tb_per_sm grid cap the choice makes no
-  // difference at all: both values issue an identical launch.
-  // See operator_benchmark_shortlist_analysis/cat_stack_operators/.
+  // 4 elements per thread measures faster than the historical 8 at small output
+  // sizes, but the two ROCm architectures measured disagree above ~2M elements,
+  // where gfx1250 regresses. The threshold is the intersection of the two win
+  // regions.
   constexpr unsigned int small_output_elements_per_thread = 4;
   constexpr unsigned int large_output_elements_per_thread = 8;
   constexpr uint64_t small_output_threshold = 2ull * 1024 * 1024;
