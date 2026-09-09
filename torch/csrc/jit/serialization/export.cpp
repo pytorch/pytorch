@@ -263,8 +263,8 @@ class GraphEncoder {
  private:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
-  // get written to the ONNX graph is always the deterministic and
-  // predictable. While this is not a ONNX requirement, it is needed
+  // get written to the ONNX graph is always deterministic and
+  // predictable. While this is not an ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
   // for validating ONNX graphs.
   void EncodeGraph(

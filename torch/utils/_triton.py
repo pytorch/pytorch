@@ -1,7 +1,11 @@
 import functools
 import hashlib
+import logging
 import os
 from typing import Any
+
+
+log = logging.getLogger(__name__)
 
 
 _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
@@ -41,6 +45,22 @@ def has_triton_package() -> bool:
         return True
     except ImportError:
         return False
+
+
+@functools.cache
+def has_triton_block_ptr() -> bool:
+    """Whether the installed Triton still provides the block-pointer frontend API.
+
+    triton-lang/triton#10833 removed block pointers but kept ``tl.make_block_ptr``
+    as a raising stub while dropping ``tl.advance``, so ``advance`` is the
+    load-bearing check -- probing ``make_block_ptr`` alone would be fooled by the
+    stub. Inductor's codegen emits both builtins, so require both.
+    """
+    if not has_triton_package():
+        return False
+    import triton.language as tl
+
+    return hasattr(tl, "make_block_ptr") and hasattr(tl, "advance")
 
 
 @functools.cache
@@ -154,6 +174,34 @@ def has_triton_tma_device() -> bool:
     return False
 
 
+def has_triton_amd_tdm_device(arch: str) -> bool:
+    """Return whether Triton exposes AMD TDM lowering for the given GCN arch."""
+    return _has_triton_amd_tdm_device(arch.split(":", 1)[0])
+
+
+@functools.cache
+def _has_triton_amd_tdm_device(arch: str) -> bool:
+    if not has_triton_package():
+        return False
+
+    try:
+        from triton.language import make_tensor_descriptor  # noqa: F401
+    except ImportError:
+        return False
+
+    try:
+        from triton._C.libtriton import amd
+
+        return bool(amd.supports_tdm(arch))
+    except Exception:
+        log.debug(
+            "Failed to query Triton AMD TDM support for %s",
+            arch,
+            exc_info=True,
+        )
+        return False
+
+
 @functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
     import torch
@@ -206,7 +254,12 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton(*, include_cpu: bool = False) -> bool:
+    """Return whether a usable Triton backend is available.
+
+    By default, this helper only considers accelerator devices; callers must
+    explicitly include CPU.
+    """
     if not has_triton_package():
         return False
 
@@ -225,7 +278,7 @@ def has_triton() -> bool:
     # specific TritonUnavailableError rather than RuntimeError so unexpected
     # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
-        if ":" in name:
+        if ":" in name or (name == "cpu" and not include_cpu):
             continue
         if not (
             device_interface.is_available() and device_interface.is_triton_capable()

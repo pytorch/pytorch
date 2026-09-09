@@ -11,6 +11,7 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CUDAFunctions.h>
@@ -112,7 +113,7 @@ __device__ int binarySearchForMultinomial(const scalar_t* cumdist,
   CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
-    int mid = start + (end - start) / 2;
+    int mid = c10::cuda::compat::midpoint(start, end);
 
     scalar_t midVal = cumdist[mid];
     if (midVal < val) {
@@ -382,17 +383,6 @@ void multinomial_with_replacement_kernel_impl(
     } else {
       // Generic, slow implementation with memory allocations
 
-      // For sampling without replacement, we modify the distribution
-      // for subsequent samples in this space
-      Tensor origDist = native::empty_like(
-          self_v,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      origDist.copy_(self_v);
-
       Tensor normDist = native::empty_like(
           self_v,
           std::nullopt /* dtype */,
@@ -410,7 +400,7 @@ void multinomial_with_replacement_kernel_impl(
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows
-      normDist.copy_(origDist);
+      normDist.copy_(self_v);
       renormRows(normDist);
 
       // Prefix sum along rows
