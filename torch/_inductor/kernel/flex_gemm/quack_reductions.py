@@ -11,15 +11,10 @@ from typing import Any
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
-    LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     local_reduce_needs_physical_combine,
 )
 from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
 from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_cutedsl_op_name
-from torch._inductor.kernel.gemm_epilogue_utils import (
-    normalize_shape,
-    statically_known_equal,
-)
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch.fx.experimental.symbolic_shapes import (
     guard_int,
@@ -109,106 +104,6 @@ class GroupedTensorSSALayout:
     @property
     def needs_physical_combine(self) -> bool:
         return local_reduce_needs_physical_combine(self.axis, self.group_size)
-
-
-def _syntactic_grouped_tensor_layout(
-    shape: tuple[Any, ...],
-) -> GroupedTensorSSALayout | None:
-    """Match grouped-reshape syntax before validating source geometry."""
-    if len(shape) not in (3, 4):
-        return None
-    last = FlexGemmStructuralInt.from_value(shape[-1])
-    penultimate = FlexGemmStructuralInt.from_value(shape[-2])
-    if (
-        last is not None
-        and last.value > 0
-        and type(shape[-2]) is int
-        and shape[-2] == -1
-    ):
-        return GroupedTensorSSALayout(axis=1, group_size=last.value)
-    if (
-        type(shape[-3]) is int
-        and shape[-3] == -1
-        and penultimate is not None
-        and penultimate.value > 0
-    ):
-        return GroupedTensorSSALayout(axis=0, group_size=penultimate.value)
-    return None
-
-
-def _group_count_matches_selected_dim(
-    group_count: Any, selected_size: Any, group: int
-) -> bool:
-    if type(group_count) is int and group_count == -1:
-        return True
-    return statically_known_equal(
-        group_count * group, selected_size
-    ) or statically_known_equal(group_count, selected_size // group)
-
-
-def _grouped_layout_matches_source_shape(
-    shape: tuple[Any, ...],
-    source_shape: tuple[Any, ...],
-    layout: GroupedTensorSSALayout,
-) -> bool:
-    """Require a 2-D GEMM output reshape to split exactly M or N."""
-    if len(shape) != 3:
-        return False
-
-    m, n = source_shape
-    match layout.axis, shape:
-        case 1, (kept_m, group_count, group):
-            structural_group = FlexGemmStructuralInt.from_value(group)
-            return (
-                structural_group is not None
-                and structural_group.value == layout.group_size
-                and statically_known_equal(kept_m, m)
-                and _group_count_matches_selected_dim(group_count, n, layout.group_size)
-            )
-        case 0, (group_count, group, kept_n):
-            structural_group = FlexGemmStructuralInt.from_value(group)
-            return (
-                structural_group is not None
-                and structural_group.value == layout.group_size
-                and statically_known_equal(kept_n, n)
-                and _group_count_matches_selected_dim(group_count, m, layout.group_size)
-            )
-        case _:
-            return False
-
-
-def grouped_tensor_layout(
-    shape: Any, source_shape: Any | None = None
-) -> GroupedTensorSSALayout | None:
-    """Recognize exact grouped M/N reshapes for the local-reduction contract."""
-    shape = normalize_shape(shape)
-    if not isinstance(shape, tuple):
-        return None
-    if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
-        shape = tuple(shape[0])
-    if source_shape is not None:
-        source_shape = normalize_shape(source_shape)
-        if isinstance(source_shape, tuple) and len(source_shape) == 2:
-            candidates = []
-            if shape:
-                group = FlexGemmStructuralInt.from_value(shape[-1])
-                if group is not None and group.value > 0:
-                    candidates.append(
-                        GroupedTensorSSALayout(axis=1, group_size=group.value)
-                    )
-            if len(shape) >= 2:
-                group = FlexGemmStructuralInt.from_value(shape[-2])
-                if group is not None and group.value > 0:
-                    candidates.append(
-                        GroupedTensorSSALayout(axis=0, group_size=group.value)
-                    )
-            for layout in candidates:
-                if _grouped_layout_matches_source_shape(shape, source_shape, layout):
-                    return layout
-            if _syntactic_grouped_tensor_layout(shape) is not None:
-                raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
-            return None
-    return _syntactic_grouped_tensor_layout(shape)
 
 
 FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
