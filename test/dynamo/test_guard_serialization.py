@@ -471,18 +471,8 @@ class DecoratedWholeDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
-def keep_defaults_element(func):
-    @functools.wraps(func)
-    def wrapper(self, x):
-        if func.__defaults__[0] == 2.0:
-            x = x + 1
-        return func(self, x)
-
-    return wrapper
-
-
 class DecoratedDefaultsElementForwardModule(torch.nn.Module):
-    @keep_defaults_element
+    @keep_default_value
     def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
         return x * scale
 
@@ -651,6 +641,16 @@ class SlottedLoudGetattr:
         if name == "__dict__":
             raise RuntimeError("user __getattr__ ran for '__dict__'")
         raise AttributeError(name)
+
+
+class PropertyProxy:
+    # Serves the bound function's name through a property; probing would run it.
+    calls = 0
+
+    @property
+    def global_add(self):
+        type(self).calls += 1
+        return global_add
 
 
 def _global_func_wrong_fqn(x):
@@ -1072,9 +1072,13 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d = base.__defaults__
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
-        # No container->element edge: the kept element is not guarded THROUGH
-        # this tuple, so the whole-tuple guard governs and the tuple stays whole.
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        # The child edge alone would prune the sibling; the whole-tuple record
+        # (EQUALS_MATCH baked the tuple) wins and keeps it verbatim.
+        edges, whole = {id(d): {id(d[1])}}, {id(d): d}
+        pickler = GuardsStatePickler(
+            gtv, {}, {}, buf, guard_tree_children=edges, guard_tree_verbatim=whole
+        )
+        pickler.dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__defaults__, ("alpha", "beta"))
 
@@ -1332,25 +1336,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, SlottedByName)
 
-    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
-        # self defines __getattr__, so probing getattr(self, name) to check
-        # resolution would run user code and can recurse. _reduce_bound_method
-        # carries the function and self explicitly instead of probing.
-        m = types.MethodType(global_add, GetattrProxy())
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
-        self.assertIs(out.__func__, global_add)
-        self.assertIsInstance(out.__self__, GetattrProxy)
-
-    def test_bound_method_on_a_slotted_getattr_proxy_is_not_probed(self):
-        # No instance __dict__: the receiver probe must read the slot, not getattr.
-        m = types.MethodType(global_add, SlottedLoudGetattr())
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
-        self.assertIs(out.__func__, global_add)
-        self.assertIsInstance(out.__self__, SlottedLoudGetattr)
+    def test_bound_method_on_an_instance_served_name_is_not_probed(self):
+        # self serves the name per instance (__getattr__, slots, a property):
+        # probing getattr(self, name) runs user code, can recurse, and a property
+        # hands back the bare function; the reducer carries (func, self) instead.
+        for recv in (GetattrProxy(), SlottedLoudGetattr(), PropertyProxy()):
+            with self.subTest(type(recv).__name__):
+                m = types.MethodType(global_add, recv)
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+                out = pickle.loads(buf.getvalue())["m"]
+                self.assertIs(out.__func__, global_add)
+                self.assertIsInstance(out.__self__, type(recv))
+        self.assertEqual(PropertyProxy.calls, 0)
 
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
