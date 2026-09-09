@@ -549,9 +549,13 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         private stream of fresh shapes that MISS and compile: the compile path
         is the only locked region that runs Python (create_cache_entry), so this
         drives that region under contention rather than lookups alone (which a
-        warm-only hammer can never reach). A wedge fails this test: the joins are
-        bounded by a shared deadline and any thread still alive after it trips
-        the assertion below.
+        warm-only hammer can never reach). The joins are bounded by a shared
+        deadline and catch a wedge in which the blocked thread has released the
+        GIL (any thread still alive after the deadline trips the assertion
+        below). A wedge that blocks while HOLDING the GIL -- the regression this
+        test guards -- cannot be caught from Python: the main thread cannot
+        reacquire the GIL to return from join, so it surfaces as a process hang
+        and a job timeout rather than an attributable failure.
         """
 
         def f(x):
@@ -625,10 +629,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skip(
-        "Flaky SIGSEGV (~12%): callers snapshot non-owning CacheEntry wrappers "
-        "and free them at the depth-zero drain. The durable fix is handing back "
-        "owning references from the ExtraState C++ layer (tracked in "
-        "pytorch/pytorch#196394); re-enable once that lands."
+        "Flaky SIGSEGV (~12%): reset_code/remove_from_cache racing a compile on "
+        "another thread. ConvertFrameAssert.__call__ (convert_frame.py) holds the "
+        "non-owning CacheEntry wrappers from _get_cache_entries_for_region for "
+        "the whole compile; compile_lock serializes the reset itself, but a reset "
+        "parked on a third thread's cache_python_depth is drained later by a "
+        "lookup holding no compile_lock, freeing the snapshot. Reachable from "
+        "user code (pre-#195355 the same race crashed 30/30; the parking narrows "
+        "it). Durable fix: owning references from the C++ layer "
+        "(pytorch/pytorch#196394); re-enable once that lands."
     )
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
         """reset_code can run while other threads are parked on the same
@@ -731,9 +740,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         reset does not splice under contention -- it parks (on a failed
         try-lock or the raised depth), so the raised depth keeps any destroy
         deferred until the readers holding the snapshot finish, and a reader
-        never touches a freed node. The threads are joined
-        under a shared deadline and asserted not alive, so a wedge fails this
-        test. Stress test; not a deterministic reproduction. It pins that the
+        never touches a freed node. The threads are joined under a shared
+        deadline and asserted not alive, so a GIL-released wedge fails this test
+        (a GIL-holding wedge hangs the process instead). Stress test; not a
+        deterministic reproduction. It pins that the
         install / owner-reset / lookup paths stay consistent under contention:
         every lookup serves the right graph or misses cleanly, and the trailing
         owner resets leave no entry behind.
@@ -1178,6 +1188,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         hook.append(reinstall)
         torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+        self.assertFalse(hook, "the backend __eq__ hook never fired")
         # The parked eviction has been applied by now; the reinstall's entries
         # must have survived it.
         self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
@@ -1258,6 +1269,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             # lookup as a mismatch, so a failure here would otherwise surface as
             # a contentless seen != [1]. Capture it to re-raise attributably.
             try:
+                # Three parks queue three CACHE_REGION evictions (they do not
+                # coalesce); the drain must apply them idempotently, which the
+                # total count assertion below pins.
                 for _ in range(3):
                     _clear_cache_entries_for_region(code, region)
                 seen.append(len(_get_cache_entries_for_region(code, region)))
@@ -1281,6 +1295,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # evaluate and recompiles into the region.
         self.assertEqual(len(compiles), 2)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
         # Draining the parked eviction also applied the deferred strategy reset,
         # so the region is back to the inherited DEFAULT.
         self.assertEqual(
