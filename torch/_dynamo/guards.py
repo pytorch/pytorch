@@ -4606,6 +4606,15 @@ def pickle_guards_state(
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
+    except RecursionError as e:
+        # A deep (but finite) guarded object graph, or a __reduce__ that never
+        # memoizes, overflows the recursion limit inside dump: a serialization
+        # limit, not a compiler bug. Reporting WHERE it overflowed is skipped
+        # deliberately, since walking the object graph would recurse again off
+        # an already exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "guard state exceeded the recursion limit while pickling"
+        ) from e
     except Exception as e:
         # Deliberately broad, AssertionError included: GradScaler.__getstate__
         # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
