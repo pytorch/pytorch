@@ -159,13 +159,12 @@ def _rocm_channel(arch: str, separator: str = "") -> str:
     return f"rocm{separator}{arch}"
 
 
+# Display names keep a hyphen (rocm-preview); index_url matches UPLOAD_SUBFOLDER
+# (DESIRED_CUDA), which is hyphen-free (rocmpreview). Mixing them 404s nightly.py.
 ROCM_NIGHTLY_SOURCE_MATRIX = {
     _rocm_channel(arch, "-"): dict(
         name=_rocm_channel(arch, "-"),
-        index_url=(
-            f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/"
-            f"{_rocm_channel(arch, '-' if arch == 'preview' else '')}"
-        ),
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{_rocm_channel(arch)}",
         supported_platforms=["Linux"],
         accelerator="rocm",
     )
