@@ -1502,7 +1502,8 @@ class TestFX(JitTestCase):
 
         for val in vals:
             graph: torch.fx.Graph = torch.fx.Graph()
-            node: torch.fx.Node = graph.create_node("placeholder", "x")
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
             node.meta["val"] = val
             graph.output(node)
             gm = torch.fx.GraphModule(torch.nn.Module(), graph)
@@ -5350,6 +5351,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         None: "None",
         typing.Iterator: "Iterator",
         collections.abc.Iterator: "Iterator",
+        types.ModuleType: "types.ModuleType",
     }
 
     _UNBOUND_TYPES = {
