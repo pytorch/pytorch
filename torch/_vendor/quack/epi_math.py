@@ -8,18 +8,11 @@ the EpiMod D/TileStore boundary; ``to_dtype`` is for FX-visible casts.
 
 from __future__ import annotations
 
-import math
-
-import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Float32
 
 from torch._vendor.quack import activation
 from torch._vendor.quack.cute_dsl_utils import torch2cute_dtype_map
-from torch._vendor.quack.rounding import (
-    cvt_f32x2_ue8m0x2_rp_satfinite,
-    cvt_f32x2_ue8m0x2_rz,
-)
 
 
 def _pair_like(value, lo, hi):
@@ -148,16 +141,6 @@ def maximum(a, b):
     return cute.arch.fmax(a, b, nan=True)
 
 
-def min(a, b):
-    """Alias for :func:`minimum` matching the pointwise vocabulary."""
-    return minimum(a, b)
-
-
-def max(a, b):
-    """Alias for :func:`maximum` matching the pointwise vocabulary."""
-    return maximum(a, b)
-
-
 def clamp(x, min=None, max=None):
     """Clamp ``x`` to its optional inclusive lower and upper bounds."""
     if const_expr(min is not None):
@@ -175,71 +158,6 @@ def clamp_min(x, min):
 def clamp_max(x, max):
     """Clamp ``x`` above by ``max``."""
     return minimum(x, max)
-
-
-def _mx_e8m0_input(x, max_value, rounding):
-    """Prepare one scalar for the selected packed E8M0 conversion."""
-    if const_expr(rounding == "rceil"):
-        return x / max_value
-    max_power = const_expr(math.floor(math.log2(max_value)))
-    scaled = x * (2.0**-max_power)
-    if const_expr(max_power > 0):
-        replacement = Float32(2.0 ** (128 - max_power))
-        scaled = Float32(cutlass.select_(scaled == Float32(float("inf")), replacement, scaled))
-    return scaled
-
-
-def mx_e8m0_scale(x, max_value=448.0, rounding="rceil"):
-    """Encode an MX scale with exact packed FLOOR or saturating RCEIL conversion."""
-    if const_expr(rounding not in ("floor", "rceil")):
-        raise ValueError(f"unsupported MX scale rounding {rounding!r}")
-    is_pair = const_expr(isinstance(x, tuple))
-    lo = _mx_e8m0_input(x[0] if is_pair else x, max_value, rounding)
-    hi = _mx_e8m0_input(x[1] if is_pair else Float32(0.0), max_value, rounding)
-    convert = (
-        cvt_f32x2_ue8m0x2_rz if const_expr(rounding == "floor") else cvt_f32x2_ue8m0x2_rp_satfinite
-    )
-    result = convert(lo, hi)
-    return _pair_like(x, *result) if is_pair else result[0]
-
-
-def nvfp4_e4m3_scale(x, max_value=6.0, rounding="nearest"):
-    """Encode an NVFP4 E4M3 scale and return its decoded Float32 value."""
-    if const_expr(rounding != "nearest"):
-        raise ValueError(f"unsupported NVFP4 scale rounding {rounding!r}")
-    if const_expr(isinstance(x, tuple)):
-        return _pair_like(
-            x,
-            nvfp4_e4m3_scale(x[0], max_value, rounding),
-            nvfp4_e4m3_scale(x[1], max_value, rounding),
-        )
-    scaled = clamp(
-        x / max_value,
-        min=0.015625,
-        max=448.0,
-    )
-    return to_dtype(scaled, cutlass.Float8E4M3FN)
-
-
-def _nvfp4_e2m1_code(x):
-    """Return one finite E2M1 nibble with round-to-nearest-even ties."""
-    magnitude = abs(x)
-    code = where(magnitude > 0.25, Float32(1.0), Float32(0.0))
-    code = where(magnitude >= 0.75, Float32(2.0), code)
-    code = where(magnitude > 1.25, Float32(3.0), code)
-    code = where(magnitude >= 1.75, Float32(4.0), code)
-    code = where(magnitude > 2.5, Float32(5.0), code)
-    code = where(magnitude >= 3.5, Float32(6.0), code)
-    code = where(magnitude > 5.0, Float32(7.0), code)
-    return code + where(x < 0.0, Float32(8.0), Float32(0.0))
-
-
-def nvfp4_pack(x):
-    """Pack adjacent Float32 lanes into native E2M1 Uint8 storage."""
-    if const_expr(isinstance(x, tuple)):
-        return _nvfp4_e2m1_code(x[0]) + Float32(16.0) * _nvfp4_e2m1_code(x[1])
-    packed = x.to(cutlass.Float4E2M1FN).bitcast(cutlass.Uint8)
-    return packed.reshape((cute.size(packed.shape), 1, 1))
 
 
 def eq(a, b):
@@ -310,11 +228,6 @@ def where(condition, a, b):
     return a if condition else b
 
 
-def select(condition, a, b):
-    """Alias for :func:`where`."""
-    return where(condition, a, b)
-
-
 def to_dtype(x, dtype):
     """Round through a torch or CuTe ``dtype`` while retaining Float32 SSA."""
     if const_expr(isinstance(x, tuple)):
@@ -322,13 +235,3 @@ def to_dtype(x, dtype):
     target_dtype = torch2cute_dtype_map.get(dtype, dtype)
     converted = x.to(target_dtype)
     return converted if const_expr(target_dtype is Float32) else converted.to(Float32)
-
-
-def convert_element_type(x, dtype):
-    """Alias for :func:`to_dtype` matching the FX primitive name."""
-    return to_dtype(x, dtype)
-
-
-def store_cast(x, dtype):
-    """Explicit pre-store cast; normal EpiMod stores convert from the destination dtype."""
-    return to_dtype(x, dtype)

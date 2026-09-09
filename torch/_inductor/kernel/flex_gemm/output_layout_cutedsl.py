@@ -32,11 +32,6 @@ def blocked_128x4_output_tensor(
     return cute.make_tensor(tensor.iterator, layout)
 
 
-def transposed_fake_shape(batch, rows, cols):
-    """Return contiguous transposed carrier geometry for async compilation."""
-    return (batch, cols, rows)
-
-
 @cute.jit
 def transposed_output_tensor(
     tensor: cute.Tensor, transposed: cutlass.Constexpr[bool]
