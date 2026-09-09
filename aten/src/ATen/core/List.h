@@ -11,6 +11,7 @@
 #include <compare>
 #include <iterator>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace at {
@@ -229,11 +230,52 @@ private:
   friend class List<T>;
 };
 
+} // namespace impl
+} // namespace c10
+
+// MSVC's STL, unlike libstdc++/libc++, needs this to satisfy
+// indirectly_readable's common_reference_with check (#196002, #196245).
+namespace std {
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    T,
+    c10::impl::ListElementReference<T, Iterator>,
+    TQual,
+    UQual> {
+  using type = T;
+};
+
+template <
+    class T,
+    class Iterator,
+    template <class>
+    class TQual,
+    template <class>
+    class UQual>
+struct basic_common_reference<
+    c10::impl::ListElementReference<T, Iterator>,
+    T,
+    TQual,
+    UQual> {
+  using type = T;
+};
+} // namespace std
+
+namespace c10::impl {
+
 template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T>&& list);
 template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-}
+} // namespace c10::impl
+
+namespace c10 {
 
 /**
  * An object of this class stores a list of values of type T.
