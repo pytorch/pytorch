@@ -50,18 +50,6 @@ class _EpilogueOps(OpsHandler[str]):
     def neg(self, x0: str) -> str:
         return f"-({x0})"
 
-    def gt(self, x0: str, x1: str) -> str:
-        return self._binary(">", x0, x1)
-
-    def where(self, condition: str, input: str, other: str) -> str:
-        return f"({condition}).select({input}, {other})"
-
-    def maximum(self, x0: str, x1: str) -> str:
-        return self.where(self.gt(x0, x1), x0, x1)
-
-    def relu(self, x0: str) -> str:
-        return self.maximum(x0, "0")
-
 
 def materialize_flydsl_scheduler_epilogue(
     original_buffer_name: str,

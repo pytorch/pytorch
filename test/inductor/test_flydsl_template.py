@@ -541,13 +541,12 @@ class TestFlyDSLTemplate(TestCase):
         value = ops.add(value, "1.0")
         value = ops.mul(value, "0.5")
         value = ops.sub(value, "2.0")
-        value = ops.relu(ops.neg(value))
+        value = ops.neg(value)
         source = str(value)
 
         self.assertIn("(acc + 1.0)", source)
         self.assertIn("* 0.5", source)
         self.assertIn("- 2.0", source)
-        self.assertIn(".select(", source)
         self.assertEqual(ops.constant(1.5, torch.float32), "1.5")
         with self.assertRaisesRegex(NotImplementedError, "accumulator reads"):
             ops.load("bias", "0")
@@ -555,6 +554,8 @@ class TestFlyDSLTemplate(TestCase):
             ops.constant(float("inf"), torch.float32)
         with self.assertRaises(NotImplementedError):
             ops.sin(value)
+        with self.assertRaises(NotImplementedError):
+            ops.relu(value)
 
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
@@ -1196,7 +1197,7 @@ class TestFlyDSLTemplate(TestCase):
 
         def fn(a, b):
             result = torch.mm(a, b.t())
-            return torch.relu(-(((result + 1.0) * 0.5 - 2.0) / 3.0))
+            return -(((result + 1.0) * 0.5 - 2.0) / 3.0)
 
         waves = 2 if use_half_tile_interleaved else 4
         gemm_config = asdict(
@@ -1278,6 +1279,7 @@ class TestFlyDSLTemplate(TestCase):
         ):
             with self.subTest(name=name):
                 code = self._assert_compiled_flydsl_epilogue(fn, a, b)
+                self.assertIn("async_compile.flydsl", code)
                 assertion = self.assertIn if expect_fused else self.assertNotIn
                 assertion("HAS_EPILOGUE: fx.Constexpr = True", code)
                 self.assertIn("triton_poi_", code)
