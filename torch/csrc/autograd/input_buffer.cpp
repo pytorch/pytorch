@@ -117,11 +117,16 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
 }
 
 bool can_accumulate_inplace(const Variable& v) {
-  return !(at::isTensorSubclassLike(v) || v._is_zerotensor() ||
-           v.is_nested()) &&
-      v.is_non_overlapping_and_dense() && v.has_storage() &&
+  return (
+      // `v` is a "vanilla" Tensor
+      !(at::isTensorSubclassLike(v) || v._is_zerotensor() || v.is_nested()) &&
+
+      // with a favorable memory layout
+      v.is_non_overlapping_and_dense() &&
+
+      // and we hold the last reference
       impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
-      v.storage().use_count() == 1;
+      v.has_storage() && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 
