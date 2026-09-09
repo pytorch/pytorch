@@ -1760,10 +1760,19 @@ class GuardBuilder(GuardBuilderBase):
                 # DefaultsSource repair below: record the edge on the instance
                 # mapping that actually holds this attribute.
                 if isinstance(source, AttrSource):
-                    for mapping in (
-                        getattr(base_example_value, "__dict__", None),
-                        getattr(base_example_value, "__annotations__", None),
+                    mappings = [getattr(base_example_value, "__dict__", None)]
+                    # __annotations__ belongs to a class/function/module;
+                    # reading it off an instance would key the edge on the
+                    # class dict and can run a user __getattr__.
+                    if (
+                        isinstance(base_example_value, type)
+                        or inspect.isroutine(base_example_value)
+                        or inspect.ismodule(base_example_value)
                     ):
+                        mappings.append(
+                            getattr(base_example_value, "__annotations__", None)
+                        )
+                    for mapping in mappings:
                         if isinstance(mapping, dict) and source.member in mapping:
                             self.guard_tree_children.setdefault(id(mapping), set()).add(
                                 id(example_value)
@@ -4391,16 +4400,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         value INSIDE a plain container it is pruned per value -- else an unguarded
         unpicklable sibling (a threading.Lock a decorator stashed) fails the dump.
 
-        The verbatim and per-value cases coexist by construction: a
-        whole-container EQUALS_MATCH/length guard reads only keys/identity and a
-        pruned value preserves both, while a guard rooted at an element records a
-        child->element edge that forces per-value pruning. The one shape that is
-        emitted today AND reads a plain container whole while also rooting an
-        edge at one of its elements is a function's __dict__/__annotations__: a
-        DunderDict guard keeps the mapping whole and an attribute guard reads an
-        element through it. get_guard_manager_from_source records the edge on the
-        mapping itself (next to the DefaultsSource repair) so that shape prunes
-        per value here rather than carrying an unpicklable sibling verbatim.
+        The verbatim and per-value cases coexist by construction: a plain
+        container carried whole is read by a keys/identity (dict) or length
+        (tuple) guard that a pruned value preserves, while a whole-value
+        EQUALS_MATCH -- which does bake tuple values -- keeps its container
+        verbatim instead; a guard rooted at an element records a child->element
+        edge that forces per-value pruning. The shapes we have identified that
+        read a plain container whole while also rooting an edge at one of their
+        elements are a function's __defaults__ (a whole-tuple EQUALS_MATCH plus a
+        call-site default binding, repaired at the DefaultsSource site) and its
+        __dict__/__annotations__ (a DunderDict guard keeps the mapping whole
+        while an attribute guard reads an element through it).
+        get_guard_manager_from_source records the edge on the container itself so
+        those shapes prune per value here rather than carrying an unpicklable
+        sibling verbatim.
         """
         if not self._keep(container):
             return False
