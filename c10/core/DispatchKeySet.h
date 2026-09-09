@@ -608,8 +608,8 @@ class DispatchKeySet final {
 
    private:
     const uint64_t* data_ptr_ = nullptr;
-    uint8_t next_functionality_;
-    uint8_t next_backend_;
+    uint8_t next_functionality_ = end_iter_mask_val;
+    uint8_t next_backend_ = 0;
     // These are in an invalid state at construction time, and set by the
     // first increment call
     uint8_t current_dispatchkey_idx_{end_iter_key_val};
