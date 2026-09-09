@@ -161,6 +161,7 @@ import sys
 from typing import NamedTuple, Optional
 
 import torch
+import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, Float32, const_expr
 
@@ -195,7 +196,6 @@ from torch._vendor.quack.gemm_config import (
     GemmConfig,
     SplitKMode,
     blockscaled_default_config,
-    canonicalize_config_constraints,
     cta_tile_shape_m,
     default_config,
 )
@@ -205,10 +205,6 @@ from torch._vendor.quack.gemm_sm90 import GemmSm90
 from torch._vendor.quack.gemm_sm100 import GemmSm100
 from torch._vendor.quack.gemm_sm120 import GemmSm120
 from torch._vendor.quack.rounding import RoundingMode
-
-canonicalize_config_constraints = torch._dynamo.assume_constant_result(
-    canonicalize_config_constraints
-)
 
 _SM_BASE = {8: GemmSm80, 9: GemmSm90, 10: GemmSm100, 11: GemmSm100, 12: GemmSm120}
 
@@ -299,6 +295,21 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
     )
 
 
+def _fragment_apply(op, gemm, pstate):
+    """Adapt an apply-port op's per-element ``fn_apply`` to a TensorSSA callable."""
+
+    @cute.jit
+    def apply(value):
+        source = cute.make_rmem_tensor(value.shape, value.element_type)
+        source.store(value)
+        result = cute.make_rmem_tensor(value.shape, value.element_type)
+        for i in cutlass.range(cute.size(source), unroll_full=True):
+            result[i] = op.fn_apply(gemm, pstate, i, source[i])
+        return result.load()
+
+    return apply
+
+
 class _FragmentEpiModMixin(_EpiModMixinBase):
     """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
 
@@ -323,7 +334,7 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
             if const_expr(kind == "apply"):
                 op = ops_by_name[name]
                 pstate = op.fn_prepare(self, epi_loop_tensors[name], False)
-                values[name] = op.fn_apply_fragment(self, pstate)
+                values[name] = _fragment_apply(op, self, pstate)
                 continue
             assert kind in ("c", "row", "col", "tile"), (
                 "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
@@ -572,10 +583,8 @@ class EpiMod:
             op = self.output_ops.get(out_name)
             if op is None:
                 op = TileStore(out_name, gated=paired_acc)
-            elif paired_acc and not (
-                op.gated or getattr(op, "paired_output_bytes", None) is not None
-            ):
-                raise ValueError(f"output op {out_name!r} must support acc_pair mode")
+            elif paired_acc and not op.gated:
+                raise ValueError(f"output op {out_name!r} must be gated in acc_pair mode")
             epi_ops.append(op)
         epi_ops.extend(self.sinks.values())
         epi_ops.extend(self.extra_ops)
@@ -657,22 +666,13 @@ class EpiMod:
         self._minted[key] = cls
         return cls
 
-    def gemm_tuned(
-        self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False, config_constraints=None
-    ):
-        """Autotune GEMM over the optionally constrained native config space."""
+    def gemm_tuned(self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False):
+        """Autotuned gemm(): config-space sweep via quack.gemm_runtime.autotune (lazy
+        import — this module sits below gemm_config in the import graph).
+        Returns TunedModGemm(plan, config, sinks); see tuned_mod_gemm."""
         from torch._vendor.quack.gemm_runtime.autotune import tuned_mod_gemm
 
-        return tuned_mod_gemm(
-            self,
-            A,
-            B,
-            D,
-            C,
-            epi_args=epi_args,
-            b_kn=b_kn,
-            config_constraints=config_constraints,
-        )
+        return tuned_mod_gemm(self, A, B, D, C, epi_args=epi_args, b_kn=b_kn)
 
     def gemm(
         self,
@@ -999,20 +999,14 @@ class EpiMod:
                 out_n //= 2  # fp4 values are stored packed, two per byte
             _require_shape(out_name, aux, _tile_shape(batch, m, out_n, varlen_m))
             if paired_acc:
-                expected_bytes = getattr(output_op, "paired_output_bytes", (2,))
-                if isinstance(expected_bytes, int):
-                    expected_bytes = (expected_bytes,)
-                if aux.dtype in (
+                # fp8/fp4 gated aux = quantized postact (SM100-only; the
+                # TileStore op asserts the arch at trace time).
+                if aux.element_size() != 2 and aux.dtype not in (
                     torch.float8_e4m3fn,
                     torch.float8_e5m2,
                     torch.float4_e2m1fn_x2,
                 ):
-                    expected_bytes = (*expected_bytes, 1)
-                if aux.element_size() not in expected_bytes:
-                    raise TypeError(
-                        "acc_pair auxiliary output has the wrong storage width: "
-                        f"expected one of {expected_bytes} bytes, got {aux.element_size()}"
-                    )
+                    raise TypeError("acc_pair auxiliary output must be 16-bit (or fp8/fp4)")
                 if aux.stride(-1) != 1 or (D is not None and D.stride(-1) != 1):
                     raise ValueError("acc_pair auxiliary output and D must be N-major")
         # Swap-at-trace relabels pinned vec pins into KERNEL coordinates: a
@@ -1429,8 +1423,7 @@ class EpiMod:
         out=None,  # {name: buffer} incl. "D"; missing entries are allocated
         out_dtype=None,
         store_d=True,
-        config_constraints=None,  # partial GemmConfig fields, mapping or canonical tuple
-        config=None,  # exact GemmConfig pin; None selects/defaults from constraints
+        config=None,  # exact GemmConfig pin; None selects the mod's default
         tuned=True,
         dynamic_scheduler=False,
         cu_seqlens_m=None,
@@ -1459,9 +1452,7 @@ class EpiMod:
         ``host_finalize`` (partials are internal scratch) unless the caller
         passed the partial buffer as an operand.
 
-        ``config_constraints`` limits native candidates for both tuning and
-        deterministic selection; an exact ``config=`` must satisfy them. The
-        tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
+        The tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
         incl. varlen/gather/blockscaled/concat, A-operand transforms and
         dynamic_scheduler=True); other calls resolve with the explicit
         ``config=`` or the per-arch default.
@@ -1476,15 +1467,8 @@ class EpiMod:
         because they are already below torch.compile."""
         import torch
 
-        constraints = canonicalize_config_constraints(config_constraints)
         if config is not None and type(config) is not GemmConfig:
             raise TypeError("config must be an exact GemmConfig or None")
-        if config is not None and any(
-            getattr(config, name) != value for name, value in constraints
-        ):
-            raise ValueError(
-                f"config {config} does not satisfy config_constraints={dict(constraints)!r}"
-            )
 
         owned_fmt = None
         transform_key = None
@@ -1544,7 +1528,6 @@ class EpiMod:
                 out=out,
                 out_dtype=out_dtype,
                 store_d=store_d,
-                config_constraints=constraints,
                 config=config,
                 tuned=tuned,
                 cu_seqlens_m=cu_seqlens_m,
@@ -1590,7 +1573,6 @@ class EpiMod:
                 # may rebuild an equal config per call (identity keys can
                 # alias a freed config's address and replay its plan).
                 config,
-                constraints,
                 tuned,
                 dynamic_scheduler,
                 tensor_key(cu_seqlens_m),
@@ -1674,7 +1656,7 @@ class EpiMod:
                 # worst-case shapes per metadata (it's on the warm path).
                 l = lead[0] if len(lead) == 2 else None
                 num_seqs = None if cu_seqlens_m is None else cu_seqlens_m.shape[0] - 1
-                shape_key = (lead[-1], n, l, str(A.device), num_seqs, constraints)
+                shape_key = (lead[-1], n, l, str(A.device), num_seqs)
                 cache = self.__dict__.setdefault("_sink_shape_cache", {})
                 shapes = cache.get(shape_key)
                 if shapes is None:
@@ -1685,7 +1667,6 @@ class EpiMod:
                         l=l,
                         device=A.device,
                         num_seqs=num_seqs,
-                        config_constraints=constraints,
                     )
                     cache[shape_key] = shapes
                 for name, shape in shapes.items():
@@ -1716,7 +1697,6 @@ class EpiMod:
                 transform_a=transform_a,
                 transform_sf=transform_sf,
                 transform_operands=transform_operands,
-                config_constraints=constraints,
             )
             sink_bufs = {name: res.sinks[name] for name in owned_sinks}
             cfg_used, plan_used = res.config, res.plan
@@ -1746,7 +1726,7 @@ class EpiMod:
             )
             if config is not None:
                 cfg = config
-            elif constraints or any(
+            elif any(
                 hasattr(op, "supports_config")
                 for op in (
                     *self.ops.values(),
@@ -1755,7 +1735,7 @@ class EpiMod:
                     *self.extra_ops,
                 )
             ):
-                from torch._vendor.quack.gemm_runtime.autotune import _select_mod_config, mod_selection_args
+                from torch._vendor.quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
 
                 selection_args = mod_selection_args(
                     operands,
@@ -1775,13 +1755,9 @@ class EpiMod:
                     if SFA is not None
                     else self._default_config(A, B, transform_a)
                 )
-                cfg = _select_mod_config(
-                    self,
-                    A.device,
-                    constraints,
-                    selection_args,
-                    preferred_config=preferred_config,
-                )
+                cfg = _legal_mod_configs(
+                    self, A.device, selection_args, preferred_config=preferred_config
+                )[0]
             elif SFA is not None:
                 cfg = blockscaled_default_config(
                     A.shape[-2], n, device_capacity=get_device_capacity(A.device)[0]

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 from torch._higher_order_ops.flex_gemm import FlexGemmOpSpec
@@ -18,6 +18,10 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpiModSource
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,14 +60,9 @@ class FlexGemmEpilogueLocalReduceConfig:
         cls,
         local_reduce: Any | None,
         out_index: int | None,
-        *,
-        combine: str | None = None,
-        finalize: str | None = None,
-        store_finalize: str | None = None,
-        prepass_combine: str | None = None,
-        prepass_finalize: str | None = None,
+        source: "FlexGemmEpiModSource",
     ) -> "FlexGemmEpilogueLocalReduceConfig | None":
-        """Translate lowering's output-consumer plan into template metadata."""
+        """Pair lowering's output-consumer plan with the generated callback names."""
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
@@ -71,11 +70,11 @@ class FlexGemmEpilogueLocalReduceConfig:
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
-            combine,
-            finalize,
-            store_finalize,
-            prepass_combine,
-            prepass_finalize,
+            source.local_reduce_combine,
+            source.local_reduce_finalize,
+            source.local_reduce_store_finalize,
+            source.local_reduce_prepass_combine,
+            source.local_reduce_prepass_finalize,
         )
 
 
@@ -90,7 +89,6 @@ class FlexGemmEpilogueConfig:
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
         blockscaled: Shared block-scaled format and SFA/SFB input positions.
-        quack_config_constraints: Optional native QuACK config field constraints.
         quack_config: Exact QuACK GemmConfig fields pinned for this choice, or
             None to take QuACK's untuned default within the constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
@@ -106,7 +104,6 @@ class FlexGemmEpilogueConfig:
     alpha: float
     beta: float
     blockscaled: FlexGemmEpilogueBlockScaledConfig | None
-    quack_config_constraints: tuple[tuple[str, Any], ...]
     quack_config: tuple[tuple[str, Any], ...] | None
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
@@ -243,8 +240,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         kwargs = []
         if config.quack_config is not None:
             kwargs.append(f", config={config.quack_config!r}")
-        if config.quack_config_constraints:
-            kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
         if config.blockscaled is not None:
             kwargs.append(
                 f", SFA={input_args[config.blockscaled.sfa_index]}, "
