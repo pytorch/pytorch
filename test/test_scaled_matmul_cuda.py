@@ -1282,6 +1282,40 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("fake", [False, True])
+    @parametrize("inplace", [False, True])
+    @parametrize(
+        "contraction_dim,supported",
+        [((1, 0), True), ((-1, -2), True), ((0, 0), False), ((1, 1), False)],
+    )
+    def test_scaled_addmm_contraction_dim(
+        self, device, fake, inplace, contraction_dim, supported
+    ):
+        """Check the supported contraction axes in eager and FakeTensor dispatch."""
+        with FakeTensorMode() if fake else contextlib.nullcontext():
+            # Square operands let unsupported axes pass the old size checks.
+            input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+                32, 32, 32, device, torch.bfloat16
+            )
+            args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+            op = scaled_addmm_ if inplace else scaled_addmm
+            if not supported:
+                with self.assertRaisesRegex(
+                    (ValueError, RuntimeError), "only supports contraction_dim"
+                ):
+                    op(input, *args, contraction_dim=contraction_dim)
+            else:
+                result = op(input.clone(), *args, contraction_dim=contraction_dim)
+                self.assertEqual(result.shape, input.shape)
+                self.assertEqual(result.dtype, input.dtype)
+                if not fake:
+                    self.assertEqual(
+                        result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
+                    )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
         input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
             32, 32, 32, device, torch.bfloat16
@@ -1295,6 +1329,21 @@ class TestFP8Matmul(TestCase):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
+        padded_out = input.new_empty_strided(input.shape, (48, 1))
+        with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
+            torch.ops.aten._scaled_addmm.out(
+                input,
+                mat1,
+                mat2,
+                [scale_a],
+                [ScalingType.TensorWise.value],
+                [],
+                [scale_b],
+                [ScalingType.TensorWise.value],
+                [],
+                out=padded_out,
+            )
+
         expected = scaled_addmm(input, *args)
         misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
         with self.assertRaisesRegex(ValueError, "16-byte aligned"):
@@ -1304,9 +1353,18 @@ class TestFP8Matmul(TestCase):
         aligned_16 = input.new_empty(input.numel() + alignment_offset)[
             alignment_offset:
         ].view_as(input)
+        self.assertEqual(aligned_16.data_ptr() % 32, 16)
         aligned_16.copy_(input)
         self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
         self.assertEqual(aligned_16, expected, atol=5e-2, rtol=5e-2)
+
+        aligned_16.fill_(float("nan"))
+        self.assert_scaled_addmm_inplace(
+            aligned_16,
+            scaled_mm(*args, output_dtype=input.dtype),
+            args,
+            beta=0,
+        )
 
         invalid_ld = input.new_empty_strided((1, 32), (1, 1))
         with self.assertRaisesRegex(ValueError, "canonical contiguous"):
