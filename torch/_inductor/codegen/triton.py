@@ -3303,6 +3303,19 @@ class TMACompatibilityChecker:
         return self.force
 
 
+# Reductions that may share a scalar kernel with an online softmax. Alone they
+# keep the vector path until their shapes are swept like softmax was.
+ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+PLAIN_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -3318,17 +3331,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         TensorDescriptorOptions
     )
     transpose_discontiguous_tensor_descriptors_override: bool | None = None
-    # Reductions that may share a scalar kernel with an online softmax. Alone
-    # they keep the vector path until their shapes are swept like softmax was.
-    SCALAR_ARG_REDUCTION_TYPES = (
-        "argmax",
-        "argmin",
-        "argmax_value",
-        "argmin_value",
-        "argmax_with_value",
-        "argmin_with_value",
-    )
-    SCALAR_LOOP_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
 
     def __init__(
         self,
@@ -5438,23 +5440,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.num_reduction_dims != 1
             or torch.version.hip is not None
             or V.graph.get_current_device_or_throw().type != "cuda"
-            or features.get_reduction_hint(self.tiling_scores) != ReductionHint.INNER
             or V.graph.sizevars.optimization_hint(features.reduction_numel) <= 4096
+            or features.get_reduction_hint(self.tiling_scores) != ReductionHint.INNER
         ):
             return False
-        allowed = self.SCALAR_ARG_REDUCTION_TYPES + self.SCALAR_LOOP_REDUCTION_TYPES
-        has_online_softmax = False
+        online_softmax_nodes = 0
         for node in features.reduction_nodes():
             buf = node.node
-            # tl.reduce cannot take int1; bool outputs cast after the vector loop.
+            # tl.reduce cannot take int1; bool-typed reductions keep the vector
+            # path, which casts after the loop.
             if not isinstance(buf, ir.ComputedBuffer) or buf.get_dtype() == torch.bool:
                 return False
             reduction_type = buf.get_reduction_type()
             if reduction_type == "online_softmax_reduce":
-                has_online_softmax = True
-            elif reduction_type not in allowed:
+                online_softmax_nodes += 1
+            elif reduction_type not in ARG_REDUCTION_TYPES + PLAIN_REDUCTION_TYPES:
                 return False
-        if not has_online_softmax:
+        # The sweep covered kernels with one or two online softmaxes.
+        if online_softmax_nodes not in (1, 2):
             return False
         nodes = OrderedSet(features.scheduler_nodes())
         produced = OrderedSet(
@@ -5581,11 +5584,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         arg_index_reduction_types = ("argmax", "argmin")
         arg_value_reduction_types = ("argmax_value", "argmin_value")
         arg_with_value_reduction_types = ("argmax_with_value", "argmin_with_value")
-        arg_reduction_types = (
-            arg_index_reduction_types
-            + arg_value_reduction_types
-            + arg_with_value_reduction_types
-        )
+        arg_reduction_types = ARG_REDUCTION_TYPES
         arg_root_ops = {
             "argmax": "max",
             "argmin": "min",
@@ -5664,16 +5663,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def final_argreduce(
             buffer, result_var, value, index, result_kind="index", whole_tile=False
         ):
-            # The two-pass helper pays off over a whole row tile, not on the
-            # tail of a loop, and only where the index alone is consumed. The
-            # Triton CPU backend computes a different index from it, so CUDA only.
-            two_pass = (
-                whole_tile
-                and result_kind == "index"
-                and torch.version.hip is None
-                and V.graph.get_current_device_or_throw().type == "cuda"
-            )
-            suffix = "_with_first_index" if two_pass else "_with_index"
+            helper = argreduce_helper(whole_tile)
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
                 buffer,
@@ -5686,7 +5676,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_value, result_index = result_var
                 buffer.splice(
                     f"""\
-                    {result_value}, {result_index} = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
+                    {result_value}, {result_index} = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_value} = {self.reduction_resize(f"{result_value}")}
                     {result_index} = {self.reduction_resize(f"{result_index}")}
                     """
@@ -5694,14 +5684,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif result_kind == "value":
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_val")}
                     """
                 )
             else:
                 buffer.splice(
                     f"""\
-                    {result_var}_val, {result_var}_idx = triton_helpers.{root_op}{suffix}({value}, {index}, {dim})
+                    {result_var}_val, {result_var}_idx = triton_helpers.{helper}({value}, {index}, {dim})
                     {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                     """
                 )
@@ -5712,6 +5702,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if reduction_type in arg_value_reduction_types:
                 return "value"
             return "index"
+
+        def argreduce_helper(whole_tile: bool) -> str:
+            # The two-pass helper pays off over a whole row tile, not on the
+            # tail of a loop, and only where the index alone is consumed. It is
+            # CUDA-only and behind the scalar flag: the Triton CPU backend
+            # returns a different index from it (test_2d_reductions_mixed_indexing).
+            two_pass = (
+                whole_tile
+                and argreduce_result_kind() == "index"
+                and config.triton.scalar_accumulators
+                and torch.version.hip is None
+                and V.graph.get_current_device_or_throw().type == "cuda"
+            )
+            suffix = "_with_first_index" if two_pass else "_with_index"
+            return f"{root_op}{suffix}"
 
         cache_key = (
             src_dtype,
@@ -5915,8 +5920,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
             scalar_loop = (
-                reduction_type in self.SCALAR_LOOP_REDUCTION_TYPES
-                and self.use_scalar_accumulators
+                reduction_type in PLAIN_REDUCTION_TYPES and self.use_scalar_accumulators
             )
             scalar_argreduce = (
                 reduction_type in arg_reduction_types and self.use_scalar_accumulators
@@ -5979,12 +5983,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     else f"{reduction_range_prefix}index"
                 )
                 if scalar_argreduce:
-                    index_only = argreduce_result_kind() == "index"
-                    block_suffix = "_with_first_index" if index_only else "_with_index"
+                    helper = argreduce_helper(True)
                     block_index = f"tl.broadcast_to({where_cond(index_var, index_max)}, {self.dense_size_str()})"
                     self.compute.splice(
                         f"""\
-                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{root_op}{block_suffix}(
+                    {accumulator}_block, {accumulator_index}_block = triton_helpers.{helper}(
                         {where_cond(value, default)}, {block_index}, {dim}
                     )
                     {accumulator}, {accumulator_index} = triton_helpers.{root_op}imum_with_index(

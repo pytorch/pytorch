@@ -666,6 +666,7 @@ class TestScalarAccumulators(TestCase):
         x = torch.randn(128, 8192, device=GPU_TYPE)
         _, code = self.check_codegen(f, x)
         self.assertNotIn("online_softmax_combine(", code)
+        self.assertIn("tl.full([XBLOCK, 1], ", code)
 
     def test_plain_reductions_stay_vector(self):
         def f(x):
@@ -685,6 +686,8 @@ class TestScalarAccumulators(TestCase):
         x[3, 4097] = float("nan")
         x[5].fill_(2.0)
         x[7, 8192] = x[7].amax() + 1
+        x[8].fill_(float("inf"))
+        x[9, 8192] = float("nan")
         _, code = self.check_codegen(f, x, marker=self.HINT)
         self.assertIn("_block = triton_helpers.max_with_first_index(", code)
         self.assertIn("_block = triton_helpers.min_with_index(", code)
@@ -720,16 +723,8 @@ class TestScalarAccumulators(TestCase):
 
     def test_welford_stays_vector(self):
         x = torch.randn(64, 8193, device=GPU_TYPE)
-        self.check_codegen(
-            lambda t: torch.var_mean(t, dim=-1), x, uses_scalar=False, marker=self.HINT
-        )
-
-    @inductor_config.patch(strict_signed_zero=True)
-    def test_strict_signed_zero_max_stays_vector(self):
-        x = torch.randn(4, 8193, device=GPU_TYPE)
-        f = lambda t: (*_prepare_softmax(t, -1), t.amax(-1))  # noqa: E731
-        _, code = self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
-        self.assertIn("tl.full([XBLOCK, R0_BLOCK]", code)
+        f = lambda t: (*_prepare_softmax(t, -1), *torch.var_mean(t, -1))  # noqa: E731
+        self.check_codegen(f, x, uses_scalar=False, marker=self.HINT)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
     def test_nan_and_inf_rows(self, dtype):
@@ -775,14 +770,17 @@ class TestScalarAccumulators(TestCase):
         x[0, 1::2] = -0.0
         x[1, ::2] = -0.0
         ref_max = torch.compile(lambda t: t.amax(dim=-1, keepdim=True))(x)
-        act, _ = self.check_codegen(_prepare_softmax, x, -1, uses_scalar=False)
+        f = lambda t: (*_prepare_softmax(t, -1), t.amax(-1))  # noqa: E731
+        act, code = self.check_codegen(f, x, uses_scalar=False)
         self.assertEqual(ref_max.view(torch.int32), act[0].view(torch.int32))
+        self.assertNotIn(self.HINT, code)
 
     @parametrize("n", [33, 8193])
     def test_max_value_signed_zero_tie(self, n):
         x = torch.zeros(2, n, device=GPU_TYPE)
         x[:, 0] = -0.0
-        values, indices = torch.compile(lambda t: torch.max(t, -1))(x)
+        f = lambda t: (*_prepare_softmax(t, -1), *torch.max(t, -1))  # noqa: E731
+        _, _, values, indices = torch.compile(f)(x)
         self.assertTrue(torch.signbit(values).all())
         self.assertEqual(indices, torch.zeros_like(indices))
 
