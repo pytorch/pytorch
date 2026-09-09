@@ -352,12 +352,7 @@ def should_pad_bench_key(
     def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
         return (t.shape, t.stride(), t.dtype)
 
-    tf32_key = (
-        None
-        if mat1.dtype != torch.float32
-        else torch.backends.cuda.matmul.fp32_precision == "tf32"
-        or torch.backends.mkldnn.fp32_precision == "tf32"
-    )
+    fp32_precision = encoders.get_matmul_precision_for_cache(mat1)
 
     def fmt_pad(name: str) -> str | None:
         if is_base_time_key:
@@ -371,7 +366,7 @@ def should_pad_bench_key(
         fmt_pad("mat2"),
         op,
         input if input is None else tensor_key(input),
-        tf32_key,
+        fp32_precision,
     )
 
     key = str(key)

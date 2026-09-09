@@ -42,19 +42,12 @@ _DEFAULT_BLOCK = 256
 
 
 class _XctaConfig(NamedTuple):
-    # xcta's own knob set; knobs left None are filled from _choose_config. subrow_target is the
-    # stage-1 sub-row length TARGET, which _split_C snaps to a legal C by nearest-divisor search.
+    # xcta's own knob set; a knob the caller leaves None takes the default here. subrow_target is the
+    # stage-1 sub-row length TARGET, which _split_C snaps to a legal C by nearest-divisor search. No
+    # nfields term: wide-accumulator traits prefer shorter sub-rows, but the shift is shape-dependent
+    # and no closed form captures it without regressing nfields=1.
     block: int = _DEFAULT_BLOCK
     subrow_target: int = _SUBROW_TARGET
-
-
-def _choose_config(hw=None, nfields: int = 1) -> "_XctaConfig":
-    # xcta config. subrow_target is a smem-tile-length sweet spot, so it scales with per-SM smem
-    # capacity and _split_C then snaps it to N's nearest legal divisor. nfields is accepted for
-    # signature parity but not acted on: wide-accumulator traits prefer shorter sub-rows, but the
-    # shift is shape-dependent and no closed form captures it without regressing nfields=1.
-    smem = 1.0 if hw is None else hw.smem_scale
-    return _XctaConfig(subrow_target=int(round(_SUBROW_TARGET * smem)))
 
 
 def _split_C(N, vec, smem_budget_elems, subrow_target=None):
@@ -98,8 +91,10 @@ class FusedTwoStage:
         mX: cute.Tensor,
         parts: list,
         mOuts: list,
-        rvals: list,
-        kvals: list,
+        rexts: list,
+        rstrides: list,
+        kexts: list,
+        kstrides: list,
         count: cutlass.Int32,
         project_n: cutlass.Int64,
         s1_nchunks: cutlass.Int32,
@@ -123,8 +118,10 @@ class FusedTwoStage:
         s2.kernel(
             parts,
             mOuts,
-            rvals,
-            kvals,
+            [cute.FastDivmodDivisorV2(e) for e in rexts],
+            rstrides,
+            [cute.FastDivmodDivisorV2(e) for e in kexts],
+            kstrides,
             count,
             cutlass.Int64(0),
             cutlass.Int64(count),
@@ -171,10 +168,7 @@ def _reduce_row_xcta(
         x = x.view(1, -1)
     M, N = x.shape
     # Fill the knobs from the config when the caller passed None; explicit values pass through.
-    # The hw-scaled target is resolved here so _split_C snaps THAT, not its own raw anchor.
-    from .._cutedsl import hw_caps as _hw
-
-    cfg = _choose_config(_hw.caps(x.device))
+    cfg = _XctaConfig()
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
@@ -191,7 +185,7 @@ def _reduce_row_xcta(
         )
     if geom is None:  # memoized refusal (prime / poorly-factored N) -> K0
         return None
-    C, s, fn, rvals, kvals, cnt, pn, s1nc, s1nw = geom
+    C, s, fn, rexts, rstrides, kexts, kstrides, cnt, pn, s1nc, s1nw = geom
 
     # One fused launch. Scratch is sized per call since M varies, and every operand is dynamic-M
     # so the cached kernel serves any M.
@@ -205,8 +199,10 @@ def _reduce_row_xcta(
         _L.read_only(sub),
         list(parts),
         list(outs),
-        rvals,
-        kvals,
+        rexts,
+        rstrides,
+        kexts,
+        kstrides,
         cnt,
         pn,
         s1nc,
@@ -243,7 +239,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
     # ONE stage-1 shape: the row kernel's fold is ROLLED, so the sub-row length is a runtime arg
     # and one compiled kernel serves the whole vec class. N is absent from the key for that reason.
-    cfg = _rt.row_config(s, elsize * 8, trait.nfields)
+    cfg = _rt.row_config(s, elsize * 8)
     tpr = max(_rt.WARP, cfg.tpr)
     nt = max(tpr, cfg.nt)
     nt -= nt % tpr  # rows_per_block must be whole
@@ -311,11 +307,13 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
 
 def _s2_args(C, M, N):
-    # Pre-boxed stage-2 runtime args, memoized because boxing is us-scale. The kept-pair quad
-    # carries a seed M, but a single-pair decode ignores the extent, so M stays fully dynamic.
+    # Pre-boxed stage-2 runtime args, memoized because boxing is us-scale. The kept pair carries a
+    # seed M, but a single-pair decode ignores the extent, so M stays fully dynamic.
     return (
-        _RB._quads([(C, 1)]),
-        _RB._quads([(M, C)]),
+        _RB._exts([(C, 1)]),
+        _RB._strides([(C, 1)]),
+        _RB._exts([(M, C)]),
+        _RB._strides([(M, C)]),
         Int32(C),
         Int64(N),
     )
