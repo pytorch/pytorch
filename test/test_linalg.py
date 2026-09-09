@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+    skipIfNoNvmath, HardwareClassification)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -126,6 +126,7 @@ def get_tunableop_untuned_filename():
 
 
 class TestLinalgDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -8838,6 +8839,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 @onlyCUDA
 class TestLinalgCUDA(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
