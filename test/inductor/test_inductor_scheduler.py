@@ -116,6 +116,43 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_outer_reduction_plan_aggregate_workspace_limit(self, device):
+        node1 = Mock()
+        node2 = Mock()
+        max_bytes = ir.Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes,
+            ),
+        ):
+            self.assertFalse(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
+        with (
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_roles",
+                return_value=OrderedSet(["partial"]),
+            ),
+            patch.object(
+                Scheduler,
+                "_outer_reduction_plan_workspace_bytes",
+                return_value=max_bytes + 1,
+            ),
+        ):
+            self.assertTrue(
+                Scheduler._fusion_would_break_outer_reduction_plan(node1, node2)
+            )
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -151,6 +188,15 @@ class TestScheduler(TestCase):
         node.ancestors = OrderedSet(ancestors)
         node.get_operation_names.return_value = OrderedSet([name])
         node.get_buffer_names.return_value = OrderedSet(writes)
+
+        def make_output(buf_name):
+            buf = Mock()
+            buf.get_name.return_value = buf_name
+            buf.get_aliases.return_value = ()
+            buf.get_mutations.return_value = ()
+            return buf
+
+        node.get_outputs.return_value = tuple(make_output(w) for w in writes)
         node.is_reduction.return_value = is_reduction
         if is_reduction:
             node.__class__ = SchedulerNode
@@ -1372,8 +1418,6 @@ class TestScheduler(TestCase):
             writes=("packed",),
             ancestors=("writer", "grouped"),
         )
-        for node in (outer_reduction, writer, grouped, epilogue):
-            node.has_aliasing_or_mutation.return_value = False
         outer = Mock()
         outer.get_nodes.return_value = (outer_reduction, writer)
         outer.group = (None, (8, 16))

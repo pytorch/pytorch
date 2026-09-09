@@ -657,6 +657,51 @@ class NestedReduction:
         )
 
     @classmethod
+    def _mutations_survive_hoisting(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        group: Sequence[BaseSchedulerNode] | None = None,
+    ) -> bool:
+        """Whether ``nodes``' aliasing and mutation survive sub-parent hoisting.
+
+        Hoisting an epilogue into the parent kernel moves its stores relative to
+        the rest of the group, so a mutation is only safe when no other node
+        there touches that storage. ``group`` defaults to ``nodes`` and must
+        cover everything sharing the fused kernel, since a node outside the
+        hoisted set observes the reordering just the same; ordering against
+        nodes outside the kernel is already carried by dependency edges.
+
+        Both names for the storage are claimed. The mutator keeps the
+        pre-mutation one -- its own StarDep self-edge and any read-modify-write
+        hoist along with it, so only another node reading that name is a
+        hazard -- while later nodes see the post-mutation name via
+        Scheduler.mutation_renames. In practice functionalization leaves one
+        mutator per buffer and no post-mutation reader, so only the
+        pre-mutation read rejects today; the rest keep this conservative rather
+        than wrong if that ever changes. Aliasing stays rejected outright: the
+        lane index math assumes each store owns its destination.
+        """
+        owners: dict[str, BaseSchedulerNode] = {}
+        for node in nodes:
+            for buf in node.get_outputs():
+                if buf.get_aliases():
+                    return False
+                if not buf.get_mutations():
+                    continue
+                for name in (*buf.get_mutations(), buf.get_name()):
+                    # A second node on the same storage makes their relative
+                    # order load-bearing, which hoisting does not preserve.
+                    if owners.setdefault(name, node) is not node:
+                        return False
+        if not owners:
+            return True
+        return all(
+            owners.get(dep.name, node) is node
+            for node in (nodes if group is None else group)
+            for dep in node.read_writes.reads_and_writes()
+        )
+
+    @classmethod
     def sub_parent_epilogue_plan(
         cls,
         nodes: Sequence[BaseSchedulerNode],
@@ -670,8 +715,7 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in nodes):
+        if not cls._mutations_survive_hoisting(nodes):
             return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
@@ -1806,8 +1850,8 @@ class NestedReduction:
         )
         if not sub_parent_nodes:
             return None
-        # TODO: No fundamental limitation; track aliases and mutation versions here.
-        if any(node.has_aliasing_or_mutation() for node in sub_parent_nodes):
+        kernel_nodes = (outer_node, *grouped_nodes)
+        if not cls._mutations_survive_hoisting(sub_parent_nodes, kernel_nodes):
             return None
 
         candidates: list[SubParentEpilogueCandidate] = []
@@ -6988,6 +7032,13 @@ class Scheduler:
                 for owner in final_owners
             ):
                 continue
+            if (
+                self._outer_reduction_plan_workspace_bytes(partial_owner)
+                > ir.Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+            ):
+                raise AssertionError(
+                    "outer reduction plan exceeds its aggregate workspace limit"
+                )
 
             grouped = FusedOuterReductionPlans(
                 partial_owner,
@@ -10049,6 +10100,42 @@ class Scheduler:
                 roles.add("other")
         return roles
 
+    @staticmethod
+    def _outer_reduction_plan_workspace_buffers(
+        node: BaseSchedulerNode,
+    ) -> dict[str, ir.ComputedBuffer]:
+        buffers: dict[str, ir.ComputedBuffer] = {}
+        for snode in node.get_nodes():
+            if not (
+                isinstance(snode, SchedulerNode)
+                and isinstance(snode.node, ir.ComputedBuffer)
+            ):
+                continue
+            if snode.node._whole_plan_outer_reduction:
+                buffers[snode.node.get_name()] = snode.node
+                continue
+            if not isinstance(snode.node.data, ir.Reduction):
+                continue
+            for dep in snode.read_writes.reads:
+                buffer = V.graph.name_to_buffer.get(dep.name)
+                if (
+                    isinstance(buffer, ir.ComputedBuffer)
+                    and buffer._whole_plan_outer_reduction
+                ):
+                    buffers[buffer.get_name()] = buffer
+        return buffers
+
+    @classmethod
+    def _outer_reduction_plan_workspace_bytes(cls, *nodes: BaseSchedulerNode) -> int:
+        buffers: dict[str, ir.ComputedBuffer] = {}
+        for node in nodes:
+            buffers.update(cls._outer_reduction_plan_workspace_buffers(node))
+        return sum(
+            V.graph.sizevars.optimization_hint(sympy_product(buffer.get_size()))
+            * get_dtype_size(buffer.get_dtype())
+            for buffer in buffers.values()
+        )
+
     @classmethod
     def _fusion_would_break_outer_reduction_plan(
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -10056,7 +10143,14 @@ class Scheduler:
         roles = cls._outer_reduction_plan_roles(
             node1
         ) | cls._outer_reduction_plan_roles(node2)
-        return ("partial" in roles or "final" in roles) and len(roles) > 1
+        if not ("partial" in roles or "final" in roles):
+            return False
+        if len(roles) > 1:
+            return True
+        return (
+            cls._outer_reduction_plan_workspace_bytes(node1, node2)
+            > ir.Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+        )
 
     def _fusion_blocked_by_placement(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

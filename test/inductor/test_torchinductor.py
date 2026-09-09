@@ -1418,6 +1418,25 @@ class skip_if_cpp_wrapper:
         return wrapper
 
 
+class skip_if_lite_mode:
+    """For tests whose premise is that a region behaves differently from the
+    graph around it. Under TORCHINDUCTOR_LITE_MODE=1 the whole graph is already
+    all-fallback, so there is no contrast left to observe and the assertions are
+    either vacuous or unsatisfiable."""
+
+    def __init__(self, reason: str = "") -> None:
+        self.reason = reason
+
+    def __call__(self, fn, *args, **kwargs):
+        @functools.wraps(fn)
+        def wrapper(test_self):
+            if config.fallback_by_default:
+                raise unittest.SkipTest(f"no contrast under lite mode: {self.reason}")
+            return fn(test_self, *args, **kwargs)
+
+        return wrapper
+
+
 def is_dynamic_shape_enabled():
     # What's the best way to decide this?
     return not torch._dynamo.config.assume_static_by_default
@@ -18015,6 +18034,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("aten::zeros_like", code[0])
         self.assertNotIn("from(nullptr, 0)", code[0])
 
+    @skip_if_lite_mode("the parent's cos falls back too, so assertNotIn fails")
     def test_regional_fallback_by_default_invoke_subgraph(self):
         # A nested region carrying inductor_config_patches={"fallback_by_default": True}
         # must fall back *only inside the region*: the region's ops become
@@ -18069,6 +18089,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         self.assertNotIn("aten.cos", body)
 
+    @skip_if_lite_mode("neither half emits a Triton reduction to compare")
     def test_regional_codegen_only_config_cpp_wrapper(self):
         # A codegen-TIME knob on the region must reach the cpp wrapper.
         # `triton.persistent_reductions` is consulted while the region's kernels
@@ -19478,17 +19499,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def f(x, y, stats):
             return (x.float() * y.float() * torch.rsqrt(stats + 1e-5)).sum(dim=0)
 
+        from torch._inductor.codegen.multi_kernel import MultiKernelPlanCall
+
         expected = f(x, y, stats)
-        actual, source_codes = run_and_get_code(
-            torch.compile(f, fullgraph=True), x, y, stats
-        )
-        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        plan_outputs = []
+        for timings in ([1.0, 2.0], [2.0, 1.0]):
+            torch._dynamo.reset()
+            with unittest.mock.patch.object(
+                MultiKernelPlanCall, "benchmark_plans", return_value=timings
+            ):
+                actual, source_codes = run_and_get_code(
+                    torch.compile(f, fullgraph=True), x, y, stats
+                )
+            self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+            plan_outputs.append(actual)
+        self.assertEqual(plan_outputs[0], plan_outputs[1], atol=0.125, rtol=0.01)
         code = source_codes[0]
         self.assertIn("async_compile.multi_kernel_plan(", code)
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
         self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 3)
-        # Exactly one one-pass kernel competes with one partial+final plan.
-        # Do not accidentally expand this into a split/config cross-product.
         self.assertEqual(code.count("async_compile.triton("), 3)
 
         def multi_output(x, y, stats):
@@ -19496,7 +19525,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return producer.sum(dim=0), (producer * y.float()).sum(dim=0)
 
         multi_expected = multi_output(x, y, stats)
-        with config.patch({"triton.multi_kernel": 3}):
+        with unittest.mock.patch.object(
+            MultiKernelPlanCall, "benchmark_plans", return_value=[2.0, 1.0]
+        ):
             multi_actual, multi_source_codes = run_and_get_code(
                 torch.compile(multi_output, fullgraph=True), x, y, stats
             )
@@ -19504,8 +19535,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(
             multi_source_codes[0].count("async_compile.multi_kernel_plan("), 1
         )
-        # Both logical outputs remain fused in the partial and final stages, so
-        # the two-output case is still exactly three kernels total.
         self.assertEqual(multi_source_codes[0].count("async_compile.triton("), 3)
 
         def with_epilogue(x, y, stats):
@@ -19539,8 +19568,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("ReductionHint.OUTER", ordinary_code)
         self.assertNotIn("async_compile.multi_kernel_plan(", ordinary_code)
 
-        # A graph-192-like trailing reduction must remain outside this leading-
-        # dimension schedule family even when it has the same large R/X extents.
         trailing_x = torch.randn(12288, 5247, device=self.device, dtype=torch.bfloat16)
 
         def trailing_reduction(x):
@@ -19553,9 +19580,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(trailing_expected, trailing_actual, atol=0.125, rtol=0.01)
         self.assertNotIn("async_compile.multi_kernel_plan(", trailing_source_codes[0])
 
-        # Whole-plan selection replaces the direct mode's producer-complexity
-        # profitability guess.  A simple but shape-eligible producer must still
-        # receive the bounded choice so runtime timing can keep one-pass.
         simple_x = torch.randn(5247, 12288, device=self.device, dtype=torch.bfloat16)
 
         def simple_large_outer(x):

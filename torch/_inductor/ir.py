@@ -1401,6 +1401,10 @@ def get_reduction_combine_fn(
 class Reduction(Loops):
     r"""IR node representing a reduction over one or more iteration dimensions."""
 
+    EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES: ClassVar[int] = (
+        128 * 1024 * 1024
+    )
+
     reduction_ranges: Sequence[_IntLike]
     reduction_type: ReductionType
     # self.dtype represents the dst dtype
@@ -1492,7 +1496,6 @@ class Reduction(Loops):
         split_quantum = 8
         min_splits = 16
         max_splits = 64
-        max_workspace_bytes = 128 * 1024 * 1024
 
         xblocks = (numel_hint + first_stage_xblock - 1) // first_stage_xblock
         target_splits = (target_ctas_per_sm * num_sm) // max(xblocks, 1)
@@ -1501,7 +1504,10 @@ class Reduction(Loops):
         # Writing and rereading S FP32 partials costs 8*S*X bytes. Relative to
         # the BF16 input's 2*R*X bytes, S <= R/64 keeps this below 6.25%.
         traffic_limited_splits = reduction_numel_hint // 64
-        workspace_limited_splits = max_workspace_bytes // (4 * max(numel_hint, 1))
+        workspace_limited_splits = (
+            Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+            // (4 * max(numel_hint, 1))
+        )
         legal_max = min(max_splits, traffic_limited_splits, workspace_limited_splits)
         legal_max = (legal_max // split_quantum) * split_quantum
         if legal_max < min_splits:
@@ -1677,7 +1683,10 @@ class Reduction(Loops):
         split_large_outer = (
             preserve_large_outer_hint
             and (
-                config.triton.enable_experimental_large_output_outer_reductions
+                (
+                    config.triton.enable_experimental_large_output_outer_reductions
+                    and not config.triton.autotune_experimental_large_output_outer_reductions
+                )
                 or (
                     config.triton.autotune_experimental_large_output_outer_reductions
                     and not V.graph.cpp_wrapper
