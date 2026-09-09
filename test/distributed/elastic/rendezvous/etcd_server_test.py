@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest.mock import Mock, call, patch
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -20,6 +22,50 @@ if os.getenv("CIRCLECI"):
 
 
 class EtcdServerTest(unittest.TestCase):
+    def test_find_free_port_retries_after_socket_creation_failure(self):
+        first_addr = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))
+        second_addr = (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0))
+        second_socket = Mock()
+
+        with (
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=[first_addr, second_addr],
+            ),
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=[OSError("socket failed"), second_socket],
+            ) as socket_ctor,
+        ):
+            self.assertIs(second_socket, find_free_port())
+
+        self.assertEqual(
+            [
+                call(socket.AF_INET, socket.SOCK_STREAM, 6),
+                call(socket.AF_INET6, socket.SOCK_STREAM, 6),
+            ],
+            socket_ctor.call_args_list,
+        )
+        second_socket.bind.assert_called_once_with(("localhost", 0))
+        second_socket.listen.assert_called_once_with(0)
+        second_socket.close.assert_not_called()
+
+    def test_find_free_port_raises_runtime_error_after_all_socket_creation_failures(self):
+        addr = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))
+
+        with (
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=[addr],
+            ),
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=OSError("socket failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "Failed to create a socket"),
+        ):
+            find_free_port()
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
