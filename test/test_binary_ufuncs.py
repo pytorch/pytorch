@@ -4071,6 +4071,27 @@ class TestBinaryUfuncsDevice(TestCase):
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
+    def test_logaddexp_bool_input_ad(self, device):
+        mask = torch.tensor([True, False, True], device=device)
+        x = torch.tensor([0.25, 0.5, 0.75], device=device)
+
+        for op, expected in (
+            (torch.logaddexp, torch.sigmoid(x - mask.float())),
+            (
+                torch.logaddexp2,
+                torch.exp2(x) / (torch.exp2(mask.float()) + torch.exp2(x)),
+            ),
+        ):
+            for op_call in (lambda m, v: op(m, v), lambda m, v: op(v, m)):
+                t = x.clone().requires_grad_()
+                op_call(mask, t).sum().backward()
+                self.assertEqual(t.grad, expected)
+
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(x, torch.ones_like(x))
+                    tangent = fwAD.unpack_dual(op_call(mask, dual)).tangent
+                self.assertEqual(tangent, expected)
+
     def test_add(self, device):
         dtypes = floating_and_complex_types()
         for dtype in dtypes:
