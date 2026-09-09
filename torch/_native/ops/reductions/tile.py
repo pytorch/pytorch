@@ -32,28 +32,20 @@ def align_bytes(N: int, itemsize: int) -> int:
     return vec_size(N, itemsize) * itemsize
 
 
-def _magic(d):
-    # Exact n // d for 0 <= n < 2**31 as (n * m) >> sh: one multiply-shift instead of a runtime
-    # 64-bit divide per element per pair. Granlund-Montgomery, round-up form.
-    l = (d - 1).bit_length()
-    return (1 << (31 + l)) // d + 1, 31 + l
-
-
-def _decode_offset(linear, vals, npairs):
-    # Mixed-radix decode of a linear index to a flat element offset. `vals` is a RUNTIME quad
-    # list, so only the pair COUNT is baked and one kernel serves every geometry sharing it.
-    # INT64 throughout: numel can exceed 2**31, where an int32 product wraps negative.
-    rem = cutlass.Int64(linear)
-    # npairs is at least 1 here: an empty KEPT list is legal but the caller drops the decode
-    # for it, and no-REDUCED-runs is refused upstream. Zero pairs would index vals[-1].
+def _decode_offset(linear, divs, strides, npairs):
+    # Mixed-radix decode of a linear index to a flat element offset; only the pair COUNT is baked,
+    # so one kernel serves every geometry sharing it. The div/mod stays INT32 -- `linear` spans
+    # count or num_o, both asserted < 2**31 -- and only the offset product needs Int64. npairs >= 1:
+    # the caller drops the decode for an empty KEPT list.
+    rem = Int32(linear)
     if npairs == 1:
-        return rem * vals[3]
+        return cutlass.Int64(rem) * strides[0]
     off = cutlass.Int64(0)
     for j in range(npairs - 1):
-        q = (rem * vals[4 * j]) >> vals[4 * j + 1]
-        off = off + (rem - q * vals[4 * j + 2]) * vals[4 * j + 3]
+        q, r = divmod(rem, divs[j])
+        off = off + cutlass.Int64(r) * strides[j]
         rem = q
-    return off + rem * vals[4 * (npairs - 1) + 3]
+    return off + cutlass.Int64(rem) * strides[npairs - 1]
 
 
 def _off(base, i: int):
@@ -147,7 +139,8 @@ def fold_decoded(
     trait,
     mX,
     obase,
-    rvals,
+    rdivs,
+    rstrides,
     npairs: cutlass.Constexpr,
     rb,
     nt: cutlass.Constexpr,
@@ -172,21 +165,21 @@ def fold_decoded(
         if const_expr(gidx == "flat"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
-                Int32(obase + _decode_offset(base_r, rvals, npairs)),
+                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
+                Int32(obase + _decode_offset(base_r, rdivs, rstrides, npairs)),
                 True,
             )
         elif const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
+                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
                 chunk_base + base_r,
                 True,
             )
         else:
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rvals, npairs)]),
+                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
                 base_r,
                 True,
             )
@@ -194,7 +187,7 @@ def fold_decoded(
     # Invalid lanes read in_base (always in range): obase itself can be past the end for an
     # overhanging chunk, whose rb clamps to 0.
     valid = base_r < rb
-    off = obase + _decode_offset(base_r, rvals, npairs)
+    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs)
     off_s = off if valid else in_base
     val = acc_dt(mX[off_s])
     if const_expr(gidx == "flat"):
@@ -559,7 +552,7 @@ class TileReduce:
         nouts=1,
         final=True,
         unroll=_ROLL_UNROLL,
-        vec=None,
+        vec: int | None = None,
         use_tma=False,
         combine=False,
         pc=True,
@@ -638,12 +631,18 @@ class TileReduce:
             if axis == "row" and order == "linear"
             else None
         )
-        # the general axis loads one element at a time (an arbitrary stride pattern has no
-        # width to exploit), so it has no tile and no vector
         if axis == "row":
             self.vec = self.tilemap.vec if order == "linear" else itree.vec
+        elif axis == "general":
+            # the general axis loads one element at a time (an arbitrary stride pattern has no
+            # width to exploit), so it has no tile and no vector
+            self.vec = 1
+        elif vec is None:
+            # The col axis takes `vec` from its DRIVER (accumulators per thread, not a load
+            # width), so there is nothing here to derive it from.
+            raise ValueError("the col axis needs an explicit vec")
         else:
-            self.vec = 1 if axis == "general" else vec
+            self.vec = vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
         # columns, each with its own accumulator, on the col axis
         self.nslots = self.vec if axis == "col" else 1
@@ -909,8 +908,10 @@ class TileReduce:
         project_n,
         q,
         npar,
-        rvals,
-        kvals,
+        rexts,
+        rstrides,
+        kexts,
+        kstrides,
         in_base,
         limit,
         stream,
@@ -945,6 +946,14 @@ class TileReduce:
             gx = cute.ceil_div(nchunks, const_expr(self.nt))
             # the y-grid splits the REDUCED axis in stage 1; combine has already consumed it
             gy = Int32(1) if const_expr(self.combine) else npar
+        # The divisors need an MLIR context, so they are built here rather than by the caller. V2
+        # rather than V1 so `.divisor` stays readable across the kernel boundary.
+        rdivs = (
+            [cute.FastDivmodDivisorV2(e) for e in rexts] if rexts is not None else None
+        )
+        kdivs = (
+            [cute.FastDivmodDivisorV2(e) for e in kexts] if kexts is not None else None
+        )
         self.kernel(
             mIns,
             mOuts,
@@ -954,8 +963,10 @@ class TileReduce:
             project_n,
             q,
             npar,
-            rvals,
-            kvals,
+            rdivs,
+            rstrides,
+            kdivs,
+            kstrides,
             in_base,
             limit,
         ).launch(grid=[gx, gy, 1], block=[const_expr(self.nt), 1, 1], stream=stream)
@@ -971,8 +982,10 @@ class TileReduce:
         project_n,
         q,
         npar,
-        rvals,
-        kvals,
+        rdivs,
+        rstrides,
+        kdivs,
+        kstrides,
         in_base,
         limit,
     ):
@@ -1053,7 +1066,7 @@ class TileReduce:
             obase = in_base
             if const_expr(self.npairs_kept > 0):
                 obase = in_base + _decode_offset(
-                    unit, kvals, const_expr(self.npairs_kept)
+                    unit, kdivs, kstrides, const_expr(self.npairs_kept)
                 )
             rb = nchunks
             if const_expr(self.flat_tail):
@@ -1066,12 +1079,12 @@ class TileReduce:
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
                 rb = cutlass.Int32(left)
             elif const_expr(self.ragged_chunk):
-                # A split whose chunk need not divide the reduced run: the LAST chunk of every output is short
-                # and must not fold the next one's elements. The chunk pair is the fastest-varying kept pair,
-                # so its magic quad yields the chunk index once per BLOCK with no runtime divide. Counted in
-                # STEPS, so a contiguous row split and a column split both use it unchanged.
-                qq = (cutlass.Int64(unit) * kvals[0]) >> kvals[1]
-                c = cutlass.Int64(unit) - qq * kvals[2]
+                # A split whose chunk need not divide the reduced run: the LAST chunk of every output
+                # is short and must not fold the next one's elements. The chunk pair is the
+                # fastest-varying kept pair, so one divmod per BLOCK yields the chunk index. Counted
+                # in STEPS, so a contiguous row split and a column split both use it unchanged.
+                _, cc = divmod(Int32(unit), kdivs[0])
+                c = cutlass.Int64(cc)
                 cnt = cutlass.Int64(nchunks)
                 chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
                 left = limit - c * cnt
@@ -1092,7 +1105,8 @@ class TileReduce:
                         trait,
                         mIns[0],
                         obase,
-                        rvals,
+                        rdivs,
+                        rstrides,
                         const_expr(self.npairs_red),
                         rb,
                         const_expr(self.nt),
