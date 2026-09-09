@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
+import io
 import itertools
 import pickle
 import sys
@@ -20,7 +22,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId
+from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -69,6 +71,40 @@ def global_func(x):
     return x + 1
 
 
+def _cell_is_empty(cell):
+    try:
+        cell.cell_contents
+    except ValueError:
+        return True
+    return False
+
+
+def keep_name_with_empty_cell(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        if func.__name__ == "renamed":
+            x = x + 1
+        if x is None:
+            return unset
+        return func(x)
+
+    if func is None:
+        unset = 1  # never runs, so the cell wrapper closes over stays EMPTY
+
+    return wrapper
+
+
+def _empty_cell_base(x):
+    return x * 2
+
+
+EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
+
+
+def global_add(obj, x):
+    return x + 1
+
+
 class ModuleNotSerializable(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -108,6 +144,21 @@ class Inputs:
     def __init__(self, x, unused):
         self.x = x
         self.unused = unused
+
+
+class SlottedByName:
+    # A slot named for the function it will hold: a method bound under that name
+    # has a class-level member descriptor but no instance __dict__ to inspect.
+    __slots__ = ("global_add",)
+
+
+class GetattrProxy:
+    # __getattr__ dynamically serves the bound function's name; probing
+    # getattr(self, name) to check resolution would run user code (and recurse).
+    def __getattr__(self, name):
+        if name == "global_add":
+            return global_add
+        raise AttributeError(name)
 
 
 def _global_func_wrong_fqn(x):
@@ -474,6 +525,81 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    # Pickler-level: these drive GuardsStatePickler directly rather than
+    # through a capture, so none of TestGuardSerialization's setup applies.
+
+    def test_reducer_handles_an_empty_cell_reached_directly(self):
+        # _prune_cell only sees cells of a reconstructed function. A cell
+        # reached directly -- a guarded __closure__ tuple, or the cell itself
+        # -- goes through reducer_override's CellType branch, which read
+        # cell_contents unguarded and raised ValueError out of the pickler.
+        # Pickler-level because a guard cannot root at a raw cell through a
+        # capture: CLOSURE_MATCH is in UNSUPPORTED_SERIALIZATION_GUARD_TYPES.
+        empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
+        self.assertEqual(len(empty), 1)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
+        self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
+
+    def test_reduce_keeps_a_none_valued_cell(self):
+        # None is a value, not an empty cell; see
+        # FunctionPicklerBase._set_cell_contents.
+        def outer():
+            scale = None
+
+            def inner():
+                return scale
+
+            return inner
+
+        fn = outer()
+        cell = fn.__closure__[0]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn, id(cell): cell}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertFalse(_cell_is_empty(out.__closure__[0]))
+        self.assertIsNone(out())
+
+    def test_bound_method_under_a_name_self_lacks(self):
+        # types.MethodType can bind a function under a name self has no
+        # attribute for. _reduce_bound_method looked that name up unguarded,
+        # and the AttributeError bypassed the package instead of carrying the
+        # function and self explicitly.
+        m = types.MethodType(global_add, Inputs(1, 2))
+        self.assertFalse(hasattr(m.__self__, "global_add"))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
+    def test_bound_method_under_a_slot_name(self):
+        # A method bound under a __slots__ member-descriptor name has no
+        # instance __dict__, and the slot value is restored only after the
+        # method is rebuilt, so getattr(self, name) cannot be trusted to resolve
+        # at load. _reduce_bound_method carries the function and self explicitly.
+        obj = SlottedByName()
+        obj.global_add = global_add
+        m = types.MethodType(global_add, obj)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, SlottedByName)
+
+    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
+        # self defines __getattr__, so probing getattr(self, name) to check
+        # resolution would run user code and can recurse. _reduce_bound_method
+        # carries the function and self explicitly instead of probing.
+        m = types.MethodType(global_add, GetattrProxy())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, GetattrProxy)
+
+
 @torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerialization(TestGuardSerializationBase):
     def test_function_locals(self):
@@ -484,6 +610,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
+        # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
+        bound = types.MethodType(global_add, Inputs(1, 2))
+
+        def fn(f, x):
+            if callable(f):
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):

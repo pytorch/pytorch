@@ -111,6 +111,91 @@ class SerializedCode:
         )
 
 
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by the picklers that rebuild objects pickle cannot do by
+    reference: code objects, closure cells, python modules, and bound methods. Each subclass
+    keeps its own dispatch; this class fixes HOW they are rebuilt so a fix in
+    one pickler cannot be missed in the other.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same function; those
+        # carry the function and self explicitly.
+        func = method.__func__
+        # __name__ is not guaranteed: MethodType accepts any callable, so
+        # method.__func__ may be a functools.partial with no __name__. Fall
+        # through to the explicit reduce rather than raising out of the reducer.
+        name = getattr(func, "__name__", None)
+        # A name served PER-INSTANCE resolves only after self is restored, which
+        # is after pickle rebuilds the method, so getattr() at load would miss
+        # it: carry func+self explicitly. That covers an instance __dict__
+        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
+        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
+        # lookup we must also not probe below -- it can recurse). A type receiver
+        # (classmethod) is exempt: its namespace is restored with the class.
+        cls = type(method.__self__)
+        self_dict = getattr(method.__self__, "__dict__", None)
+        instance_served = not isinstance(method.__self__, type) and (
+            (isinstance(self_dict, dict) and name in self_dict)
+            or (
+                name is not None
+                and isinstance(
+                    inspect.getattr_static(cls, name, None),
+                    types.MemberDescriptorType,
+                )
+            )
+            or hasattr(cls, "__getattr__")
+        )
+        if instance_served:
+            return type(self)._unpickle_bound_method, (func, method.__self__)
+        inner = getattr(method.__self__, name, None) if name is not None else None
+        if inspect.ismethod(inner):
+            inner = inner.__func__
+        # `func is inner` proves the class MRO resolves back to this function.
+        if func is inner:
+            return None
+        return type(self)._unpickle_bound_method, (func, method.__self__)
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -804,6 +889,13 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # install() still imports this entry's import_sources and global names,
+        # but skips its backends and guarded codes (the entry.bypassed check in
+        # install()). Clear those two here, and the add_* methods refuse to
+        # repopulate them once bypassed, so a later serializable recompile that
+        # reuses this same entry cannot resurrect the frame.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -822,6 +914,8 @@ class CompilePackage:
     def add_import_source(self, alias: str, module_name: str) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_import_source")
+        if self._current_entry.bypassed:
+            return
         self._current_entry.import_sources[alias] = module_name
 
     def _add_backend_id(
@@ -829,6 +923,8 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
+        if self._current_entry.bypassed:
+            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
