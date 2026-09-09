@@ -109,13 +109,34 @@ class SuperVariable(VariableTracker):
     _cpython_type = super
 
     _nonvar_fields = {
+        "obj_type",
+        "obj_type_source",
         *VariableTracker._nonvar_fields,
     }
+
+    tp_members = {
+        "__thisclass__": Member(lambda self, tx: self.typevar, readonly_setter),
+        "__self__": Member(lambda self, tx: self.objvar, readonly_setter),
+        "__self_class__": Member(
+            lambda self, tx: VariableTracker.build(tx, *self._obj_type_and_source()),
+            readonly_setter,
+        ),
+    }
+
+    # CPython represents super as:
+    # typedef struct {
+    #     PyObject_HEAD
+    #     PyTypeObject *type;       -> typevar
+    #     PyObject *obj;            -> objvar
+    #     PyTypeObject *obj_type;   -> obj_type
+    # } superobject;
 
     def __init__(
         self,
         typevar: VariableTracker,
-        objvar: VariableTracker | None = None,
+        objvar: VariableTracker,
+        obj_type: type | None = None,
+        obj_type_source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -128,6 +149,8 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
+        self.obj_type = obj_type
+        self.obj_type_source = obj_type_source
 
     def python_type(self) -> type:
         return builtins.super
@@ -135,37 +158,14 @@ class SuperVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
         codegen(self.typevar)
-        if self.objvar is not None:
-            codegen(self.objvar)
-            codegen.extend_output(create_call_function(2, False))
-        else:
-            codegen.extend_output(create_call_function(1, False))
+        codegen(self.objvar)
+        codegen.extend_output(create_call_function(2, False))
 
-    def _resolved_getattr_and_source(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> tuple[Any, AttrSource | None]:
-        if not self.objvar:
-            unimplemented(
-                gb_type="1-arg super not implemented",
-                context="",
-                explanation=f"Dynamo failed to trace attribute `{name}` accessed "
-                f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
-                "because one-argument of super() is not supported.",
-                hints=[
-                    "Use two-argument super(type, object_or_type).",
-                ],
-            )
-        if self.objvar is None:
-            raise AssertionError("super() requires objvar to be set")
-        search_type = self.typevar.as_python_constant()
-
-        # The rest of this function does two things:
-        #   - Walk the mro to find where the attribute comes from to be
-        #     able to provide accurate source
-        #   - Call the getattr to get the object
-
+    def _obj_type_and_source(self) -> tuple[type, Source | None]:
         # Find the class object, where the function lives.
         # When objvar is "self", use type(self), when objvar is "cls", use it as-is
+        if self.obj_type is not None:
+            return self.obj_type, self.obj_type_source
         type_to_use = self.objvar.python_type()
         type_to_use_source: Source | None = (
             TypeSource(self.objvar.source) if self.objvar.source else None
@@ -173,6 +173,13 @@ class SuperVariable(VariableTracker):
         if issubclass(type_to_use, type):
             type_to_use = self.objvar.value  # type: ignore[attr-defined]
             type_to_use_source = self.objvar.source
+        return type_to_use, type_to_use_source
+
+    def _resolved_getattr_and_source(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> tuple[Any, AttrSource | None]:
+        search_type = self.typevar.as_python_constant()
+        type_to_use, type_to_use_source = self._obj_type_and_source()
 
         source = None
         search_mro = type_to_use.__mro__
@@ -182,6 +189,7 @@ class SuperVariable(VariableTracker):
         except ValueError:
             # Corner case where the typevar is not in the mro of the objvar
             # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            # pyrefly: ignore[invalid-argument]
             return getattr(super(search_type, type_to_use), name), None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
@@ -198,21 +206,29 @@ class SuperVariable(VariableTracker):
                         )
                     return resolved_getattr, source
 
-        unimplemented(
-            gb_type="Unable to resolve super getattr",
-            context="",
-            explanation=f"Dynamo failed to trace attribute `{name}` accessed "
-            f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
-            "because the resolved attribute type is not supported.",
-            hints=[
-                "Ensure the attribute exists in the parent class.",
-                "Check the arguments passed to `super()`.",
-            ],
+        # Matches CPython's super_getattro: none of the classes above
+        # search_type in the MRO define `name`.
+        raise_observed_exception(
+            AttributeError, tx, args=[f"'super' object has no attribute '{name}'"]
         )
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # `__class__` (inherited from VariableTracker.tp_getset -- returns
+        # `self.python_type()`, i.e. `super`) and the `__thisclass__`/
+        # `__self__`/`__self_class__` tp_members above are attributes of the
+        # super object itself, resolved before (and instead of) walking the
+        # wrapped object's MRO. Mirrors CPython's super_getattro, which
+        # special-cases `__class__` and falls back to
+        # PyObject_GenericGetAttr(su, name) when the MRO walk finds nothing.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L11194-L11206
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+
         # Check if getattr is a constant. If not, delay the actual work by
         # wrapping the result in GetAttrVariable. Mostly super is called with a
         # method, so most of the work is delayed to call_function.
@@ -236,8 +252,7 @@ class SuperVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
-        if self.objvar is None:
-            raise AssertionError("super() requires objvar to be set for method calls")
+
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
@@ -246,6 +261,16 @@ class SuperVariable(VariableTracker):
         # applied if it has one. We currently don't have polyfills for all the
         # relevant `tp_descr_get`, so we explicitly handle the cases we care
         # about here (e.g., note the staticmethod, classmethod cases).
+        def _type_to_use_vt_and_raw_source() -> tuple[VariableTracker, Source | None]:
+            obj_type, obj_type_source = self._obj_type_and_source()
+            type_to_use_vt = VariableTracker.build(tx, obj_type, obj_type_source)
+            raw_descriptor_source = (
+                DictGetItemSource(TypeDictSource(source.base), name)
+                if source is not None
+                else None
+            )
+            return type_to_use_vt, raw_descriptor_source
+
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is types.SimpleNamespace.__init__ and isinstance(
@@ -299,44 +324,29 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            fn_vt = VariableTracker.build(
-                tx, inner_fn.__func__, source=source, realize=True
+            # sm_descr_get returns sm->sm_callable unconditionally, ignoring
+            # both obj and owner.
+            from .functions import _resolve_descriptor_get
+
+            type_to_use_vt, raw_descriptor_source = _type_to_use_vt_and_raw_source()
+            fn_vt = _resolve_descriptor_get(
+                tx, inner_fn, self.objvar, type_to_use_vt, raw_descriptor_source
             )
+            if fn_vt is None:
+                raise AssertionError("staticmethod must resolve via tp_descr_get")
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            if isinstance(self.objvar, variables.UserDefinedClassVariable):
-                # super().classmethod is called from a classmethod itself. So,
-                # super was converted to super(__class__, cls) in bytecode and
-                # therefore we have to propagate the cls.
-                cls_variable = self.objvar
-            else:
-                # current function is an instance method, therefore super was
-                # converted to super(__class__, self). We have to find
-                # type(self) to bind the cls to the parent classmethod.
-                # Note that it can't be the self.typevar because __class__ is
-                # the class where the method is defined, which could be
-                # different from type(self) with polymorphism.
-                cls_source = None
-                if self.objvar.source:
-                    cls_source = TypeSource(self.objvar.source)
-                cls_variable = VariableTracker.build(
-                    tx,
-                    self.objvar.value_type,  # type: ignore[attr-defined]
-                    cls_source,
-                )
-            if source is None:
-                raise AssertionError(
-                    "source must not be None for classmethod resolution"
-                )
-            fn_vt = VariableTracker.build(
-                tx,
-                inner_fn.__func__,
-                source=AttrSource(source, "__func__"),
-                realize=True,
+            from .functions import _resolve_descriptor_get
+
+            type_to_use_vt, raw_descriptor_source = _type_to_use_vt_and_raw_source()
+            fn_vt = _resolve_descriptor_get(
+                tx, inner_fn, self.objvar, type_to_use_vt, raw_descriptor_source
             )
-            return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
+            if fn_vt is None:
+                raise AssertionError("classmethod must resolve via tp_descr_get")
+            return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
@@ -349,21 +359,9 @@ class SuperVariable(VariableTracker):
         ):
             # type: ignore[arg-type]
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
-        elif inner_fn is object.__delattr__:
-            attr = args[0]
-            try:
-                attr = attr.as_python_constant()
-            except NotImplementedError as exc:
-                unimplemented(
-                    gb_type="Non-constant attribute given to `super().__delattr__()`",
-                    context=f"call_method {self} {name}",
-                    explanation="Dynamo requires the attribute name passed to "
-                    "`super().__delattr__(...)` to be a constant (string).",
-                    hints=[
-                        "Ensure the attribute name is a string literal or a constant variable."
-                    ],
-                    from_exc=exc,
-                )
+        elif inner_fn is object.__delattr__ and isinstance(
+            self.objvar, UserDefinedObjectVariable
+        ):
             if not tx.output.side_effects.is_attribute_mutation(self.objvar):
                 unimplemented(
                     gb_type="Attempted super().__delattr__() on an object without mutation tracking",
@@ -377,12 +375,12 @@ class SuperVariable(VariableTracker):
                         *graph_break_hints.DYNAMO_BUG,
                     ],
                 )
-            if not isinstance(attr, str):
-                raise AssertionError(f"attr must be a str, got {type(attr)}")
-            tx.output.side_effects.store_attr(
-                self.objvar, attr, variables.DeletedVariable()
+            # object.__delattr__ IS PyObject_GenericSetAttr(obj, name, NULL).
+            # Same helper the is_standard_setattr branch above uses for
+            # object.__setattr__; DeletedVariable models the NULL value.
+            return self.objvar.method_setattr_standard(
+                tx, args[0], variables.DeletedVariable()
             )
-            return variables.ConstantVariable.create(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedObjectVariable)
             and self.objvar._base_vt is not None
@@ -444,6 +442,19 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, types.BuiltinFunctionType):
             fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
             return fn_vt.call_function(tx, args, kwargs)
+        else:
+            # Generic tp_descr_get fallback for descriptor kinds with a
+            # dedicated VT (property, member/getset descriptor, tuplegetter,
+            # classmethod_descriptor, wrapper_descriptor, method_descriptor)
+            # that aren't one of the special cases above.
+            from .functions import _resolve_descriptor_get
+
+            type_to_use_vt, raw_descriptor_source = _type_to_use_vt_and_raw_source()
+            resolved = _resolve_descriptor_get(
+                tx, inner_fn, self.objvar, type_to_use_vt, raw_descriptor_source
+            )
+            if resolved is not None:
+                return resolved.call_function(tx, args, kwargs)
 
         unimplemented(
             gb_type="Attempted to call a super() attribute that is "
