@@ -446,6 +446,29 @@ class DecoratedDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
+def keep_whole_dict_attribute(func):
+    func.tag = 2.0
+    func.cache = threading.Lock()  # unpicklable and unguarded sibling
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        # Reads the WHOLE __dict__ (a DunderDict guard keeps the mapping
+        # verbatim) AND an element through it. The generic edge keys on the
+        # function, not its __dict__, so without the mapping edge the verbatim
+        # dict drags func.cache in.
+        if type(func.__dict__) is dict and func.tag == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedWholeDictAttributeForwardModule(torch.nn.Module):
+    @keep_whole_dict_attribute
+    def forward(self, x):
+        return x * 2
+
+
 def keep_defaults_element(func):
     @functools.wraps(func)
     def wrapper(self, x):
@@ -599,6 +622,21 @@ class Inputs:
     def __init__(self, x, unused):
         self.x = x
         self.unused = unused
+
+
+class SlottedByName:
+    # A slot named for the function it will hold: a method bound under that name
+    # has a class-level member descriptor but no instance __dict__ to inspect.
+    __slots__ = ("global_add",)
+
+
+class GetattrProxy:
+    # __getattr__ dynamically serves the bound function's name; probing
+    # getattr(self, name) to check resolution would run user code (and recurse).
+    def __getattr__(self, name):
+        if name == "global_add":
+            return global_add
+        raise AttributeError(name)
 
 
 def _global_func_wrong_fqn(x):
@@ -1327,6 +1365,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, Inputs)
 
+    def test_bound_method_under_a_slot_name(self):
+        # A method bound under a __slots__ member-descriptor name has no
+        # instance __dict__, and the slot value is restored only after the
+        # method is rebuilt, so getattr(self, name) cannot be trusted to resolve
+        # at load. _reduce_bound_method carries the function and self explicitly.
+        obj = SlottedByName()
+        obj.global_add = global_add
+        m = types.MethodType(global_add, obj)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, SlottedByName)
+
+    def test_bound_method_on_a_getattr_proxy_is_not_probed(self):
+        # self defines __getattr__, so probing getattr(self, name) to check
+        # resolution would run user code and can recurse. _reduce_bound_method
+        # carries the function and self explicitly instead of probing.
+        m = types.MethodType(global_add, GetattrProxy())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, GetattrProxy)
+
     def test_unpicklable_value_error_names_the_attribute_path(self):
         # A type alone ("cannot pickle 'generator' object") is not actionable in
         # a model with a thousand-frame guard tree; the path is.
@@ -1836,6 +1899,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         mod = DecoratedCalledDefaultForwardModule()
         # Serializes cleanly with the edge recorded on the tuple; without it this
         # raises PackageError("cannot pickle '_thread.lock' object").
+        torch.compile(mod, backend="eager")(torch.randn(3))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_fqn_mismatched_function_prunes_a_verbatim_dict_read(self):
+        # A guard that reads the WHOLE __dict__ (DunderDict keeps the mapping)
+        # plus an element through it records no child edge on __dict__ under the
+        # generic rule (it keys on the function, not its dict), so the mapping
+        # was carried verbatim and an unpicklable unguarded sibling (func.cache)
+        # bypassed the frame. Like the called-default shape this only survives
+        # the full compile path -- _test_serialization's filter drops the
+        # whole-dict guard. The mapping edge in get_guard_manager_from_source
+        # prunes per value; without it this raises PackageError on the lock.
+        mod = DecoratedWholeDictAttributeForwardModule()
         torch.compile(mod, backend="eager")(torch.randn(3))
 
     def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):

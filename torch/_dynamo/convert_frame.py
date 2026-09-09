@@ -2045,7 +2045,9 @@ def _compile(
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=record and output.package is not None,
+                save=record
+                and output.package is not None
+                and not output.package.current_entry_bypassed(),
                 cache_entries=cache_entries,
                 serialization_guard_filter_fn=(
                     package.serialization_guard_filter_fn
@@ -2058,9 +2060,16 @@ def _compile(
 
         # bypass_package sets output.package to None when this entry's guards
         # could not be serialized (the local `package` still holds the object).
-        # Skip the whole block in that case: a bypassed entry contributes none
-        # of its guards, inlined source, or device type to the package.
-        if record and output.package is not None:
+        # An entry bypassed on an earlier recompile stays bypassed, and
+        # add_guarded_code/add_inlined_source/update_device_type all no-op on it.
+        # Skip the whole block in either case: a bypassed entry contributes none
+        # of its guards, inlined source, or device type, and `save` above is
+        # gated identically so guards_state is deliberately None here.
+        if (
+            record
+            and output.package is not None
+            and not output.package.current_entry_bypassed()
+        ):
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
