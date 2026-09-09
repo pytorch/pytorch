@@ -464,6 +464,29 @@ for generator_prefix in ("torch.default_generator", "torch._C.Generator"):
 # In graph functions (including constant folding) that are C bindings
 torch_c_binding_in_graph_functions = dict.fromkeys(
     [
+        "cmath.acos",
+        "cmath.acosh",
+        "cmath.asin",
+        "cmath.asinh",
+        "cmath.atan",
+        "cmath.atanh",
+        "cmath.cos",
+        "cmath.cosh",
+        "cmath.exp",
+        "cmath.isclose",
+        "cmath.isfinite",
+        "cmath.isinf",
+        "cmath.isnan",
+        "cmath.log",
+        "cmath.log10",
+        "cmath.phase",
+        "cmath.polar",
+        "cmath.rect",
+        "cmath.sin",
+        "cmath.sinh",
+        "cmath.sqrt",
+        "cmath.tan",
+        "cmath.tanh",
         "math.acos",
         "math.acosh",
         "math.asin",
@@ -789,6 +812,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
+        "torch._C._is_tracing",
         "torch._C._get_upgrader_ranges",
         "torch._C._get_upgraders_entry_map",
         "torch._C._get_upgraders_map_size",
@@ -2407,6 +2431,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
+
+if sys.version_info >= (3, 12):
+    torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 13):
     torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
