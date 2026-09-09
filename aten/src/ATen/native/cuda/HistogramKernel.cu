@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Histogram.h>
@@ -42,7 +43,8 @@ __device__ index_t histogram_bin(
   }
 
   if constexpr (linear_bins) {
-    // This is only an estimate; validate against the original scalar_t edges.
+    // Above roughly 2^24 bins, float rounding can require the binary-search fallback.
+    // Validate the estimate against the original scalar_t edges.
     const float estimate = static_cast<float>(value - edges[0]) /
         static_cast<float>(edges[num_bins] - edges[0]) * num_bins;
     if (estimate >= 0 && estimate < num_bins) {
@@ -81,7 +83,7 @@ template <
     bool one_dimensional,
     bool weighted,
     bool shared_histogram>
-__global__ void histogramdd_cuda_kernel(
+__global__ C10_LAUNCH_BOUNDS_1(histogram_threads) void histogramdd_cuda_kernel(
     const scalar_t* input,
     int64_t num_samples,
     index_t dimensions,
@@ -135,9 +137,9 @@ __global__ void histogramdd_cuda_kernel(
         // Reduce uniform warps without serializing their floating-point atomics.
         const auto peers = __activemask();
         if (peers == 0xffffffffu &&
-            __all_sync(peers, histogram_index == __shfl_sync(peers, histogram_index, 0))) {
+            __all_sync(peers, histogram_index == WARP_SHFL(histogram_index, 0, C10_WARP_SIZE, peers))) {
           for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
-            value += __shfl_down_sync(peers, value, offset);
+            value += WARP_SHFL_DOWN(value, offset, C10_WARP_SIZE, peers);
           }
           if (threadIdx.x % C10_WARP_SIZE == 0) {
             gpuAtomicAddNoReturn(accumulation + histogram_index, value);
@@ -146,12 +148,14 @@ __global__ void histogramdd_cuda_kernel(
           gpuAtomicAddNoReturn(accumulation + histogram_index, value);
         }
       } else {
+        // Unit weights need only a peer count, not a floating-point reduction.
         const auto peers = __match_any_sync(__activemask(), histogram_index);
         if ((threadIdx.x % C10_WARP_SIZE) == __ffs(peers) - 1) {
           gpuAtomicAddNoReturn(accumulation + histogram_index, static_cast<scalar_t>(__popc(peers)));
         }
       }
 #else
+      // ROCm and pre-Volta CUDA use per-sample atomics with shared-memory replicas.
       gpuAtomicAddNoReturn(accumulation + histogram_index, value);
 #endif
     }
@@ -179,13 +183,6 @@ void histogramdd_out_cuda_template(
     const TensorList& bin_edges) {
   const c10::cuda::CUDAGuard device_guard(self.device());
   globalContext().alertNotDeterministic("histogram_cuda");
-  TORCH_CHECK(hist.device() == self.device(), "torch.histogram: hist and input must be on the same device");
-  if (weight.has_value()) {
-    TORCH_CHECK(weight->device() == self.device(), "torch.histogram: weight and input must be on the same device");
-  }
-  for (const auto& edges : bin_edges) {
-    TORCH_CHECK(edges.device() == self.device(), "torch.histogram: bin edges and input must be on the same device");
-  }
 
   const int64_t dimensions = self.size(-1);
   const int64_t num_samples = std::accumulate(
@@ -294,7 +291,9 @@ void histogramdd_linear_kernel_impl(
     bool density,
     Tensor& hist,
     const TensorList& bin_edges,
-    bool /*local_search*/) {
+    bool local_search) {
+  // histc uses a separate CUDA kernel; this stub always checks returned edges.
+  TORCH_INTERNAL_ASSERT(local_search);
   histogramdd_out_cuda_template<true>(self, weight, density, hist, bin_edges);
 }
 
@@ -304,12 +303,14 @@ void histogram_select_outer_bin_edges_impl(
     std::vector<double>& leftmost_edges,
     std::vector<double>& rightmost_edges) {
   const c10::cuda::CUDAGuard device_guard(input.device());
-  auto [min, max] = at::aminmax(input, 0);
-  const Tensor min_cpu = min.to(kCPU);
-  const Tensor max_cpu = max.to(kCPU);
+  Tensor extrema = at::empty({2, dimensions}, input.options());
+  Tensor min = extrema.select(0, 0);
+  Tensor max = extrema.select(0, 1);
+  at::aminmax_out(min, max, input, 0);
+  const Tensor extrema_cpu = extrema.to(kCPU);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogram_cuda", [&]() {
-    const scalar_t* min_data = min_cpu.const_data_ptr<scalar_t>();
-    const scalar_t* max_data = max_cpu.const_data_ptr<scalar_t>();
+    const scalar_t* min_data = extrema_cpu.const_data_ptr<scalar_t>();
+    const scalar_t* max_data = min_data + dimensions;
     std::copy(min_data, min_data + dimensions, leftmost_edges.begin());
     std::copy(max_data, max_data + dimensions, rightmost_edges.begin());
   });
