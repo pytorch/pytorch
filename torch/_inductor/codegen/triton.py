@@ -3396,16 +3396,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def replacement(candidate: sympy.Basic) -> sympy.Symbol | None:
             if not isinstance(candidate, sympy.Expr):
                 return None
-            if (
-                candidate in self._r_numel_reuse_replacements
-                or not candidate.free_symbols
-            ):
+            if not candidate.free_symbols:
                 return None
             if any(
                 not symbol_is_type(symbol, _R_NUMEL_REUSE_SYMBOL_TYPES)
                 for symbol in candidate.free_symbols
             ):
                 return None
+            # Keep only replacements that eliminate a scalar kernel argument.
             if not simulate and not candidate.free_symbols.intersection(
                 self._r_numel_reuse_eliminated_symbols
             ):
