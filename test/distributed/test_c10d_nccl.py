@@ -1098,6 +1098,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
         dist.set_timeout(timedelta(seconds=3), pg)
+        dist.barrier()
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
@@ -1237,6 +1238,35 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 2)
 
         dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_initialized_parent_with_lazy_default(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        default_pg = self._create_process_group_nccl(store, self.opts())
+        default_backend = default_pg._get_backend(device)
+        self.assertFalse(default_backend._is_initialized())
+
+        ranks = list(range(self.world_size))
+        parent = c10d.new_group(ranks)
+        parent_backend = parent._get_backend(device)
+        self.assertFalse(parent_backend._is_initialized())
+        with self.assertRaisesRegex(RuntimeError, "Parent process group backend"):
+            c10d.split_group(parent, [ranks])
+
+        tensor = torch.full((1,), self.rank, device=device)
+        dist.all_reduce(tensor, group=parent)
+        self.assertTrue(parent_backend._is_initialized())
+        self.assertFalse(default_backend._is_initialized())
+
+        child = c10d.split_group(parent, [ranks])
+        self.assertIsInstance(child, c10d.ProcessGroup)
+        self.assertIsNone(child.bound_device_id)
+        dist.broadcast(tensor, 0, group=child)
+        self.assertEqual(tensor, torch.full_like(tensor, sum(ranks)))
+
+        c10d.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

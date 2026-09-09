@@ -7,22 +7,31 @@
 # dispatcher stays in the general path and does not pull in the row/col/xcta fast
 # kernels (added in later commits).
 
+import sys
 import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+
+
+# The kernel modules import cutlass at module scope, so the guard precedes the import: otherwise
+# an image without the runtime fails collection for the whole file instead of skipping it.
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+import cutlass
+
+from torch._native.ops._cutedsl import traits as T
+from torch._native.ops.reductions import kernel_general as kg
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
-@skipIfNoCuteDSL
 class TestKernelGeneral(TestCase):
     def test_reduce_dim_general_path(self):
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
-
         x = torch.randn(8, 16, 32, device="cuda")
         out = kg.reduce_dim(
             T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
@@ -34,11 +43,6 @@ class TestKernelGeneral(TestCase):
         # entirely. A test cannot observe the -O build from here, so what it CAN pin is that each
         # check is a real raise reached on the documented input -- which is what a stripped assert
         # would stop doing. Every check these kernels carry is covered.
-        import cutlass
-
-        from torch._native.ops._cutedsl import traits as T
-        from torch._native.ops.reductions import kernel_general as kg
-
         trait = T.SumOps(acc=cutlass.Float32)
         # reduce-all needs a flat view, so a transposed input has to be refused, not reshaped.
         xt = torch.randn(64, 128, device="cuda").t()
