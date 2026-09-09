@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1881,6 +1881,13 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, torch.device):
+            # A device is metadata, not data: it holds no activation memory. Nodes
+            # carrying one show up as operands to factory ops (e.g. the
+            # current_device() node compile-on-one-rank substitutes for a baked
+            # device), and the partitioner sizes a node's fx.Node args, so this is
+            # reached during a normal partition.
+            return 0
         elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
             # A (Fake)ScriptObject may hold tensors internally, so we cannot
             # soundly compute its size here. Only treat it as zero size when the
@@ -2580,6 +2587,16 @@ def solve_min_cut(
         if config.recompute_views and op_types.is_view(node):
             return None
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return None
+        if isinstance(node.meta.get("val"), torch.device):
+            # A device-valued node (e.g. the coor::current_device() node
+            # compile_on_one_rank substitutes for a baked device) has no tensor to
+            # save, so get_node_weight would give it infinite weight as a non-tensor
+            # output and the allowlist check below would ban it as unrecomputable --
+            # leaving min-cut unable to place it at all once a backward op needs it.
+            # Recomputing is both free and correct: the op only reads the current
+            # accelerator, and doing so on the backward side is what makes the graph
+            # follow each rank's own device.
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -3870,6 +3887,7 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
+    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3887,6 +3905,11 @@ def _sync_decision_cross_ranks(
         and has_collectives(joint_graph)
     ):
         return saved_values
+
+    pg = get_compile_sync_pg()
+    if pg is None:
+        raise AssertionError("Compile sync process group must be available here")
+    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
 
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
@@ -3908,10 +3931,9 @@ def _sync_decision_cross_ranks(
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3926,10 +3948,10 @@ def _sync_decision_cross_ranks(
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [
-                [] for _ in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], group=pg
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3941,17 +3963,16 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == torch.distributed.get_rank():
+                    if idx == pg.rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(
-                saved_sizes,
-                device=torch.distributed.distributed_c10d._get_object_coll_device(),
-            )
+            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
             torch.distributed.all_reduce(
-                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+                saved_sizes_tensor,
+                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+                group=pg,
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())

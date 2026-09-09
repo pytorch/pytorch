@@ -204,8 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.14
-    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    ROCM_VERSION=10.0
+    THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -216,7 +216,7 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=7.15.0a20260712
+    ROCM_VERSION=10.1.0a20260821
     THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
     USE_MSLK=0
     TRITON=yes
@@ -234,6 +234,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     XPU_VERSION=2026.1
+    OMIX_VERSION=0.3.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -357,10 +358,10 @@ case "$tag" in
   ;;
 esac
 
-# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
-# PYTHON_VERSION, while the rocm/xpu images still express it as
-# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
-# get what they expect.
+# The ubuntu and ubuntu-rocm images provision Python from a deadsnakes venv
+# keyed on PYTHON_VERSION, while the xpu image still expresses it as
+# ANACONDA_PYTHON_VERSION (it keeps conda). Mirror the value so every flavor
+# gets what it expects.
 if [ -z "${PYTHON_VERSION}" ]; then
   PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
 fi
@@ -426,6 +427,7 @@ build_image() {
        --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
+       --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
