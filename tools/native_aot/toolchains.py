@@ -42,6 +42,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shlex
 
 
 class Toolchain:
@@ -195,6 +196,20 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
     }
 
+    @staticmethod
+    def _declared_host_target(opts: str | None) -> str | None:
+        """The --host-target an op's builder asked for, or None if it asked for none.
+
+        Empty string is a real answer, not a missing one: the DSL reads an empty spec as
+        the build host, so the caller has to tell the two apart."""
+        tokens = shlex.split(opts or "")
+        for i, tok in enumerate(tokens):
+            if tok.startswith("--host-target="):
+                return tok.partition("=")[2]
+            if tok == "--host-target":
+                return tokens[i + 1] if i + 1 < len(tokens) else ""
+        return None
+
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
         import cutlass.cute as cute
 
@@ -202,9 +217,22 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         # the op's JIT wrapper passes, minus --enable-tvm-ffi, which would change
         # the exported ABI; otherwise the two routes' SASS diverges.
         opts = b.get("options")
-        host_target = self._HOST_TARGETS.get(platform.machine())
-        if host_target and "--host-target" not in (opts or ""):
-            host_opt = f"--host-target '{host_target}'"
+        declared = self._declared_host_target(opts)
+        if declared == "":
+            raise RuntimeError(
+                "native-AOT export: --host-target with an empty value tells the DSL to "
+                "compile for the build host, so the kernels would only load on a CPU "
+                "like the builder's. Name a target or leave the option out."
+            )
+        if declared is None:
+            machine = platform.machine()
+            if machine not in self._HOST_TARGETS:
+                raise RuntimeError(
+                    f"native-AOT export: no pinned host target for {machine!r}. "
+                    "Falling back would target this builder's CPU; add an entry to "
+                    "CuteDslToolchain._HOST_TARGETS."
+                )
+            host_opt = f"--host-target '{self._HOST_TARGETS[machine]}'"
             opts = f"{opts} {host_opt}" if opts else host_opt
         if arch:
             # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can

@@ -461,8 +461,10 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
         # '_parameters'), 'weight')``. Collapse that pair into a single
         # attr token.
-        if isinstance(cur, DictGetItemSource) and isinstance(
-            cur.base, UnspecializedParamBufferSource
+        if (
+            isinstance(cur, DictGetItemSource)
+            and isinstance(cur.base, UnspecializedParamBufferSource)
+            and isinstance(cur.index, str)
         ):
             path.append(_AttrToken(cur.index))
             cur = cur.base.base
