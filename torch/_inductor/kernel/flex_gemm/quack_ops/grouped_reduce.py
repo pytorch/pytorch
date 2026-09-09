@@ -1,30 +1,30 @@
-# Copyright (c) 2026, Han Guo, Tri Dao.
+# mypy: allow-untyped-defs
 """Grouped local reductions inside a GEMM epilogue tile (FlexGEMM parity).
 
 FlexGEMM (``torch/_inductor/kernel/flex_gemm``) recognizes epilogues that
 reshape the GEMM output to expose contiguous groups along M or N and reduce
 only that grouped dimension::
 
-    out = acc.reshape(m, n // g, g).sum(-1)     # axis=1, group=g
-    out = acc.reshape(m // g, g, n).sum(-2)     # axis=0, group=g
+    out = acc.reshape(m, n // g, g).sum(-1)  # axis=1, group=g
+    out = acc.reshape(m // g, g, n).sum(-2)  # axis=0, group=g
 
 The reduced value either leaves the kernel *compressed* (one value per
-``(row, group)`` — no per-tile partials, unlike
-:class:`quack.epilogue.ops.VecReduce`)
+``(row, group)`` - no per-tile partials, unlike
+:class:`torch._vendor.quack.epilogue.ops.VecReduce`)
 or is broadcast back into the same epilogue pass ("feed main", e.g. a grouped
 softmax denominator). This module provides three EpiOps for that contract:
 
-* :class:`GroupedLocalReduce` — sink port. The fn returns the value under the
+* :class:`GroupedLocalReduce` - sink port. The fn returns the value under the
   op name; the op reduces each group physically and stores exactly one element
   per ``(row, group)`` into a compressed aux tensor.
-* :class:`GroupedLocalReduceFeed` — apply port for same-warp axis-0 groups. The
+* :class:`GroupedLocalReduceFeed` - apply port for same-warp axis-0 groups. The
   fn calls the op (``r = gsum(acc)``) and gets the reduction broadcast to every
   row lane. Passing a compressed aux tensor additionally stores the value.
-* :class:`GroupedLocalReducePrepass` — tensorless value port for axis-1 groups
+* :class:`GroupedLocalReducePrepass` - tensorless value port for axis-1 groups
   up to 32. An accumulator prepass reduces to shared memory through
-  :class:`quack.epilogue.ops.GroupedColStatsBase`; the main pass receives the group
+  :class:`torch._vendor.quack.epilogue.ops.GroupedColStatsBase`; the main pass receives the group
   value broadcast per element, without a follow-up kernel.
-* :class:`GroupedLocalReduceWithFinalizeArg` — sink port for a grouped sum whose
+* :class:`GroupedLocalReduceWithFinalizeArg` - sink port for a grouped sum whose
   scalar finalizer also consumes a prepass value, used by stable grouped LSE.
 
 Reduction geometry (all static, derived from the epilogue tiled_copy)
@@ -66,25 +66,29 @@ ragged last tile writes fewer groups without host-side padding. Groups must not
 straddle the GEMM boundary: ``group`` has to divide both the CTA tile and the
 grouped GEMM dimension (``GroupedReduceBase.host_validate`` checks both host-side
 and the tile divisibility is asserted again at compile time). OOB accumulator
-lanes are zero, which is the identity for ``add`` only — with ``mul``/``max``/
+lanes are zero, which is the identity for ``add`` only - with ``mul``/``max``/
 ``min`` a partially OOB group would be wrong, and the divisibility rule is what
 makes that unrepresentable.
 
-Integration (EpiMod / quack.epilogue.frontend)
-------------------------------------------
+Integration (EpiMod / torch._vendor.quack.epilogue.frontend)
+------------------------------------------------------------
 The ops work through the existing hook APIs::
 
     @gemm_epilogue(outs={"gsum": GroupedLocalReduce("gsum", axis=1, group=32)})
     def grouped_sum(acc):
         return {"D": acc, "gsum": acc}
 
-    @gemm_epilogue(ops={"gmax": GroupedLocalReduceFeed("gmax", axis=0, group=8,
-                                                       combine="max")})
+
+    @gemm_epilogue(
+        ops={"gmax": GroupedLocalReduceFeed("gmax", axis=0, group=8, combine="max")}
+    )
     def grouped_center(acc, gmax):
-        return {"D": acc - gmax(acc)}   # epi_args["gmax"] = compressed buffer
+        return {"D": acc - gmax(acc)}  # epi_args["gmax"] = compressed buffer
+
 
     def grouped_prepass(acc):
         return {"gsum": acc}
+
 
     @gemm_epilogue(
         ops={"gsum": GroupedLocalReducePrepass("gsum", group=16)},
@@ -92,15 +96,14 @@ The ops work through the existing hook APIs::
         prepass_outs=("gsum",),
     )
     def grouped_n_center(acc, gsum):
-        return {"D": acc - gsum}        # epi_args["gsum"] = None
+        return {"D": acc - gsum}  # epi_args["gsum"] = None
 
-Tensorless feeds need a parent-side hook: ``ComposableEpiMixin`` normally
-filters ops whose argument is ``None`` and omits their shared-memory budget.
-:class:`GroupedFeedMainMixin` keeps both apply feeds and prepass/value feeds
-active; ``EpiMod._mint`` includes it in every generated kernel class.
+Tensorless feeds rely on the ``EpiOp.keep_tensorless`` hook: ``ComposableEpiMixin``
+normally filters ops whose argument is ``None`` and omits their shared-memory
+budget, but keeps ops that set the flag.
 
 Numerics, geometries, tails, and the config contract are pinned by
-tests/test_grouped_reduce.py.
+test/inductor/test_flex_gemm.py.
 """
 
 from __future__ import annotations
@@ -109,23 +112,29 @@ import math
 import operator
 from dataclasses import dataclass
 from functools import partial
-from typing import NamedTuple
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Float32, const_expr
+from cutlass import const_expr, Float32
 
+from torch._vendor.quack import layout_utils
 from torch._vendor.quack.epilogue.ops import (
-    EpiOp,
-    EpiSmemBytes,
-    GroupedColStatsBase,
     _callable_config_key,
     _get_lane_warp_layouts,
     assume_stride_divisibility,
+    EpiOp,
+    EpiSmemBytes,
+    GroupedColStatsBase,
 )
 from torch._vendor.quack.gemm_runtime.identity import semantic_value_key
-from torch._vendor.quack import layout_utils
 from torch._vendor.quack.sm90_utils import partition_for_epilogue
+from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 # FlexGEMM's host-side gate width (``constraints.LOCAL_REDUCE_FRAGMENT_WIDTH``):
 # the M-lane count of the SM100 epilogue partition, and the largest group that
@@ -221,7 +230,11 @@ def max_grouped_reduce_group(configs, axis: int) -> int | None:
             32,
             *range(
                 64,
-                (config.tile_m if (1 - axis if config.swap_ab else axis) == 0 else config.tile_n)
+                (
+                    config.tile_m
+                    if (1 - axis if config.swap_ab else axis) == 0
+                    else config.tile_n
+                )
                 + 1,
                 GROUPED_FRAGMENT_WIDTH,
             ),
@@ -231,7 +244,9 @@ def max_grouped_reduce_group(configs, axis: int) -> int | None:
     return max(groups, default=None)
 
 
-def grouped_reduce_out_shape(m: int, n: int, group: int, axis: int, batch: int | None = None):
+def grouped_reduce_out_shape(
+    m: int, n: int, group: int, axis: int, batch: int | None = None
+):
     """Compressed aux shape for a grouped reduce: the grouped GEMM dim / group."""
     if group <= 0:
         raise ValueError("group must be positive")
@@ -254,25 +269,30 @@ class GroupedLocalReduceOutputLayout:
     """
 
     name: str
-    tensor_fn: object
-    carrier_shape_fn: object
-    fake_shape_fn: object
+    tensor_fn: Callable[..., Any]
+    carrier_shape_fn: Callable[..., Any]
+    fake_shape_fn: Callable[..., Any]
     carrier_ndim: int
-    supports_config_fn: object | None = None
-    validate_carrier_fn: object | None = None
+    supports_config_fn: Callable[..., Any] | None = None
+    validate_carrier_fn: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("output layout name must be non-empty")
         if not all(
-            callable(fn) for fn in (self.tensor_fn, self.carrier_shape_fn, self.fake_shape_fn)
+            callable(fn)
+            for fn in (self.tensor_fn, self.carrier_shape_fn, self.fake_shape_fn)
         ):
             raise TypeError(
                 "output layout tensor, carrier-shape, and fake-shape callbacks must be callable"
             )
-        if self.supports_config_fn is not None and not callable(self.supports_config_fn):
+        if self.supports_config_fn is not None and not callable(
+            self.supports_config_fn
+        ):
             raise TypeError("output layout config predicate must be callable")
-        if self.validate_carrier_fn is not None and not callable(self.validate_carrier_fn):
+        if self.validate_carrier_fn is not None and not callable(
+            self.validate_carrier_fn
+        ):
             raise TypeError("output layout carrier validator must be callable")
         if self.carrier_ndim <= 0:
             raise ValueError("output layout carrier rank must be positive")
@@ -281,12 +301,16 @@ class GroupedLocalReduceOutputLayout:
         """Return source-derived callback identity for the persistent kernel key."""
         return (
             self.name,
-            semantic_value_key(self.tensor_fn, set(), force_source=True),
-            semantic_value_key(self.carrier_shape_fn, set(), force_source=True),
-            semantic_value_key(self.fake_shape_fn, set(), force_source=True),
+            semantic_value_key(self.tensor_fn, OrderedSet(), force_source=True),
+            semantic_value_key(self.carrier_shape_fn, OrderedSet(), force_source=True),
+            semantic_value_key(self.fake_shape_fn, OrderedSet(), force_source=True),
             self.carrier_ndim,
-            semantic_value_key(self.supports_config_fn, set(), force_source=True),
-            semantic_value_key(self.validate_carrier_fn, set(), force_source=True),
+            semantic_value_key(
+                self.supports_config_fn, OrderedSet(), force_source=True
+            ),
+            semantic_value_key(
+                self.validate_carrier_fn, OrderedSet(), force_source=True
+            ),
         )
 
 
@@ -358,11 +382,16 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
         reference_src=reference_src,
     )
     frags = tuple(
-        partition(cute.make_rmem_tensor(cute.make_layout((tile_M, tile_N), stride=s), Float32))
+        partition(
+            cute.make_rmem_tensor(cute.make_layout((tile_M, tile_N), stride=s), Float32)
+        )
         for s in ((1, 0), (0, 1))
     )
     m_sub, n_sub = (f[None, None, None, 0, 0].layout for f in frags)
-    slots = [(cute.crd2idx(i, m_sub), cute.crd2idx(i, n_sub)) for i in range(cute.size(m_sub))]
+    slots = [
+        (cute.crd2idx(i, m_sub), cute.crd2idx(i, n_sub))
+        for i in range(cute.size(m_sub))
+    ]
     by_row: dict[int, list] = {}
     by_col: dict[int, list] = {}
     for i, (m_off, n_off) in enumerate(slots):
@@ -371,12 +400,10 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
     rows = len(by_row)
     cols = len(next(iter(by_row.values())))
     chunk, chunks = _row_chunks(by_row, cols, group) if axis == 1 else (1, ())
-    epi_m = cute.size(frags[0].layout.shape[3])
     epi_n = cute.size(frags[0].layout.shape[4])
     lane_layout_MN, warp_layout_MN = _get_lane_warp_layouts(tiled_copy, reference_src)
     lanes_m = cute.size(lane_layout_MN, mode=[0])
     warps_m = cute.size(warp_layout_MN, mode=[0])
-    warps_n = cute.size(warp_layout_MN, mode=[1])
     tile = tile_M if axis == 0 else tile_N
     if group > tile or tile % group:
         raise NotImplementedError(
@@ -409,10 +436,16 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
             for entries in (
                 tuple(
                     sorted(
-                        (entry for entry in col_entries if entry[0] // group == group_idx),
+                        (
+                            entry
+                            for entry in col_entries
+                            if entry[0] // group == group_idx
+                        ),
                     )
                 )
-                for group_idx in sorted({m_off // group for m_off, _ in col_entries})
+                for group_idx in sorted(
+                    OrderedSet([m_off // group for m_off, _ in col_entries])
+                )
             )
         )
         rows_per_warp = lanes_m * rows
@@ -473,7 +506,7 @@ class GroupedReduceBase(EpiOp):
     ``axis``: 0 groups contiguous M rows, 1 groups contiguous N columns.
     ``group``: elements per group; must divide the CTA tile extent and the
     grouped GEMM dimension. ``combine``: ``"add" | "mul" | "max" | "min"``, a
-    2-argument callable, or None — None means the values arrive already reduced
+    2-argument callable, or None - None means the values arrive already reduced
     and broadcast per group (FlexGEMM's generated-TensorSSA contract) and this
     op only compresses the store. ``finalize``: None, ``"mean"`` (divide by
     ``group``), or a 1-argument callable applied once to each group value.
@@ -497,7 +530,9 @@ class GroupedReduceBase(EpiOp):
         if group <= 1:
             raise ValueError("group must be greater than 1")
         if isinstance(combine, str) and combine not in _COMBINE_FNS:
-            raise ValueError(f"unsupported combine {combine!r}; use {sorted(_COMBINE_FNS)}")
+            raise ValueError(
+                f"unsupported combine {combine!r}; use {sorted(_COMBINE_FNS)}"
+            )
         if combine is not None and not (isinstance(combine, str) or callable(combine)):
             raise TypeError("combine must be a name, a 2-argument callable, or None")
         if not (finalize is None or finalize == "mean" or callable(finalize)):
@@ -505,7 +540,7 @@ class GroupedReduceBase(EpiOp):
         self.axis = axis
         self.group = group
         self.combine = combine
-        self.finalize = finalize
+        self.finalize: Any = finalize
         self.output_layout = output_layout
 
     def config_key(self):
@@ -516,7 +551,10 @@ class GroupedReduceBase(EpiOp):
         :meth:`EpiOp.config_key` demands of stateful ops."""
         extra = tuple(
             sorted(
-                set(vars(self)) - {"name", "axis", "group", "combine", "finalize", "output_layout"}
+                OrderedSet(vars(self))
+                - OrderedSet(
+                    ["name", "axis", "group", "combine", "finalize", "output_layout"]
+                )
             )
         )
         if extra:
@@ -526,7 +564,9 @@ class GroupedReduceBase(EpiOp):
         return (
             self.axis,
             self.group,
-            self.combine if isinstance(self.combine, str) else _callable_config_key(self.combine),
+            self.combine
+            if isinstance(self.combine, str)
+            else _callable_config_key(self.combine),
             self.finalize
             if self.finalize is None or isinstance(self.finalize, str)
             else _callable_config_key(self.finalize),
@@ -554,18 +594,28 @@ class GroupedReduceBase(EpiOp):
                 if grouped_reduce_supports_config(config, self.axis, self.group)
             )
         ):
-            return f"output layout {self.output_layout.name!r} has no supported GemmConfig"
+            return (
+                f"output layout {self.output_layout.name!r} has no supported GemmConfig"
+            )
         max_group = max_grouped_reduce_group(configs, self.axis)
         return f"requested group={self.group}, max supported group={max_group} for axis={self.axis}"
 
     @property
     def combine_fn(self):
         """Resolved 2-argument combine, or None for pre-reduced values."""
-        return _COMBINE_FNS[self.combine] if isinstance(self.combine, str) else self.combine
+        return (
+            _COMBINE_FNS[self.combine]
+            if isinstance(self.combine, str)
+            else self.combine
+        )
 
     def _is_temporal(self, geom):
         """Whether one group spans several physical-N subtiles."""
-        return geom.axis == 1 and self.combine_fn is not None and geom.fragments_per_group > 1
+        return (
+            geom.axis == 1
+            and self.combine_fn is not None
+            and geom.fragments_per_group > 1
+        )
 
     @cute.jit
     def finalize_value(self, value):
@@ -591,7 +641,9 @@ class GroupedReduceBase(EpiOp):
                 )
         else:
             if value.ndim not in (2, 3):
-                raise ValueError(f"{self.name}: compressed aux buffer must be rank 2 or 3")
+                raise ValueError(
+                    f"{self.name}: compressed aux buffer must be rank 2 or 3"
+                )
             if value.stride(-1) != 1:
                 raise ValueError(
                     f"{self.name}: compressed aux buffer must be contiguous in its last dim"
@@ -615,10 +667,12 @@ class GroupedReduceBase(EpiOp):
         if varlen_m:
             raise ValueError(f"{self.name}: grouped reductions do not support varlen_m")
         if value is None:
-            if getattr(self, "keep_tensorless", False):
+            if self.keep_tensorless:
                 return
             kind = (
-                "compressed aux buffer" if self.output_layout is None else "output-layout carrier"
+                "compressed aux buffer"
+                if self.output_layout is None
+                else "output-layout carrier"
             )
             raise ValueError(f"{self.name}: {kind} is required")
         self.host_arg_key(value)
@@ -638,7 +692,9 @@ class GroupedReduceBase(EpiOp):
             expected = grouped_reduce_out_shape(m, n, self.group, self.axis, batch)
             actual = tuple(value.shape)
             if actual != expected:
-                raise ValueError(f"{self.name}: expected compressed shape {expected}, got {actual}")
+                raise ValueError(
+                    f"{self.name}: expected compressed shape {expected}, got {actual}"
+                )
             return
         rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
         expected = tuple(
@@ -663,7 +719,9 @@ class GroupedReduceBase(EpiOp):
         dtype, ndim = key
         m, n = (fctx.n, fctx.m) if fctx.swapped else (fctx.m, fctx.n)
         if self.output_layout is not None:
-            rows, cols = (m, n // self.group) if self.axis == 1 else (m // self.group, n)
+            rows, cols = (
+                (m, n // self.group) if self.axis == 1 else (m // self.group, n)
+            )
             shape = self.output_layout.fake_shape_fn(fctx.l, rows, cols)
             return make_fake_tensor(
                 dtype,
@@ -687,15 +745,24 @@ class GroupedReduceBase(EpiOp):
         tensor = getattr(args, self.name)
         if self.output_layout is not None:
             tensor = self.output_layout.tensor_fn(tensor, gemm.a_transposed)
-            assert cute.rank(tensor) == 3
+            if const_expr(cute.rank(tensor) != 3):
+                raise AssertionError(
+                    "output layout tensor_fn must return a rank-3 tensor"
+                )
             logical_extent, logical_groups = (
                 (gemm.caller_m, gemm.caller_n // self.group)
                 if self.axis == 1
                 else (gemm.caller_n, gemm.caller_m // self.group)
             )
-            return {self.name: _GroupedOutputLayoutParams(tensor, logical_extent, logical_groups)}
+            return {
+                self.name: _GroupedOutputLayoutParams(
+                    tensor, logical_extent, logical_groups
+                )
+            }
         if const_expr(gemm.a_transposed):
-            tensor = layout_utils.select(tensor, [0, 2, 1] if cute.rank(tensor) == 3 else [1, 0])
+            tensor = layout_utils.select(
+                tensor, [0, 2, 1] if cute.rank(tensor) == 3 else [1, 0]
+            )
         return {self.name: assume_stride_divisibility(tensor)}
 
     def epi_m_major_score(self, arg_tensor, gemm):
@@ -723,7 +790,9 @@ class GroupedReduceBase(EpiOp):
             return EpiSmemBytes()
         warps_m = warp_shape_mnk[0] if warp_shape_mnk is not None else 1
         planes = self._smem_warps(warps_m)
-        return EpiSmemBytes(unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8))
+        return EpiSmemBytes(
+            unstaged=cta_tile_shape_mnk[1] * planes * (Float32.width // 8)
+        )
 
     def _smem_shape(self, gemm):
         planes = self._smem_warps(gemm.epi_smem_warp_shape_mnk()[0])
@@ -734,19 +803,26 @@ class GroupedReduceBase(EpiOp):
         if shape is None:
             return None
         size = shape[0] * shape[1]
-        return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
+        return (
+            f"s_{self.name}",
+            cute.struct.Align[cute.struct.MemRange[Float32, size], 16],
+        )
 
     def get_smem_tensor(self, gemm, params, storage_epi):
         shape = self._smem_shape(gemm) if self._uses_smem(gemm) else None
         if shape is None:
             return None
-        return getattr(storage_epi, f"s_{self.name}").get_tensor(cute.make_layout(shape))
+        return getattr(storage_epi, f"s_{self.name}").get_tensor(
+            cute.make_layout(shape)
+        )
 
     # --- Device: shared setup ---------------------------------------------
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
         """Register accumulator, coordinate partition, smem, validated geometry."""
-        tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
+        tiled_copy = (
+            ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
+        )
         geom = _fragment_geometry(
             gemm,
             ctx.epi_tile,
@@ -803,7 +879,26 @@ class GroupedReduceBase(EpiOp):
         tidx,
     ):
         """Stage this self-synchronized grouped flush for the finish phase."""
-        return (False, (state, epi_coord, epi_tile, tiled_copy_t2r, tiled_copy_r2s, tidx))
+        return (
+            False,
+            (state, epi_coord, epi_tile, tiled_copy_t2r, tiled_copy_r2s, tidx),
+        )
+
+    def end_loop(
+        self,
+        gemm,
+        param,
+        state,
+        epi_coord,
+        epi_tile,
+        tiled_copy_t2r,
+        tiled_copy_r2s,
+        tile_coord_mnkl,
+        varlen_manager,
+        tidx,
+    ):
+        """Fold and store this subtile's groups; each port defines its own flush."""
+        raise NotImplementedError
 
     @cute.jit
     def end_loop_finish(self, gemm, param, staged, tile_coord_mnkl, varlen_manager):
@@ -863,7 +958,8 @@ class GroupedReduceBase(EpiOp):
         if const_expr(axis == 1):
             tile_shape = (tile_M, groups_per_cta)
             if const_expr(self.output_layout is not None):
-                assert not varlen_manager.varlen_m
+                if const_expr(varlen_manager.varlen_m):
+                    raise AssertionError("output layouts do not support varlen_m")
                 limit_groups = logical_groups
             else:
                 logical_extent = varlen_manager.len_m(batch_idx)
@@ -872,16 +968,21 @@ class GroupedReduceBase(EpiOp):
         else:
             tile_shape = (groups_per_cta, tile_N)
             if const_expr(self.output_layout is not None):
-                assert not varlen_manager.varlen_m
+                if const_expr(varlen_manager.varlen_m):
+                    raise AssertionError("output layouts do not support varlen_m")
                 limit_groups = logical_groups
             else:
                 logical_extent = cute.size(mReduce, mode=[1])
                 limit_groups = cute.size(mReduce, mode=[0])
             limit = min(logical_extent - tile_coord_mnkl[1] * tile_N, tile_N)
-        gReduce = cute.local_tile(mReduce, tile_shape, (tile_coord_mnkl[0], tile_coord_mnkl[1]))
-        coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
+        gReduce = cute.local_tile(
+            mReduce, tile_shape, (tile_coord_mnkl[0], tile_coord_mnkl[1])
+        )
+        coord = cute.filter_zeros(
+            state.coord[None, None, None, epi_coord[0], epi_coord[1]]
+        )
         # Group leaders: the group's first column (N groups) / first row (M
-        # groups) — except after a temporal combine, which lands on the LAST
+        # groups) - except after a temporal combine, which lands on the LAST
         # fragment of the group.
         leader_off = const_expr(
             self.group - state.geom.cols if self._is_temporal(state.geom) else 0
@@ -897,7 +998,11 @@ class GroupedReduceBase(EpiOp):
                 and in_bounds
                 and tile_idx * groups_per_cta + group_idx < limit_groups
             ):
-                value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
+                value = (
+                    self.finalize_value(values[i])
+                    if const_expr(finalize)
+                    else values[i]
+                )
                 if const_expr(param.element_type != Float32):
                     value = value.to(param.element_type)
                 if const_expr(axis == 1):
@@ -980,7 +1085,9 @@ class GroupedLocalReduce(GroupedReduceBase):
         cute.autovec_copy(state.frag[None, None, None, epi_coord[0], first], merged)
         merged_flt = cute.filter_zeros(merged)
         for offset in cutlass.range_constexpr(1, geom.fragments_per_group):
-            other = cute.filter_zeros(state.frag[None, None, None, epi_coord[0], first + offset])
+            other = cute.filter_zeros(
+                state.frag[None, None, None, epi_coord[0], first + offset]
+            )
             for i in cutlass.range(cute.size(merged_flt), unroll_full=True):
                 merged_flt[i] = combine_fn(merged_flt[i], other[i])
         return merged_flt
@@ -996,9 +1103,12 @@ class GroupedLocalReduce(GroupedReduceBase):
         instead of guarding each slot access.
         """
         sReduce = state.smem
-        assert sReduce is not None, "grouped M reduce across warps needs its smem buffer"
+        if const_expr(sReduce is None):
+            raise AssertionError("grouped M reduce across warps needs its smem buffer")
         combine_fn = const_expr(self.combine_fn)
-        coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
+        coord = cute.filter_zeros(
+            state.coord[None, None, None, epi_coord[0], epi_coord[1]]
+        )
         group_idx = state.warp_m_idx // geom.group_warps
         warp_in_group = state.warp_m_idx - group_idx * geom.group_warps
         smem_base = group_idx * (geom.group_warps - 1) - 1
@@ -1048,7 +1158,9 @@ class GroupedLocalReduce(GroupedReduceBase):
                     self._butterfly_rows(frag, geom)
                 if const_expr(geom.group_warps > 1):
                     self._stitch_warps(gemm, state, frag, epi_coord, geom)
-        self._store_groups(gemm, param, state, epi_coord, tile_coord_mnkl, varlen_manager, frag)
+        self._store_groups(
+            gemm, param, state, epi_coord, tile_coord_mnkl, varlen_manager, frag
+        )
         if const_expr(geom.group_warps > 1):
             # Re-arm the smem planes for the next subtile / persistent tile.
             gemm.epilogue_barrier.arrive_and_wait()
@@ -1058,11 +1170,11 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
     """Same-pass grouped M reduction fed back into the fn (apply port).
 
     The fn calls the op (``r = gsum(acc)``) and receives the group reduction
-    broadcast to every row lane of the group — no second accumulator pass and no
+    broadcast to every row lane of the group - no second accumulator pass and no
     smem, which is why it is limited to groups inside one warp's row lanes
     (FlexGEMM's ``validate_local_reduce_feed_main_capability``). Passing a
-    compressed aux tensor also stores the reduced values, and is what keeps the
-    op active without the :class:`GroupedFeedMainMixin` hook.
+    compressed aux tensor also stores the reduced values; ``keep_tensorless``
+    keeps the op active without one.
     """
 
     fn_port = "apply"
@@ -1075,8 +1187,12 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
                 f"(axis=0, group <= {GROUPED_FRAGMENT_WIDTH}); got axis={axis}, group={group}"
             )
         if combine is None:
-            raise ValueError("a grouped feed must reduce: combine=None has nothing to broadcast")
-        super().__init__(name, axis=axis, group=group, combine=combine, finalize=finalize)
+            raise ValueError(
+                "a grouped feed must reduce: combine=None has nothing to broadcast"
+            )
+        super().__init__(
+            name, axis=axis, group=group, combine=combine, finalize=finalize
+        )
 
     @cute.jit
     def reduce_broadcast(self, value, geom):
@@ -1212,12 +1328,17 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
         finalize_arg = state.finalize_arg
         if const_expr(finalize_arg is not None and cute.rank(finalize_arg) != 3):
             finalize_arg = finalize_arg[None, None, None, epi_coord[0], epi_coord[1]]
-        return _GroupedFinalizeSlice(self._frag_slice(state, epi_coord), finalize_arg, state.geom)
+        return _GroupedFinalizeSlice(
+            self._frag_slice(state, epi_coord), finalize_arg, state.geom
+        )
 
     @cute.jit
     def fn_sink_flush(self, gemm, state, frag, scale=None):
         """Capture the sum source and prepass value emitted as a sink pair."""
-        assert scale is not None
+        if const_expr(scale is None):
+            raise AssertionError(
+                "binary grouped finalizers require a (value, scale) sink"
+            )
         cute.autovec_copy(frag, state.frag)
         cute.autovec_copy(scale, state.finalize_arg)
 
@@ -1239,9 +1360,10 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
         if const_expr(param is None):
             return
         geom = state.geom
-        assert not self._is_temporal(geom), (
-            "two-argument grouped finalizers require one fragment per group"
-        )
+        if const_expr(self._is_temporal(geom)):
+            raise AssertionError(
+                "two-argument grouped finalizers require one fragment per group"
+            )
         frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
         finalize_arg = cute.filter_zeros(
             state.finalize_arg
@@ -1285,15 +1407,19 @@ class GroupedLocalReducePrepass(GroupedColStatsBase):
                 f"grouped prepass feed-main supports axis=1 only; got axis={axis}"
             )
         if group <= 1 or group > GROUPED_FRAGMENT_WIDTH or group & (group - 1):
-            raise ValueError(f"group must be a power of two in [2, {GROUPED_FRAGMENT_WIDTH}]")
+            raise ValueError(
+                f"group must be a power of two in [2, {GROUPED_FRAGMENT_WIDTH}]"
+            )
         if combine not in _COMBINE_FNS:
-            raise ValueError(f"unsupported combine {combine!r}; use {sorted(_COMBINE_FNS)}")
+            raise ValueError(
+                f"unsupported combine {combine!r}; use {sorted(_COMBINE_FNS)}"
+            )
         if not (finalize is None or finalize == "mean" or callable(finalize)):
             raise TypeError("finalize must be None, 'mean', or a 1-argument callable")
         self.axis = axis
         self.group = group
         self.combine = combine
-        self.finalize = finalize
+        self.finalize: Any = finalize
 
     def supports_config(self, config) -> bool:
         """Whether a native GEMM config can preserve this grouped geometry."""
@@ -1301,7 +1427,12 @@ class GroupedLocalReducePrepass(GroupedColStatsBase):
 
     def config_key(self):
         """Static reduction semantics used by the persistent kernel cache."""
-        extra = tuple(sorted(set(vars(self)) - {"name", "axis", "group", "combine", "finalize"}))
+        extra = tuple(
+            sorted(
+                OrderedSet(vars(self))
+                - OrderedSet(["name", "axis", "group", "combine", "finalize"])
+            )
+        )
         if extra:
             raise NotImplementedError(
                 f"{type(self).__name__} has static configuration {extra}; extend config_key()"
@@ -1346,12 +1477,14 @@ class GroupedLocalReducePrepass(GroupedColStatsBase):
 
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
-        assert gemm.arch in (90, 100, 120), (
-            "grouped prepass feed-main needs a re-readable accumulator"
-        )
-        assert ctx.tile_N % self.group == 0, (
-            "grouped prepass feed-main needs whole groups in each CTA N tile"
-        )
+        if const_expr(gemm.arch not in (90, 100, 120)):
+            raise AssertionError(
+                "grouped prepass feed-main needs a re-readable accumulator"
+            )
+        if const_expr(ctx.tile_N % self.group != 0):
+            raise AssertionError(
+                "grouped prepass feed-main needs whole groups in each CTA N tile"
+            )
         return [self.stats_begin(gemm, smem_tensor, ctx, self.group), ctx.tRS_rD_layout]
 
     @cute.jit
@@ -1384,31 +1517,3 @@ class GroupedLocalReducePrepass(GroupedColStatsBase):
                 for j in cutlass.range_constexpr(len(slots)):
                     out[slots[j]] = value
         return out
-
-
-class GroupedFeedMainMixin:
-    """Parent-side hook that keeps tensorless grouped value producers active.
-
-    ``ComposableEpiMixin`` normally drops ops whose argument is ``None``.
-    Grouped apply feeds and prepass/value feeds still participate when no
-    compressed tensor exists, so this mixin retains ops marked
-    ``keep_tensorless`` and includes their shared-memory budget.
-    """
-
-    def _filter_epi_ops(self, args):
-        super()._filter_epi_ops(args)
-        active = {op.name for op in self._epi_ops}
-        self._epi_ops = tuple(
-            op
-            for op in type(self)._epi_ops
-            if op.name in active or getattr(op, "keep_tensorless", False)
-        )
-
-    @classmethod
-    def epi_smem_bytes(cls, args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
-        """Include tensorless prepass resources omitted by the base filter."""
-        result = super().epi_smem_bytes(args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
-        for op in cls._epi_ops:
-            if getattr(args, op.name, None) is None and getattr(op, "keep_tensorless", False):
-                result += op.smem_bytes(None, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
-        return result
