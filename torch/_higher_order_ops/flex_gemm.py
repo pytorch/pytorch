@@ -29,19 +29,14 @@ class FlexGemmOpSpec:
     name: str
     mat1_index: int
     mat2_index: int
-    input_ndim: int
     bias_index: int | None = None
 
 
 FLEX_GEMM_OP_SPECS = {
-    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1, input_ndim=2),
-    torch.ops.aten.addmm.default: FlexGemmOpSpec(
-        "addmm", 1, 2, input_ndim=2, bias_index=0
-    ),
-    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1, input_ndim=3),
-    torch.ops.aten.baddbmm.default: FlexGemmOpSpec(
-        "baddbmm", 1, 2, input_ndim=3, bias_index=0
-    ),
+    torch.ops.aten.mm.default: FlexGemmOpSpec("mm", 0, 1),
+    torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
+    torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
+    torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,

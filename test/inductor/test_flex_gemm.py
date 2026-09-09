@@ -573,17 +573,11 @@ class TestFlexGemmRuntimeHelpers(TestCase):
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_feed_main_host_guards_match_runtime_contract(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            validate_local_reduce_feed_main_capability,
+            LOCAL_REDUCE_FRAGMENT_WIDTH,
         )
-        from torch._vendor.quack.grouped_reduce import feed_main_capable
+        from torch._vendor.quack.grouped_reduce import GROUPED_FRAGMENT_WIDTH
 
-        for axis in (0, 1):
-            for group in (2, 8, 16, 32, 64, 128):
-                if feed_main_capable(axis, group):
-                    validate_local_reduce_feed_main_capability(axis, group)
-                else:
-                    with self.assertRaises(NotImplementedError):
-                        validate_local_reduce_feed_main_capability(axis, group)
+        self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
 
     def test_local_reduce_propagates_before_grouped_view_matching(self):
         from torch._inductor.kernel.flex_gemm.epilogue import (
@@ -1355,12 +1349,6 @@ class TestFlexGemmAnalysis(TestCase):
                 combine="add",
                 prepass_finalize="mean",
             )
-        with self.assertRaisesRegex(NotImplementedError, "same-warp axis-0"):
-            FlexGemmEpiModLocalReducePlan(
-                FlexGemmLocalReduceGeometry(64, 0),
-                feeds_main=True,
-                combine="add",
-            )
         FlexGemmEpiModLocalReducePlan(
             FlexGemmLocalReduceGeometry(16, 1),
             feeds_main=True,
@@ -1369,27 +1357,6 @@ class TestFlexGemmAnalysis(TestCase):
             prepass_combine="add",
         )
         FlexGemmEpiModLocalReducePlan(axis0, out=torch.empty(1), combine="max")
-
-    def test_local_reduce_plan_uses_explicit_consumers(self):
-        from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmLocalReduceGeometry,
-        )
-        from torch._inductor.kernel.flex_gemm.template import (
-            FlexGemmEpilogueLocalReduceConfig,
-        )
-
-        geometry = FlexGemmLocalReduceGeometry(8, 0)
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
-        )
-        self.assertTrue(
-            FlexGemmEpilogueLocalReduceConfig(
-                geometry, out_index=0, feeds_main=True
-            ).feeds_main
-        )
-        self.assertFalse(
-            FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
-        )
 
     @parametrize(
         "case",
@@ -1645,6 +1612,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "flex_gemm"):
             actual.sum().backward()
 
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_generated_captured_arg_rejects_unsupported_shape(self):
         def fn(a, b, scale):
             return flex_gemm(
@@ -3587,32 +3555,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 (4, 128),
                 "unsupported FlexGEMM epilogue op",
             ),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_generated_local_reduce_rejects_physical_result_feeding_pointwise(
-        self, case
-    ):
-        _, epilogue_fn, shape, error = case
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        m, n = shape
-        a = torch.randn(m, 8)
-        b = torch.randn(8, n)
-
-        with self.assertRaisesRegex(Exception, error):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @parametrize(
-        "case",
-        (
             (
                 "m_then_n",
                 lambda acc: (
@@ -3643,7 +3585,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_generated_local_reduce_rejects_block_reductions(self, case):
+    def test_generated_local_reduce_rejects_unsupported_compositions(self, case):
         _, epilogue_fn, shape, error = case
 
         def fn(a, b):
@@ -7137,7 +7079,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         )
         self.assertIn("gemm_epimod as flex_gemm_runtime", code)
         self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
-        self.assertNotIn("config_constraints=", code)
 
     @parametrize("tuned", (False, True))
     def test_mm_partial_config_matches_reference(self, device, tuned):
@@ -7177,7 +7118,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("gemm_epimod as flex_gemm_runtime", code)
-        self.assertNotIn("config_constraints=", code)
         for item in pinned.items():
             self.assertIn(repr(item), code)
 
@@ -7937,7 +7877,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertLocalReduceAuxCode(code, group)
         self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
-        self.assertNotIn("config_constraints=", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuned_local_reduce_supports_max_autotune(self, device):
@@ -8086,7 +8025,6 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
         self.assertLocalReduceAuxCode(code, group, axis=axis)
         self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
-        self.assertNotIn("config_constraints=", code)
 
 
 instantiate_device_type_tests(

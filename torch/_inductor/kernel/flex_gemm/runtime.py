@@ -18,10 +18,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
-    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
-    validate_local_reduce_feed_main_capability,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
@@ -156,7 +154,6 @@ def flex_gemm_candidate_configs(
     sfa: torch.Tensor | None,
     output_buffers: dict[str, torch.Tensor],
     operands: dict[str, Any],
-    config_constraints: tuple[tuple[str, Any], ...],
     concat_layout: Any,
 ) -> list[Any]:
     """Return QuACK's legal configs for this call, its untuned default first.
@@ -191,13 +188,7 @@ def flex_gemm_candidate_configs(
         if sfa is not None
         else default_config(device)
     )
-    return _legal_mod_configs(
-        epimod,
-        device,
-        config_constraints,
-        named_args,
-        preferred_config=preferred,
-    )
+    return _legal_mod_configs(epimod, device, named_args, preferred_config=preferred)
 
 
 # NOTE [Byte-backed epilogue tensor storage]
@@ -263,10 +254,6 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
-        if self.feeds_main and not (
-            self.axis == 1 and self.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
-        ):
-            validate_local_reduce_feed_main_capability(self.axis, self.group)
 
     @property
     def group(self) -> int:
@@ -453,13 +440,12 @@ def gemm_epimod(
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     config: tuple[tuple[str, Any], ...] | None = None,
-    config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
     """Run a dense FlexGEMM call through the vendored QuACK EpiMod.
 
-    ``config`` pins the exact GemmConfig Inductor selected; ``None`` takes
-    QuACK's untuned default for the remaining ``config_constraints``.
+    ``config`` pins the exact GemmConfig Inductor selected; ``None`` is only
+    used by the lowering-time legal-config probe, which returns before launch.
     """
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
@@ -488,36 +474,26 @@ def gemm_epimod(
         )
     initialize_local_reduce_out = None
     if local_reduce is not None:
-        from torch._vendor.quack import grouped_reduce
-
+        # QuACK's host_validate checks the compressed buffer against the GEMM
+        # problem; only the caller-owned carrier view is built here.
         local_reduce_out = local_reduce.out
-        if local_reduce_out is not None:
-            if local_reduce.output_layout is None:
-                grouped_reduce.validate_grouped_reduce_out(
-                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
-                    local_reduce_out,
-                    a.shape[-2],
-                    b.shape[-1],
-                    local_reduce.group,
-                    local_reduce.axis,
+        if local_reduce_out is not None and local_reduce.output_layout is not None:
+            grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
+            if grouped_dim % local_reduce.group:
+                raise ValueError(
+                    f"group {local_reduce.group} must divide the grouped dim "
+                    f"{grouped_dim} (axis={local_reduce.axis})"
                 )
-            else:
-                grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
-                if grouped_dim % local_reduce.group:
-                    raise ValueError(
-                        f"group {local_reduce.group} must divide the grouped dim "
-                        f"{grouped_dim} (axis={local_reduce.axis})"
-                    )
-                rows, cols = (
-                    (a.shape[-2], b.shape[-1] // local_reduce.group)
-                    if local_reduce.axis == 1
-                    else (a.shape[-2] // local_reduce.group, b.shape[-1])
-                )
-                if local_reduce_out.numel() != rows * cols:
-                    initialize_local_reduce_out = local_reduce_out
-                local_reduce_out = local_reduce.output_layout.runtime_view(
-                    local_reduce_out, 1, rows, cols
-                )
+            rows, cols = (
+                (a.shape[-2], b.shape[-1] // local_reduce.group)
+                if local_reduce.axis == 1
+                else (a.shape[-2] // local_reduce.group, b.shape[-1])
+            )
+            if local_reduce_out.numel() != rows * cols:
+                initialize_local_reduce_out = local_reduce_out
+            local_reduce_out = local_reduce.output_layout.runtime_view(
+                local_reduce_out, 1, rows, cols
+            )
         if local_reduce.prepass is not None:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
             if local_reduce.out is not None:
@@ -555,7 +531,6 @@ def gemm_epimod(
                 None,
                 output_buffers,
                 operands,
-                config_constraints,
                 concat_layout,
             )
         )
@@ -583,7 +558,6 @@ def gemm_epimod(
             out_dtype=out.dtype,
             store_d=main_transform is None,
             config=quack_config,
-            config_constraints=config_constraints,
             tuned=False,
             concat_layout=concat_layout,
             compile_dispatch=False,
