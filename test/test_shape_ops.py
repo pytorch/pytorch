@@ -889,7 +889,9 @@ class TestShapeOpsCPUOnly(TestCase):
 
 
 instantiate_device_type_tests(TestShapeOps, globals())
-instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestShapeOpsCPUOnly, globals(), only_for="cpu", add_device_type_to_name=False
+)
 
 if __name__ == "__main__":
     run_tests()

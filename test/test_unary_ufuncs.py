@@ -1977,8 +1977,8 @@ class TestUnaryUfuncsCUDADevice(TestCase):
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
-instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
-instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu", add_device_type_to_name=False)
+instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda", add_device_type_to_name=False)
 
 if __name__ == "__main__":
     run_tests()

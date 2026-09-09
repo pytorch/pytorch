@@ -4588,8 +4588,12 @@ class TestConvolutionNNCUDA(NNTestCase):
 instantiate_device_type_tests(
     TestConvolutionNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(TestConvolutionNNCPU, globals(), only_for=("cpu",))
-instantiate_device_type_tests(TestConvolutionNNCUDA, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestConvolutionNNCPU, globals(), only_for=("cpu",), add_device_type_to_name=False
+)
+instantiate_device_type_tests(
+    TestConvolutionNNCUDA, globals(), only_for=("cuda",), add_device_type_to_name=False
+)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":

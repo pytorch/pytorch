@@ -489,7 +489,9 @@ class TestFloat8DtypeCPUOnly(TestCase):
         f(x).sum().backward()
 
 
-instantiate_device_type_tests(TestFloat8DtypeCPUOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestFloat8DtypeCPUOnly, globals(), only_for="cpu", add_device_type_to_name=False
+)
 
 if __name__ == "__main__":
     run_tests()

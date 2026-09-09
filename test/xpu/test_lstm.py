@@ -119,7 +119,13 @@ class TestLstmXpu(NNTestCase):
             torch.use_deterministic_algorithms(False)
 
 
-instantiate_device_type_tests(TestLstmXpu, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestLstmXpu,
+    globals(),
+    only_for="xpu",
+    allow_xpu=True,
+    add_device_type_to_name=False,
+)
 
 if __name__ == "__main__":
     run_tests()
