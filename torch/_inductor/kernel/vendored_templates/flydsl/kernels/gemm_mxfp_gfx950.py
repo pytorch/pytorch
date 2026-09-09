@@ -69,16 +69,6 @@ def _waitcnt_barrier(vmcnt=0):
     )
 
 
-def __waitcnt_lgkm(lgkmcnt=0):
-    llvm.InlineAsmOp(
-        None,
-        [],
-        f"s_waitcnt lgkmcnt({lgkmcnt})",
-        "",
-        has_side_effects=True,
-    )
-
-
 def _permlane_swap(width, old, src):
     """v_permlane{16,32}_swap_b32 -> (new_old, new_src) as i32 IR values.
 
@@ -984,7 +974,7 @@ def gemm_mxfp_gfx950_kernel(
             for mi in range_constexpr(d.mma_m_repeat):
                 _rd_a(kh, mi)
         if const_expr(a_is_transposed or not b_is_transposed):
-            __waitcnt_lgkm()
+            rocdl.s_waitcnt(lgkmcnt=0)
             if const_expr(a_is_transposed):
                 for kh in range_constexpr(d.k_halves):
                     for mi in range_constexpr(d.mma_m_repeat):
