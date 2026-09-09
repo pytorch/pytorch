@@ -27,6 +27,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -3316,11 +3317,41 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]) -> None:
         super().finalize_indexing(indices)
-        self._eliminated_reduction_numel_symbols_for_indexing.clear()
-        # Staged reductions emit some indexing outside this prepass, so their
-        # complete scalar-argument liveness is not available here.
+        self._finalize_r_numel_reuse(indices)
+
+    def _finalize_r_numel_reuse(self, indices: Sequence[sympy.Expr]) -> None:
+        """Select profitable indexing expressions to rewrite with ``rN_numel``.
+        The goal is to reuse an existing ``rN_numel`` kernel argument when
+        doing so eliminates an ordinary scalar size argument from the kernel.
+
+        1. Collect size symbols from all ordinary indexing and range-tree
+           expressions.
+        2. Simulate every statically valid replacement with the corresponding
+           existing ``rN_numel`` argument. Simulating them together detects
+           arguments that become unused only after multiple replacements.
+        3. Record the size symbols absent from the fully rewritten expressions.
+        4. During source emission, keep only replacements involving one of
+           these eliminated symbols, avoiding neutral indexing rewrites.
+        """
+        self._r_numel_reuse_eliminated_symbols.clear()
+        self._r_numel_reuse_replacements.clear()
+        # Staged reductions emit some symbolic indexing expressions after
+        # this prepass, so we cannot prove that a size argument is unused.
         if self.features.indexing_node_schedule is not self.features.node_schedule:
             return
+
+        sizevars = V.graph.sizevars
+        replacements = {}
+        for prefix, numel in self.numels.items():
+            if not prefix_is_reduction(prefix):
+                continue
+            numel = sizevars.simplify(sizevars.remove_precomputed_replacements(numel))
+            if has_free_symbols(numel):
+                r_numel_symbol = sympy.Symbol(
+                    f"{prefix}numel", integer=True, nonnegative=True
+                )
+                replacements[r_numel_symbol] = numel
+        self._r_numel_reuse_replacements.update(replacements)
 
         allowed_symbol_types = (
             SymT.SIZE,
@@ -3328,6 +3359,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             SymT.PRECOMPUTED_SIZE,
         )
 
+        # Only these symbols become ordinary ks* size arguments, which are the
+        # kernel arguments this profitability check is intended to eliminate.
         def size_symbols(exprs: Iterable[sympy.Expr]) -> OrderedSet[sympy.Symbol]:
             return OrderedSet(
                 symbol
@@ -3336,43 +3369,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if symbol_is_type(symbol, allowed_symbol_types)
             )
 
-        all_indices = [
+        all_indexing_exprs = [
             *indices,
             *(entry.expr for entry in self.range_tree_nodes.values()),
         ]
-        original_symbols = size_symbols(all_indices)
+        original_symbols = size_symbols(all_indexing_exprs)
         rewritten_symbols = size_symbols(
-            self._replace_reduction_numel_in_index(index, force=True)
-            for index in all_indices
+            self._replace_reduction_numel_in_index(index, simulate=True)
+            for index in all_indexing_exprs
         )
-        self._eliminated_reduction_numel_symbols_for_indexing.update(
+        self._r_numel_reuse_eliminated_symbols.update(
             original_symbols - rewritten_symbols
         )
 
     def _replace_reduction_numel_in_index(
-        self, index: sympy.Expr, *, force: bool = False
+        self, index: sympy.Expr, *, simulate: bool = False
     ) -> sympy.Expr:
-        if not force and not self._eliminated_reduction_numel_symbols_for_indexing:
+        if not simulate and not self._r_numel_reuse_eliminated_symbols:
+            return index
+
+        if not self._r_numel_reuse_replacements:
             return index
 
         sizevars = V.graph.sizevars
-        reduction_numels = []
-        for prefix, numel in self.numels.items():
-            if not prefix_is_reduction(prefix):
-                continue
-            numel = sizevars.simplify(sizevars.remove_precomputed_replacements(numel))
-            if numel.free_symbols:
-                reduction_numels.append(
-                    (
-                        numel,
-                        sympy.Symbol(f"{prefix}numel", integer=True, nonnegative=True),
-                    )
-                )
-
-        if not reduction_numels:
-            return index
-
-        reduction_numel_symbols = OrderedSet(symbol for _, symbol in reduction_numels)
         allowed_symbol_types = (
             SymT.SIZE,
             SymT.UNBACKED_INT,
@@ -3382,29 +3401,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def replacement(candidate: sympy.Basic) -> sympy.Symbol | None:
             if not isinstance(candidate, sympy.Expr):
                 return None
-            if candidate in reduction_numel_symbols or not candidate.free_symbols:
+            if (
+                candidate in self._r_numel_reuse_replacements
+                or not candidate.free_symbols
+            ):
                 return None
             if any(
                 not symbol_is_type(symbol, allowed_symbol_types)
                 for symbol in candidate.free_symbols
             ):
                 return None
-            if not force and not candidate.free_symbols.intersection(
-                self._eliminated_reduction_numel_symbols_for_indexing
+            if not simulate and not candidate.free_symbols.intersection(
+                self._r_numel_reuse_eliminated_symbols
             ):
                 return None
 
             normalized_candidate = sizevars.simplify(
                 sizevars.remove_precomputed_replacements(candidate)
             )
-            for reduction_numel, reduction_numel_symbol in reduction_numels:
+            for (
+                r_numel_symbol,
+                equivalent_extent_expr,
+            ) in self._r_numel_reuse_replacements.items():
                 if (
-                    normalized_candidate == reduction_numel
+                    normalized_candidate == equivalent_extent_expr
                     or sizevars.statically_known_equals(
-                        normalized_candidate, reduction_numel
+                        normalized_candidate, equivalent_extent_expr
                     )
                 ):
-                    return reduction_numel_symbol
+                    return r_numel_symbol
             return None
 
         # Prefer an enclosing match over nested matches: replacing the whole
@@ -3434,9 +3459,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
-        self._eliminated_reduction_numel_symbols_for_indexing: OrderedSet[
-            sympy.Symbol
-        ] = OrderedSet()
+        self._r_numel_reuse_eliminated_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        self._r_numel_reuse_replacements: dict[sympy.Symbol, sympy.Expr] = {}
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)

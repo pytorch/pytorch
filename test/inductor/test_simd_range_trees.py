@@ -378,13 +378,13 @@ class TestSIMDRangeTrees(TestCase):
 
             self.assertEqual(
                 no_reduction._replace_reduction_numel_in_index(
-                    sympy.Symbol("s0"), force=True
+                    sympy.Symbol("s0"), simulate=True
                 ),
                 sympy.Symbol("s0"),
             )
             self.assertEqual(
                 static_reduction._replace_reduction_numel_in_index(
-                    sympy.Integer(512), force=True
+                    sympy.Integer(512), simulate=True
                 ),
                 sympy.Integer(512),
             )
