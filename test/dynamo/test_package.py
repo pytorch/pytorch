@@ -137,7 +137,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         )
         package = CompilePackage(fn)
         with package.code_context(fn.__code__):
+            package.add_backend_id("__compiled_fn_0_bypassed", object())
             package.bypass_current_entry()
+            self.assertEqual(package.cached_backends, {})
             package.add_guarded_code(
                 b"", compiled_region_with_backend_id_for_package_test.__code__
             )
