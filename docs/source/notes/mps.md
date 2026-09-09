@@ -42,11 +42,11 @@ else:
     pred = model(x)
 ```
 
-## Floating-point dtypes
+## Double-precision types
 
-The `mps` device supports `torch.float32`, `torch.float16`, `torch.bfloat16`
-and `torch.complex64`. It has no double precision: Metal Shading Language has
-no `double` type, so `torch.float64` and `torch.complex128` are rejected:
+The MPS backend does not support `torch.float64` (`torch.double`) or
+`torch.complex128` (`torch.cdouble`) because Metal Shading Language has no
+`double` type:
 
 ```python
 >>> torch.ones(3, dtype=torch.float64, device="mps")
@@ -54,10 +54,10 @@ TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework
 doesn't support float64. Please use float32 instead.
 ```
 
-This is a dtype restriction, not a missing operator, so
-`PYTORCH_ENABLE_MPS_FALLBACK=1` does not apply to it: the error is raised when
-the tensor is allocated or copied to the device, before any operator is
-dispatched. `Tensor.to("mps")` on a float64 tensor raises for the same reason,
-rather than downcasting implicitly.
+This is a fundamental limitation of Metal Shading Language rather than an
+unimplemented PyTorch operator. Consequently, `PYTORCH_ENABLE_MPS_FALLBACK=1`
+does not apply: tensors with double-precision types cannot be allocated or
+copied to MPS in the first place. `Tensor.to("mps")` on a float64 tensor raises
+for the same reason, rather than downcasting implicitly.
 
 A computation that genuinely requires double precision has to run on the CPU.
