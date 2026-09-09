@@ -74,8 +74,7 @@ std::optional<libkineto::TypedValue> toTypedMetadataValue(
   // Lists expose their elements as IValues, including List[str]. Validate each
   // element before constructing a vector<string>. As before, an empty list is
   // accepted because all_of over an empty range is true.
-  if (!std::ranges::all_of(
-          list, [](const c10::IValue& item) { return item.isString(); })) {
+  if (!std::ranges::all_of(list, &c10::IValue::isString)) {
     return std::nullopt;
   }
 
