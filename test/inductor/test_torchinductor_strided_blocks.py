@@ -1758,6 +1758,57 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
         self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
+    @config.patch({"split_reductions": True})
+    def test_split_reduction_tma_store_strided_input(self):
+        """
+        Regression test: split reduction emits a TMA descriptor store for the
+        partial-sum output.  When the input is strided (no TMA load), this was
+        the only TMA path in the kernel.  Previously _emitted_device_tma was not
+        set, causing tma_min_block_sizes to be stripped and XBLOCK=1 to reach
+        Triton (which requires >= 16 bytes in the innermost descriptor dim).
+        """
+
+        def fn(a):
+            return torch.sum(a, dim=-1)
+
+        n = 1 << 20
+        base = torch.randn((1, 2 * n), device=GPU_TYPE)
+        # stride-2 on reduction dim prevents TMA load
+        a = torch.as_strided(base, (1, n), (2 * n, 2))
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a)
+        expected = fn(a)
+        torch.testing.assert_close(result, expected)
+
+    @config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": True,
+            "triton.force_cooperative_reductions": True,
+        }
+    )
+    def test_cooperative_reduction_tma_store_strided_input(self):
+        """
+        Same as the split reduction variant but using cooperative (grid)
+        reduction.  The store_reduction path is shared; xnumel > 1 is needed
+        so the output is multi-element and TMA-eligible.
+        """
+
+        def fn(a):
+            return torch.sum(a, dim=-1)
+
+        n = 1 << 20
+        base = torch.randn((4, 2 * n), device=GPU_TYPE)
+        # stride-2 on reduction dim prevents TMA load; 4 output rows
+        a = torch.as_strided(base, (4, n), (2 * n, 2))
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a)
+        expected = fn(a)
+        # Cooperative reduction changes summation order; allow small tolerance
+        torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-3)
+
 
 test_torchinductor.copy_tests(
     CommonTemplate,
