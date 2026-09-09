@@ -424,6 +424,13 @@ class FSDPState(_State):
                 if self._state_ctx.is_last_backward:
                     for fsdp_param_group in state._fsdp_param_groups:
                         fsdp_param_group.finalize_backward()
+            if all_gather_state := self._comm_ctx.all_gather_state:
+                if all_gather_state.event is not None:
+                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                        all_gather_state.event
+                    )
+                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
+                self._comm_ctx.all_gather_state = None
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 # Wait on and release any retained reduce-scatter input buffers:
