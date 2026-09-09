@@ -41,7 +41,7 @@ void registerFusionBackend(
 
 bool hasFusionBackend(at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
-  return getFusionBackends().count(backend_type);
+  return getFusionBackends().contains(backend_type);
 }
 
 static const FusedKernelConstructor& getConstructor(

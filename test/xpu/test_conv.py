@@ -609,6 +609,23 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
+    @dtypes(torch.double)
+    def test_conv1d_backward_depthwise(self, device, dtype):
+        batch, channels, width = 2, 4, 2
+        x = make_tensor(
+            (batch, 1, channels), device=device, dtype=dtype, requires_grad=True
+        ).transpose(1, 2)
+        weight = make_tensor(
+            (channels, width), device=device, dtype=dtype, requires_grad=True
+        )
+
+        def conv1d_depthwise(x, weight):
+            return torch.nn.functional.conv1d(
+                x, weight.unsqueeze(1), padding=width - 1, groups=channels
+            )
+
+        gradcheck(conv1d_depthwise, (x, weight))
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float)
     @parametrize_test("mode", ("valid", "same"))

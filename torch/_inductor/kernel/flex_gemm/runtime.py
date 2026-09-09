@@ -35,6 +35,7 @@ from torch._inductor.kernel.flex_gemm.output_layout import (
     blocked_128x4_carrier_shape,
     blocked_128x4_numel,
     FlexGemmOutputStorageLayout,
+    transposed_carrier_shape,
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
@@ -335,6 +336,18 @@ def validate_runtime_local_reduce(
             )
         return
     check_matrix("local_reduce_out", local_reduce_out)
+    if plan.output_layout is FlexGemmOutputStorageLayout.TRANSPOSED:
+        if not local_reduce_out.is_contiguous():
+            raise NotImplementedError(
+                "FlexGEMM transposed local-reduce output must be contiguous"
+            )
+        validate_local_reduce_out_shape(
+            local_reduce_out.shape,
+            transposed_carrier_shape(
+                local_reduce_compressed_shape(expected_shape, plan.group, plan.axis)
+            ),
+        )
+        return
     if swap_ab:
         check_matrix_row_major_layout("local_reduce_out.mT", local_reduce_out.mT)
     else:
@@ -401,28 +414,49 @@ def register_runtime_output_layout(
     """Register a PyTorch-owned CuTe layout callback for one orientation."""
     if layout is None:
         return None
-    if layout is not FlexGemmOutputStorageLayout.BLOCKED_128X4:
-        raise NotImplementedError(f"unsupported FlexGEMM output layout: {layout}")
 
-    from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
-        blocked_128x4_output_layout_key,
-        blocked_128x4_output_shape,
-        blocked_128x4_output_tensor,
-        blocked_128x4_transposed_output_tensor,
-    )
     from torch._vendor.quack.gemm_act import register_output_layout
 
-    layout_key = blocked_128x4_output_layout_key(transposed)
-    register_output_layout(
-        layout_key,
-        (
-            blocked_128x4_transposed_output_tensor
-            if transposed
-            else blocked_128x4_output_tensor
-        ),
-        blocked_128x4_output_shape,
-        4,
-    )
+    match layout:
+        case FlexGemmOutputStorageLayout.BLOCKED_128X4:
+            from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
+                blocked_128x4_output_layout_key,
+                blocked_128x4_output_shape,
+                blocked_128x4_output_tensor,
+                blocked_128x4_transposed_output_tensor,
+            )
+
+            layout_key = blocked_128x4_output_layout_key(transposed)
+            register_output_layout(
+                layout_key,
+                (
+                    blocked_128x4_transposed_output_tensor
+                    if transposed
+                    else blocked_128x4_output_tensor
+                ),
+                blocked_128x4_output_shape,
+                4,
+            )
+        case FlexGemmOutputStorageLayout.TRANSPOSED:
+            if transposed:
+                raise NotImplementedError(
+                    "FlexGEMM transposed output layouts do not support swap_ab configs"
+                )
+            from torch._inductor.kernel.flex_gemm.output_layout_cutedsl import (
+                transposed_output_layout_key,
+                transposed_output_shape,
+                transposed_output_tensor,
+            )
+
+            layout_key = transposed_output_layout_key()
+            register_output_layout(
+                layout_key,
+                transposed_output_tensor,
+                transposed_output_shape,
+                3,
+            )
+        case _:
+            raise NotImplementedError(f"unsupported FlexGEMM output layout: {layout}")
     return layout_key
 
 

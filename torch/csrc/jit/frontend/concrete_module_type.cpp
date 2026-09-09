@@ -193,7 +193,7 @@ std::optional<std::string> ConcreteModuleType::findFailedAttribute(
 }
 
 bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
-  return data_.ignoredAttributes_.count(name) > 0;
+  return data_.ignoredAttributes_.contains(name);
 }
 
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
