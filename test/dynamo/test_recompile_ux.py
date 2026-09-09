@@ -1461,9 +1461,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=True)
     def test_isolate_recompiles_auto_dynamic_shared_pgo(self):
-        """PGO (frame_state) is shared across isolated regions. Region B
-        benefits from region A's shape observations — compiles with dynamic
-        shapes immediately without redundant static-then-dynamic recompilation."""
+        """PGO is shared across isolated regions; frame_state itself is now
+        per-region. Region B still benefits from region A's shape observations,
+        compiling with dynamic shapes immediately without redundant
+        static-then-dynamic recompilation."""
         cnt_a = torch._dynamo.testing.CompileCounter()
         cnt_b = torch._dynamo.testing.CompileCounter()
 
