@@ -18,6 +18,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -52,11 +54,28 @@ def _epilogue_args_signature(epilogue_args: object) -> tuple:
     tensors = getattr(epilogue_args, "tensors", None)
     if not tensors:
         return ()
-    sig: list[tuple] = []
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    schema = get_cutedsl_epilogue_schema(getattr(epilogue_args, "epilogue_fn", None))
+    scalar_broadcast_names = tuple(
+        sorted(schema.scalar_broadcast_names) if schema is not None else ()
+    )
+    sig: list[tuple] = [("scalar_broadcast_names", scalar_broadcast_names)]
     for name, val in tensors.items():
         if torch.is_tensor(val):
             sig.append(
                 (name, "tensor", val.dtype, tuple(val.shape), tuple(val.stride()))
+            )
+        elif isinstance(val, TensorWrapper):
+            sig.append(
+                (
+                    name,
+                    "tensor_wrapper",
+                    str(val.dtype),
+                    tuple(val.shape),
+                    tuple(val.stride),
+                    getattr(val, "_alignment_bytes", None),
+                )
             )
         else:
             sig.append((name, type(val).__name__))
@@ -193,9 +212,61 @@ def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     metadata_filter = (
         (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
     )
-    return cutlass.operators.get_operators(
-        args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(
+            cutlass.operators.get_operators(
+                args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+            )
+        ),
+        args,
+        cc,
     )
+
+
+def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
+    from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
+        PersistentDenseGemmEFCOperator,
+    )
+
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+        VendoredDenseGemmEFCOperator,
+    )
+
+    result = []
+    seen_names: OrderedSet[str] = OrderedSet()
+    for kernel in kernels:
+        if kernel.metadata.operator_class is not PersistentDenseGemmEFCOperator:
+            if kernel.metadata.operator_name not in seen_names:
+                seen_names.add(kernel.metadata.operator_name)
+                result.append(kernel)
+            continue
+        design = kernel.metadata.design
+        tile_m, tile_n, tile_k = design.tile_shape
+        for vendored_tile_n in OrderedSet((tile_n, 64, 128)):
+            if vendored_tile_n < tile_n:
+                continue
+            operator_name = kernel.metadata.operator_name.replace(
+                "cutedsl.PersistentDenseGemmEFCOperator",
+                "inductor_vendored.VendoredDenseGemmEFCOperator",
+                1,
+            ).replace(
+                f"tile{tile_m}x{tile_n}x{tile_k}",
+                f"tile{tile_m}x{vendored_tile_n}x{tile_k}",
+                1,
+            )
+            metadata = dataclasses.replace(
+                kernel.metadata,
+                operator_name=operator_name,
+                operator_class=VendoredDenseGemmEFCOperator,
+                design=dataclasses.replace(
+                    design, tile_shape=(tile_m, vendored_tile_n, tile_k)
+                ),
+            )
+            if operator_name in seen_names:
+                continue
+            seen_names.add(operator_name)
+            result.append(VendoredDenseGemmEFCOperator(metadata))
+    return result
 
 
 def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
@@ -235,7 +306,11 @@ def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             for kernel in kernels
             if "EFC" in kernel.metadata.operator_class.__name__
         )
-    return _filter_supported(kernels, args, cc)
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc)),
+        args,
+        cc,
+    )
 
 
 def _blockscaled_provider_classes() -> list[Any]:
@@ -445,7 +520,19 @@ def get_kernel_by_name(kernel_name: str) -> Any:
     kernel = _ops_by_name.get(kernel_name)
     if kernel is not None:
         return kernel
-    return _get_kernel_cache().get(kernel_name)
+    cache = _get_kernel_cache()
+    kernel = cache.get(kernel_name)
+    if kernel is None and "VendoredDenseGemmEFCOperator" in kernel_name:
+        upstream_name = kernel_name.replace(
+            "inductor_vendored.VendoredDenseGemmEFCOperator",
+            "cutedsl.PersistentDenseGemmEFCOperator",
+            1,
+        )
+        upstream = cache.get(upstream_name)
+        if upstream is not None:
+            kernel = _replace_dense_efc_with_vendored((upstream,))[0]
+            _ops_by_name[kernel_name] = kernel
+    return kernel
 
 
 def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
@@ -470,7 +557,19 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     if cached is not None:
         return cached
 
-    ops = cutlass.operators.get_operators(args=args, target_sm=f"{cc}a")
+    query_args = args
+    if "VendoredDenseGemmEFCOperator" in kernel_name:
+        from cutlass.operators.arguments import GemmArguments
+
+        query_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+    ops = _replace_dense_efc_with_vendored(
+        cutlass.operators.get_operators(args=query_args, target_sm=f"{cc}a")
+    )
     for op in ops:
         # setdefault: keep an already-cached (possibly already-compiled) object
         # rather than replacing it with a fresh instance from this query.
@@ -503,7 +602,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -575,6 +674,8 @@ def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
             )
         else:
             fake_kwargs[name] = val
+    if get_cutedsl_epilogue_schema(epilogue_args.epilogue_fn) is not None:
+        return EpilogueMetadata.from_args(epilogue_args.with_tensors(fake_kwargs))
     fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
     accum = epilogue_args.traced_epilogue.example_inputs["accum"]
     fake_args.trace(accum.shape, accum.element)
@@ -586,6 +687,7 @@ def get_efc_kernel_with_epilogue(
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -602,6 +704,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:

@@ -38,15 +38,6 @@ def fake_compact(dtype, shape, *, order=None, align=None):
     )
 
 
-def fake_strided(dtype, shape, stride, *, align=None):
-    """Compile-time descriptor for a GAPPED operand: a dense run per row, rows further apart
-    than the run. Strides may be symbolic, which is how one kernel serves every row pitch.
-    """
-    return cute.runtime.make_fake_tensor(
-        dtype, tuple(shape), stride=tuple(stride), assumed_align=align
-    )
-
-
 def read_only(t):
     """Wrap an INPUT so it exports through const_data_ptr(), leaving a COW input unmaterialized.
 

@@ -356,28 +356,27 @@ class _RowConfig(NamedTuple):
     nt: int  # threads per block
 
 
-def row_config(N: int, dtype_width: int, nfields: int = 1, hw=None) -> "_RowConfig":
+def row_config(N: int, dtype_width: int) -> "_RowConfig":
     # Occupancy config from (N, dtype). The ladder's N-limits are proxies for how wide a row gets
-    # before it needs more threads, which tracks smem capacity, so scaling them by hw.smem_scale
-    # keeps the rule right on other GPUs. nfields is accepted for signature parity but NOT acted
-    # on: the fp32 and bf16 optima move in OPPOSITE directions, so no scalar rule serves both.
-    smem = 1.0 if hw is None else hw.smem_scale
+    # before it needs more threads. No nfields term: the fp32 and bf16 optima move in OPPOSITE
+    # directions, so no scalar rule serves both.
+    #
     # Wide-row rung first, and byte-based: a >=16KB row saturates 256 threads whatever the dtype.
     # This overrides the element ladder, which under-threads mid-N wide rows by ~1.3x.
-    if N * (dtype_width // 8) >= _WIDE_ROW_BYTES * smem:
+    if N * (dtype_width // 8) >= _WIDE_ROW_BYTES:
         return _RowConfig(tpr=_TPR_MAX, nt=_NT_LARGE)
-    tpr = next((t for limit, t in _TPR_LADDER if N <= limit * smem), _TPR_MAX)
-    nt = _NT_SMALL if N <= _NT_GATE_N * smem else _NT_LARGE
+    tpr = next((t for limit, t in _TPR_LADDER if N <= limit), _TPR_MAX)
+    nt = _NT_SMALL if N <= _NT_GATE_N else _NT_LARGE
     return _RowConfig(tpr=tpr, nt=nt)
 
 
-def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
+def single_row_config(N: int, dtype_width: int):
     # Occupancy override for a ONE-ROW launch, or None to leave the ladder's pick standing. The
     # ladder's small tpr exists so rows pack per block; with one row the GPU runs a fraction of
     # one CTA, so give that row the widest rung it can feed. From _TPR_RUNGS rather than a
     # computed width, since tpr is both tree width and block size -- a computed one returned a
     # wrong variance. Measured 0.53-0.93x -> 1.47-1.62x of ATen on var_mean.
-    cfg = row_config(N, dtype_width, nfields, hw)
+    cfg = row_config(N, dtype_width)
     vec = math.gcd(N, 128 // dtype_width)
     feedable = min(_TPR_MAX, N // max(1, vec))  # vector loads this row can issue
     rungs = [t for t in _TPR_RUNGS if WARP <= t <= feedable]
@@ -415,6 +414,8 @@ def _launch_itree(
             Int32(N // plan.vec),
             None,
             Int32(N),
+            None,
+            None,
             None,
             None,
             None,
@@ -581,7 +582,7 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
-    cfg = row_config(N, x.element_size() * 8, trait.nfields)
+    cfg = row_config(N, x.element_size() * 8)
     # Unroll depth of the rolled wave loop. A SCALAR row (an odd or prime N) has no wide load to
     # hide latency behind and wants more loads in flight; a vectorized row pays for the depth.
     # Measured across unroll 4/8/16/32, 4 is at or within noise of the best at every shape.
@@ -631,7 +632,9 @@ def reduce_row_tile(
             Int32(N),
             None,  # q, npar: the col axis's split
             None,
-            None,  # rvals, kvals, in_base, limit: the general axis's decode
+            None,  # the general axis's decode: exts, strides, in_base, limit
+            None,
+            None,
             None,
             None,
             None,
@@ -649,6 +652,8 @@ def reduce_row_tile(
         nchunks,
         nwaves,
         Int32(N),
+        None,
+        None,
         None,
         None,
         None,
