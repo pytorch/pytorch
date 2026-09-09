@@ -65,6 +65,12 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_utils._check_runtime_available.cache_clear()
         _get_flydsl_device_arch.cache_clear()
 
+    def _skip_unless_flydsl_gfx950(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
     def test_runtime_unavailable_when_package_missing(self):
         with mock.patch.object(flydsl_utils, "find_spec", return_value=None):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
@@ -169,7 +175,7 @@ class TestFlyDSLTemplate(TestCase):
         finally:
             FlyDSLTemplate.all_templates.pop(template_name, None)
 
-    def test_scheduling_disables_fusion(self):
+    def test_scheduling_rejects_non_flydsl_nodes(self):
         scheduling = FlyDSLScheduling(scheduler=None)
         node1 = mock.Mock()
         node2 = mock.Mock()
@@ -508,6 +514,48 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
 
+    def test_compiled_cache_keys_on_extra_key(self):
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+        dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
+
+        for key in ("epilogue_a", "epilogue_a", "epilogue_b"):
+            run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                extra_cache_key=key,
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_called_once_with(dispatch)
+
+    def test_flydsl_epilogue_expression_codegen(self):
+        from torch._inductor.codegen.flydsl.epilogue import _EpilogueOps
+
+        ops = _EpilogueOps("accumulator")
+        value = ops.load("accumulator", "0")
+        value = ops.add(value, "1.0")
+        value = ops.mul(value, "0.5")
+        value = ops.sub(value, "2.0")
+        value = ops.relu(ops.neg(value))
+        source = str(value)
+
+        self.assertIn("(acc + 1.0)", source)
+        self.assertIn("* 0.5", source)
+        self.assertIn("- 2.0", source)
+        self.assertEqual(ops.relu("t"), "((t < 0.0)).select(0.0, t)")
+        self.assertEqual(ops.constant(1.5, torch.float32), "1.5")
+        with self.assertRaisesRegex(NotImplementedError, "accumulator reads"):
+            ops.load("bias", "0")
+        with self.assertRaisesRegex(NotImplementedError, "finite scalar constants"):
+            ops.constant(float("inf"), torch.float32)
+        with self.assertRaises(NotImplementedError):
+            ops.sin(value)
+
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
         compile_started = threading.Event()
@@ -561,6 +609,20 @@ class TestFlyDSLTemplate(TestCase):
         assertion("async_compile.flydsl", code)
         self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
         return code
+
+    def _assert_compiled_flydsl_epilogue(self, fn, *args):
+        from torch._inductor.utils import run_and_get_code
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", dynamic=False), *args
+        )
+        expected = fn(*args)
+        if isinstance(expected, torch.Tensor) and expected.dtype is torch.bool:
+            self.assertEqual(result, expected)
+        else:
+            self.assertEqual(result, expected, atol=3e-2, rtol=3e-2)
+        return result, code
 
     def _assert_compiled_grouped_mm(self, a, b, offs, *, expect_flydsl: bool = True):
         from torch._inductor.utils import run_and_get_code
@@ -1108,6 +1170,128 @@ class TestFlyDSLTemplate(TestCase):
         self.assertNotIn("async_compile.flydsl", code)
         self.assertIn("extern_kernels._grouped_mm", code)
         self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @parametrize(
+        "dtype,use_half_tile_interleaved,m,n",
+        (
+            (torch.float16, False, 32, 128),
+            (torch.bfloat16, False, 256, 136),
+            (torch.bfloat16, True, 256, 136),
+        ),
+    )
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        epilogue_fusion=True,
+        benchmark_epilogue_fusion=False,
+    )
+    def test_flydsl_gemm_accumulator_epilogue_fusion(
+        self, dtype, use_half_tile_interleaved, m, n
+    ):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        self._skip_unless_flydsl_gfx950()
+
+        def fn(a, b):
+            result = torch.mm(a, b.t())
+            return torch.relu(-(((result + 1.0) * 0.5 - 2.0) / 3.0))
+
+        waves = 2 if use_half_tile_interleaved else 4
+        gemm_config = asdict(
+            flydsl_heuristics.FlyDSLGemmConfig(
+                M_WAVES=waves,
+                N_WAVES=waves,
+                USE_HALF_TILE_INTERLEAVED=use_half_tile_interleaved,
+            )
+        )
+        a = torch.randn(m, 128, device="cuda", dtype=dtype)
+        a[0].fill_(float("nan"))
+        a[1].fill_(float("inf"))
+        a[2].fill_(float("-inf"))
+        a[3].fill_(3.0)
+        b = torch.full((n, 128), 1 / 128, device="cuda", dtype=dtype)
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_gemm_configs",
+            return_value=[gemm_config],
+        ):
+            result, code = self._assert_compiled_flydsl_epilogue(fn, a, b)
+        self.assertIn("HAS_EPILOGUE: fx.Constexpr = True", code)
+        self.assertIn("EPILOGUE_FN = lambda acc:", code)
+        self.assertNotIn("triton_poi_", code)
+        self.assertEqual(code.count(" = empty_strided_cuda("), 1)
+        self.assertIn(
+            f"USE_HALF_TILE_INTERLEAVED: fx.Constexpr = {use_half_tile_interleaved}",
+            code,
+        )
+        self.assertTrue(torch.isnan(result[0]).all())
+        self.assertEqual(result[1], torch.zeros_like(result[1]))
+        self.assertFalse(torch.signbit(result[1]).any())
+        self.assertTrue(torch.isposinf(result[2]).all())
+        self.assertEqual(result[3], torch.zeros_like(result[3]))
+        self.assertTrue(torch.signbit(result[3]).all())
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        epilogue_fusion=True,
+        epilogue_fusion_first=True,
+        benchmark_epilogue_fusion=False,
+    )
+    def test_flydsl_gemm_epilogue_fusion_safety(self):
+        self._skip_unless_flydsl_gfx950()
+
+        def extra_tensor_read(a, b, scale):
+            return torch.mm(a, b.t()) * scale
+
+        def different_output_dtype(a, b, unused):
+            return torch.mm(a, b.t()) > 0
+
+        def non_identity_read(a, b, unused):
+            return torch.flip(torch.mm(a, b.t()), dims=(1,)) + 1.0
+
+        dtype = torch.bfloat16
+        a = torch.randn(32, 128, device="cuda", dtype=dtype)
+        b = torch.randn(128, 128, device="cuda", dtype=dtype)
+        scale = torch.randn(32, 128, device="cuda", dtype=dtype)
+        for name, fn in (
+            ("extra_tensor_read", extra_tensor_read),
+            ("different_output_dtype", different_output_dtype),
+            ("non_identity_read", non_identity_read),
+        ):
+            with self.subTest(name=name):
+                _, code = self._assert_compiled_flydsl_epilogue(fn, a, b, scale)
+                self.assertIn("async_compile.flydsl", code)
+                self.assertIn("HAS_EPILOGUE: fx.Constexpr = False", code)
+                self.assertIn("triton_poi_", code)
+
+        def template_output_has_other_user(a, b):
+            result = torch.mm(a, b.t())
+            return result, result + 1.0
+
+        def fused_output_has_other_user(a, b):
+            result = torch.mm(a, b.t()) + 1.0
+            return result, result * 2.0
+
+        def independent_epilogues(a, b):
+            result = torch.mm(a, b.t())
+            return result + 1.0, result * 2.0
+
+        for name, fn, expect_fused in (
+            ("template_output", template_output_has_other_user, False),
+            ("fused_output", fused_output_has_other_user, True),
+            ("independent_epilogues", independent_epilogues, False),
+        ):
+            with self.subTest(name=name):
+                _, code = self._assert_compiled_flydsl_epilogue(fn, a, b)
+                self.assertIn("async_compile.flydsl", code)
+                assertion = self.assertIn if expect_fused else self.assertNotIn
+                assertion("HAS_EPILOGUE: fx.Constexpr = True", code)
+                self.assertIn("triton_poi_", code)
 
 
 if __name__ == "__main__":
