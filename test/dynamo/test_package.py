@@ -13,6 +13,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
@@ -37,6 +38,17 @@ def compute_loss_helper(x):
 
 def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
+
+
+class StaticParamModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(3))
+
+    def forward(self, x, use_w=False):
+        if use_w:
+            return (x * self.w).sin()
+        return x.sin()
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -128,6 +140,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
             package.add_guarded_code(b"", code)
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
+
+    @torch._dynamo.config.patch(
+        caching_precompile=True, strict_precompile=False, prepare_freezing=True
+    )
+    def test_bypass_before_guards_keeps_the_frames_earlier_variant(self):
+        # A bypass raised before guards are built (a graph holding a named
+        # parameter under prepare_freezing) drops only that compile. It also
+        # pins that convert_frame reads the package off the output graph, which
+        # the bypass cleared: reading its own local instead records the bypassed
+        # compile's guarded code and a backend id nothing cached, and the save
+        # then fails or drops the whole frame.
+        mod = StaticParamModule()
+        torch._dynamo.mark_static_address(mod.w, guard=False)
+        x = torch.randn(3)
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled(x), mod(x))
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x, use_w=True), mod(x, use_w=True))
+        self.assertTrue(any("package bypass" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = StaticParamModule.forward.__code__
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), mod(x))
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -540,7 +580,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
         ctx = DiskDynamoStore()
 
