@@ -446,6 +446,29 @@ class DecoratedDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
+def keep_whole_dict_attribute(func):
+    func.tag = 2.0
+    func.cache = threading.Lock()  # unpicklable and unguarded sibling
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        # Reads the WHOLE __dict__ (a DunderDict guard keeps the mapping
+        # verbatim) AND an element through it. The generic edge keys on the
+        # function, not its __dict__, so without the mapping edge the verbatim
+        # dict drags func.cache in.
+        if type(func.__dict__) is dict and func.tag == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedWholeDictAttributeForwardModule(torch.nn.Module):
+    @keep_whole_dict_attribute
+    def forward(self, x):
+        return x * 2
+
+
 def keep_defaults_element(func):
     @functools.wraps(func)
     def wrapper(self, x):
@@ -458,6 +481,16 @@ def keep_defaults_element(func):
 
 class DecoratedDefaultsElementForwardModule(torch.nn.Module):
     @keep_defaults_element
+    def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
+        return x * scale
+
+
+class DecoratedCalledDefaultForwardModule(torch.nn.Module):
+    # keep_attribute roots the guard at the function via scale_flag (not through
+    # __defaults__). The tuple is pulled in only by the call-site default binding
+    # of `scale` -- the ordinary DefaultsSource shape whose base is the function,
+    # not the tuple.
+    @keep_attribute
     def forward(self, x, scale=2.0, junk=threading.Lock()):  # unpicklable sibling
         return x * scale
 
@@ -1552,6 +1585,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             inner.__defaults__ = original
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_fqn_mismatched_function_prunes_an_unpicklable_called_default(self):
+        # The call-site default binding (DefaultsSource, base = the function)
+        # registers the __defaults__ tuple via SEQUENCE_LENGTH, but the generic
+        # container->element edge keys on the function, not the tuple, so the
+        # tuple is carried verbatim and drags in the unpicklable sibling default.
+        # This shape is unreachable through _test_serialization: its guard filter
+        # drops the whole-tuple SEQUENCE_LENGTH guard, so the tuple is never
+        # _keep and gets pruned regardless. Only the full compile path (all
+        # guards live) puts the tuple in guard_tree_values while the guarded
+        # element is rooted at the function -- so drive a real compile here.
+        mod = DecoratedCalledDefaultForwardModule()
+        # Serializes cleanly with the edge recorded on the tuple; without it this
+        # raises PackageError("cannot pickle '_thread.lock' object").
+        torch.compile(mod, backend="eager")(torch.randn(3))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_fqn_mismatched_function_prunes_a_verbatim_dict_read(self):
+        # A guard that reads the WHOLE __dict__ (DunderDict keeps the mapping)
+        # plus an element through it records no child edge on __dict__ under the
+        # generic rule (it keys on the function, not its dict), so the mapping
+        # was carried verbatim and an unpicklable unguarded sibling (func.cache)
+        # bypassed the frame. Like the called-default shape this only survives
+        # the full compile path -- _test_serialization's filter drops the
+        # whole-dict guard. The mapping edge in get_guard_manager_from_source
+        # prunes per value; without it this raises PackageError on the lock.
+        mod = DecoratedWholeDictAttributeForwardModule()
+        torch.compile(mod, backend="eager")(torch.randn(3))
 
     def test_fqn_mismatched_function_prunes_a_none_valued_guarded_default(self):
         # The container->element edge is recorded on the source, not the
