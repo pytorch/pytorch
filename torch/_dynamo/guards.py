@@ -1024,7 +1024,9 @@ def get_key_index_source(source: Any, index: Any) -> str:
 
 
 def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
+    # A PackageError like the sibling checks in serialize_guards: a bypass, or
+    # an error under strict_precompile, never an internal compiler error.
+    raise torch._dynamo.exc.PackageError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
@@ -1381,10 +1383,11 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
-        # ids of the plain dict/tuple values an EQUALS_MATCH reads whole. The
-        # serializer carries those verbatim and prunes every other container per
-        # value (GuardsStatePickler._keep_container_verbatim). Save-path only.
-        self.value_guarded_containers: set[int] = set()
+        # The plain dict/tuple values an EQUALS_MATCH reads whole, keyed by id
+        # and holding the value so the id stays live. The serializer carries
+        # those verbatim and prunes every other container per value
+        # (GuardsStatePickler._keep_container_verbatim). Save-path only.
+        self.value_guarded_containers: dict[int, Any] = {}
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -2866,7 +2869,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if self.save_guards and type(val) in (dict, tuple):
-            self.value_guarded_containers.add(id(val))
+            self.value_guarded_containers[id(val)] = val
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -4175,16 +4178,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
         *args: Any,
-        value_guarded_containers: set[int] | None = None,
+        value_guarded_containers: dict[int, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
-        # ids of the plain dict/tuple values an EQUALS_MATCH reads whole; see
+        # The plain dict/tuple values an EQUALS_MATCH reads whole, by id; see
         # _keep_container_verbatim. Absent for the pickler-level unit tests.
-        self.value_guarded_containers = value_guarded_containers or set()
+        self.value_guarded_containers = value_guarded_containers or {}
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4456,8 +4459,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             kwdefaults=kwdefaults,
             closure=closure,
             attributes=attributes,
-            annotations=annotations,
             doc=self._prune(obj.__doc__, "unguarded function doc"),
+            annotations=annotations,
             type_params=type_params,
             globals_snapshot=snapshot,
         )
@@ -4765,7 +4768,7 @@ def pickle_guards_state(
         # deliberately, since walking the object graph would recurse again off
         # an already exhausted stack.
         raise torch._dynamo.exc.PackageError(
-            "guard state exceeded the recursion limit while pickling"
+            "exceeded the recursion limit while pickling guard state"
         ) from e
     except Exception as e:
         # Deliberately broad, AssertionError included: GradScaler.__getstate__
