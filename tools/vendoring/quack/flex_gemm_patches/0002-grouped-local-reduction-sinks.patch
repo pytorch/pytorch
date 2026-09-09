@@ -1,28 +1,28 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index b6d9e6b..093e326 100644
+index 9a8ec41..4a925e2 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -180,0 +181 @@ from quack.epilogue.visit import _EpiModMixinBase
+@@ -181,0 +182 @@ from quack.epilogue.visit import _EpiModMixinBase
 +from quack.grouped_reduce import GroupedFeedMainMixin
-@@ -316,0 +318,5 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+@@ -327,0 +329,5 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 +            if const_expr(kind == "value"):
 +                fragment = ops_by_name[name].fn_prepare(self, epi_loop_tensors[name], False)
 +                assert fragment is not None
 +                values[name] = fragment.load()
 +                continue
-@@ -323 +329 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+@@ -334 +340 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 -                "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
 +                "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
-@@ -424,4 +430,2 @@ class EpiMod:
+@@ -435,4 +441,2 @@ class EpiMod:
 -        if fragmentwise and (self.mode != "element" or prepass is not None):
 -            raise ValueError(
 -                "TensorSSA callbacks support element mode without an accumulator prepass"
 -            )
 +        if fragmentwise and self.mode != "element":
 +            raise ValueError("TensorSSA callbacks support element mode only")
-@@ -621,0 +626 @@ class EpiMod:
+@@ -630,0 +635 @@ class EpiMod:
 +                GroupedFeedMainMixin,
-@@ -1979 +1984,8 @@ def gemm_epilogue(
+@@ -1955 +1960,8 @@ def gemm_epilogue(
 -def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +def fragment_epilogue(
 +    outputs=(),
@@ -32,23 +32,14 @@ index b6d9e6b..093e326 100644
 +    prepass=None,
 +    prepass_outs=(),
 +):
-@@ -1988,0 +2001,2 @@ def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
+@@ -1964,0 +1977,2 @@ def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +            prepass=prepass,
 +            prepass_outs=prepass_outs,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index dbb9344..5342fb0 100644
+index 78be4c8..091bba2 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -2236,35 +2236,12 @@ class GroupedColStatsBase(EpiOp):
--    Prepass-sink + main-phase value-port base: the prepass fn returns the
--    statistic input under this op's name; the fold accumulates per
--    (row, group of ``group_cols`` N columns) with NO float atomics and NO
--    per-subtile smem traffic. ``combine`` (class attribute) selects the fold:
--    "add" (default, identity 0.0) or "max" (identity -inf: a TRUE max, never
--    clamped). "max" caveat: the prepass folds the raw accumulator fragment
--    with no OOB masking, so a ragged last N tile's OOB zeros (predicated
--    loads) would contaminate the max — keep the group span tile-divisible
--    (scaled_exp enforces this via its writer's host_validate).
+@@ -2220,12 +2220,11 @@ class GroupedColStatsBase(EpiOp):
 -    The sweep folds each
 -    thread's run into REGISTER accumulators — the register index is static:
 -    rows from the (compile-time) epi_m coordinate, groups by their
@@ -61,12 +52,18 @@ index dbb9344..5342fb0 100644
 -    partials. The prepass barrier orders those stores before every consumer
 -    warp folds the planes in fixed order, applies ``stat_value``, and keeps
 -    its finalized values in ``rStats``. No second barrier is needed because
--    the resolved values are thread-private registers. GroupedColStatsOut
--    independently folds the same raw planes once per output slot and writes
--    the finalized value directly to gmem.
--    Statistics never leave the kernel — the in-kernel counterpart to
--    VecReduce's per-tile gmem partials.
--
++    The sweep folds each thread's run into REGISTER accumulators derived from
++    the actual M/N register layouts (including interleaved layouts) — the
++    register index is static: rows from the (compile-time) epi_m coordinate,
++    N visits from epi_n, and the thread's local groups by their flat register
++    slots. At prepass end (``fn_prepass_end``) each slot is butterflied across
++    the contiguous N-lane subgroup (fixed tree) and the subgroup leader stores
++    it ONCE to its (row, group, warp_n) smem plane — single writer, absolute
++    group recovered from the coordinate partition. Smem uniformly holds RAW
++    per-warp_n partials. The prepass barrier orders those stores before every
++    consumer warp folds the planes in fixed order, applies ``stat_value``, and
++    keeps its finalized values in ``rAcc``. No second barrier is needed because
+@@ -2238,8 +2237,8 @@ class GroupedColStatsBase(EpiOp):
 -    Default host schema: a 1-D host tensor whose length is the group width
 -    (a real per-group resource like an rmsnorm weight, or a dummy that only
 -    fixes the width). Stats-only subclasses just set ``combine`` and define
@@ -75,22 +72,15 @@ index dbb9344..5342fb0 100644
 -    ``fn_prepare``, keeping the stats state from ``stats_begin``/
 -    ``stats_slice`` as element 0 of their state (``fn_sink_flush`` reads it
 -    there).
-+    The prepass folds values into register accumulators derived from the actual
-+    M/N register layouts, including interleaved layouts. At prepass end each
-+    local group is reduced across its contiguous N-lane subgroup and written
-+    once to the corresponding (row, group, warp_n) shared-memory plane. The
-+    prepass barrier publishes those raw planes; consumers combine warp_n planes
-+    in fixed order, so the statistic is bitwise reproducible run to run.
-+
-+    The default host schema accepts either a group width integer or a 1-D tensor
-+    whose length is the group width. Stats-only subclasses can set ``combine``
-+    and override ``stat_value``. Tensorless or resource-carrying subclasses can
-+    override the host methods and ``fn_prepare`` while retaining the stats state
-+    as element 0 of their begin/begin_loop state.
-@@ -2274 +2251 @@ class GroupedColStatsBase(EpiOp):
--    combine = "add"  # class attribute; "max" folds with fmax from a -inf identity
-+    combine = "add"
-@@ -2276 +2253,6 @@ class GroupedColStatsBase(EpiOp):
++    Default host schema: a group width integer, or a 1-D host tensor whose
++    length is the group width (a real per-group resource like an rmsnorm
++    weight, or a dummy that only fixes the width). Stats-only subclasses just
++    set ``combine`` and define ``stat_value`` (per-row value from the finalized
++    statistic); tensorless or resource-carrying subclasses override the host
++    methods / ``begin``/``begin_loop``/``fn_prepare``, keeping the stats state
++    from ``stats_begin``/``stats_slice`` as element 0 of their state
++    (``fn_sink_flush`` reads it there).
+@@ -2251 +2250,6 @@ class GroupedColStatsBase(EpiOp):
 -    def _combine_op(self):
 +    def stats_identity(self):
 +        """Identity value for register and shared-memory statistic slots."""
@@ -98,38 +88,21 @@ index dbb9344..5342fb0 100644
 +
 +    def stats_combine_fn(self):
 +        """Binary operator used for every local, lane, and warp-plane fold."""
-@@ -2278,0 +2261,3 @@ class GroupedColStatsBase(EpiOp):
+@@ -2253,0 +2258,3 @@ class GroupedColStatsBase(EpiOp):
 +    def _combine_op(self):
 +        return self.stats_combine_fn()
 +
-@@ -2280 +2265 @@ class GroupedColStatsBase(EpiOp):
+@@ -2255 +2262 @@ class GroupedColStatsBase(EpiOp):
 -        return {"add": 0.0, "max": -math.inf}[self.combine]
 +        return self.stats_identity()
-@@ -2305,8 +2290 @@ class GroupedColStatsBase(EpiOp):
--        """Validate the reduction-group geometry independently of optional
--        consumers such as GroupedColStatsOut.
--
--        A group is a complete, globally aligned N interval. Both the CTA tile
--        and GEMM N must therefore contain an integer number of groups; silently
--        flooring either would merge a partial group into the wrong statistic
--        or finalize it with the wrong denominator.
--        """
-+        """Validate that complete, globally aligned groups cover N and tile_N."""
-@@ -2337 +2315 @@ class GroupedColStatsBase(EpiOp):
--        return "Const" if isinstance(value, int) else ""  # suffix must stay symbol-name-safe
-+        return "Const" if isinstance(value, int) else ""
-@@ -2348,4 +2326 @@ class GroupedColStatsBase(EpiOp):
--        # (not epi_tile[0]) matters on SM90, whose epi tiles are 64 rows:
--        # epi_M > 1 subtiles land on distinct rows and must not alias. The
--        # warp_n axis keeps a single deterministic writer per slot when the
--        # epi warp layout splits N (SM120 always; SM100 2-CTA 64-row tiles).
-+        # matters on SM90, whose epi tiles can be only 64 rows.
-@@ -2374,3 +2349 @@ class GroupedColStatsBase(EpiOp):
+@@ -2349,3 +2356,3 @@ class GroupedColStatsBase(EpiOp):
 -        """Coordinate partition, row-broadcast reference layout, lane/warp
 -        geometry, and zeroed accumulators (+ barrier) — everything the fold
 -        and read-back need."""
-+        """Build coordinate/layout geometry and initialize statistic storage."""
-@@ -2381,3 +2354,5 @@ class GroupedColStatsBase(EpiOp):
++        """Coordinate partition, row/column-broadcast reference layouts, lane/warp
++        geometry, and identity-filled accumulators (+ barrier) — everything the
++        fold and read-back need."""
+@@ -2356,3 +2363,5 @@ class GroupedColStatsBase(EpiOp):
 -        tDrM_ref = ctx.partition_for_epilogue_fn(
 -            cute.make_rmem_tensor(
 -                cute.make_layout((ctx.tile_M, ctx.tile_N), stride=(1, 0)), Float32
@@ -138,61 +111,43 @@ index dbb9344..5342fb0 100644
 +                cute.make_rmem_tensor(
 +                    cute.make_layout((ctx.tile_M, ctx.tile_N), stride=stride), Float32
 +                )
-@@ -2384,0 +2360 @@ class GroupedColStatsBase(EpiOp):
+@@ -2359,0 +2369 @@ class GroupedColStatsBase(EpiOp):
 +            for stride in ((1, 0), (0, 1))
-@@ -2388 +2364 @@ class GroupedColStatsBase(EpiOp):
+@@ -2363 +2373 @@ class GroupedColStatsBase(EpiOp):
 -            tDrM_ref = ctx.tiled_copy_r2s.retile(tDrM_ref)
 +            tDrRefs = tuple(ctx.tiled_copy_r2s.retile(ref) for ref in tDrRefs)
-@@ -2390 +2366,4 @@ class GroupedColStatsBase(EpiOp):
+@@ -2365 +2375,4 @@ class GroupedColStatsBase(EpiOp):
 -        ref_layout = cute.group_modes(tDrM_ref, 3, cute.rank(tDrM_ref))[None, None, None, 0].layout
 +        ref_layouts = tuple(
 +            cute.group_modes(ref, 3, cute.rank(ref))[None, None, None, 0].layout for ref in tDrRefs
 +        )
 +        ref_layout = ref_layouts[0]
-@@ -2396,5 +2375,3 @@ class GroupedColStatsBase(EpiOp):
--        # Reduction ownership is factored by the actual tiled-copy layout:
--        # warp-N coordinates contribute partials to the SAME (row, group);
--        # every other epilogue warp must partition M and therefore own
--        # DISJOINT rows. This rules out an unmodelled replicated/spatial warp
--        # mode whose writers would race in the same smem plane.
-+
-+        # Warp-N coordinates contribute partials to the same row/group, while
-+        # every other epilogue warp must partition M and own disjoint rows.
-@@ -2407,2 +2384 @@ class GroupedColStatsBase(EpiOp):
+@@ -2382,2 +2395 @@ class GroupedColStatsBase(EpiOp):
 -        smem_warps_n = const_expr(cute.size(smem_tensor, mode=[2]))
 -        assert warps_in_N == smem_warps_n, (
 +        assert warps_in_N == const_expr(cute.size(smem_tensor, mode=[2])), (
-@@ -2411,8 +2387,4 @@ class GroupedColStatsBase(EpiOp):
--        # Fill the smem planes with the fold identity: begin runs before the
--        # driver prepass sweep. Needed even though fn_prepass_end STOREs (not
--        # adds): a warp whose column interleave misses a group never writes
--        # that plane, and persistent tiles reuse the smem — readers must see
--        # the identity there.
--        # Strided: the flat extent can exceed the epilogue thread count
--        # (e.g. 192-row tiles under pingpong's single 128-thread warpgroup,
--        # whose exclusive epilogue window covers the shared smem).
-+
-+        # A warp whose layout misses a group leaves the identity in that plane;
-+        # persistent tiles also reuse this shared storage.
+@@ -2393,0 +2406 @@ class GroupedColStatsBase(EpiOp):
 +        identity = const_expr(self.stats_identity())
-@@ -2424 +2396 @@ class GroupedColStatsBase(EpiOp):
+@@ -2399 +2412 @@ class GroupedColStatsBase(EpiOp):
 -                sFlat[i] = Float32(self._fold_identity())
 +                sFlat[i] = Float32(identity)
-@@ -2427,3 +2399,4 @@ class GroupedColStatsBase(EpiOp):
+@@ -2402,3 +2415,6 @@ class GroupedColStatsBase(EpiOp):
 -        # Register-resident statistics for the sweep: (rows_total, group ordinals).
 -        # Static indexing requires each thread's per-subtile run to lie in one
 -        # group, and subtile/group boundaries to nest.
-+
-+        # Register accumulators for the sweep. ``visit`` identifies an N
-+        # subtile set; ``group_slots`` maps each row/group to its actual flat
-+        # register indices, including interleaved M64 layouts.
-@@ -2438,2 +2411,3 @@ class GroupedColStatsBase(EpiOp):
++        # Register-resident statistics for the sweep: (rows_total, N visits,
++        # local groups). ``visit`` identifies an N subtile set; ``group_slots``
++        # maps each row/group to its actual flat register indices, including
++        # interleaved M64 layouts. Static indexing requires each thread's
++        # per-subtile run to lie in one group, and subtile/group boundaries to
++        # nest.
+@@ -2413,2 +2429,3 @@ class GroupedColStatsBase(EpiOp):
 -        rows_sub = const_expr(
 -            cute.size(layout_utils.convert_layout_zero_stride(ref_layout, ref_layout), mode=[0])
 +        slot_coords = tuple(
 +            (cute.crd2idx(i, ref_layouts[0]), cute.crd2idx(i, ref_layouts[1]))
 +            for i in range(cute.size(ref_layout))
-@@ -2441,14 +2415,28 @@ class GroupedColStatsBase(EpiOp):
+@@ -2416,14 +2433,28 @@ class GroupedColStatsBase(EpiOp):
 -        n_ords = const_expr(ctx.tile_N // max(group_cols, n_e))
 -        rStats = cute.make_rmem_tensor((rows_sub * epi_m_cnt, n_ords), Float32)
 -        rStats.fill(self._fold_identity())
@@ -235,7 +190,7 @@ index dbb9344..5342fb0 100644
 +        )
 +        assert lanes_in_N % lanes_per_group == 0, (
 +            "grouped stats need N-lane subgroups to partition the warp layout"
-@@ -2455,0 +2444,13 @@ class GroupedColStatsBase(EpiOp):
+@@ -2430,0 +2462,13 @@ class GroupedColStatsBase(EpiOp):
 +        n_visits = const_expr(ctx.tile_N // max(group_cols, n_e))
 +        rAcc = cute.make_rmem_tensor((rows_sub * epi_m_cnt, n_visits, groups_per_run), Float32)
 +        rAcc.fill(identity)
@@ -249,29 +204,28 @@ index dbb9344..5342fb0 100644
 +            lanes_per_group,
 +        )
 +        return (smem_tensor, tDcC, ref_layout, group_cols, lane_info, rAcc, geom)
-@@ -2459 +2460 @@ class GroupedColStatsBase(EpiOp):
+@@ -2434 +2478 @@ class GroupedColStatsBase(EpiOp):
 -        smem_tensor, tDcC, ref_layout, group_cols, lane_info, rStats, geom = state[:7]
 +        smem_tensor, tDcC, ref_layout, group_cols, lane_info, rAcc, geom = state
-@@ -2461,2 +2461,0 @@ class GroupedColStatsBase(EpiOp):
--        # Static register indices for this subtile: row base from epi_m, and
+@@ -2437 +2481 @@ class GroupedColStatsBase(EpiOp):
 -        # the group's thread-relative visit ordinal from epi_n.
-@@ -2464 +2463 @@ class GroupedColStatsBase(EpiOp):
++        # the N visit from epi_n.
+@@ -2439 +2483 @@ class GroupedColStatsBase(EpiOp):
 -        ord_n = const_expr((epi_coord[1] * n_e) // max(group_cols, n_e))
 +        visit_n = const_expr((epi_coord[1] * n_e) // max(group_cols, n_e))
-@@ -2471 +2470 @@ class GroupedColStatsBase(EpiOp):
+@@ -2446 +2490 @@ class GroupedColStatsBase(EpiOp):
 -            rStats,
 +            rAcc,
-@@ -2473 +2472,2 @@ class GroupedColStatsBase(EpiOp):
+@@ -2448 +2492,2 @@ class GroupedColStatsBase(EpiOp):
 -            ord_n,
 +            visit_n,
 +            geom,
-@@ -2478,4 +2478 @@ class GroupedColStatsBase(EpiOp):
--        """Prepass sink: fold frag (the statistic input) into the register
+@@ -2454 +2499 @@ class GroupedColStatsBase(EpiOp):
 -        statistics at static (row, ordinal) slots — no smem and no shuffles
--        in the sweep; fn_prepass_end exchanges and stores once per slot."""
++        statistics at static (row, visit, group) slots — no smem and no shuffles
+@@ -2456 +2500,0 @@ class GroupedColStatsBase(EpiOp):
 -        combine = self._combine_op()
-+        """Fold one prepass fragment into static row/visit/group registers."""
-@@ -2483,6 +2480,4 @@ class GroupedColStatsBase(EpiOp):
+@@ -2458,6 +2502,4 @@ class GroupedColStatsBase(EpiOp):
 -        ref_layout, group_cols = stats[2], stats[3]
 -        rStats, row_base, ord_n = stats[5], stats[6], stats[7]
 -        x_mn = layout_utils.convert_layout_zero_stride(frag, ref_layout)
@@ -282,7 +236,7 @@ index dbb9344..5342fb0 100644
 +        combine_fn = const_expr(self.stats_combine_fn())
 +        identity = const_expr(self.stats_identity())
 +        num_rows, group_slots, groups_per_run = geom[0], geom[4], geom[5]
-@@ -2490,4 +2485,6 @@ class GroupedColStatsBase(EpiOp):
+@@ -2465,4 +2507,6 @@ class GroupedColStatsBase(EpiOp):
 -            partial = Float32(self._fold_identity())
 -            for c in cutlass.range(num_cols, unroll_full=True):
 -                partial = combine(partial, x_mn[r, c])
@@ -293,31 +247,28 @@ index dbb9344..5342fb0 100644
 +                for j in cutlass.range_constexpr(len(slots)):
 +                    partial = combine_fn(partial, frag[slots[j]])
 +                rAcc[row_base + r, visit_n, g] = combine_fn(rAcc[row_base + r, visit_n, g], partial)
-@@ -2497,9 +2494,7 @@ class GroupedColStatsBase(EpiOp):
--        """Prepass-end flush: butterfly each register slot across the N-lane
+@@ -2473 +2517 @@ class GroupedColStatsBase(EpiOp):
 -        group (fixed tree), retain a finalized register value immediately when
--        no cross-warp fold is needed, and store the RAW partial once to its
--        (row, group, warp_n) smem plane. The driver's barrier after this hook
--        publishes all raw planes before cross-warp register resolution."""
++        subgroup (fixed tree), retain a finalized register value immediately when
+@@ -2477,4 +2521,6 @@ class GroupedColStatsBase(EpiOp):
 -        smem_tensor, tDcC, ref_layout, group_cols, lane_info, rStats, geom = state[0][:7]
 -        lanes_in_N, warps_in_N, warp_n_idx, is_lane_n_leader = lane_info
 -        rows_sub, n_e, epi_m_cnt, n_ords = geom
 -        e_per_ord = const_expr(max(1, group_cols // n_e))
-+        """Reduce lane subgroups and publish raw warp-N planes to shared memory."""
 +        smem_tensor, tDcC, _, group_cols, lane_info, rAcc, geom = state[0]
 +        _, warps_in_N, warp_n_idx, _ = lane_info
 +        rows_sub, n_e, epi_m_cnt, n_visits = geom[:4]
 +        groups_per_run, lanes_per_group = geom[5], geom[6]
 +        combine_fn = const_expr(self.stats_combine_fn())
 +        e_per_visit = const_expr(max(1, group_cols // n_e))
-@@ -2507,4 +2502,2 @@ class GroupedColStatsBase(EpiOp):
+@@ -2482,4 +2528,2 @@ class GroupedColStatsBase(EpiOp):
 -            for o in cutlass.range_constexpr(n_ords):
 -                c_mn = layout_utils.convert_layout_zero_stride(
 -                    tDcC[None, None, None, (em, o * e_per_ord)], ref_layout
 -                )
 +            for visit in cutlass.range_constexpr(n_visits):
 +                coords = tDcC[None, None, None, (em, visit * e_per_visit)]
-@@ -2512,15 +2505,11 @@ class GroupedColStatsBase(EpiOp):
+@@ -2487,15 +2531,11 @@ class GroupedColStatsBase(EpiOp):
 -                    partial = rStats[em * rows_sub + r, o]
 -                    if const_expr(lanes_in_N > 1):
 -                        partial = cute.arch.warp_reduction(
@@ -344,18 +295,10 @@ index dbb9344..5342fb0 100644
 +                        coord = coords[const_expr(geom[4][r][g][0])]
 +                        if cute.arch.lane_idx() % lanes_per_group == 0:
 +                            smem_tensor[coord[0], coord[1] // group_cols, warp_n_idx] = total
-@@ -2529,3 +2518 @@ class GroupedColStatsBase(EpiOp):
--        """Cross-warp register resolution is needed exactly when the epilogue
--        warp layout splits N. The driver's first prepass barrier has already
--        made every raw partial plane visible."""
-+        """Whether raw warp-N planes need a post-barrier register resolution."""
-@@ -2536,4 +2523 @@ class GroupedColStatsBase(EpiOp):
--        """Post-barrier all-reduce (warps_n > 1): every consumer lane folds
--        the raw smem planes for its own (row, group) slots in fixed order,
+@@ -2513 +2553 @@ class GroupedColStatsBase(EpiOp):
 -        applies ``stat_value``, and overwrites its thread-private rStats.
--        No shared writes means no second barrier."""
-+        """Resolve cross-warp statistics into each consumer's register slots."""
-@@ -2541,5 +2525,4 @@ class GroupedColStatsBase(EpiOp):
++        applies ``stat_value``, and overwrites its thread-private rAcc.
+@@ -2516,5 +2556,4 @@ class GroupedColStatsBase(EpiOp):
 -        smem_tensor, tDcC, ref_layout, group_cols, lane_info, rStats, geom = stats[:7]
 -        warps_in_N = lane_info[1]
 -        rows_sub, n_e, epi_m_cnt, n_ords = geom
@@ -365,14 +308,14 @@ index dbb9344..5342fb0 100644
 +        rows_sub, n_e, epi_m_cnt, n_visits = geom[:4]
 +        groups_per_run = geom[5]
 +        e_per_visit = const_expr(max(1, group_cols // n_e))
-@@ -2547,4 +2530,2 @@ class GroupedColStatsBase(EpiOp):
+@@ -2522,4 +2561,2 @@ class GroupedColStatsBase(EpiOp):
 -            for o in cutlass.range_constexpr(n_ords):
 -                c_mn = layout_utils.convert_layout_zero_stride(
 -                    tDcC[None, None, None, (em, o * e_per_ord)], ref_layout
 -                )
 +            for visit in cutlass.range_constexpr(n_visits):
 +                coords = tDcC[None, None, None, (em, visit * e_per_visit)]
-@@ -2552,11 +2533,18 @@ class GroupedColStatsBase(EpiOp):
+@@ -2527,9 +2564,20 @@ class GroupedColStatsBase(EpiOp):
 -                    coord = c_mn[r, 0]
 -                    group = coord[1] // group_cols
 -                    total = smem_tensor[coord[0], group, 0]
@@ -382,8 +325,6 @@ index dbb9344..5342fb0 100644
 -
 -    # --- Stats-only defaults: the host arg's length fixes the group width;
 -    # the value port broadcasts a per-row function of the finalized statistic.
--    # Subclasses with extra per-element resources override all three, keeping
--    # the stats state as element 0 (fn_sink_flush reads it there). ---
 +                    for g in cutlass.range_constexpr(groups_per_run):
 +                        coord = coords[const_expr(geom[4][r][g][0])]
 +                        rAcc[em * rows_sub + r, visit, g] = self.stat_value(
@@ -402,18 +343,11 @@ index dbb9344..5342fb0 100644
 +            total = combine_fn(total, smem_tensor[row, group, w])
 +        return total
 +
-@@ -2572,3 +2560 @@ class GroupedColStatsBase(EpiOp):
--        """Per-row Float32 value derived from the finalized (row, group)
--        statistic — the default ``fn_prepare``'s only hook. ``group_cols``
--        is the compile-time group width (for mean-style finalizes)."""
-+        """Finalize one statistic before broadcasting or writing it."""
-@@ -2578,2 +2564 @@ class GroupedColStatsBase(EpiOp):
--        """Companion gmem writer for this op's finalized values — declare it
--        in ``extra_ops``; see GroupedColStatsOut."""
-+        """Return a companion global-memory writer for finalized statistics."""
-@@ -2583,0 +2569 @@ class GroupedColStatsBase(EpiOp):
++    # --- Stats-only defaults: the host arg fixes the group width; the value
++    # port broadcasts a per-row function of the finalized statistic.
+@@ -2558,0 +2607 @@ class GroupedColStatsBase(EpiOp):
 +        """Broadcast finalized register statistics over their source groups."""
-@@ -2585,11 +2571,15 @@ class GroupedColStatsBase(EpiOp):
+@@ -2560,11 +2609,18 @@ class GroupedColStatsBase(EpiOp):
 -        c_cur, ref_layout = stats[1], stats[2]
 -        out = cute.make_rmem_tensor(c_cur.layout.shape, Float32)
 -        out_mn = layout_utils.convert_layout_zero_stride(out, ref_layout)
@@ -436,36 +370,24 @@ index dbb9344..5342fb0 100644
 +        num_rows, group_slots, groups_per_run = geom[0], geom[4], geom[5]
 +        for r in cutlass.range_constexpr(num_rows):
 +            for g in cutlass.range_constexpr(groups_per_run):
++                # Finalized values are register-resident for both the single-
++                # and multi-warp_n paths; fn_prepass_end / fn_prepass_resolve
++                # wrote them back to rAcc before the main sweep.
 +                value = rAcc[row_base + r, visit_n, g]
 +                slots = const_expr(group_slots[r][g])
 +                for j in cutlass.range_constexpr(len(slots)):
 +                    out[slots[j]] = value
-@@ -2600,13 +2590 @@ class GroupedColStatsOut(EpiOp):
--    """Companion gmem writer for a GroupedColStatsBase op: write the sibling's
--    finalized per-(row, group) values (``stat_value``) to a
--    (l?, m, N/group_cols) buffer.
--
--    The sibling's smem contains raw per-warp_n partial planes after the prepass
--    barrier. At the first main-phase subtile this op elects one flat writer per
--    (row, group), folds those planes in fixed order, finalizes, and writes
--    directly to gmem — no finalized-smem publication or second barrier.
--    This is outside the per-element hot path (contrast: routing the value port
--    through a reduce sink costs a combine per element, and a reduce slot is per
--    (row, n-tile) — too coarse for sub-tile groups like per-head rstd).
--    Declare via ``extra_ops`` alongside the stats op (the fn never sees it);
--    the buffer arg is optional — absent, the op is compiled out."""
-+    """Write a sibling GroupedColStatsBase statistic to global memory."""
-@@ -2629,2 +2606,0 @@ class GroupedColStatsOut(EpiOp):
+@@ -2604,2 +2660,2 @@ class GroupedColStatsOut(EpiOp):
 -        """Buffer shape from the sibling's group width (its 1-D arg length):
 -        (l?, m, n/width), with the groups nesting in N and in the tile."""
-@@ -2646 +2621,0 @@ class GroupedColStatsOut(EpiOp):
--        # The SIBLING's stats planes (its to_params stashed the shape).
++        """Buffer shape from the sibling's group width (its arg): (l?, m, n/width),
++        with the groups nesting in N and in the tile."""
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
 new file mode 100644
-index 0000000..d1daf22
+index 0000000..eae88af
 --- /dev/null
 +++ b/quack/grouped_reduce.py
-@@ -0,0 +1,1420 @@
+@@ -0,0 +1,1269 @@
 +# Copyright (c) 2026, Han Guo, Tri Dao.
 +"""Grouped local reductions inside a GEMM epilogue tile (FlexGEMM parity).
 +
@@ -508,7 +430,7 @@ index 0000000..d1daf22
 +  (left-to-right, broadcast within the group), then one leader lane stores.
 +* axis=1, ``group > cols``: fold each fragment, then combine the
 +  ``group // cols`` consecutive epi-N subtiles of a group in ascending order
-+  (the oracle's "temporal" combine) at the last subtile of the group.
++  at the last subtile of the group.
 +* axis=0 (M groups), ``group <= lanes_m``: butterfly across the group's row
 +  lanes (halving offsets), so every lane holds the group value.
 +* axis=0, ``group > lanes_m``: butterfly within each warp, then stitch
@@ -516,18 +438,15 @@ index 0000000..d1daf22
 +  epilogue barrier.
 +
 +Every fold order is fixed and data-independent, so results are bitwise
-+reproducible run to run. Two intentional deviations from the legacy FlexGEMM
-+reducer (the behavior oracle):
++reproducible run to run. Two semantic notes:
 +
-+* The oracle receives axis-1 groups that fit one fragment already reduced by
-+  generated TensorSSA code and only compresses the store (``combine=None``
-+  here does that). With a ``combine``, this module folds the fragment itself in
-+  a fixed left-to-right order; TensorSSA's ``reduce`` may use a different
-+  association, so f32 sums can differ by rounding (tolerance-level, not a
-+  contract change).
-+* The oracle's 4-wide vectorized f32 store fast path for axis=0 is not ported;
-+  stores are scalar (one element per group leader). Pure throughput, no
-+  semantics.
++* Axis-1 groups that fit one fragment may arrive already reduced by generated
++  TensorSSA code, in which case ``combine=None`` only compresses the store. With
++  a ``combine``, this module folds the fragment itself in a fixed left-to-right
++  order; TensorSSA's ``reduce`` may use a different association, so f32 sums
++  can differ by rounding (tolerance-level, not a contract change).
++* Stores are scalar (one element per group leader); there is no vectorized
++  f32 store fast path for axis=0. Pure throughput, no semantics.
 +
 +Tails and dynamic group counts
 +------------------------------
@@ -535,8 +454,8 @@ index 0000000..d1daf22
 +(``limit_groups``) and of the GEMM output (``limit_m`` / ``limit_n``), so a
 +ragged last tile writes fewer groups without host-side padding. Groups must not
 +straddle the GEMM boundary: ``group`` has to divide both the CTA tile and the
-+grouped GEMM dimension (:func:`validate_grouped_reduce_out` checks the latter
-+host-side; the tile divisibility is asserted at compile time). OOB accumulator
++grouped GEMM dimension (``GroupedReduceBase.host_validate`` checks both host-side
++and the tile divisibility is asserted again at compile time). OOB accumulator
 +lanes are zero, which is the identity for ``add`` only — with ``mul``/``max``/
 +``min`` a partially OOB group would be wrong, and the divisibility rule is what
 +makes that unrepresentable.
@@ -708,56 +627,6 @@ index 0000000..d1daf22
 +        raise ValueError("axis must be 0 (group along M) or 1 (group along N)")
 +    inner = (m, n // group) if axis == 1 else (m // group, n)
 +    return inner if batch is None else (batch, *inner)
-+
-+
-+def blocked_128x4_numel(rows: int, cols: int, batch: int = 1) -> int:
-+    """Physical element count for a batch of padded 128x4 blocked matrices."""
-+    return batch * 512 * ((rows + 127) // 128) * ((cols + 3) // 4)
-+
-+
-+def blocked_128x4_carrier_view(carrier, rows: int, cols: int, batch: int = 1):
-+    """Attach logical matrix extents to a flat blocked carrier without moving data."""
-+    expected = blocked_128x4_numel(rows, cols, batch)
-+    if carrier.ndim != 1 or not carrier.is_contiguous() or carrier.numel() != expected:
-+        raise ValueError(
-+            f"blocked 128x4 carrier must be contiguous rank 1 with {expected} elements"
-+        )
-+    return carrier.as_strided(
-+        (batch, rows, cols),
-+        (expected // batch, 0, 0),
-+    )
-+
-+
-+def validate_grouped_reduce_out(
-+    name: str,
-+    out,
-+    m: int,
-+    n: int,
-+    group: int,
-+    axis: int,
-+    batch: int | None = None,
-+    tile_M: int | None = None,
-+    tile_N: int | None = None,
-+) -> None:
-+    """Fail-closed host check of a compressed aux buffer against the reduce plan.
-+
-+    ``EpiMod`` only shape-checks sinks that look like :class:`VecReduce`
-+    partials, so callers (or a parent-side hook in ``EpiMod.gemm``'s sink loop)
-+    call this to reject group/shape combinations the kernel cannot express:
-+    a group that straddles the GEMM boundary would fold zero-padded elements,
-+    and a mismatched or non-contiguous buffer would corrupt memory.
-+    """
-+    tile = tile_M if axis == 0 else tile_N
-+    dim = m if axis == 0 else n
-+    if dim % group:
-+        raise ValueError(f"{name}: group {group} must divide the grouped dim {dim} (axis={axis})")
-+    if tile is not None and (tile % group or group > tile):
-+        raise ValueError(f"{name}: group {group} must divide the CTA tile extent {tile}")
-+    expected = grouped_reduce_out_shape(m, n, group, axis, batch)
-+    if tuple(out.shape) != expected:
-+        raise ValueError(f"{name}: expected compressed shape {expected}, got {tuple(out.shape)}")
-+    if out.stride(-1) != 1:
-+        raise ValueError(f"{name}: compressed aux buffer must be contiguous in its last dim")
 +
 +
 +class _GroupGeometry(NamedTuple):
@@ -1430,103 +1299,6 @@ index 0000000..d1daf22
 +            gemm.epilogue_barrier.arrive_and_wait()
 +
 +
-+class Blocked128x4GroupedLocalReduce(GroupedLocalReduce):
-+    """Axis-1 grouped sink stored directly into a padded cuBLAS 128x4 carrier.
-+
-+    The host passes a zero-stride metadata view shaped ``(batch, rows, groups)``
-+    over the flat carrier. The kernel ignores those strides, uses the shape for
-+    exact tail predicates, and owns the physical swizzle and batch padding.
-+    """
-+
-+    def __init__(self, name, *, axis=1, group, combine="add", finalize=None):
-+        if axis != 1:
-+            raise NotImplementedError("blocked 128x4 grouped outputs support axis 1 only")
-+        super().__init__(name, axis=axis, group=group, combine=combine, finalize=finalize)
-+
-+    def supports_config(self, config) -> bool:
-+        """Start with the SM100 tile family validated by the vendor contract."""
-+        return (
-+            getattr(config, "device_capacity", None) == 10
-+            and config.tile_m in (128, 256)
-+            and config.tile_n >= 128
-+            and grouped_reduce_supports_config(config, self.axis, self.group)
-+        )
-+
-+    def host_arg_key(self, value):
-+        if value is None:
-+            return None
-+        from quack.cute_dsl_utils import torch2cute_dtype_map
-+
-+        if value.ndim != 3 or value.stride()[1:] != (0, 0):
-+            raise ValueError(
-+                f"{self.name}: blocked carrier must use a (batch, rows, groups) metadata view"
-+            )
-+        return (torch2cute_dtype_map[value.dtype],)
-+
-+    def host_fake_arg(self, key, fctx):
-+        from quack.compile_utils import make_fake_tensor
-+
-+        (dtype,) = key
-+        m, n = (fctx.n, fctx.m) if fctx.swapped else (fctx.m, fctx.n)
-+        return make_fake_tensor(
-+            dtype,
-+            (fctx.l, m, n // self.group),
-+            leading_dim=None,
-+            divisibility=1,
-+        )
-+
-+    def to_params(self, gemm, args):
-+        return {self.name: getattr(args, self.name)}
-+
-+    @cute.jit
-+    def _store_groups(
-+        self,
-+        gemm,
-+        param,
-+        state,
-+        epi_coord,
-+        tile_coord_mnkl,
-+        varlen_manager,
-+        values,
-+        finalize=True,
-+    ):
-+        """Map caller-oriented group leaders to the blocked carrier index."""
-+        tile_M, tile_N = gemm.cta_tile_shape_mnk[:2]
-+        physical_axis = state.geom.axis
-+        rows, groups = param.shape[1], param.shape[2]
-+        row_blocks = cute.ceil_div(rows, 128)
-+        col_blocks = cute.ceil_div(groups, 4)
-+        batch_stride = 512 * row_blocks * col_blocks
-+        raw = cute.make_tensor(
-+            param.iterator,
-+            cute.make_layout(param.shape[0] * batch_stride),
-+        )
-+        coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
-+        leader_off = const_expr(
-+            self.group - state.geom.cols if self._is_temporal(state.geom) else 0
-+        )
-+        for i in cutlass.range(cute.size(coord), unroll_full=True):
-+            row_idx, n_idx = coord[i][0], coord[i][1]
-+            pos = n_idx if const_expr(physical_axis == 1) else row_idx
-+            if pos % self.group == leader_off:
-+                if const_expr(physical_axis == 1):
-+                    logical_row = tile_coord_mnkl[0] * tile_M + row_idx
-+                    logical_group = (tile_coord_mnkl[1] * tile_N + n_idx) // self.group
-+                else:
-+                    logical_row = tile_coord_mnkl[1] * tile_N + n_idx
-+                    logical_group = (tile_coord_mnkl[0] * tile_M + row_idx) // self.group
-+                if logical_row < rows and logical_group < groups:
-+                    block = (logical_row // 128) * col_blocks + logical_group // 4
-+                    within = (logical_row % 32) * 16 + (logical_row // 32 % 4) * 4
-+                    index = (
-+                        tile_coord_mnkl[3] * batch_stride + block * 512 + within + logical_group % 4
-+                    )
-+                    value = self.finalize_value(values[i]) if const_expr(finalize) else values[i]
-+                    if const_expr(param.element_type != Float32):
-+                        value = value.to(param.element_type)
-+                    raw[index] = value
-+
-+
 +class GroupedLocalReduceFeed(GroupedReduceBase):
 +    """Same-pass grouped M reduction fed back into the fn (apply port).
 +
@@ -1555,8 +1327,7 @@ index 0000000..d1daf22
 +    def reduce_broadcast(self, value, geom):
 +        """Group reduction of one register value, broadcast to the group's row
 +        lanes. The primitive the apply port calls per element, and the entry
-+        point a hand-written mixin uses in place of the oracle's
-+        ``grouped_rowvec_reduce_value`` (loop it over the fragment)."""
++        point for a hand-written mixin (loop it over the fragment)."""
 +        combine_fn = const_expr(self.combine_fn)
 +        rows = const_expr(self.group // 2)
 +        while rows > 0:
@@ -1888,10 +1659,10 @@ index 0000000..d1daf22
 +        return result
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
 new file mode 100644
-index 0000000..833ac3e
+index 0000000..1c9cbf9
 --- /dev/null
 +++ b/tests/test_grouped_reduce.py
-@@ -0,0 +1,736 @@
+@@ -0,0 +1,569 @@
 +"""Tests for quack.grouped_reduce: FlexGEMM-style grouped local reductions.
 +
 +Two layers:
@@ -1910,7 +1681,6 @@ index 0000000..833ac3e
 +import pickle
 +from types import SimpleNamespace
 +
-+import cutlass
 +import cutlass.cute as cute
 +import pytest
 +import torch
@@ -1919,19 +1689,15 @@ index 0000000..833ac3e
 +from quack.epilogue.mixin import ComposableEpiMixin
 +from quack.grouped_reduce import (
 +    GROUPED_FRAGMENT_WIDTH,
-+    Blocked128x4GroupedLocalReduce,
 +    GroupedFeedMainMixin,
 +    GroupedLocalReduce,
 +    GroupedLocalReduceFeed,
 +    GroupedLocalReducePrepass,
 +    GroupedLocalReduceWithFinalizeArg,
-+    blocked_128x4_carrier_view,
-+    blocked_128x4_numel,
 +    feed_main_capable,
 +    grouped_reduce_out_shape,
 +    grouped_reduce_supports_config,
 +    max_grouped_reduce_group,
-+    validate_grouped_reduce_out,
 +)
 +
 +# ---------------------------------------------------------------- host config
@@ -2010,22 +1776,6 @@ index 0000000..833ac3e
 +    assert len(digests) == 4
 +
 +
-+def test_compressed_shape_and_out_validation():
-+    assert grouped_reduce_out_shape(512, 256, 32, axis=1, batch=2) == (2, 512, 8)
-+    assert grouped_reduce_out_shape(512, 256, 32, axis=0) == (16, 256)
-+    out = torch.empty(2, 512, 8)
-+    validate_grouped_reduce_out("g", out, 512, 256, 32, axis=1, batch=2, tile_N=256)
-+    with pytest.raises(ValueError, match="must divide the grouped dim"):
-+        validate_grouped_reduce_out("g", out, 512, 260, 32, axis=1, batch=2)
-+    with pytest.raises(ValueError, match="CTA tile extent"):
-+        validate_grouped_reduce_out("g", out, 512, 256, 32, axis=1, batch=2, tile_N=16)
-+    with pytest.raises(ValueError, match="compressed shape"):
-+        validate_grouped_reduce_out("g", out, 512, 256, 16, axis=1, batch=2)
-+    strided = torch.empty(2, 512, 16)[..., ::2]
-+    with pytest.raises(ValueError, match="contiguous"):
-+        validate_grouped_reduce_out("g", strided, 512, 256, 32, axis=1, batch=2)
-+
-+
 +def test_host_arg_key_rejects_unusable_buffers():
 +    op = GroupedLocalReduce("g", axis=1, group=32)
 +    assert op.host_arg_key(None) is None
@@ -2036,6 +1786,8 @@ index 0000000..833ac3e
 +
 +
 +def test_plain_sink_host_validation():
++    assert grouped_reduce_out_shape(512, 256, 32, axis=1, batch=2) == (2, 512, 8)
++    assert grouped_reduce_out_shape(512, 256, 32, axis=0) == (16, 256)
 +    op = GroupedLocalReduce("g", axis=0, group=32)
 +    kwargs = {
 +        "m": 512,
@@ -2065,27 +1817,6 @@ index 0000000..833ac3e
 +
 +    op = GroupedLocalReduceWithFinalizeArg("g", axis=1, group=16, finalize=finalize)
 +    assert not op.supports_swap_ab
-+
-+
-+def test_blocked_carrier_contract_and_cache_identity():
-+    """Blocked storage owns padding, metadata shape, and semantic identity."""
-+    assert blocked_128x4_numel(128, 4) == 512
-+    assert blocked_128x4_numel(129, 5, batch=2) == 4096
-+    carrier = torch.empty(2048)
-+    view = blocked_128x4_carrier_view(carrier, 129, 5)
-+    assert view.shape == (1, 129, 5)
-+    assert view.stride() == (2048, 0, 0)
-+    assert view.untyped_storage().data_ptr() == carrier.untyped_storage().data_ptr()
-+
-+    op = Blocked128x4GroupedLocalReduce("g", group=16)
-+    assert op.host_arg_key(view)[0] is cutlass.Float32
-+    assert op.cache_key() != GroupedLocalReduce("g", axis=1, group=16).cache_key()
-+    with pytest.raises(NotImplementedError, match="axis 1 only"):
-+        Blocked128x4GroupedLocalReduce("g", axis=0, group=16)
-+    with pytest.raises(ValueError, match="contiguous rank 1"):
-+        blocked_128x4_carrier_view(torch.empty(2049), 129, 5)
-+    with pytest.raises(ValueError, match="metadata view"):
-+        op.host_arg_key(torch.empty(1, 129, 5))
 +
 +
 +def test_prepass_value_port_config_and_validation():
@@ -2187,7 +1918,6 @@ index 0000000..833ac3e
 +# ------------------------------------------------------------------ GPU tests
 +
 +_TILE = dict(tile_M=128, tile_N=256, cluster_M=1, cluster_N=1)
-+_TILE_EXTENTS = dict(tile_M=_TILE["tile_M"], tile_N=_TILE["tile_N"])
 +
 +
 +def _store_mod(axis, group, combine, finalize):
@@ -2204,22 +1934,6 @@ index 0000000..833ac3e
 +    op = GroupedLocalReduce(
 +        "g",
 +        axis=axis,
-+        group=group,
-+        combine=combine,
-+        finalize=finalize,
-+    )
-+
-+    @fragment_epilogue(outs={"g": op})
-+    @cute.jit
-+    def grouped_store(acc):
-+        return {"D": acc, "g": acc}
-+
-+    return grouped_store
-+
-+
-+def _blocked_store_mod(group, combine="add", finalize=None):
-+    op = Blocked128x4GroupedLocalReduce(
-+        "g",
 +        group=group,
 +        combine=combine,
 +        finalize=finalize,
@@ -2319,7 +2033,6 @@ index 0000000..833ac3e
 +    A, B, x = _inputs(l, m, n, k)
 +    D = torch.empty((l, m, n), device="cuda", dtype=torch.bfloat16)
 +    out = _compressed_out(l, m, n, axis, group)
-+    validate_grouped_reduce_out("g", out, m, n, group, axis, batch=l, **_TILE_EXTENTS)
 +    _store_mod(axis, group, combine, finalize).gemm(A, B, D, epi_args=dict(g=out), **_TILE)
 +    _check(D, x, "D")
 +    _check(out, _grouped_ref(x, axis, group, combine, finalize), "grouped", tol=1e-3)
@@ -2366,115 +2079,6 @@ index 0000000..833ac3e
 +    )
 +    _check(D, x, "D")
 +    _check(out, _grouped_ref(x, axis, group, "add", None), "grouped", tol=1e-3)
-+
-+
-+def test_grouped_store_blocked_128x4():
-+    """The EpiOp owns the physical 128x4 swizzle and writes no follow-up kernel."""
-+    l, m, n, k, group = 1, 256, 256, 256, 32
-+    A, B, x = _inputs(l, m, n, k, seed=43)
-+    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
-+    carrier = torch.full(
-+        (blocked_128x4_numel(m, n // group),),
-+        float("nan"),
-+        device="cuda",
-+        dtype=torch.float32,
-+    )
-+    view = blocked_128x4_carrier_view(carrier, m, n // group)
-+    _blocked_store_mod(group, combine="max").gemm(
-+        A,
-+        B,
-+        D,
-+        epi_args=dict(g=view),
-+        tile_M=256,
-+        tile_N=256,
-+        cluster_M=2,
-+        cluster_N=1,
-+    )
-+
-+    reduced = _grouped_ref(D, 1, group, "max", None)[0]
-+    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
-+    padded[:m, : n // group] = reduced
-+    expected = (
-+        padded.reshape(2, 128, 2, 4)
-+        .permute(0, 2, 1, 3)
-+        .reshape(-1, 4, 32, 4)
-+        .transpose(1, 2)
-+        .reshape(-1)
-+    )
-+    _check(D, x, "D")
-+    assert torch.equal(carrier, expected)
-+
-+
-+def test_grouped_store_blocked_128x4_zero_fills_padding():
-+    """Tail predicates leave the caller-zeroed padded rows and columns untouched."""
-+    l, m, n, k, group = 1, 129, 80, 256, 16
-+    A, B, x = _inputs(l, m, n, k, seed=47)
-+    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
-+    carrier = torch.zeros(
-+        (blocked_128x4_numel(m, n // group),),
-+        device="cuda",
-+        dtype=torch.float32,
-+    )
-+    _blocked_store_mod(group, combine="max").gemm(
-+        A,
-+        B,
-+        D,
-+        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
-+        tile_M=256,
-+        tile_N=256,
-+        cluster_M=2,
-+        cluster_N=1,
-+    )
-+
-+    reduced = _grouped_ref(D, 1, group, "max", None)[0]
-+    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
-+    padded[:m, : n // group] = reduced
-+    expected = (
-+        padded.reshape(2, 128, 2, 4)
-+        .permute(0, 2, 1, 3)
-+        .reshape(-1, 4, 32, 4)
-+        .transpose(1, 2)
-+        .reshape(-1)
-+    )
-+    _check(D, x, "D")
-+    assert torch.equal(carrier, expected)
-+
-+
-+def test_grouped_store_blocked_128x4_swap_ab():
-+    """The same logical blocked carrier works for the validated swapped sink."""
-+    l, m, n, k, group = 1, 257, 288, 64, 32
-+    A, B, x = _inputs(l, m, n, k, seed=53)
-+    D = torch.empty((l, m, n), device="cuda", dtype=torch.float32)
-+    carrier = torch.zeros(
-+        (blocked_128x4_numel(m, n // group),),
-+        device="cuda",
-+        dtype=torch.float32,
-+    )
-+    _blocked_store_mod(group, combine="max").gemm(
-+        A,
-+        B.mT,
-+        D,
-+        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
-+        tile_M=256,
-+        tile_N=256,
-+        cluster_M=2,
-+        cluster_N=1,
-+        b_kn=True,
-+        swap_ab=True,
-+    )
-+
-+    reduced = _grouped_ref(D, 1, group, "max", None)[0]
-+    padded = torch.zeros((384, 12), device="cuda", dtype=torch.float32)
-+    padded[:m, : n // group] = reduced
-+    expected = (
-+        padded.reshape(3, 128, 3, 4)
-+        .permute(0, 2, 1, 3)
-+        .reshape(-1, 4, 32, 4)
-+        .transpose(1, 2)
-+        .reshape(-1)
-+    )
-+    _check(D, x, "D")
-+    assert torch.equal(carrier, expected)
 +
 +
 +@pytest.mark.parametrize("axis,group,combine", [(1, 32, "max"), (0, 32, "add")])
