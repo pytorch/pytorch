@@ -3712,6 +3712,12 @@ class DynamoTracerOutput:
     def _cleanup_output_graph(self) -> None:
         output_graph = self.output_graph_for_cleanup
         if output_graph:
+            # Failed tracing attempts never transfer these hooks to
+            # CleanupManager, so run them here to remove installed globals.
+            for cleanup in reversed(output_graph.cleanups):
+                cleanup()
+            output_graph.cleanups.clear()
+
             # Lazy import to avoid a circular import (convert_frame imports
             # output_graph at module load time).
             from .convert_frame import _clear_fake_mode_weakrefs

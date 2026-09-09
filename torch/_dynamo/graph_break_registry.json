@@ -192,6 +192,14 @@
   "GB2019": [
     {
       "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
+      "Context": "call_method {self} mark_dirty",
+      "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
       "Context": "call_method {self} {name}",
       "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
       "Hints": [
@@ -1245,6 +1253,17 @@
       ]
     }
   ],
+  "GB9193": [
+    {
+      "Gb_type": "Call to a time function",
+      "Context": "Called `{fn_name}()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `{fn_name}()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Hints": [
+        "Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7596": [
     {
       "Gb_type": "Indexing torch.Size with non-scalar tensor",
@@ -2122,6 +2141,16 @@
     }
   ],
   "GB0138": [
+    {
+      "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
+      "Context": "call_method {self} save_for_backward",
+      "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
+      "Hints": [
+        "Ensure that the `saved_tensors` attribute is properly ",
+        "initialized before calling `save_for_backward`. ",
+        "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`."
+      ]
+    },
     {
       "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
       "Context": "call_method {self} {name}",

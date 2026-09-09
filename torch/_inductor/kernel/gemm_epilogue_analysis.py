@@ -323,7 +323,6 @@ class GemmOutputPlan:
             group=match.geometry.group,
             axis=match.geometry.axis,
             reduction_type=match.reduction_type,
-            source_type="identity",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             primary_output=self.output.name,
             feeds_main=local_reduce.feeds_main,
@@ -455,7 +454,7 @@ class GemmLocalReduceAnalysis:
         )
         return True
 
-    def has_physical_grouped_input(self, value: Any) -> bool:
+    def has_physical_grouped_input(self, value: torch.fx.node.Argument) -> bool:
         """Return whether a value depends on a grouped layout needing callbacks."""
         active_geometries = OrderedSet(
             match.geometry for match in self.matches.values()
@@ -503,7 +502,7 @@ class GemmLocalReduceAnalysis:
 
     def match_feed_value(
         self,
-        value: Any,
+        value: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
         layout: GemmReductionGeometry,
     ) -> GemmLocalReduceMatch | None:
@@ -541,7 +540,7 @@ class GemmLocalReduceAnalysis:
 
     def validate_hidden_feed_main_reduction_input(
         self,
-        input_node: Any,
+        input_node: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
     ) -> None:
         """Reject reduction inputs that would need another physical feed-main value."""
@@ -556,7 +555,7 @@ class GemmLocalReduceAnalysis:
 
     def validate_feed_main_source_reductions(
         self,
-        value: Any,
+        value: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
         selected_reduction: torch.fx.Node,
         seen: OrderedSet[torch.fx.Node] | None = None,
