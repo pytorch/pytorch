@@ -5665,8 +5665,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer, result_var, value, index, result_kind="index", whole_tile=False
         ):
             # The two-pass helper pays off over a whole row tile, not on the
-            # tail of a loop, and only where the index alone is consumed.
-            two_pass = whole_tile and result_kind == "index"
+            # tail of a loop, and only where the index alone is consumed. The
+            # Triton CPU backend computes a different index from it, so CUDA only.
+            two_pass = (
+                whole_tile
+                and result_kind == "index"
+                and torch.version.hip is None
+                and V.graph.get_current_device_or_throw().type == "cuda"
+            )
             suffix = "_with_first_index" if two_pass else "_with_index"
             value = self.reduction_collapse_dims(buffer, value, value.dtype)
             index = self.reduction_collapse_dims(
