@@ -58,7 +58,7 @@ class AccessType(enum.Enum):
         return "reading from" if self is AccessType.READ else "writing to"
 
 
-@dataclass
+@dataclass(slots=True)
 class Access:
     r"""Stores information about a single access to a tensor by a kernel.
 
@@ -141,6 +141,59 @@ class UnsynchronizedAccessError(SynchronizationError):
             return message.getvalue()
 
 
+class AllocatorReuseError(SynchronizationError):
+    """Detected when the caching allocator reuses memory without proper stream sync.
+
+    This occurs when a tensor is freed (refcount drops to zero, returning memory
+    to the caching allocator's free pool) while a stream may still be accessing
+    that memory, and the allocator then hands the same memory block to a new
+    allocation on a different stream without synchronization.
+    """
+
+    def __init__(
+        self,
+        data_ptr: DataPtr,
+        alloc_stream: StreamId,
+        previous_accesses: list[tuple[StreamId, SeqNum]],
+        dealloc_stack_trace: traceback.StackSummary | None,
+        alloc_stack_trace: traceback.StackSummary | None,
+    ):
+        self.data_ptr = data_ptr
+        self.alloc_stream = alloc_stream
+        self.previous_accesses = previous_accesses
+        self.dealloc_stack_trace = dealloc_stack_trace
+        self.alloc_stack_trace = alloc_stack_trace
+
+    def __str__(self):
+        with io.StringIO() as message:
+            message.write(
+                textwrap.dedent(
+                    f"""\
+                    ============================
+                    CSAN detected a possible data race from caching allocator memory reuse
+                    Memory at data pointer {self.data_ptr}
+                    New allocation on stream {self.alloc_stream}, but previous access(es) on
+                    unsynchronized stream(s) may still be using this memory:
+                    """
+                )
+            )
+            for stream, seq_num in self.previous_accesses:
+                message.write(f"  stream {stream} (seq_num {seq_num})\n")
+
+            if self.dealloc_stack_trace:
+                message.write(
+                    "\nMemory was freed with stack trace:\n"
+                    f"{''.join(self.dealloc_stack_trace.format())}\n"
+                )
+
+            if self.alloc_stack_trace:
+                message.write(
+                    "Memory was re-allocated with stack trace:\n"
+                    f"{''.join(self.alloc_stack_trace.format())}"
+                )
+            return message.getvalue()
+
+
 class CUDASanitizerErrors(Exception):
     """Wrapper class for errors reported by CUDA Sanitizer."""
 
@@ -151,7 +204,7 @@ class CUDASanitizerErrors(Exception):
         return f"detected {len(self.errors)} errors"
 
 
-@dataclass
+@dataclass(slots=True)
 class TensorInfo:
     r"""Stores information about a single tensor and recent accesses to it.
 
@@ -166,6 +219,27 @@ class TensorInfo:
     allocation_stack_trace: traceback.StackSummary | None
     reads: list[Access] = field(default_factory=list)
     write: Access | None = None
+
+
+@dataclass(slots=True)
+class PendingReuse:
+    r"""Tracks a freed memory block awaiting potential reuse by the caching allocator.
+
+    When a tensor is deallocated, its access history is condensed into this
+    record.  If the caching allocator later hands the same data pointer to a
+    new allocation, CSAN checks whether the new stream has a happens-before
+    relationship with every stream recorded here.
+
+    Args:
+        stream_seq_nums: mapping from stream id to the latest seq_num that
+            accessed this memory before it was freed.
+        dealloc_stream: the stream on which the deallocation occurred.
+        dealloc_stack_trace: stack trace captured at deallocation time.
+    """
+
+    stream_seq_nums: dict[StreamId, SeqNum]
+    dealloc_stream: StreamId
+    dealloc_stack_trace: traceback.StackSummary | None
 
 
 class _TensorsAccessed:
@@ -348,6 +422,16 @@ class EventHandler:
         self.tensors_accessed = _TensorsAccessed()
         self.syncs = StreamSynchronizations()
         self.seq_num: SeqNum = 0
+        self.pending_reuse: dict[DataPtr, PendingReuse] = {}
+        # Errors detected in memory callbacks are deferred here because
+        # CallbackRegistry.fire_callbacks swallows exceptions.  They are
+        # drained and raised in the next __torch_dispatch__ call.
+        self.deferred_errors: list[SynchronizationError] = []
+        # Streams registered via record_stream() per data pointer.  The
+        # caching allocator guarantees it will not reuse memory until all
+        # recorded streams have completed, so these streams are safe and
+        # should be excluded from PendingReuse checks.
+        self.recorded_streams: dict[DataPtr, set[StreamId]] = {}
 
     def _handle_kernel_launch(
         self,
@@ -435,21 +519,91 @@ class EventHandler:
     def _handle_event_wait(self, event: EventId, stream: StreamId) -> None:
         self.syncs.stream_wait_for_event(stream, event)
 
-    def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
+    def _handle_memory_allocation(self, data_ptr: DataPtr, stream: StreamId) -> None:
+        # Check for caching allocator reuse races: if this data_ptr was
+        # recently freed, verify that the new allocation stream has a
+        # happens-before relationship with all streams that previously
+        # accessed the memory.
+        if data_ptr in self.pending_reuse:
+            pending = self.pending_reuse.pop(data_ptr)
+            self.syncs._ensure_stream_exists(stream)
+            unsynchronized = []
+            for old_stream, seq_num in pending.stream_seq_nums.items():
+                if not self.syncs.is_ordered_after(stream, seq_num, old_stream):
+                    unsynchronized.append((old_stream, seq_num))
+            if unsynchronized:
+                alloc_stack_trace = traceback.StackSummary.extract(
+                    traceback.walk_stack(inspect.currentframe()),
+                    lookup_lines=False,
+                )
+                alloc_stack_trace.reverse()
+                error = AllocatorReuseError(
+                    data_ptr,
+                    stream,
+                    unsynchronized,
+                    pending.dealloc_stack_trace,
+                    alloc_stack_trace,
+                )
+                # Cannot raise here — this runs inside
+                # CallbackRegistry.fire_callbacks which swallows exceptions.
+                # Defer the error to be raised on the next __torch_dispatch__.
+                self.deferred_errors.append(error)
+
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
         stack_trace = traceback.StackSummary.extract(
             traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
-        # The stack trace generated in this way is in the inverse order, so it must be
-        # reversed.
+        # The stack trace generated in this way is in the inverse order, so it
+        # must be reversed.
         stack_trace.reverse()
         self.tensors_accessed.create_tensor(
             data_ptr,
             stack_trace,
         )
 
-    def _handle_memory_deallocation(self, data_ptr: DataPtr) -> None:
+    def _handle_record_stream(self, data_ptr: DataPtr, stream: StreamId) -> None:
+        """Handle tensor.record_stream(stream).
+
+        The caching allocator guarantees it will not reuse a block's memory
+        until every stream passed to record_stream has completed.  We track
+        these streams so that _handle_memory_deallocation can exclude them
+        from PendingReuse — the allocator itself ensures safety for recorded
+        streams.
+        """
+        self.recorded_streams.setdefault(data_ptr, set()).add(stream)
+
+    def _handle_memory_deallocation(self, data_ptr: DataPtr, stream: StreamId) -> None:
         self.tensors_accessed.ensure_tensor_exists(data_ptr)
+        # Condense the tensor's access history into a PendingReuse record so
+        # we can detect races if the caching allocator hands this memory block
+        # to a new allocation before all prior streams have finished.
+        info = self.tensors_accessed.accesses[data_ptr]
+        stream_seq_nums: dict[StreamId, SeqNum] = {}
+        if info.write is not None:
+            stream_seq_nums[info.write.stream] = info.write.seq_num
+        for read in info.reads:
+            prev = stream_seq_nums.get(read.stream, -1)
+            stream_seq_nums[read.stream] = max(prev, read.seq_num)
+
+        # Exclude streams that were registered via record_stream().  The
+        # caching allocator guarantees it will not reuse this memory until
+        # those streams have completed, so they cannot race.
+        safe_streams = self.recorded_streams.pop(data_ptr, set())
+        for s in safe_streams:
+            stream_seq_nums.pop(s, None)
+
+        if stream_seq_nums:
+            dealloc_stack_trace = traceback.StackSummary.extract(
+                traceback.walk_stack(inspect.currentframe()),
+                lookup_lines=False,
+            )
+            dealloc_stack_trace.reverse()
+            self.pending_reuse[data_ptr] = PendingReuse(
+                stream_seq_nums=stream_seq_nums,
+                dealloc_stream=stream,
+                dealloc_stack_trace=dealloc_stack_trace,
+            )
+
         self.tensors_accessed.delete_tensor(data_ptr)
 
     def _handle_stream_creation(self, stream: StreamId) -> None:
@@ -457,9 +611,29 @@ class EventHandler:
 
     def _handle_device_synchronization(self) -> None:
         self.syncs.sync_all_streams()
+        # After a full device sync, all streams are synchronized with each
+        # other, so every pending reuse is safe — prune the entire map.
+        self.pending_reuse.clear()
 
     def _handle_stream_synchronization(self, stream: StreamId) -> None:
         self.syncs.all_streams_wait_for_stream(stream)
+        # After synchronizing with a specific stream, prune pending_reuse
+        # entries whose only unsynchronized accesses were on that stream.
+        to_delete = []
+        for data_ptr, pending in self.pending_reuse.items():
+            all_synced = True
+            for old_stream in pending.stream_seq_nums:
+                # Check if all known streams now see old_stream's seq_num.
+                # After all_streams_wait_for_stream(stream), every stream's
+                # view of `stream` is up-to-date. If old_stream == stream,
+                # those accesses are now visible to everyone.
+                if old_stream != stream:
+                    all_synced = False
+                    break
+            if all_synced:
+                to_delete.append(data_ptr)
+        for data_ptr in to_delete:
+            del self.pending_reuse[data_ptr]
 
     def _handle_event_synchronization(self, event: EventId) -> None:
         self.syncs.all_streams_wait_for_event(event)
@@ -595,8 +769,22 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        # record_stream is not a kernel dispatch, skip it
+        # record_stream tells the caching allocator that a tensor is used on
+        # an additional stream.  Forward this to EventHandler so it can
+        # exclude the recorded stream from allocator-reuse race checks.
         if func is aten.record_stream.default:
+            tensor, stream_arg = args[0], args[1]  # type: ignore[index]
+            if isinstance(tensor, torch.Tensor) and tensor.is_cuda:
+                data_ptr = tensor.data_ptr() if tensor.data_ptr() else id(tensor)
+                # stream_arg is a torch.Stream with (device_type, device_index,
+                # stream_id).  Convert to the raw cuda_stream handle that CSAN
+                # uses everywhere else for stream identity.
+                cuda_stream = torch.cuda.Stream(
+                    stream_id=stream_arg.stream_id,
+                    device_index=stream_arg.device_index,
+                    device_type=stream_arg.device_type,
+                ).cuda_stream
+                self.event_handler._handle_record_stream(data_ptr, cuda_stream)
             return func(*args, **kwargs)
 
         is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
@@ -615,6 +803,12 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
             func._schema,
             argument_handler.tensor_aliases,
         )
+        # Drain any errors deferred from memory allocation/deallocation
+        # callbacks (which run inside CallbackRegistry.fire_callbacks and
+        # cannot propagate exceptions directly).
+        if self.event_handler.deferred_errors:
+            errors = list(errors) + self.event_handler.deferred_errors
+            self.event_handler.deferred_errors.clear()
         if errors:
             for error in errors:
                 print(error, file=sys.stderr)
