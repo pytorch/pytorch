@@ -86,7 +86,9 @@ class ComposableEpiMixin:
         directly. After this runs, op hook methods can assume their
         `param`/`arg_tensor` is non-None."""
         self._epi_ops = tuple(
-            op for op in type(self)._epi_ops if getattr(args, op.name, None) is not None
+            op
+            for op in type(self)._epi_ops
+            if getattr(args, op.name, None) is not None or op.keep_tensorless
         )
 
     def _epi_ops_to_params_dict(self, args):
@@ -128,7 +130,7 @@ class ComposableEpiMixin:
         result = EpiSmemBytes()
         for op in cls._epi_ops:
             arg = getattr(args, op.name, None)
-            if arg is not None:
+            if arg is not None or op.keep_tensorless:
                 result += op.smem_bytes(arg, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
         return result
 
