@@ -50,14 +50,14 @@ void eval_frame_callback_set(PyObject* obj) {
 
 int64_t get_current_isolate_recompiles_id(void) {
   void* value = PyThread_tss_get(&isolate_recompiles_key);
-  return value == NULL ? -1 : (int64_t)(intptr_t)value - 2;
+  return value == NULL ? -1 : (int64_t)((uint64_t)(uintptr_t)value - 2);
 }
 
 static void set_current_isolate_recompiles_id(int64_t id) {
   // The Python entry point already rejects id < -1 with ValueError.
   DEBUG_CHECK(id >= -1);
   PyThread_tss_set(
-      &isolate_recompiles_key, (void*)(intptr_t)(id + 2));
+      &isolate_recompiles_key, (void*)(uintptr_t)((uint64_t)id + 2));
 }
 
 static PyObject* get_eval_frame_isolate_recompiles_id_py(
