@@ -11631,29 +11631,6 @@ class GraphModule(torch.nn.Module):
                 else:
                     torch.compile(fn)(f, x)
 
-    @requires_cuda
-    @parametrize("device", ["cuda", "cpu"])
-    def test_cond_input_mutation(self, device):
-        predicate_true = torch.tensor(True, device=device)
-        predicate_false = torch.tensor(False, device=device)
-        org_data = torch.ones(2, 2, device=device)
-
-        def fn(predicate, data):
-            return torch.cond(
-                predicate, lambda x: x + 1, lambda x: x.sin_().add_(2), [data]
-            )
-
-        with torch.no_grad():
-            expected = org_data.sin() + 2
-            data = org_data.clone()
-            output = torch.compile(fn)(predicate_false, data)
-            self.assertEqual(output, expected)
-            self.assertIsNot(output, data)
-
-            data = org_data.clone()
-            output = torch.compile(fn)(predicate_true, data)
-            self.assertEqual(output, org_data + 1)
-
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
@@ -12081,6 +12058,38 @@ class GraphModule(torch.nn.Module):
 
         compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
         self.assertEqual(compiled(5, 7), g(5, 7))
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowTracedDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_cond_input_mutation(self, device):
+        predicate_true = torch.tensor(True, device=device)
+        predicate_false = torch.tensor(False, device=device)
+        org_data = torch.ones(2, 2, device=device)
+
+        def fn(predicate, data):
+            return torch.cond(
+                predicate, lambda x: x + 1, lambda x: x.sin_().add_(2), [data]
+            )
+
+        with torch.no_grad():
+            expected = org_data.sin() + 2
+            data = org_data.clone()
+            output = torch.compile(fn)(predicate_false, data)
+            self.assertEqual(output, expected)
+            self.assertIsNot(output, data)
+
+            data = org_data.clone()
+            output = torch.compile(fn)(predicate_true, data)
+            self.assertEqual(output, org_data + 1)
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):
@@ -13072,6 +13081,174 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    @parametrize("mutate_in", ["cond", "body", "both"])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_mutation(
+        self, device, dynamic, mutate_in
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    if mutate_in in ("cond", "both"):
+                        y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    if mutate_in in ("body", "both"):
+                        y.add_(1.0)
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_in_cond_zero_iter(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    y.mul_(0.5)
+                    return i < 0
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # cond_fn mutating a carried input alone is rejected by
+    # functionalization (auto-functionalization does not kick in because
+    # no captured tensor is mutated).
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_while_loop_cond_mutates_carry_raises(self, device):
+        def f(x):
+            def cond_fn(i, acc):
+                acc.mul_(0.99)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + 1.0
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x.clone()),
+            )
+
+        x = torch.ones(4, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_fn might be modifying the input"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    # cond_fn mutates both a carried input and a pre-mutated captured
+    # tensor: the captured-tensor mutation makes auto-functionalization
+    # kick in, so the carry mutation reaches Inductor's while_loop
+    # lowering instead of being rejected up front. The carry's final
+    # value must come from body_fn's output, not the pre-loop buffer.
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_cond_mutates_carry_and_pre_mutated_tensor(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    acc.mul_(0.99)
+                    y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_pre_mutated_tensor_in_cond_repeated_calls(
+        self, device, dynamic
+    ):
+        def f(state):
+            state.mul_(0.8)
+
+            def cond_fn(i, acc):
+                state.mul_(0.5)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + state
+
+            i, acc = while_loop(
+                cond_fn,
+                body_fn,
+                (
+                    torch.zeros((), dtype=torch.int64, device=state.device),
+                    torch.zeros_like(state),
+                ),
+            )
+            return i, acc, state.clone()
+
+        compiled = torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)
+        state_eager = torch.ones(4, device=device)
+        state_compiled = state_eager.clone()
+        with torch.no_grad():
+            for _ in range(3):
+                expected = f(state_eager)
+                actual = compiled(state_compiled)
+                self.assertEqual(expected, actual)
+                self.assertEqual(state_eager, state_compiled)
+
 
 _hop_schema_test_schema_types = [
     "bool",
@@ -13746,6 +13923,7 @@ only_for = ("cpu", "cuda")
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
+instantiate_device_type_tests(TestControlFlowTracedDevice, globals(), only_for=only_for)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 instantiate_device_type_tests(
     TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for
