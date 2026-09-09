@@ -112,10 +112,19 @@ class SerializedCode:
 
 
 class FunctionPicklerBase(pickle.Pickler):
-    """Reducers shared by the picklers that rebuild objects pickle cannot do by
-    reference: code objects, closure cells, python modules, and bound methods. Each subclass
-    keeps its own dispatch; this class fixes HOW they are rebuilt so a fix in
-    one pickler cannot be missed in the other.
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
+
+    Defaults travel as pickle STATE, applied after memoization, so a default
+    that reaches back to its own function ends. A closure cell is a reduce
+    ARGUMENT: a function closing over itself is reduced twice, and
+    save_reduce's recursive-object fallback (present in both the C and the
+    pure-Python pickler) drops the outer copy.
     """
 
     @classmethod
@@ -140,6 +149,64 @@ class FunctionPicklerBase(pickle.Pickler):
         # entirely when the state object is None, and None is an ordinary cell
         # value that must not come back as an empty cell.
         cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that. Leave that None in
+        # place rather than assigning it back (which the stub rejects).
+        if module is not None:
+            fn.__module__ = module
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(
+        cls,
+        module: str | None,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope. That is safe on the guard-serialization path,
+        # which reads attributes off the rebuilt function without calling it;
+        # the shared AOT path (AOTCompilePickler) does call it, so there an
+        # empty scope surfaces as a NameError at first call, not a load error.
+        f_globals: dict[str, Any]
+        # __module__ need not be an importable string: a decorator can set it to
+        # a non-str (42), a <locals>/exec function can carry None or "" (bare
+        # globals with no __name__), and a relative name (".rel") or a module
+        # whose body raises fails import with something other than ImportError.
+        # None of those should fail the load, so require a non-empty str and
+        # swallow any import failure into the empty scope.
+        if isinstance(module, str) and module:
+            try:
+                f_globals = importlib.import_module(module).__dict__
+            except Exception:
+                f_globals = {}
+        else:
+            f_globals = {}
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
+
+    @staticmethod
+    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+        defaults, kwdefaults = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
 
     def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
         try:
@@ -194,6 +261,21 @@ class FunctionPicklerBase(pickle.Pickler):
         if func is inner:
             return None
         return type(self)._unpickle_bound_method, (func, method.__self__)
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> tuple[Any, ...]:
+        # defaults/kwdefaults/closure are passed in rather than read off fn so
+        # the subclass decides what the rebuilt function carries.
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        unpickle = type(self)._unpickle_fn_from_module
+        state = (defaults, kwdefaults)
+        return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
 @dataclasses.dataclass
