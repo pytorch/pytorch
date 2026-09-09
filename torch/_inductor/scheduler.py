@@ -9221,7 +9221,8 @@ class Scheduler:
         for sn in snodes:
             order = tuple(range(len(sn._sizes[0])))
             if not SIMDKernel.is_compatible(target_iter_sizes, sn.get_ranges()):
-                if not config.loop_ordering_after_fusion:
+                # Child reordering can invalidate internal fused dependencies.
+                if not config.loop_ordering_after_fusion or len(snodes) > 1:
                     return False
                 order = self._reduction_output_first_order(
                     reduction_node.get_buffer_names(), sn, red_numel

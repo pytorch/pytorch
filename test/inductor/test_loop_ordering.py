@@ -34,6 +34,7 @@ from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symb
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1686,6 +1687,20 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
 
+class LoopOrderingDeviceTest(TestCase):
+    @inductor_config.patch(loop_ordering_after_fusion=True)
+    @parametrize("size", (6, 7))
+    def test_square_block_fused_consumer_dependencies(self, device, size):
+        def fn(x, a, b, c):
+            scale = x.abs().amax(dim=(1, 3), keepdim=True).clamp(min=1e-6)
+            u = x / scale + a + b + c
+            v = u + scale.transpose(0, 2)
+            return u, v
+
+        args = [torch.randn(size, 16, size, 16, device=device) for _ in range(4)]
+        self.assertEqual(fn(*args), torch.compile(fn, fullgraph=True)(*args))
+
+
 @inductor_config.patch(
     {
         "triton.unique_kernel_names": True,
@@ -2822,6 +2837,9 @@ class TestIndexInversion(TestCase):
                 sympy.S.Zero,
             )
         )
+
+
+instantiate_device_type_tests(LoopOrderingDeviceTest, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":
