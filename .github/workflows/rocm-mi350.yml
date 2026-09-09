@@ -5,10 +5,9 @@
 name: rocm-mi350
 
 on:
-  push:
-    tags:
-      # temporary: re-comment before merge
-      - ciflow/rocm-mi350/*
+  #push:
+  #  tags:
+  #    - ciflow/rocm-mi350/*
   workflow_dispatch:
   #schedule:
   #  - cron: 29 8 * * *  # about 1:29am PDT
@@ -30,10 +29,7 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    # TEMPORARY (PR validation only): use the PR's own _runner-determinator.yml so
-    # amd-dpx-label-type propagates. Revert to
-    # pytorch/pytorch/.github/workflows/_runner-determinator.yml@main before merge.
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
