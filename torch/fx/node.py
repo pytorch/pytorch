@@ -47,14 +47,6 @@ BaseArgumentTypes = Union[  # noqa: UP007
 ]
 base_types = typing.get_args(BaseArgumentTypes)
 
-_SPARSE_LAYOUTS = (
-    torch.sparse_coo,
-    torch.sparse_csc,
-    torch.sparse_csr,
-    torch.sparse_bsc,
-    torch.sparse_bsr,
-)
-
 Target: TypeAlias = Callable[..., Any] | str
 
 Argument = Optional[  # noqa: UP045
@@ -685,6 +677,7 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
+            from torch._subclasses.meta_utils import is_sparse_compressed_layout
 
             def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
@@ -697,7 +690,7 @@ class Node(_NodeBase):
             if include_tensor_metadata and isinstance(meta_val, torch.Tensor):
                 stride_annotation = (
                     ""
-                    if meta_val.layout in _SPARSE_LAYOUTS
+                    if is_sparse_compressed_layout(meta_val.layout)
                     else stringify_shape(meta_val.stride())
                 )
                 device_annotation = _device_annotation(meta_val.device)

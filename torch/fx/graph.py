@@ -35,7 +35,6 @@ from .immutable_collections import immutable_dict
 from .node import (
     _device_annotation,
     _get_qualified_name,
-    _SPARSE_LAYOUTS,
     _type_repr,
     Argument,
     Node,
@@ -795,6 +794,7 @@ class CodeGen:
                 except ModuleNotFoundError:
                     DTensor = None  # type: ignore[assignment,misc]
                     dtensorspec_format_shard_order_str = None
+                from torch._subclasses.meta_utils import is_sparse_compressed_layout
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -804,7 +804,8 @@ class CodeGen:
                 )
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
-                    want_stride = include_stride and t.layout not in _SPARSE_LAYOUTS
+                    compressed = is_sparse_compressed_layout(t.layout)
+                    want_stride = include_stride and not compressed
                     stride = stringify_shape(t.stride()) if want_stride else ""
                     device = _device_annotation(t.device) if include_device else ""
                     return (
