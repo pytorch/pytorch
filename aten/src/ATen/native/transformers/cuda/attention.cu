@@ -1738,7 +1738,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
     auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
-    hipError_t err; // TODO: Error handling
     using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::VarlenType;
     using aotriton::v3::flash::WindowValue;
@@ -1777,9 +1776,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     } else {
       params.varlen_type = VarlenType::None;
     }
-    err = aotriton::v3::flash::attn_fwd(params,
-                                        aotriton::v3::flash::attn_fwd_params::kVersion,
-                                        stream);
+    AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
+        params, aotriton::v3::flash::attn_fwd_params::kVersion, stream));
 #else
     TORCH_CHECK(false, "Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
 #endif
@@ -2083,14 +2081,13 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
   const auto options = at::dtype(at::kLong).device(at::kCUDA);
   seed_t = at::scalar_tensor(at::Scalar(seed), options);
   offset_t = at::scalar_tensor(at::Scalar(offset), options);
-  hipError_t err; // TODO: Error handling
-
-  err = debug_simulate_encoded_softmax(mk_aotensor(self, "r"),
-                                       dropout_p,
-                                       mk_aoscalartensor(seed_t),
-                                       mk_aoscalartensor(offset_t),
-                                       0,
-                                       stream);
+  AT_CUDA_CHECK(debug_simulate_encoded_softmax(
+      mk_aotensor(self, "r"),
+      dropout_p,
+      mk_aoscalartensor(seed_t),
+      mk_aoscalartensor(offset_t),
+      0,
+      stream));
 #else
   TORCH_CHECK(false, "_fill_mem_eff_dropout_mask_ is only enabled with aotriton");
 #endif
