@@ -182,6 +182,10 @@ def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
 
 
+class _Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+    bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
+
+
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -307,9 +311,86 @@ class TestMaxAutotune(TestCase):
         )
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_rejects_misaligned_leading_stride(self) -> None:
+        bsz, m, k, n = 2, 256, 256, 257
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            self.assertEqual(choices, [])
+            raise NoValidChoicesError("Blackwell BMM template was correctly rejected")
+
+        with (
+            self.assertRaisesRegex(BackendCompilerFailed, "correctly rejected"),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
+
+    def _assert_blackwell_bmm_2cta_rejected(
+        self,
+        a: torch.Tensor,
+        b: torch.Tensor,
+        *,
+        flatten_output: bool,
+    ) -> None:
+        class FlatBMMKernelInputs(MMKernelInputs):
+            def output_layout(self, flexible=True):
+                return FixedLayout(
+                    self.device(),
+                    self.out_dtype(),
+                    [a.shape[0] * a.shape[1], b.shape[2]],
+                    [b.shape[2], 1],
+                )
+
+        def lowering(a_node, b_node):
+            kernel_inputs_cls = (
+                FlatBMMKernelInputs if flatten_output else MMKernelInputs
+            )
+            choices = V.choices.get_template_configs(
+                kernel_inputs_cls([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            self.assertEqual(choices, [])
+            raise NoValidChoicesError("Blackwell BMM template was correctly rejected")
+
+        custom_op = (
+            torch.ops.inductor_test.blackwell_bmm_flat.default
+            if flatten_output
+            else torch.ops.inductor_test.blackwell_bmm.default
+        )
+        fn = blackwell_bmm_flat if flatten_output else blackwell_bmm
+        with (
+            self.assertRaisesRegex(BackendCompilerFailed, "correctly rejected"),
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=_Test2CTABlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(lowerings, {custom_op: lowering}),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            torch.compile(fn, fullgraph=True)(a, b)
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
-        bsz, m, k, n = 2, 256, 8193, 128
+    @parametrize("m", (256, 512))
+    def test_blackwell_bmm_template_2cta_flat_output(self, m: int) -> None:
+        bsz, k, n = 2, 8193, 128
         a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         a = a_storage.transpose(1, 2)
         b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -319,19 +400,6 @@ class TestMaxAutotune(TestCase):
                 return FixedLayout(
                     self.device(), self.out_dtype(), [bsz * m, n], [n, 1]
                 )
-
-        class Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
-            bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
-
-            def _get_template_configs_impl(self, kernel_inputs, op_name):
-                for template_config in super()._get_template_configs_impl(
-                    kernel_inputs, op_name
-                ):
-                    yield {
-                        **template_config,
-                        "FLATTEN_OUTPUT": True,
-                        "tma_store": True,
-                    }
 
         def lowering(a_node, b_node):
             choices = V.choices.get_template_configs(
@@ -347,7 +415,7 @@ class TestMaxAutotune(TestCase):
                 template_op_pairs=[
                     (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
                 ],
-                override_heuristic_class=Test2CTABlackwellBMMHeuristic,
+                override_heuristic_class=_Test2CTABlackwellBMMHeuristic,
             ),
             mock.patch.dict(
                 lowerings,
@@ -368,6 +436,30 @@ class TestMaxAutotune(TestCase):
         self.assertIn("TWO_CTAS : tl.constexpr = True", codes[0])
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
+    def test_blackwell_bmm_template_2cta_rejects_m_tail(self) -> None:
+        bsz, m, k, n = 2, 384, 8193, 128
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        self._assert_blackwell_bmm_2cta_rejected(
+            a,
+            b,
+            flatten_output=True,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
+    def test_blackwell_bmm_template_2cta_requires_tma_output(self) -> None:
+        bsz, m, k, n = 2, 256, 8193, 128
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        self._assert_blackwell_bmm_2cta_rejected(
+            a,
+            b,
+            flatten_output=False,
+        )
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
