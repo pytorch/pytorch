@@ -1740,6 +1740,33 @@ class GuardBuilder(GuardBuilderBase):
                 self.guard_tree_children.setdefault(id(base_example_value), set()).add(
                     id(example_value)
                 )
+                # The generic edge above keys on id(base_example_value); an
+                # attribute read as obj.attr records its edge on the OBJECT, not
+                # on obj.__dict__/obj.__annotations__. But a guard that reads a
+                # whole such mapping makes _keep(mapping) True (DunderDictVariable
+                # registers AttrSource(base, "__dict__")), so without an edge on
+                # the mapping itself _keep_container_verbatim would carry it
+                # verbatim and drag an unpicklable sibling. Mirror the
+                # DefaultsSource repair below: record the edge on the instance
+                # mapping that actually holds this attribute.
+                if isinstance(source, AttrSource):
+                    mappings = [getattr(base_example_value, "__dict__", None)]
+                    # __annotations__ belongs to a class/function/module;
+                    # reading it off an instance would key the edge on the
+                    # class dict and can run a user __getattr__.
+                    if (
+                        isinstance(base_example_value, type)
+                        or inspect.isroutine(base_example_value)
+                        or inspect.ismodule(base_example_value)
+                    ):
+                        mappings.append(
+                            getattr(base_example_value, "__annotations__", None)
+                        )
+                    for mapping in mappings:
+                        if isinstance(mapping, dict) and source.member in mapping:
+                            self.guard_tree_children.setdefault(id(mapping), set()).add(
+                                id(example_value)
+                            )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -1975,6 +2002,21 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_source_name must not be empty")
             if not callable(base_example_value):
                 raise AssertionError("base_example_value must be callable")
+            # The generic edge above keys on id(base_example_value), which for a
+            # DefaultsSource is the FUNCTION, not the __defaults__/__kwdefaults__
+            # container that actually holds this element. Record the edge on the
+            # real container too, so _keep_container_verbatim can prune an
+            # unpicklable sibling default instead of carrying the whole container
+            # verbatim on the ordinary call-site binding shape.
+            if source_name != "" and self.save_guards:
+                container = (
+                    base_example_value.__kwdefaults__
+                    if source.is_kw
+                    else base_example_value.__defaults__
+                )
+                self.guard_tree_children.setdefault(id(container), set()).add(
+                    id(example_value)
+                )
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
                     source=base_source_name,
@@ -4353,7 +4395,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         (tuple) guard that a pruned value preserves, while a whole-value
         EQUALS_MATCH -- which does bake tuple values -- keeps its container
         verbatim instead; a guard rooted at an element records a child->element
-        edge that forces per-value pruning.
+        edge that forces per-value pruning. The shapes we have identified that
+        read a plain container whole while also rooting an edge at one of their
+        elements are a function's __defaults__ (a whole-tuple EQUALS_MATCH plus a
+        call-site default binding, repaired at the DefaultsSource site) and its
+        __dict__/__annotations__ (a DunderDict guard keeps the mapping whole
+        while an attribute guard reads an element through it).
+        get_guard_manager_from_source records the edge on the container itself so
+        those shapes prune per value here rather than carrying an unpicklable
+        sibling verbatim.
         """
         if not self._keep(container):
             return False
