@@ -3816,6 +3816,47 @@ class TestFxGraphCacheHashing(TestCase):
             require_shape_env=False,
         ).validate()
 
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+            ),
+            {"is_matrix": False},
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        validator.validate_graph(include_constants=False)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache HigherOrderOperator: with_effects"
+        ):
+            validator.validate_graph(include_constants=False)
+
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
             get_backward_nested_region_config,
