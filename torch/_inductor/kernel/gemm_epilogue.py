@@ -548,7 +548,7 @@ def normalize_gemm_epilogue_fx_node(node: torch.fx.Node) -> NormalizedNode | Non
     return None
 
 
-def iter_fx_node_inputs(value: Any) -> Iterator[torch.fx.Node]:
+def iter_fx_node_inputs(value: torch.fx.node.Argument) -> Iterator[torch.fx.Node]:
     """Yield FX node inputs nested in args/kwargs-style containers."""
     result: list[torch.fx.Node] = []
     torch.fx.map_arg(value, lambda node: result.append(node))
@@ -577,7 +577,7 @@ class GemmEpilogueGraph:
                 normalized_nodes[node] = normalized
         return cls(dependencies, normalized_nodes)
 
-    def depends_on(self, value: Any, target: torch.fx.Node) -> bool:
+    def depends_on(self, value: torch.fx.node.Argument, target: torch.fx.Node) -> bool:
         """Return whether a value is or transitively depends on the target node."""
         return any(
             node is target or target in self.dependencies.get(node, ())
