@@ -76,8 +76,18 @@ class RecursingGuardedDefault:
         self.inner = inner
 
     def __reduce__(self):
-        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        # Hands pickle a fresh instance every time as a reduce ARGUMENT, so
+        # nothing is ever memoized and the recursion never ends; self.inner only
+        # keeps the reduce well-formed.
         return type(self), (type(self)(),)
+
+
+class UnpicklableGuardedDefault:
+    def __init__(self):
+        self.flag = 2.0
+
+    def __reduce__(self):
+        raise RuntimeError("guarded default cannot pickle")
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -496,6 +506,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_unserializable_guarded_value_is_a_package_error(self):
+        # Whatever the pickler raises for a value some guard reads -- here a
+        # RuntimeError from the value's own __reduce__ -- surfaces as a
+        # PackageError: a bypass for non-strict callers, never a compiler
+        # crash. strict_precompile is on for this class, so it re-raises.
+        def fn(x, cfg=UnpicklableGuardedDefault()):
+            if cfg.flag == 2.0:
+                x = x + 1
+            return x * 2
+
+        with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+
     def test_recursing_guarded_value_overflow_is_a_package_error(self):
         # A recursion overflow while pickling a guarded value -- here a
         # pathological __reduce__ that never memoizes -- is a serialization
@@ -579,7 +602,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return m(x)
 
         with self.assertRaisesRegex(
-            TypeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
 
