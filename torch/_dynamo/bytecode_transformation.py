@@ -2003,6 +2003,7 @@ def _reserve_unique_id_through(index: int) -> None:
 
 
 COMPILED_FN_PREFIX = "__compiled_fn"
+RESUME_FN_PREFIX = "__resume_at"
 _COMPILED_FN_NAME_RE = re.compile(
     rf"^{COMPILED_FN_PREFIX}_\d+_"
     r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
