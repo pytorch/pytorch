@@ -90,7 +90,6 @@ LF_FLEET_EXPERIMENT = "lf"
 # The Meta (OSDC) fleet is the default; the "lf" experiment switches to the
 # Linux Foundation fleet. META_LABEL_PREFIX is also the fallback on error.
 META_LABEL_PREFIX = "mt-"
-META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
 
 # Experiments naming a scale-config AMI variant, selected by prefixing the
@@ -531,7 +530,6 @@ def get_runner_prefix(
     branch: str,
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
-    is_canary: bool = False,
     workflow_name: str = "",
 ) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
@@ -789,15 +787,12 @@ def main() -> None:
             args.github_branch,
         )
 
-        is_canary = args.github_repo == "pytorch/pytorch-canary"
-
         result = get_runner_prefix(
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
             args.eligible_experiments,
             opt_out_experiments,
-            is_canary,
             workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix

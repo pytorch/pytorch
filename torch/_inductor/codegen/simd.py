@@ -3673,7 +3673,10 @@ class SIMDScheduling(BaseScheduling):
                 grouped_reduction_body.var_ranges[v]
                 for v in grouped_reduction_body.iter_vars
             ],
-            group_reduction_vars.iter_remapped,
+            [
+                reduced_output_family.remap_index(value)
+                for value in group_reduction_vars.iter_remapped
+            ],
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:
@@ -4187,16 +4190,10 @@ class SIMDScheduling(BaseScheduling):
         free_buffers: bool = True,
     ) -> None:
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_begin()
-        if config.cpp.enable_kernel_profile and config.cpp.enable_kernel_context_guard:
-            V.graph.wrapper_code.write_kernel_context_guard(
-                kernel.kernel_name,
-                base_scheduler_nodes,
-            )
-        kernel.call_kernel(kernel.kernel_name)
-        if config.cpp.enable_kernel_profile:
-            V.graph.wrapper_code.write_kernel_context_guard_end()
+        with V.graph.wrapper_code.kernel_profile_scope(
+            kernel.kernel_name, base_scheduler_nodes
+        ):
+            kernel.call_kernel(kernel.kernel_name)
 
         if config.nan_asserts:
             kernel.codegen_nan_check()
