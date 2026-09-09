@@ -47,7 +47,7 @@ from torchgen.api.python import (
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, SchemaKind, Variant
 from torchgen.utils import FileManager
 
 
@@ -318,6 +318,23 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
     )
     if type_hint_vararg:
         type_hints.append(type_hint_vararg)
+
+    # Keep this in sync with the Python binding return-self special case in
+    # tools/autograd/gen_python_functions.py:emit_single_dispatch.
+    if (
+        str(sig_group.base.func.name).startswith("_foreach_")
+        and sig_group.base.func.kind() == SchemaKind.inplace
+    ):
+        old_suffix = " -> None: ..."
+        return_type = "tuple[Tensor, ...] | list[Tensor]"
+        if not all(hint.endswith(old_suffix) for hint in type_hints):
+            raise AssertionError(
+                "Expected generated in-place foreach hints to return None"
+            )
+        type_hints = [
+            f"{hint.removesuffix(old_suffix)} -> {return_type}: ..."
+            for hint in type_hints
+        ]
 
     return type_hints
 

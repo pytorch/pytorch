@@ -128,8 +128,11 @@ jobs:
 
           Updates the Metamates merge rule with active team members.
           EOF
-            )"
+            )" \
+              --label "triaged"
+            GH_TOKEN="${PYTORCHBOT_TOKEN}" gh pr review "${BRANCH}" --approve
           fi
+          GH_TOKEN="${PYTORCHBOT_TOKEN}" gh pr comment "${BRANCH}" --body "@pytorchbot merge"
 
   update-commit-hashes:
     runs-on: ubuntu-24.04

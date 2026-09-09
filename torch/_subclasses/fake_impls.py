@@ -46,7 +46,6 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
-from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
@@ -423,6 +422,67 @@ def resize_as_(
         return func(*args, **kwargs)
 
 
+_foreach_pointwise_tensor_to_scalar_list = {
+    aten._foreach_addcdiv.Tensor: aten._foreach_addcdiv.ScalarList,
+    aten._foreach_addcdiv_.Tensor: aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcmul.Tensor: aten._foreach_addcmul.ScalarList,
+    aten._foreach_addcmul_.Tensor: aten._foreach_addcmul_.ScalarList,
+}
+_foreach_packed_scalar_dtypes = frozenset(
+    {
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex32,
+        torch.bcomplex32,
+        torch.complex64,
+        torch.complex128,
+    }
+)
+
+
+@register_op_impl(tuple(_foreach_pointwise_tensor_to_scalar_list))
+def foreach_pointwise_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    inputs: list[torch.Tensor],
+    tensor1: list[torch.Tensor],
+    tensor2: list[torch.Tensor],
+    scalars: torch.Tensor,
+) -> list[FakeTensor] | None:
+    if scalars.device.type != "cpu":
+        raise RuntimeError(
+            f"Expected scalars to be on CPU, got {scalars.device} instead."
+        )
+    if not scalars.is_contiguous():
+        raise RuntimeError("Expected scalars to be contiguous.")
+    if scalars.dim() != 1:
+        raise RuntimeError(
+            f"Expected packed scalar Tensor to be of dimension 1. Got {scalars.dim()} instead."
+        )
+    if scalars.dtype not in _foreach_packed_scalar_dtypes:
+        raise NotImplementedError(
+            f"Packed scalar Tensor dtype {scalars.dtype} is not supported"
+        )
+    if scalars.size(0) != len(inputs):
+        raise RuntimeError(
+            f"Expected length of scalars to match input of length {len(inputs)} "
+            f"but got {scalars.size(0)} instead."
+        )
+
+    scalar = utils.dtype_to_type(scalars.dtype)(1)
+    return _foreach_pointwise_tensor_to_scalar_list[func](
+        inputs, tensor1, tensor2, [scalar] * len(inputs)
+    )
+
+
 @register_op_impl(aten._sparse_coo_tensor_with_dims_and_tensors.default)
 def _sparse_coo_tensor_with_dims_and_tensors(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
@@ -607,17 +667,20 @@ def sparse_compressed_constructors(
     )
     if "size" not in new_kwargs:
         # without an explicit size, it is inferred from plain_indices.max()
-        raise DataDependentOutputException(func)
+        raise DynamicOutputShapeException(func)
     out_device, _ = FakeTensor._find_common_device(func, list(new_kwargs.values()))
     requested_device = new_kwargs.pop("device", None)
     if requested_device is not None:
         requested_device = torch.device(requested_device)
+        requested_device = FakeTensor._normalize_fake_device(requested_device)
         torch._check(
-            requested_device.type == out_device.type,
+            requested_device.type == out_device.type
+            and (requested_device.index or 0) == (out_device.index or 0),
             lambda: "Values and compressed tensor instance need to be on the same device.",
         )
         out_device = requested_device
     new_kwargs["device"] = torch.device("meta")
+    new_kwargs["pin_memory"] = False
     # Invariant checks read index data, which meta tensors do not have.
     suppress_invariants = (
         torch.sparse.check_sparse_tensor_invariants(False)
@@ -643,8 +706,7 @@ def _to_dense(
     if maybe_mkldnn_out is not NotImplemented:
         return typing_cast(FakeTensor, maybe_mkldnn_out)
 
-    fake_device = self.fake_device
-    if is_sparse_any(self):
+    if self.layout in _TO_DENSE_SPARSE_LAYOUTS:
         if dtype is not None:
             raise RuntimeError("dtype argument is not supported by sparse_to_dense")
         with in_kernel_invocation_manager(fake_mode):
@@ -653,7 +715,7 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, fake_device)
+        return FakeTensor(fake_mode, out, self.fake_device)
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)

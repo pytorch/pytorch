@@ -52,6 +52,7 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
+from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
@@ -1487,6 +1488,56 @@ class TestFX(JitTestCase):
             raise AssertionError(
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
+
+    def test_print_readable_with_sparse_meta_val(self):
+        # The compressed sparse layouts have no strides; annotating a node
+        # whose meta["val"] carries one used to raise from Tensor.stride().
+        for layout in (
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ):
+            with self.subTest(layout=layout):
+                dense = torch.eye(4)
+                kwargs = (
+                    {"blocksize": (2, 2)}
+                    if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                    else {}
+                )
+                sparse = dense.to_sparse(layout=layout, **kwargs)
+
+                graph = torch.fx.Graph()
+                node = graph.create_node("placeholder", "x")
+                node.meta["val"] = sparse
+                graph.output(node)
+                gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+                text = gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                self.assertIn("x", text)
+
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            node.format_node(include_tensor_metadata=True)
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
@@ -5329,6 +5380,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         None: "None",
         typing.Iterator: "Iterator",
         collections.abc.Iterator: "Iterator",
+        types.ModuleType: "types.ModuleType",
     }
 
     _UNBOUND_TYPES = {
