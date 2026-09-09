@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -38,6 +39,19 @@ log = logging.getLogger(__name__)
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
     return os.path.join(cache_dir(), "quack")
+
+
+def register_quack_ops_source_dir() -> None:
+    """Fingerprint the PyTorch-owned EpiOp sources into QuACK's disk-cache key.
+
+    QuACK hashes its own package to version cached kernels; ops defined under
+    ``quack_ops`` must be hashed the same way, before the first compile.
+    """
+    from torch._vendor.quack import cache as quack_cache
+
+    source_dir = Path(__file__).resolve().parent / "quack_ops"
+    if source_dir not in quack_cache.EXTRA_SOURCE_DIRS:
+        quack_cache.EXTRA_SOURCE_DIRS.append(source_dir)
 
 
 _CONFIG_SELECTION: contextvars.ContextVar[list[Any] | None] = contextvars.ContextVar(
@@ -84,8 +98,7 @@ def _init_flex_gemm_compile_worker(
         os.environ["QUACK_ARCH"] = quack_arch
     if cute_dsl_arch is not None:
         os.environ["CUTE_DSL_ARCH"] = cute_dsl_arch
-    import torch._vendor.quack.cache  # noqa: F401
-
+    register_quack_ops_source_dir()
     quack_async._pin_dsl_arch(cute_dsl_arch)
     if quack_arch is not None:
         quack_async._install_gpu_blind_device_attrs()
@@ -316,9 +329,11 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    from torch._vendor.quack import cute_dsl_utils, epi_math
+    from torch._inductor.kernel.flex_gemm.quack_ops import epi_math
+    from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
+    register_quack_ops_source_dir()
     # Generated callbacks reference epi_math without importing QuACK into the
     # generated source. Inject it only into the original function's globals;
     # decorated wrappers may belong to third-party modules.
@@ -340,8 +355,12 @@ def flex_gemm_epimod(
             else op_types[kind](name, dtype=dtype)
         )
     if main_transform is not None:
+        from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
+            GroupedMainStore,
+        )
+
         outputs = (
-            epi_ops.GroupedMainStore(
+            GroupedMainStore(
                 "main",
                 main_transform.group,
             ),
@@ -352,7 +371,7 @@ def flex_gemm_epimod(
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
-        from torch._vendor.quack import grouped_reduce
+        from torch._inductor.kernel.flex_gemm.quack_ops import grouped_reduce
 
         finalize = local_reduce.finalize
         store_finalize = local_reduce.store_finalize or finalize
