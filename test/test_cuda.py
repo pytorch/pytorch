@@ -10275,7 +10275,6 @@ class TestMemPool(TestCase):
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
@@ -10285,7 +10284,6 @@ class TestMemPool(TestCase):
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
@@ -10295,7 +10293,6 @@ class TestMemPool(TestCase):
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
@@ -10306,7 +10303,6 @@ class TestMemPool(TestCase):
         self.assertIsNotNone(model.weight.grad)
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
