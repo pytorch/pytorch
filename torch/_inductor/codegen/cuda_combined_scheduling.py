@@ -74,7 +74,7 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._rocm_cpp_scheduling
         if self._cutedsl_scheduling.is_cutedsl_template(node):
             return self._cutedsl_scheduling
-        if self._flydsl_scheduling.is_flydsl_template(node):
+        if self._flydsl_scheduling.is_flydsl_template_or_fused(node):
             return self._flydsl_scheduling
         if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
             return self._nv_universal_gemm_scheduling
@@ -96,10 +96,10 @@ class CUDACombinedScheduling(BaseScheduling):
             node1
         ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
             return False
-        elif self._flydsl_scheduling.is_flydsl_template(
+        elif self._flydsl_scheduling.is_flydsl_template_or_fused(
             node1
-        ) or self._flydsl_scheduling.is_flydsl_template(node2):
-            return False
+        ) or self._flydsl_scheduling.is_flydsl_template_or_fused(node2):
+            return self._flydsl_scheduling.can_fuse_vertical(node1, node2)
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
         # Triton, or NVGEMM-winning MTBs silently lose Triton prologue fusion.
@@ -145,7 +145,7 @@ class CUDACombinedScheduling(BaseScheduling):
                 return self._cutedsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
-            if self._flydsl_scheduling.is_flydsl_template(node):
+            if self._flydsl_scheduling.is_flydsl_template_or_fused(node):
                 return self._flydsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
@@ -230,8 +230,6 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
         elif self._flydsl_scheduling.is_flydsl_template(template_node):
-            if epilogue_nodes:
-                raise AssertionError("flydsl template does not support epilogue nodes")
             if prologue_nodes:
                 raise AssertionError("flydsl template does not support prologue nodes")
             return self._flydsl_scheduling.codegen_template(

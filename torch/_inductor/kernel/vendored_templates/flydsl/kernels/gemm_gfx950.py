@@ -35,6 +35,7 @@ class GemmGfx950Param:
     a_is_transposed: fx.Constexpr[bool]
     b_is_transposed: fx.Constexpr[bool]
     has_bias: fx.Constexpr[bool]
+    has_epilogue: fx.Constexpr[bool]
     has_k_tail: fx.Constexpr[bool]
     async_load_bytes: fx.Constexpr[int]
     in_data_bytes: fx.Constexpr[int]
@@ -88,6 +89,7 @@ def make_gemm_gfx950_param(
     a_is_transposed: bool,
     b_is_transposed: bool,
     has_bias: bool = False,
+    has_epilogue: bool = False,
     has_k_tail: bool = False,
     mma_m: int = 16,
     mma_n: int = 16,
@@ -218,6 +220,7 @@ def make_gemm_gfx950_param(
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
         has_bias=has_bias,
+        has_epilogue=has_epilogue,
         has_k_tail=has_k_tail,
         async_load_bytes=GFX950_DMA_BYTES,
         in_data_bytes=in_dbytes,
@@ -238,6 +241,7 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
     name += f"_w{param.m_waves}x{param.n_waves}"
     name += f"_gm{param.group_m}"
     name += f"_bias{int(param.has_bias)}"
+    name += f"_epi{int(param.has_epilogue)}"
     name += f"_ktail{int(param.has_k_tail)}"
     a_layout = "t" if param.a_is_transposed else "n"
     b_layout = "t" if param.b_is_transposed else "n"
@@ -514,6 +518,7 @@ def gemm_gfx950_kernel(
     b_leading_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
 ):
     block_m = param.block_m
     block_n = param.block_n
@@ -732,7 +737,13 @@ def gemm_gfx950_kernel(
         current_stage = (current_stage + 1) % stages
 
     frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
-    frag_C_out.store(frag_C.load().to(elem_dtype))
+    if const_expr(param.has_epilogue):
+        for i in range_constexpr(fx.size(frag_C.shape).unpack()):
+            # Round the GEMM result, then upcast for pointwise computation.
+            value = frag_C[i].to(elem_dtype).to(fx.Float32)
+            frag_C_out[i] = epilogue_fn(value).to(elem_dtype)
+    else:
+        frag_C_out.store(frag_C.load().to(elem_dtype))
 
     fx.gpu.barrier()
     for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
@@ -758,6 +769,7 @@ def gemm_hti_gfx950_kernel(
     b_leading_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
 ):
     block_m = param.block_m
     block_n = param.block_n
@@ -1010,6 +1022,9 @@ def gemm_hti_gfx950_kernel(
                 global_n_idx = bid_n * block_n + n_part * half_block_n + col
                 safe_global_n_idx = (global_n_idx < n).select(global_n_idx, 0)
                 val = val + bias_buf[safe_global_n_idx].to(fx.Float32)
+            if const_expr(param.has_epilogue):
+                # Round the GEMM result, then upcast for pointwise computation.
+                val = epilogue_fn(val.to(elem_dtype).to(fx.Float32))
             frag_C_out[i] = val.to(elem_dtype)
 
         fx.gpu.barrier()
@@ -1122,9 +1137,10 @@ def gemm_gfx950(
     a: fx.Tensor,
     b: fx.Tensor,
     param: GemmGfx950Param,
+    epilogue_fn: fx.Constexpr,
     stream: fx.Stream = fx.Stream(None),
 ):
-    r"""gemm_gfx950(out, a, b, param, stream=fx.Stream(None))
+    r"""gemm_gfx950(out, a, b, param, epilogue_fn, stream=fx.Stream(None))
 
     Compute ``out[M, N] = a[M, K] @ b[K, N]``. The physical input layouts are
     specified by ``param.a_is_transposed`` and ``param.b_is_transposed``.
@@ -1160,6 +1176,7 @@ def gemm_gfx950(
         b_leading_stride,
         tiled_mma,
         param,
+        epilogue_fn,
     ).launch(
         grid=(num_pid_m * num_pid_n, 1, 1),
         block=(param.block_threads, 1, 1),
