@@ -209,8 +209,9 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
         CUDA_KERNEL_ASSERT_VERBOSE(
           zero_point >= quant_min && zero_point <= quant_max
             && "`zero_point` must be between `quant_min` and `quant_max`",
-          "Expected quant_min (%ld) <= zero_point <= quant_max (%ld), but got zero_point = %ld",
-          quant_min, quant_max, static_cast<int64_t>(zero_point));
+          "Expected quant_min (%lld) <= zero_point <= quant_max (%lld), but got zero_point = %lld",
+          static_cast<long long>(quant_min), static_cast<long long>(quant_max),
+          static_cast<long long>(zero_point));
         const float inv_scale = 1.0f / scale;
         const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale)) + zero_point;
         return ((quant_min <= qval) && (qval <= quant_max));
