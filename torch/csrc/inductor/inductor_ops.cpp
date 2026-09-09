@@ -4,6 +4,7 @@
 #include <ATen/ops/mm.h>
 #endif
 
+#include <ATen/EmptyTensor.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
@@ -56,15 +57,45 @@ Tensor _alloc_from_pool(
 // Similar to as_strided with the following differences
 // - offset is added to the existing offset (rather than replacing it)
 // - view tracking is disabled similar to unsafe_view
+//
+// Intentionally unchecked in release builds: this is a hot-path codegen
+// helper (like unsafe_view). Debug builds validate storage bounds to catch
+// hand-crafted OOB views; empty storage is skipped because CUDAGraph trees
+// / FSDP temporarily resize_(0) before _swap_data_ptr_ while views may still
+// be reconstructed via this op.
 Tensor _reinterpret_tensor(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
     int64_t offset_increment) {
+  auto storage_offset = self.storage_offset() + offset_increment;
+#ifndef NDEBUG
+  if (self.storage().nbytes() != 0) {
+    TORCH_CHECK(
+        storage_offset >= 0,
+        "_reinterpret_tensor: invalid storage offset ",
+        storage_offset);
+    const auto needed = at::detail::computeStorageNbytes(
+        size,
+        stride,
+        self.dtype().itemsize(),
+        static_cast<size_t>(storage_offset));
+    TORCH_CHECK(
+        needed <= self.storage().nbytes(),
+        "_reinterpret_tensor: sizes ",
+        size,
+        ", strides ",
+        stride,
+        ", storage offset ",
+        storage_offset,
+        " are out of bounds for storage of size ",
+        self.storage().nbytes());
+  }
+#endif
   Tensor self_ = at::detail::make_tensor<TensorImpl>(
       Storage(self.storage()), self.key_set(), self.dtype());
   auto* self_tmp_ = self_.unsafeGetTensorImpl();
-  self_tmp_->set_storage_offset(self.storage_offset() + offset_increment);
+  self_tmp_->set_storage_offset(storage_offset);
   self_tmp_->set_sizes_and_strides(size, stride);
   return self_;
 }
