@@ -20,6 +20,39 @@ requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
+    def test_control_deps_wraps_fallback_op(self):
+        def fn(x):
+            dependency = x + 1
+            fallback = torch.neg(x)
+            return dependency + fallback
+
+        def add_control_deps(graph):
+            from torch._inductor.fx_passes.control_dependencies import (
+                preserve_node_ordering,
+            )
+            from torch.utils._ordered_set import OrderedSet
+
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            neg_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.neg.default
+            )
+            if len(add_nodes) != 2 or len(neg_nodes) != 1:
+                raise AssertionError("Unexpected graph structure")
+
+            fallback = neg_nodes[0]
+            fallback.meta["should_fallback"] = True
+            fallback.meta["custom"] = {"fallback_to_eager": True}
+            preserve_node_ordering(graph, {fallback: OrderedSet([add_nodes[0]])})
+            return graph
+
+        x = torch.randn(8)
+        with config.patch(post_grad_custom_post_pass=add_control_deps):
+            actual = torch.compile(fn)(x)
+
+        torch.testing.assert_close(actual, fn(x))
+
     @config.patch(reorder_for_locality=False)
     @requires_gpu()
     def test_control_deps_prevents_fusion(self):
