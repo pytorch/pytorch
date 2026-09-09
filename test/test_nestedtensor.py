@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     freeze_rng_state,
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
@@ -322,6 +323,8 @@ def convert_nt_to_jagged(nt):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(NestedTensorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -913,6 +916,8 @@ class TestNestedTensor(NestedTensorTestCase):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorDeviceType(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -3148,6 +3153,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorAutograd(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -3971,6 +3978,8 @@ def get_tolerances(
 @markDynamoStrictTest
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorSubclass(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
@@ -9062,6 +9071,8 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 @periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # TODO: move this
     def _gen_grad_outputs(self, out_val):
         if isinstance(out_val, (list, tuple)):
@@ -9310,6 +9321,8 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_comparisons(self):
         a = torch.SymInt(NestedIntNode(1, 1))
         b = torch.SymInt(NestedIntNode(1, 1))
@@ -9402,9 +9415,9 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
 
 
 instantiate_parametrized_tests(TestNestedTensor)
-instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
+instantiate_device_type_tests(TestNestedTensorDeviceType, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestNestedTensorAutograd, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestNestedTensorSubclass, globals())
+instantiate_device_type_tests(TestNestedTensorSubclass, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestNestedTensorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
