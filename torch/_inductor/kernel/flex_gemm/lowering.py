@@ -396,6 +396,19 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
+    config_constraints = {} if explicit_config is None else dict(explicit_config)
+    if config_constraints:
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        config_fields = OrderedSet(
+            field.name for field in dataclasses.fields(GemmConfig)
+        )
+        unknown_fields = OrderedSet(config_constraints) - config_fields
+        if unknown_fields:
+            raise NotImplementedError(
+                f"unknown GemmConfig constraint {sorted(unknown_fields)}; "
+                f"choose one of {', '.join(config_fields)}"
+            )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -683,13 +696,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             indices_index=indexed_index_input_indices[0],
         )
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
-        outputs.local_reduce,
-        local_reduce_out_index,
-        combine=epimod_source.local_reduce_combine,
-        finalize=epimod_source.local_reduce_finalize,
-        store_finalize=epimod_source.local_reduce_store_finalize,
-        prepass_combine=epimod_source.local_reduce_prepass_combine,
-        prepass_finalize=epimod_source.local_reduce_prepass_finalize,
+        outputs.local_reduce, local_reduce_out_index, epimod_source
     )
     template_config = FlexGemmEpilogueConfig(
         epilogue_name=epimod_source.name,
@@ -703,11 +710,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             else FlexGemmEpilogueBlockScaledConfig(
                 blockscaled.format, *gemm_input_indices[2:]
             )
-        ),
-        quack_config_constraints=(
-            tuple(sorted(explicit_config.items()))
-            if explicit_config is not None
-            else ()
         ),
         quack_config=None,
         epilogue_arg_indices=epilogue_arg_indices,
@@ -725,6 +727,20 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     legal_configs = flex_gemm_quack_configs(
         flex_gemm_epilogue_template, template_kwargs, template_config
     )
+    if config_constraints:
+        legal_configs = tuple(
+            config
+            for config in legal_configs
+            if all(
+                dict(config)[name] == value
+                for name, value in config_constraints.items()
+            )
+        )
+        if not legal_configs:
+            raise NotImplementedError(
+                "no supported GemmConfig matches "
+                f"config_constraints={config_constraints!r} for this call"
+            )
     quack_configs = (
         flex_gemm_search_space(legal_configs) if tuned else legal_configs[:1]
     )
@@ -737,11 +753,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     for quack_config in quack_configs:
         error = flex_gemm_epilogue_template.maybe_append_choice(
             choices,
-            config=dataclasses.replace(
-                template_config,
-                quack_config=quack_config,
-                quack_config_constraints=(),
-            ),
+            config=dataclasses.replace(template_config, quack_config=quack_config),
             **template_kwargs,
         )
         if error is not None:
