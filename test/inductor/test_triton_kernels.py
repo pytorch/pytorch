@@ -147,6 +147,25 @@ if HAS_GPU:
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.jit
+    def _add_kernel_with_interleaved_tma_args(
+        in_desc_ptr0,
+        scale_ptr,
+        in_desc_ptr1,
+        bias_ptr,
+        out_desc_ptr,
+        BLOCK_SIZE_X: "tl.constexpr",
+        BLOCK_SIZE_Y: "tl.constexpr",
+    ):
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offsets = [pid_x * BLOCK_SIZE_X, pid_y * BLOCK_SIZE_Y]
+        x = tl.load_tensor_descriptor(in_desc_ptr0, offsets)
+        scale = tl.load(scale_ptr)
+        y = tl.load_tensor_descriptor(in_desc_ptr1, offsets)
+        bias = tl.load(bias_ptr)
+        tl.store_tensor_descriptor(out_desc_ptr, offsets, x * scale + y + bias)
+
     def _get_backend_options_kernel(*, with_enable_fp_fusion):
         # These kernels are intentionally illustrative. `enable_fp_fusion` is a
         # real backend option name, but the branch below only makes the kwarg's
@@ -5073,6 +5092,187 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         code = "\n".join(codes[0])
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["aot_eager", "inductor", "aoti"])
+    def test_host_tma_descriptor_in_triton_op(self, backend):
+        # Host-side TMA descriptors built inside a triton_op body are captured by
+        # the non-Dynamo tracing path, which must turn them into TMA descriptor
+        # metadata instead of leaving them as opaque constant args.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        libname = "my_cool_namespace"
+        opname = "my_tma_operator"
+        BLOCK_SIZE_X, BLOCK_SIZE_Y = 16, 32
+
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def tma_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            out = torch.zeros_like(x)
+            x_size, y_size = out.size()
+
+            def grid(meta):
+                return (
+                    triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
+                )
+
+            descs = [
+                TensorDescriptor.from_tensor(t, [BLOCK_SIZE_X, BLOCK_SIZE_Y])
+                for t in (x, y, out)
+            ]
+            capture_triton(add_kernel_with_tma_2d_new_api)[grid](
+                *descs,
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        def f(x, y):
+            return tma_add(x, y)
+
+        x = torch.randn((25, 16), device=GPU_TYPE)
+        y = torch.randn((25, 16), device=GPU_TYPE)
+        expected = x + y
+
+        self.assertEqual(f(x, y), expected)
+
+        if backend == "aoti":
+            try:
+                from .test_aot_inductor_utils import AOTIRunnerUtil
+            except ImportError:
+                from test_aot_inductor_utils import AOTIRunnerUtil
+
+            empty_x = torch.empty((0, 16), device=GPU_TYPE)
+            empty_y = torch.empty((0, 16), device=GPU_TYPE)
+            batch = torch.export.Dim("tma_batch")
+            with inductor_config.patch("triton.autotune_at_compile_time", False):
+                outputs = AOTIRunnerUtil.run_multiple(
+                    f,
+                    [(x, y), (empty_x, empty_y)],
+                    dynamic_shapes=(({0: batch}, {0: batch}),),
+                )
+            self.assertEqual(outputs[0], expected)
+            self.assertEqual(outputs[1], empty_x + empty_y)
+            return
+
+        compiled = torch.compile(f, fullgraph=True, backend=backend)
+        if backend == "inductor":
+            from torch._inductor.utils import run_and_get_code
+
+            compiled_out, codes = run_and_get_code(compiled, x, y)
+            # The descriptors must be codegen'd as TMA descriptor args rather
+            # than passed through as opaque constant args.
+            self.assertIn("TensorDescriptor.from_tensor(", codes[0])
+            self.assertIn(f"tensordesc<fp32[{BLOCK_SIZE_X}, {BLOCK_SIZE_Y}]>", codes[0])
+        else:
+            compiled_out = compiled(x, y)
+        self.assertEqual(compiled_out, expected)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["inductor", "aoti"])
+    def test_host_tma_descriptor_wide_block_interleaved_args(self, backend):
+        # A descriptor whose innermost block spans more than 128 bytes
+        # (fp16 x 128 = 256B). The compiler chooses the swizzle and final box
+        # shape; AOTI must use that metadata rather than re-derive either value.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        BLOCK_SIZE_X, BLOCK_SIZE_Y = 64, 128
+        TENSOR_SIZE_X, TENSOR_SIZE_Y = 128, 256
+
+        @torch.library.triton_op("my_cool_namespace::my_wide_tma_op", mutates_args={})
+        def tma_add_wide(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            scale: torch.Tensor,
+            bias: torch.Tensor,
+        ) -> torch.Tensor:
+            out = torch.zeros_like(x)
+            x_view = x.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+            y_view = y.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+            out_view = out.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+
+            def grid(meta):
+                return (
+                    triton.cdiv(TENSOR_SIZE_X, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(TENSOR_SIZE_Y, meta["BLOCK_SIZE_Y"]),
+                )
+
+            descs = [
+                TensorDescriptor.from_tensor(t, [BLOCK_SIZE_X, BLOCK_SIZE_Y])
+                for t in (x_view, y_view, out_view)
+            ]
+            capture_triton(_add_kernel_with_interleaved_tma_args)[grid](
+                descs[0],
+                scale,
+                descs[1],
+                bias,
+                descs[2],
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        def f(x, y, scale, bias):
+            return tma_add_wide(x, y, scale, bias)
+
+        input_shape = (128, 2, 128)
+        x = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        scale = torch.tensor([2.0], device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.tensor([3.0], device=GPU_TYPE, dtype=torch.float16)
+        x2 = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        y2 = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        scale2 = torch.tensor([-1.0], device=GPU_TYPE, dtype=torch.float16)
+        bias2 = torch.tensor([0.5], device=GPU_TYPE, dtype=torch.float16)
+        expected = x * scale + y + bias
+        expected2 = x2 * scale2 + y2 + bias2
+
+        self.assertEqual(f(x, y, scale, bias), expected)
+
+        if backend == "aoti":
+            try:
+                from .test_aot_inductor_utils import AOTIRunnerUtil
+            except ImportError:
+                from test_aot_inductor_utils import AOTIRunnerUtil
+
+            for autotune_at_compile_time in (True, False):
+                with (
+                    self.subTest(autotune_at_compile_time=autotune_at_compile_time),
+                    inductor_config.patch(
+                        "triton.autotune_at_compile_time", autotune_at_compile_time
+                    ),
+                ):
+                    outputs = AOTIRunnerUtil.run_multiple(
+                        f,
+                        [
+                            (x, y, scale, bias),
+                            (x2, y2, scale2, bias2),
+                        ],
+                    )
+                    self.assertEqual(outputs[0], expected)
+                    self.assertEqual(outputs[1], expected2)
+        else:
+            configs = (
+                ("default", {}),
+                (
+                    "cpp_wrapper_lazy",
+                    {
+                        "cpp_wrapper": True,
+                        "triton.autotune_at_compile_time": False,
+                    },
+                ),
+            )
+            for name, config in configs:
+                with self.subTest(config=name), inductor_config.patch(config):
+                    compiled = torch.compile(f, fullgraph=True, backend=backend)
+                    self.assertEqual(compiled(x, y, scale, bias), expected)
+                    self.assertEqual(compiled(x2, y2, scale2, bias2), expected2)
 
     @requires_gpu
     def test_subclass(self):

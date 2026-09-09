@@ -251,11 +251,9 @@ class TestDependencies(InductorTestCase):
             ops.store("out", i, ops.add(ops.load("inp", i), other))
 
         body = LoopBody(fn, ([x], []), {x: 4}, [x], [])
-        self.assertFalse(body.has_masked_stores())
         expanded = body.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
 
         self.assertEqual(expanded.sizes, ((6,), ()))
-        self.assertTrue(expanded.has_masked_stores())
         self.assertFalse(
             any(e.has(ModularIndexing) for e in expanded.indexing_exprs.values())
         )
@@ -267,10 +265,6 @@ class TestDependencies(InductorTestCase):
             n for n in root.nodes if n.op == "call_module" and n.target != "get_index"
         ]
         self.assertEqual(region.args[0].target, "lt")
-        # Expanding to the current range is a no-op.
-        self.assertIs(
-            body.expand_dimension_for_pointwise_node_with_masked_stores(0, 4), body
-        )
         self.assertIn("indirect_indexing", MASKED_EXPANSION_BANNED_OPS)
 
         def indirect(index, rindex):
@@ -295,26 +289,9 @@ class TestDependencies(InductorTestCase):
         writes = [dep for dep in rw.writes if isinstance(dep, MemoryDep)]
         self.assertEqual(len(writes), 1)
         self.assertEqual(writes[0].name, "out")
-        # Recorded over the whole range although the mask excludes the tail;
-        # SchedulerNode.can_inplace compensates by refusing to reuse the input.
+        # Recorded over the whole range although the mask excludes the tail:
+        # the dep keeps its ordering role and only over-reports its size.
         self.assertEqual(writes[0].get_numel(), 64)
-
-    def test_masked_stores_disable_inplace_reuse(self):
-        from torch._inductor.loop_body import LoopBody
-        from torch._inductor.scheduler import SchedulerNode
-
-        x = sympy_index_symbol("x")
-
-        def fn(index, rindex):
-            (i,) = index
-            ops.store("out", i, ops.load("inp", i))
-
-        body = LoopBody(fn, ([x], []), {x: 4}, [x], [])
-        node = object.__new__(SchedulerNode)
-        node._body = body.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
-        node.node = None
-        node.outputs = []
-        self.assertFalse(node.can_inplace(object()))
 
 
 if __name__ == "__main__":

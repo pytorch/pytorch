@@ -2321,9 +2321,13 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
+    nested_reduction: bool = Config(
+        justknob="pytorch/inductor:nested_reduction",
+        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
+        default=True,
+    )
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
