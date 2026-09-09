@@ -477,7 +477,7 @@ class TestFP64CapabilityDeclarations(TestCase):
             predicate = test_base._capabilities()[Capability.dtype.fp64]
             self.assertEqual(predicate(), expected)
 
-    def test_hpu_distributed_capabilities_follow_backend_availability(self):
+    def test_hpu_has_no_distributed_capabilities(self):
         capabilities = HPUTestBase._capabilities()
         self.assertIn(Capability.lib.safetensors, capabilities)
         distributed_capabilities = {
@@ -487,22 +487,8 @@ class TestFP64CapabilityDeclarations(TestCase):
         }
         self.assertEqual(
             set(capabilities) & distributed_capabilities,
-            {
-                Capability.distributed.backend,
-                Capability.distributed.fsdp,
-            },
+            set(),
         )
-
-        for expected in (True, False):
-            with patch(
-                "torch.testing._internal.common_device_type._distributed_backend_available",
-                return_value=expected,
-            ) as backend_available:
-                capabilities = HPUTestBase.get_capabilities()
-                self.assertEqual(capabilities[Capability.distributed.backend], expected)
-                self.assertEqual(capabilities[Capability.distributed.fsdp], expected)
-                self.assertEqual(backend_available.call_count, 2)
-                backend_available.assert_called_with("hpu")
 
     def test_xpu_fp64_capability_tracks_device_properties(self):
         predicate = XPUTestBase._capabilities()[Capability.dtype.fp64]
