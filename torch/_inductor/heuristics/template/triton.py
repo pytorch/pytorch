@@ -38,6 +38,7 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    can_use_tma,
     get_backend_num_stages,
     get_default_kpack,
     get_num_sms,
@@ -3129,6 +3130,12 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         mat1, mat2 = kernel_inputs.mat1mat2()
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
+
+        # Each logical batch is addressed through a rank-2 TMA descriptor.  In
+        # particular, every matrix-leading stride and every per-batch base must
+        # retain the 16-byte alignment required by TMA.
+        if not can_use_tma(mat1, mat2):
+            return
 
         batch, _, k = map(int, mat1.get_size())
         batch_b, k_b, _ = map(int, mat2.get_size())
