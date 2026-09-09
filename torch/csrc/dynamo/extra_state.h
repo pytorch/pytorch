@@ -338,7 +338,9 @@ void destroy_extra_state(void* obj);
 // cache_mutex releases at depth 0 (_get_cache_entries_for_region's py::cast
 // wrappers, extract_cache_entry's borrowed CacheEntry*) can race that drain and
 // need owning references like lookup()/create_cache_entry:
-// pytorch/pytorch#196394. Ownership contract args
+// pytorch/pytorch#196394.
+// Ownership contract
+// args
 //  - code: Borrowed
 void reset_extra_state(PyCodeObject* code);
 
