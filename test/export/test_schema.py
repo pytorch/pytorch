@@ -140,6 +140,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -181,6 +183,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -225,6 +229,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -292,6 +298,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -329,6 +337,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -373,6 +383,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -414,6 +426,8 @@ Example(s):
             thrift_schema_path="",
             enum_converter_header="",
             enum_converter_header_path="",
+            pybind_header="",
+            pybind_header_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
