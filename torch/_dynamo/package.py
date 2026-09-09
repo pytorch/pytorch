@@ -120,6 +120,10 @@ class FunctionPicklerBase(pickle.Pickler):
     that a fix to how an object is rebuilt cannot be missed in one pickler.
     """
 
+    # The reducers stay classmethods: pickle reduces a bound classmethod to
+    # getattr(owner, name), so an artifact names the subclass and resolves the
+    # reducer through its MRO. A staticmethod would pickle by __qualname__ and
+    # change the artifact.
     @classmethod
     def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
         return SerializedCode.to_code_object(serialized_code)
