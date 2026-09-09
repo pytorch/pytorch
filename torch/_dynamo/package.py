@@ -111,6 +111,16 @@ class SerializedCode:
         )
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ read through the plain slot, so a user __getattr__ on a
+    __slots__ receiver never runs; None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers shared by GuardsStatePickler and AOTCompilePickler.
 
@@ -294,17 +304,16 @@ class FunctionPicklerBase(pickle.Pickler):
         # method.__func__ may be a functools.partial with no __name__. Fall
         # through to the explicit reduce rather than raising out of the reducer.
         name = getattr(func, "__name__", None)
-        # A name served PER-INSTANCE resolves only after self is restored, which
-        # is after pickle rebuilds the method, so getattr() at load would miss
-        # it: carry func+self explicitly. That covers an instance __dict__
-        # monkeypatch (m.forward = MethodType(f, m)), a __slots__ member
-        # descriptor (no __dict__ to inspect), and a __getattr__ proxy (whose
-        # lookup we must also not probe below -- it can recurse). A type receiver
-        # (classmethod) is exempt: its namespace is restored with the class.
+        # A name served PER-INSTANCE resolves only after self is restored, i.e.
+        # after pickle rebuilds the method, so getattr() at load would miss it:
+        # carry func+self explicitly. That covers an instance __dict__ monkeypatch
+        # (m.forward = MethodType(f, m)), a __slots__ member descriptor, and a
+        # __getattr__ proxy (which must not be probed below -- it can recurse).
+        # A type receiver (classmethod) is exempt: its namespace is restored.
         cls = type(method.__self__)
-        self_dict = getattr(method.__self__, "__dict__", None)
+        self_dict = _instance_dict(method.__self__)
         instance_served = not isinstance(method.__self__, type) and (
-            (isinstance(self_dict, dict) and name in self_dict)
+            (self_dict is not None and name in self_dict)
             or (
                 name is not None
                 and isinstance(
@@ -1242,6 +1251,11 @@ class CompilePackage:
         # install()). Clear those two here, and the add_* methods refuse to
         # repopulate them once bypassed, so a later serializable recompile that
         # reuses this same entry cannot resurrect the frame.
+        # Drop this entry's compiled backends from the package-global cache
+        # before clearing backend_ids; otherwise they are stranded, pinning a
+        # dead GraphModule under an id no entry references.
+        for backend_id in self._current_entry.backend_ids:
+            self._cached_backends.pop(backend_id, None)
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
 
