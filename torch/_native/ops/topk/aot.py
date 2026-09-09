@@ -36,10 +36,13 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
     import torch
 
     n = self.shape[-1] if self.dim() >= 1 else 0
-    # Mirror the prelude's full-wave perf gate (M >= SM count), so coverage is no
-    # wider than the stub's acceptance. Only gate CUDA tensors, since the device query
-    # would throw on CPU. dim/largest/sorted are not grid fields and so not axes; a
-    # mismatch declines in the stub.
+    # Mirror the stub's gates, so coverage is never wider than its acceptance: a call
+    # the stub declines must keep its JIT route rather than fall to stock aten.
+    if dim != -1 and dim != self.dim() - 1:
+        n = 0
+    if not largest or not sorted:
+        n = 0
+    # Only gate CUDA tensors, since the device query would throw on CPU.
     if n > 0 and self.is_cuda:
         sm = torch.cuda.get_device_properties(self.device).multi_processor_count
         if self.numel() // n < sm:
@@ -57,8 +60,8 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
 def cpp_covers():
     # C++ port of covered_axes plus grid matching, registered as
     # torch.ops._native_aot.covers_topk, so a call does not walk the 48-point grid in
-    # Python. Covered means on-grid (dtype, N, K) at full-wave M, in either
-    # determinism mode; largest/sorted/dim/layout are not part of coverage.
+    # Python. Covered means on-grid (dtype, N, K) at full-wave M in either determinism
+    # mode, with the flags the stub requires; layout is not part of coverage.
     dtype_accept = " || ".join(f"st == {t}" for t in _DTYPES.values())
     n_accept = " || ".join(f"N == {n}" for n in _NS)
     k_accept = " || ".join(f"k == {kk}" for kk in _KS)
@@ -66,6 +69,8 @@ def cpp_covers():
       const auto st = self.scalar_type();
       if (!({dtype_accept})) return false;
       if (!self.is_cuda()) return false;
+      if (!largest || !sorted) return false;
+      if (self.dim() < 1 || c10::maybe_wrap_dim(dim, self.dim()) != self.dim() - 1) return false;
       const int64_t N = self.dim() >= 1 ? self.size(-1) : 0;
       if (N == 0) return false;
       if (self.numel() / N < at::cuda::getDeviceProperties(self.device().index())->multiProcessorCount) return false;
