@@ -10,11 +10,20 @@ from torch._inductor.codegen.common import deduce_output_dtype_by_name
 from torch._inductor.loop_body import LoopBody
 from torch._inductor.optimize_indexing import (
     convert_index_expr_to_value_expr,
+    range_implied_indices,
     remove_redundant_argreduce_indices,
 )
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.virtualized import V
 from torch.fx import Graph
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -32,6 +41,7 @@ class _FakeGraph:
     sizevars = _FakeSizeVars()
 
 
+@instantiate_parametrized_tests
 class TestOptimizeIndexing(TestCase):
     @staticmethod
     def _make_loop_body(
@@ -97,6 +107,78 @@ class TestOptimizeIndexing(TestCase):
         value, index_expr = reduction.args[-1]
         get_index = index_expr.args[1]
         return graph, reduction, value, index_expr, get_index
+
+    def _masked_loop_body(self, predicate, var_range):
+        """Trace ``masked`` over one iteration var guarded by ``predicate(var)``; return the var and the implied iteration vars."""
+        r0 = sympy.Symbol("r0", integer=True, nonnegative=True)
+
+        def fn(index, reduction_index):
+            (i,) = index
+            return V.ops.masked(predicate(i), lambda: V.ops.load("buf0", i), 0.0)
+
+        graph = _FakeGraph()
+        graph.sizevars = SizeVarAllocator(ShapeEnv())
+        with V.set_graph_handler(graph):
+            loop_body = LoopBody(fn, ([r0], []), {r0: var_range}, [r0], [])
+            node = loop_body.root_block.graph.output_node().args[0]
+            names = range_implied_indices(loop_body, node)
+        return r0, OrderedSet(loop_body.indexing_exprs[name] for name in names)
+
+    @staticmethod
+    def _size_symbol(name="s0", hint=1000):
+        shape_env = ShapeEnv()
+        return shape_env.create_symbol(
+            hint, torch._dynamo.source.ConstantSource(name), DimDynamic.DYNAMIC
+        )
+
+    @parametrize("op", ["index_expr", "value_expr"])
+    @parametrize(
+        "bound,var_range,accepted", [(8, 9, True), (8, 8, True), (9, 8, False)]
+    )
+    def test_range_implied_indices_constant_bound(self, op, bound, var_range, accepted):
+        def predicate(i):
+            lhs = getattr(V.ops, op)(i, torch.int64)
+            return V.ops.lt(lhs, V.ops.constant(bound, torch.int64))
+
+        r0, implied = self._masked_loop_body(predicate, var_range)
+        self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
+
+    def test_range_implied_indices_non_variable_lhs_rejected(self):
+        def predicate(i):
+            lhs = V.ops.index_expr(2 * i, torch.int64)
+            return V.ops.lt(lhs, V.ops.constant(8, torch.int64))
+
+        _, implied = self._masked_loop_body(predicate, 9)
+        self.assertEqual(implied, OrderedSet())
+
+    def test_range_implied_indices_constant_lhs_rejected(self):
+        def predicate(i):
+            rhs = V.ops.index_expr(i, torch.int64)
+            return V.ops.lt(V.ops.constant(1, torch.int64), rhs)
+
+        _, implied = self._masked_loop_body(predicate, 9)
+        self.assertEqual(implied, OrderedSet())
+
+    def test_range_implied_indices_conjunction(self):
+        def predicate(i):
+            idx = V.ops.index_expr(i, torch.int64)
+            lower = V.ops.ge(idx, V.ops.constant(1, torch.int64))
+            upper = V.ops.lt(idx, V.ops.constant(8, torch.int64))
+            return V.ops.and_(lower, upper)
+
+        r0, implied = self._masked_loop_body(predicate, 9)
+        self.assertEqual(implied, OrderedSet([r0]))
+
+    @parametrize("accepted", [True, False])
+    def test_range_implied_indices_symbolic_bound(self, accepted):
+        s0 = self._size_symbol()
+
+        def predicate(i):
+            idx = V.ops.index_expr(i, torch.int64)
+            return V.ops.lt(idx, V.ops.index_expr(s0, torch.int64))
+
+        r0, implied = self._masked_loop_body(predicate, s0 + 1 if accepted else 8)
+        self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
 
     def test_remove_redundant_argreduce_index(self):
         loop_body = self._make_argreduce_loop_body(lambda r0, r1: 8 * r0 + r1)
