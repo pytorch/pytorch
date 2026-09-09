@@ -88,6 +88,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self._init_recv_buffer_pools()
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -237,6 +238,73 @@ class ScheduleTest(TestCase):
             has_backward=False,
         )[1]
         self.assertEqual(inference_slots.forward, {0: 0, 1: 1})
+
+    def test_stage_recv_buffer_pool_reuses_deterministic_slots(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage.has_backward = True
+        stage._downstream_group = None
+        stage._upstream_group = None
+        stage.args_recv_info = {}
+        stage.grad_recv_info = {}
+
+        activation_meta = _TensorMeta.from_tensor(torch.ones(2))
+        grad_meta = _TensorMeta.from_tensor(torch.ones(2))
+        stage._stage_meta = _StageMeta(
+            inputs=(activation_meta,),
+            output_grads=(grad_meta,),
+        )
+        stage.act_send_info = {0: [2]}
+        PipelineStage._setup_forward_recv_info(stage, 3, has_backward=True)
+        for microbatch_index in range(3):
+            stage.grad_recv_info[microbatch_index] = (
+                PipelineStage._create_grad_recv_info(stage, stage.act_send_info)
+            )
+        stage._prepare_recv_buffer_pools(
+            fwd_slots={0: 0, 1: 1, 2: 0},
+            bwd_slots={0: 0, 1: 0, 2: 0},
+        )
+
+        for recv_info_by_chunk in (stage.args_recv_info, stage.grad_recv_info):
+            for recv_infos in recv_info_by_chunk.values():
+                self.assertIsNone(recv_infos[0].buffer)
+
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            patch("torch.distributed.pipelining.stage.dist.P2POp"),
+            patch(
+                "torch.distributed.pipelining.stage._make_tensor_from_meta"
+            ) as make_tensor,
+        ):
+            self.assertEqual(len(stage.get_fwd_recv_ops(0)), 1)
+            fwd_buffer_0 = stage.args_recv_info[0][0].buffer
+            self.assertIsNotNone(fwd_buffer_0)
+            self.assertIs(stage._retrieve_recv_activations(0)[0], fwd_buffer_0)
+
+            stage.get_fwd_recv_ops(1)
+            fwd_buffer_1 = stage.args_recv_info[1][0].buffer
+            self.assertIsNot(fwd_buffer_1, fwd_buffer_0)
+            with self.assertRaisesRegex(RuntimeError, "still owned by microbatch 0"):
+                stage.get_fwd_recv_ops(2)
+
+            stage._release_fwd_recv_buffers(0)
+            stage.get_fwd_recv_ops(2)
+            self.assertIs(stage.args_recv_info[2][0].buffer, fwd_buffer_0)
+            for microbatch_index in (1, 2):
+                stage._retrieve_recv_activations(microbatch_index)
+                stage._release_fwd_recv_buffers(microbatch_index)
+
+            self.assertEqual(len(stage.get_bwd_recv_ops(0)), 1)
+            bwd_buffer = stage.grad_recv_info[0][0].buffer
+            self.assertIsNotNone(bwd_buffer)
+            self.assertIs(stage._retrieve_recv_grads(0)[0], bwd_buffer)
+            stage._release_bwd_recv_buffers(0)
+            stage.get_bwd_recv_ops(1)
+            self.assertIs(stage.grad_recv_info[1][0].buffer, bwd_buffer)
+            stage._retrieve_recv_grads(1)
+            stage._release_bwd_recv_buffers(1)
+            make_tensor.assert_not_called()
 
     def test_pipeline_resource_liveness_reuses_completed_slots(self):
         stage = MockPipelineStage(group_size=1, num_stages=1)
