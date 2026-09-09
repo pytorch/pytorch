@@ -46,11 +46,6 @@ import torch._vendor.quack.copy_utils as copy_utils
 import torch._vendor.quack.layout_utils as layout_utils
 
 
-_CUTE_TO_TORCH_DTYPE = {
-    cute_dtype: torch_dtype for torch_dtype, cute_dtype in torch2cute_dtype_map.items()
-}
-
-
 def assume_stride_divisibility(tensor):
     """Assume all strides are divisible by 32 bits (except static strides).
 
@@ -313,6 +308,9 @@ class EpiOp:
     fn_port = None
     sink_arity = 1
     supports_swap_ab = False
+    # Tensorless ops (a None host argument) stay active and keep their smem
+    # budget instead of being filtered out by ComposableEpiMixin.
+    keep_tensorless = False
 
     def fn_prepare(self, gemm, state, paired):
         """Per-subtile port state derived from this op's begin_loop result.
@@ -781,26 +779,11 @@ class ColVecLoad(VecLoad):
         )
 
 
-def _contract_epi_tile_n(epi_tile, group):
-    """Contract an epilogue tile's N extent by a static group size."""
-    if isinstance(epi_tile[1], cute.Layout):
-        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
-    return (epi_tile[0], epi_tile[1] // group)
-
-
 def _gated_epi_tile_fn(gemm, epi_tile):
     """Halve the N dimension of the epi_tile for gated postact."""
-    return _contract_epi_tile_n(epi_tile, 2)
-
-
-def _grouped_main_epi_tile_2(gemm, epi_tile):
-    """Contract a grouped-main output tile by two adjacent N lanes."""
-    return _contract_epi_tile_n(epi_tile, 2)
-
-
-def _grouped_main_epi_tile_4(gemm, epi_tile):
-    """Contract a grouped-main output tile by four adjacent N lanes."""
-    return _contract_epi_tile_n(epi_tile, 4)
+    if isinstance(epi_tile[1], cute.Layout):
+        return (epi_tile[0], cute.recast_layout(2, 1, epi_tile[1]))
+    return (epi_tile[0], epi_tile[1] // 2)
 
 
 class TileStore(EpiOp):
@@ -1173,97 +1156,6 @@ class DStore(EpiOp):
             # frag_out is tRS_rD (already retiled by the kernel) or its
             # converted same-layout copy: no retile needed.
             cute.copy(tiled_copy, frag_out, tRS_s_stage)
-
-
-class GroupedMainStore(TileStore):
-    """Store one value per adjacent-N group from a direct TensorSSA callback.
-
-    The callback owns the logical lane contraction; this op owns the contracted
-    epilogue tile, output buffer schema, physical store geometry, and QuACK
-    config legality. It intentionally remains an ordinary output EpiOp rather
-    than introducing a grouped-main GEMM mode.
-    """
-
-    supports_swap_ab = False
-
-    def __init__(self, name, group, min_fragment_n=None):
-        if group not in (2, 4):
-            raise ValueError("GroupedMainStore supports group 2 or 4")
-        if min_fragment_n is not None and (min_fragment_n <= 0 or min_fragment_n % group):
-            raise ValueError("min_fragment_n must be a positive multiple of group")
-        epi_tile_fn = _grouped_main_epi_tile_2 if group == 2 else _grouped_main_epi_tile_4
-        super().__init__(name, epi_tile_fn=epi_tile_fn)
-        self.group = group
-        self.min_fragment_n = min_fragment_n
-
-    def config_key(self):
-        return (self.group, self.min_fragment_n, *super().config_key())
-
-    def output_n(self, n):
-        """Return the contracted logical output N extent."""
-        if n % self.group:
-            raise ValueError(
-                f"grouped main output requires GEMM N divisible by {self.group}, got {n}"
-            )
-        return n // self.group
-
-    def supports_config(self, config):
-        """Return whether a config has validated grouped-main store ownership."""
-        supported_arch = (
-            config.device_capacity in (10, 11) if self.group == 2 else config.device_capacity == 10
-        )
-        supported_m_cluster = (config.tile_m in (128, 256) and config.cluster_m == 1) or (
-            config.tile_m == 256 and config.cluster_m == 2
-        )
-        min_tile_n = 64 if self.group == 2 else 128
-        return (
-            supported_arch
-            and not config.swap_ab
-            and supported_m_cluster
-            and config.cluster_n == 1
-            and config.tile_n >= min_tile_n
-            and config.tile_n % self.group == 0
-        )
-
-    def supports_problem(self, config, m, n):
-        """Apply problem-size legality not expressible from config fields alone."""
-        return n % self.group == 0 and config.tile_n <= n
-
-    def config_support_error(self, configs):
-        if self.group == 4:
-            return "group-4 grouped main outputs require an SM100 config"
-        return "group-2 grouped main outputs require an SM100 or SM110 config"
-
-    def to_params(self, gemm, args):
-        tensor = getattr(args, self.name)
-        layout = cutlass.utils.LayoutEnum.from_tensor(tensor)
-        if not layout.is_n_major_c():
-            raise ValueError("grouped main output must be N-major")
-        setattr(gemm, self._layout_gemm_attr(), layout)
-        setattr(gemm, self._dtype_gemm_attr(), tensor.element_type)
-        epi_tile = self.epi_tile_fn(gemm, gemm.epi_tile)
-        tma_atom, tma_tensor, smem_layout, epi_tile_out = setup_epi_tensor(
-            gemm, tensor, epi_tile=epi_tile
-        )
-        return {
-            self._tma_atom_key(): tma_atom,
-            self.name: tma_tensor,
-            self._smem_layout_key(): smem_layout,
-            self._epi_tile_key(): epi_tile_out,
-            self._dtype_field(): tensor.element_type,
-        }
-
-    def min_epi_tile_n(self, arg_tensor):
-        """Keep stores vectorizable and fragment reductions complete."""
-        store_width = 0
-        if arg_tensor is not None:
-            width = arg_tensor.element_type.width
-            store_width = self.group * ((128 + width - 1) // width)
-        required_n = max(store_width, self.min_fragment_n or 0)
-        return required_n or None
-
-    def store_tile_shape_mn(self, gemm):
-        return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // self.group)
 
 
 class _TileLoadState(NamedTuple):
@@ -2992,20 +2884,9 @@ def _selp_pair_f16x2(
     )
 
 
-class _ColVecSelectParams(NamedTuple):
-    tensor: object
-    logical_n: object
-
-
 class ColVecSelect(EpiOp):
     """Per-row column selection ("gather along N"): out[m] = the fn value at
-    column idx[m], written directly to an (l, m) / (m,) colvec.
-
-    By default this keeps the cross-entropy contract: the output is f32 and
-    out-of-range indices leave prefilled rows untouched. Setting ``output_dtype``
-    selects exact gather semantics: preserve every selected value, including
-    ``-inf``, trap on indices outside ``[0, N)``, and store directly in the
-    requested dtype.
+    column idx[m], written directly to an (l, m) / (m,) f32 colvec.
 
     The fn returns the value under this op's name (a plain sink plane). The
     per-row column index arrives through a companion integer ColVecLoad
@@ -3064,7 +2945,7 @@ class ColVecSelect(EpiOp):
 
     fn_port = "sink"
 
-    def __init__(self, name, idx_op, *, output_dtype=None):
+    def __init__(self, name, idx_op):
         super().__init__(name)
         if not isinstance(idx_op, ColVecLoad):
             raise ValueError(
@@ -3072,18 +2953,9 @@ class ColVecSelect(EpiOp):
                 "staging the per-row column indices"
             )
         self.idx_op = idx_op
-        self.output_dtype = output_dtype
-        try:
-            self._sink_dtype = (
-                torch.float32 if output_dtype is None else _CUTE_TO_TORCH_DTYPE[output_dtype]
-            )
-        except KeyError:
-            raise ValueError(
-                f"ColVecSelect {name!r}: unsupported output dtype {output_dtype}"
-            ) from None
 
     def config_key(self):
-        return (self.idx_op.cache_key(), self.output_dtype)
+        return (self.idx_op.cache_key(),)
 
     def host_fake_arg(self, key, fctx):
         dtype, ndim = key
@@ -3094,23 +2966,12 @@ class ColVecSelect(EpiOp):
         return [(self.name, object, None)]
 
     def to_params(self, gemm, args):
-        tensor = assume_stride_divisibility(getattr(args, self.name))
-        return {
-            self.name: (
-                _ColVecSelectParams(tensor, gemm.caller_n)
-                if self.output_dtype is not None
-                else tensor
-            )
-        }
+        return {self.name: assume_stride_divisibility(getattr(args, self.name))}
 
     def sink_alloc_shape(self, lead, n, tile_m, tile_n, num_seqs=None):
         # Full colvec, not per-tile partials: config-independent (tiles
         # ignored), and there is no host_finalize — the buffer IS the result.
         return tuple(lead)
-
-    def sink_alloc_dtype(self):
-        """Return the requested exact-gather dtype, or Float32 for CE selection."""
-        return self._sink_dtype
 
     def host_validate(self, value, *, m, n, tile_M, tile_N, batch, varlen_m, epi_args, **_):
         idx = epi_args.get(self.idx_op.name)
@@ -3119,25 +2980,12 @@ class ColVecSelect(EpiOp):
         if idx.dtype not in (torch.int32, torch.int64):
             raise ValueError(f"'{self.idx_op.name}' must be int32 or int64, got {idx.dtype}")
         expected = (m,) if varlen_m or batch is None else (batch, m)
-        index_shapes = (expected,) if len(expected) == 1 else ((m,), expected)
-        if tuple(idx.shape) not in index_shapes:
-            raise ValueError(
-                f"'{self.idx_op.name}' must have shape in {index_shapes}, got {tuple(idx.shape)}"
-            )
-        if idx.stride(-1) != 1:
-            raise ValueError(f"'{self.idx_op.name}' must have unit innermost stride")
         if tuple(value.shape) != expected:
             raise ValueError(
                 f"sink '{self.name}': expected shape {expected}, got {tuple(value.shape)}"
             )
-        if value.stride(-1) != 1:
-            raise ValueError(f"sink '{self.name}' must have unit innermost stride")
-        expected_dtype = Float32 if self.output_dtype is None else self.output_dtype
-        actual_dtype = torch2cute_dtype_map.get(value.dtype)
-        if actual_dtype != expected_dtype:
-            raise ValueError(
-                f"sink '{self.name}' must have dtype {expected_dtype}, got {value.dtype}"
-            )
+        if value.dtype != torch.float32:
+            raise ValueError(f"sink '{self.name}' must be float32, got {value.dtype}")
 
     def get_smem_tensor(self, gemm, params, storage_epi):
         # The COMPANION's staged index vector (the smem field is declared by
@@ -3148,8 +2996,6 @@ class ColVecSelect(EpiOp):
 
     @cute.jit
     def begin(self, gemm, param, smem_tensor, ctx):
-        if const_expr(self.output_dtype is not None):
-            param = param.tensor
         # Reference colvec-broadcast partition: its zero-N-stride layout
         # groups aliased same-row elements in fn_sink_flush (layout only —
         # the tensor itself is never read or written, so it costs nothing).
@@ -3193,59 +3039,7 @@ class ColVecSelect(EpiOp):
         return (state[0], ref_cur, c_cur, *state[3:], epi_coord)
 
     @cute.jit
-    def end_loop_stage(
-        self,
-        gemm,
-        param,
-        state,
-        epi_coord,
-        epi_tile,
-        tiled_copy_t2r,
-        tiled_copy_r2s,
-        tidx,
-    ):
-        """Stage strict-gather bounds validation for the finish phase."""
-        if const_expr(self.output_dtype is None or epi_coord[1] != 0):
-            return None
-        return (False, (state, epi_coord))
-
-    @cute.jit
-    def end_loop_finish(self, gemm, param, staged, tile_coord_mnkl, varlen_manager):
-        """Trap strict-gather indices outside the logical output extent."""
-        state, epi_coord = staged
-        sIdx, _, coords, _, limit_m, n_off, _, _, _ = state
-        logical_n = param.logical_n
-        coordinates = cute.filter_zeros(coords[None, None, None, epi_coord[0], epi_coord[1]])
-        for i in cutlass.range(cute.size(coordinates), unroll_full=True):
-            row, column = coordinates[i][0], coordinates[i][1]
-            index = sIdx[row]
-            if row < limit_m and n_off == 0 and column == 0 and (index < 0 or index >= logical_n):
-                llvm.inline_asm(
-                    None,
-                    [],
-                    "trap;",
-                    "",
-                    has_side_effects=True,
-                    is_align_stack=False,
-                )
-
-    @cute.jit
-    def _flush_exact(self, gemm, state, frag):
-        """Implement exact tensor-gather semantics with direct predicated stores."""
-        sIdx, _, coords, gVec, limit_m, n_off, _, _, _, _ = state
-        values = cute.filter_zeros(frag)
-        coordinates = cute.filter_zeros(coords)
-        for i in cutlass.range(cute.size(values), unroll_full=True):
-            row, column = coordinates[i][0], coordinates[i][1]
-            index = sIdx[row]
-            if row < limit_m and n_off + column == index:
-                gVec[row] = values[i].to(gVec.element_type)
-
-    @cute.jit
     def fn_sink_flush(self, gemm, state, frag):
-        if const_expr(self.output_dtype is not None):
-            self._flush_exact(gemm, state, frag)
-            return
         sIdx, ref_frag, coords, gVec, limit_m, n_off, tMask, tRel0, etN, epi_coord = state
         ref = ref_frag.layout
         frag_g = layout_utils.convert_layout_zero_stride(frag, ref)
