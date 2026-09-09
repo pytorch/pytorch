@@ -305,10 +305,15 @@ class TreeManagerContainer:
 
         weakref.finalize(fn, self.finalize_cudagraphify_fn)
 
-    def get_tree_manager(self) -> CUDAGraphTreeManager:
+    def get_tree_manager(
+        self, initial_mempool_allocation_gb: float | None = None
+    ) -> CUDAGraphTreeManager:
         with self.lock:
             if self.tree_manager is None:
-                self.tree_manager = CUDAGraphTreeManager(self.device_index)
+                self.tree_manager = CUDAGraphTreeManager(
+                    self.device_index,
+                    initial_mempool_allocation_gb=initial_mempool_allocation_gb,
+                )
             return self.tree_manager
 
 
@@ -533,6 +538,7 @@ def cudagraphify(
     user_visible_output_idxs: tuple[int, ...] = (),
     cudagraph_managed_input_rerecord_limit: int | None = None,
     cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] | None = None,
+    cudagraph_initial_mempool_allocation_gb: float | None = None,
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
     if is_backward and is_inference:
@@ -552,7 +558,9 @@ def cudagraphify(
         )
 
     with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
-        manager = get_container(device_index).get_tree_manager()
+        manager = get_container(device_index).get_tree_manager(
+            cudagraph_initial_mempool_allocation_gb
+        )
 
     return manager.add_function(
         model,
@@ -1028,9 +1036,6 @@ class CUDAGraphNode:
         copy_cudagraph_managed_idxs_set = (
             OrderedSet(copy_cudagraph_managed_idxs) & all_cudagraph_managed_idxs
         ) - static_input_idxs
-        self.copy_cudagraph_managed_idxs: LevelList[int] = LevelList(
-            copy_cudagraph_managed_idxs_set
-        )
         self.cudagraph_managed_idxs: list[int] = list(
             all_cudagraph_managed_idxs - copy_cudagraph_managed_idxs_set
         )
@@ -2127,8 +2132,7 @@ class CUDAGraphNode:
         return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def mismatched_cudagraph_managed_idxs(self, inputs: list[InputType]) -> list[int]:
-        # Only called on the re-record path after a CudagraphManagedIdxMismatch,
-        # so this does not need to be fast.
+        # Only called on the re-record path, so this does not need to be fast.
         return [
             idx
             for idx in self.cudagraph_managed_idxs
@@ -2399,7 +2403,9 @@ class CUDAGraphTreeManager:
     replay.
     """
 
-    def __init__(self, device_index: int) -> None:
+    def __init__(
+        self, device_index: int, *, initial_mempool_allocation_gb: float | None = None
+    ) -> None:
         # roots are functions which have no dependencies on an other node. I.e.,
         # when they are first invoked, none of their inputs are outputs are outputs
         # of another node, nor are there any live outputs of another node whose
@@ -2447,19 +2453,11 @@ class CUDAGraphTreeManager:
                     capture_error_mode="thread_local",
                 ),
             ):
-                pass
-
-            # Priming the pool with one large allocation reserves a single
-            # contiguous segment for later recordings to carve up, rather than
-            # growing the pool a segment at a time, which reduces fragmentation.
-            # The block is freed immediately but stays cached in the pool.
-            # NB: must run after the empty capture above, which keeps the pool's
-            # use count positive for the manager's lifetime.
-            prime_gb = config.triton.cudagraph_initial_mempool_allocation_gb
-            if prime_gb:
-                with _use_cuda_memory_pool_manager(
-                    device_index, self.cuda_graphs_thread_pool, self.stream
-                ):
+                prime_gb = initial_mempool_allocation_gb
+                if prime_gb is None:
+                    prime_gb = config.triton.cudagraph_initial_mempool_allocation_gb
+                if prime_gb:
+                    # Freed immediately, but cached in the pool for later recordings.
                     nbytes = int(prime_gb * (1 << 30))
                     torch.empty(
                         nbytes, dtype=torch.uint8, device=f"cuda:{device_index}"
@@ -2724,8 +2722,6 @@ class CUDAGraphTreeManager:
         if not self.in_recording:
             unexpected_rerecord = False
             unexpected_rerecord_reason = None
-            cudagraph_managed_mismatched_idxs: OrderedSet[int] = OrderedSet()
-            non_demotable_cudagraph_managed_idxs: OrderedSet[int] = OrderedSet()
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
@@ -2743,13 +2739,6 @@ class CUDAGraphTreeManager:
                     # other mismatch reasons do count.
                     if status != CheckInvariantStatus.StaticInputIdxMismatch:
                         unexpected_rerecord = True
-                    if status == CheckInvariantStatus.CudagraphManagedIdxMismatch:
-                        for idx in child.mismatched_cudagraph_managed_idxs(new_inputs):
-                            if idx in cudagraph_managed_mismatched_idxs:
-                                continue
-                            cudagraph_managed_mismatched_idxs.add(idx)
-                            if not child.can_copy_cudagraph_managed_input(idx):
-                                non_demotable_cudagraph_managed_idxs.add(idx)
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2780,9 +2769,15 @@ class CUDAGraphTreeManager:
                 if self.skip_cudagraph[self._get_node_id()][function_id]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
-            demotable_cudagraph_managed_idxs = (
-                cudagraph_managed_mismatched_idxs - non_demotable_cudagraph_managed_idxs
-            )
+            demotable_cudagraph_managed_idxs: OrderedSet[int] = OrderedSet()
+            if children := child_nodes[function_id]:
+                # Old specializations must not keep charging inputs that stabilized.
+                latest = children[-1]
+                demotable_cudagraph_managed_idxs = OrderedSet(
+                    idx
+                    for idx in latest.mismatched_cudagraph_managed_idxs(new_inputs)
+                    if latest.can_copy_cudagraph_managed_input(idx)
+                )
             skip_cudagraph_managed_input_idxs: tuple[int, ...] = ()
             if demotable_cudagraph_managed_idxs:
                 skip_cudagraph_managed_input_idxs = (
