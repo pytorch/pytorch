@@ -1604,11 +1604,20 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Cudnn:
       check_input_same_type_as_parameters(input, weight, bias);
-      output = at::cudnn_convolution(
-          input.contiguous(backend_memory_format), weight, params.padding, params.stride,
-          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
-      if (bias.defined()) {
-        output.add_(reshape_bias(input.dim(), bias));
+      if (bias.defined() && cudnnv8_conv_bias_enabled() &&
+          (input.scalar_type() == kFloat || input.scalar_type() == kHalf ||
+           input.scalar_type() == kBFloat16)) {
+        output = at::cudnn_convolution(
+            input.contiguous(backend_memory_format), weight, bias, params.padding,
+            params.stride, params.dilation, params.groups, params.benchmark,
+            params.deterministic, params.allow_tf32);
+      } else {
+        output = at::cudnn_convolution(
+            input.contiguous(backend_memory_format), weight, params.padding, params.stride,
+            params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
+        if (bias.defined()) {
+          output.add_(reshape_bias(input.dim(), bias));
+        }
       }
       break;
     case ConvBackend::CudnnTranspose:
