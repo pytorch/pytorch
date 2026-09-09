@@ -2012,7 +2012,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/120318")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
