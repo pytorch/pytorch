@@ -7,6 +7,8 @@
 
 #include <c10/util/irange.h>
 
+#include <atomic>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -260,6 +262,9 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
   is_symbolic_ = other->is_symbolic_;
+  // Must travel with view_metas_: the flag describes that chain, and
+  // _functionalize_is_multi_output_view reports it to AOTAutograd.
+  is_multi_output_view_ = other->is_multi_output_view_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -790,12 +795,30 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
   self_impl->mutate_view_meta(meta);
 }
 
+namespace {
+// Constant-initialized, so registering from another translation unit's static
+// initializer cannot race with this one's construction.
+std::atomic<MultiOutputViewMarker> multi_output_view_marker{nullptr};
+}
+
+void setMultiOutputViewMarker(MultiOutputViewMarker fn) {
+  multi_output_view_marker.store(fn, std::memory_order_release);
+}
+
 Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
   Tensor r = base;
   for (auto& vm : sequence) {
     r = vm->forward(r);
+    if (vm->is_multi_output) {
+      // See [Note: multi-output view replay]. `forward` rebuilt this output as
+      // a single-output view, so autograd does not know it came from an op
+      // returning several views and would let the user mutate it in place.
+      if (auto mark = multi_output_view_marker.load(std::memory_order_acquire)) {
+        mark(r);
+      }
+    }
   }
   return r;
 }

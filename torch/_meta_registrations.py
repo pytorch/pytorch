@@ -5254,9 +5254,8 @@ def pool3d_shape_check(
         torch._check(
             input.size(i) > 0,
             lambda: (
-                f"{fn_name}: Expected input's non-batch dimensions to have positive length,"
-                f" but input has a shape of {input.shape}"
-                f" and non-batch dimension {input.size(i)} has length zero!"
+                f"{fn_name}: Expected input to have non-zero size for non-batch dimensions,"
+                f" but input has sizes {input.shape} with dimension {i} being empty"
             ),
         )
 
@@ -8570,7 +8569,7 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda:
+    if torch.version.cuda or device_hint(mat1) == "mps":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
         if mat1_is_2d == mat2_is_2d:

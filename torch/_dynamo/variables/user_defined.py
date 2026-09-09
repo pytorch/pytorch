@@ -184,7 +184,6 @@ def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
@@ -1854,11 +1853,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
-        if self._base_vt is not None:
-            return side_effects.is_modified(self._base_vt)
-        return False
-
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -3031,7 +3025,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx,
                 args=[
                     f"property '{name_str}' of "
-                    f"'{type(self.value).__name__}' object has no {action}"
+                    f"'{type(self.value).__qualname__}' object has no {action}"
                 ],
             )
 
@@ -3379,6 +3373,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
+    def _class_vt(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.source:
+            cls_source: Source | None = AttrSource(self.source, "__class__")
+        else:
+            # An instance built during tracing has no source of its own, but its
+            # class can still be sourced (see cls_source in __init__). Keeping
+            # that provenance is what makes constructing from `obj.__class__`
+            # (e.g. dataclasses.replace) traceable.
+            cls_source = self.cls_source
+        return VariableTracker.build(tx, self.python_type(), cls_source)
+
+    # Overrides the base __class__ getset to add the cls_source fallback above.
+    tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
+
     def generic_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -3404,12 +3412,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # dunder attrs. inspect.getattr_static does not return correct value for
         # them.
         if name == "__class__":
-            cls_source: Source | None = source
-            if source is None:
-                cls_source = self.cls_source
-            else:
-                cls_source = source
-            return VariableTracker.build(tx, type(self.value), cls_source)
+            return self._class_vt(tx)
 
         from ..mutation_guard import unpatched_nn_module_init
 
@@ -3671,9 +3674,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 type_attr, "__wrapped__", self, source=source
             )
         elif isinstance(type_attr, types.FunctionType):
-            while hasattr(type_attr, "_torchdynamo_inline"):
-                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
-                source = AttrSource(source, "_torchdynamo_inline") if source else None
+            if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
+                if can_use_mro_source:
+                    source = self.get_source_by_walking_mro(tx, name)
+                return variables.WrapperUserMethodVariable(
+                    type_attr, "_torchdynamo_inline", self, source=source
+                )
             # Function on the type MRO + not in instance dict → bound method.
             var_source = None
             if can_use_mro_source:
