@@ -29,7 +29,6 @@ import io
 import itertools
 import logging
 import math
-import pickle
 import sys
 import textwrap
 import traceback
@@ -75,6 +74,7 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
+from torch._dynamo.package import FunctionPicklerBase, SerializedCode
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -221,7 +221,6 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
-    from torch._dynamo.package import SerializedCode
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -4153,7 +4152,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
-class GuardsStatePickler(pickle.Pickler):
+class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
         guard_tree_values: dict[int, Any],
@@ -4168,6 +4167,8 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        self._missing_cache: dict[str, _Missing] = {}
+        self._pruned_cells: dict[int, types.CellType] = {}
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4222,10 +4223,6 @@ class GuardsStatePickler(pickle.Pickler):
         return out
 
     @classmethod
-    def _unpickle_python_module(cls, alias: str) -> types.ModuleType:
-        return importlib.import_module(alias)
-
-    @classmethod
     def _unpickle_dispatch_key_set(cls, raw_repr: int) -> torch._C.DispatchKeySet:
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
@@ -4274,23 +4271,10 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
-    @classmethod
-    def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
-        return types.MethodType(func, base)
-
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
         return getattr(torch.nn.attention.SDPBackend, name)
-
-    @classmethod
-    def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("Closure must not be None when unpickling cell")
-        return _.__closure__[0]
 
     @classmethod
     def _unpickle_named_tuple_type(
@@ -4299,23 +4283,116 @@ class GuardsStatePickler(pickle.Pickler):
         # pyrefly: ignore [bad-return]
         return collections.namedtuple(name, fields)
 
-    @classmethod
-    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
+    # Note [Reconstructing a function a guard is rooted at]
+    #
+    # A function whose qualname does not resolve back to it cannot be pickled by
+    # reference, and every functools.wraps decorator produces one: the wrapper
+    # copies the wrapped function's __module__ and __qualname__ while living in
+    # the decorator's file. Such a function becomes a _Missing sentinel, which is
+    # right for one nothing depends on. When a guard's source walks THROUGH it,
+    # evaluating that source against the sentinel raises while the guard manager
+    # is still being built and the whole load fails, so it is rebuilt from its
+    # code object instead (FunctionPicklerBase._reduce_function).
+    #
+    # Rebuilding drags along whatever the function holds -- closure cells,
+    # defaults, attributes, and the module scope its body reads -- and carrying
+    # all of that would let an unpicklable neighbour fail a package that never
+    # needed it. So only values some guard tree node references are carried
+    # (_keep) and the rest become sentinels. A registered CONTAINER is carried
+    # verbatim rather than pruned per element: a guard on the __defaults__ tuple
+    # or __kwdefaults__ dict itself -- what wrap_listlike's SEQUENCE_LENGTH and
+    # CONSTANT_MATCH register -- rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make that guard
+    # fail forever with no load error.
 
-        return SerializedCode.to_code_object(serialized_code)
+    def _keep(self, value: object) -> bool:
+        """Identity match; an interned value that collides is kept, harmlessly."""
+        return id(value) in self.guard_tree_values
 
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+    def _missing(self, reason: str) -> _Missing:
+        """One sentinel per reason; a pruned container shares them."""
+        if reason not in self._missing_cache:
+            self._missing_cache[reason] = _Missing(reason)
+        return self._missing_cache[reason]
+
+    def _prune(self, value: object, reason: str) -> object:
+        return value if self._keep(value) else self._missing(reason)
+
+    def _prune_cell(self, cell: types.CellType) -> types.CellType:
+        # A carried cell passes through UNCHANGED so pickle memoizes it and two
+        # functions closing over one variable still share it after reload.
+        if self._keep(cell):
+            return cell
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return cell
+        if self._keep(contents):
+            return cell
+        # Memoize by the ORIGINAL cell's identity so two functions sharing one
+        # unguarded cell still share a single pruned cell after reload, rather
+        # than each getting a distinct _Missing-filled one.
+        pruned = self._pruned_cells.get(id(cell))
+        if pruned is None:
+            pruned = types.CellType(self._missing("unguarded function closure"))
+            self._pruned_cells[id(cell)] = pruned
+        return pruned
+
+    def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        """Pickle a function by value, pruned to what some guard reads.
+
+        See Note [Reconstructing a function a guard is rooted at].
+        """
+        # A kept container (__defaults__/__kwdefaults__/__dict__/__annotations__)
+        # is carried whole; an unkept one is pruned per value. See the Note.
+        defaults = obj.__defaults__
+        if defaults is not None and not self._keep(defaults):
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None and not self._keep(kwdefaults):
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
+
+        closure = obj.__closure__
+        if closure is not None:
+            # No verbatim gate like the other containers: a cell is never a
+            # literal a value guard could keep whole, and _prune_cell is
+            # length-preserving, so pruning every cell is always safe.
+            closure = tuple(self._prune_cell(cell) for cell in closure)
+        if self._keep(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+            }
+        # An unguarded annotation/type param may be an unpicklable local class;
+        # prune it. (On 3.14 __annotations__ is a fresh dict, so always pruned.)
+        raw_annotations = self._read_raw_annotations(obj)
+        if self._keep(raw_annotations):
+            annotations = raw_annotations
+        else:
+            annotations = {
+                name: self._prune(value, "unguarded function annotation")
+                for name, value in raw_annotations.items()
+            }
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params is not None and not self._keep(type_params):
+            type_params = tuple(
+                self._prune(t, "unguarded function type param") for t in type_params
+            )
+        return self._reduce_function(
+            obj,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            closure=closure,
+            attributes=attributes,
+            annotations=annotations,
+            doc=self._prune(obj.__doc__, "unguarded function doc"),
+            type_params=type_params,
+        )
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4327,8 +4404,6 @@ class GuardsStatePickler(pickle.Pickler):
             return type(obj).__new__, (type(obj),)
 
         if inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
-
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
         if id(obj) in self.missing_values:
@@ -4469,30 +4544,31 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
+                return self._reduce_function_by_value(obj)
+            resolved: Any = None
             if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
+                resolved = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                if f is not obj:
+                    resolved = getattr(resolved, name, None)
+            if resolved is not obj:
+                # See Note [Reconstructing a function a guard is rooted at].
+                # A module absent from sys.modules (an exec-created function, or
+                # __module__ is None) is an fqn mismatch too: pickling by
+                # reference imports __module__ and re-reads the qualname, which
+                # would not round back to this object -- it fails to resolve, or
+                # resolves to a different one -- so rebuild a guarded function by
+                # value and prune an unguarded one, rather than fall through and
+                # mis-serialize.
+                if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
+                return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4599,10 +4675,33 @@ def pickle_guards_state(
         state.output_graph.guard_on_key_order = set()
         state.output_graph.global_scope = {}
 
+    # Anything dump raises means a guarded value cannot be serialized, which is
+    # a bypass (an error under strict_precompile), never a compiler crash. A
+    # PackageError raised inside reducer_override already carries its message.
     try:
         pickler.dump(state)
-    except AttributeError as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except torch._dynamo.exc.PackageError:
+        raise
+    except RecursionError as e:
+        # A guard rooted at an fqn-mismatched function is now traversed rather
+        # than dropped, so pickle walks whatever user data hangs off it -- and a
+        # deep (but finite, acyclic) object graph, or a pathological __reduce__
+        # that never memoizes, overflows the recursion limit here. That is a
+        # serialization limit, not a compiler bug: bypass it (or raise under
+        # strict_precompile) like any other unpicklable value, rather than
+        # hard-failing a program that compiled fine before. Walking the object
+        # graph to report WHERE the overflow happened is skipped deliberately --
+        # it would recurse again off an already exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "guard state exceeded the recursion limit while pickling"
+        ) from e
+    except Exception as e:
+        # Deliberately broad, AssertionError included: GradScaler.__getstate__
+        # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
+        # assert in __reduce__ and properties. Each is a legitimate limit of
+        # what a package can carry, reported as a bypass rather than failing
+        # the compile.
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
