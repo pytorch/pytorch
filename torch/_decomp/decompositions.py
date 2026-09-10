@@ -6117,11 +6117,6 @@ def max_pool2d_with_indices_backward(
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
-    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
-    # (#163327) and numerical differences on macOS 15+.
-    if grad_output.device.type == "mps":
-        return NotImplemented
-
     if not stride:
         stride = kernel_size
 
@@ -6170,6 +6165,11 @@ def max_pool2d_with_indices_backward(
         return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
 
     if grad_output.is_xpu:
+        return NotImplemented
+
+    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
+    # (#163327) and numerical differences on macOS 15+.
+    if grad_output.device.type == "mps":
         return NotImplemented
 
     # Get spatial dimensions
