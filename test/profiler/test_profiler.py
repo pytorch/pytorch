@@ -2001,8 +2001,8 @@ class TestProfiler(TestCase):
                 payload()
             validate_json(prof, gc_flag)
 
+    @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.accelerator.is_available(), "Accelerator is required")
     def test_region_device_time(self):
         if not supported_activities() - {ProfilerActivity.CPU, ProfilerActivity.HPU}:
             self.skipTest("Device kernel attribution is unavailable")
