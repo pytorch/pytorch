@@ -32,7 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 # them or the skip check treats them as built by a different compiler.
 _RUNTIMES = export.runtime_versions("cutedsl")
 
-SIDECAR = {
+SIDECAR: dict[str, Any] = {
     "prefix": "fakeop_f32_n1024_k8",
     # Generation reads arch and kind rather than defaulting either, so a fixture
     # missing them is not a sidecar export could have written.
@@ -815,6 +815,14 @@ class TestSidecarIntegrity(unittest.TestCase):
         self.assertIn("no sidecar claims", out.getvalue())
         self.assertNotIn("partial copy", out.getvalue())
 
+    def test_an_unclaimed_cubin_is_reported_like_any_other_artifact(self):
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "k.cubin"), "w").close()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                export._check_no_orphan_artifacts(d, [])
+        self.assertIn("k.cubin", out.getvalue())
+        self.assertIn("no sidecar claims", out.getvalue())
+
     def test_artifacts_with_sidecar_are_fine(self):
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "k.o"), "w").close()
@@ -845,6 +853,193 @@ class TestSidecarIntegrity(unittest.TestCase):
                 f.write("{truncated")
             with self.assertRaisesRegex(RuntimeError, "could not be read"):
                 export._read_sidecar(path)
+
+
+@contextlib.contextmanager
+def _fake_triton(**metadata):
+    """Stand in for triton, yielding what export() asked it to compile.
+
+    ``metadata`` overrides fields of the compiled kernel's metadata; num_warps
+    otherwise mirrors the requested count, as it does whenever the kernel is not
+    warp-specialized.
+
+    triton.runtime raises on any access: resolving the active driver builds CudaUtils,
+    which needs a libcuda the GPU-less builders have not got."""
+    seen: dict[str, Any] = {}
+
+    class _Poisoned(types.ModuleType):
+        def __getattr__(self, name):
+            raise AssertionError(f"export must not reach triton.runtime.{name}")
+
+    def fake_compile(src, target=None, options=None):
+        seen["target"] = target
+        seen["options"] = options
+        md = {
+            "name": "_fake_kernel",
+            "shared": 256,
+            "num_warps": (options or {}).get("num_warps", 4),
+            "global_scratch_size": 0,
+            "profile_scratch_size": 0,
+            **metadata,
+        }
+        return types.SimpleNamespace(
+            asm={"cubin": b"\x7fELF-fake"},
+            metadata=types.SimpleNamespace(**md),
+        )
+
+    def fake_ast_source(**kwargs):
+        seen["src"] = kwargs
+        return types.SimpleNamespace(**kwargs)
+
+    fake_compiler = types.ModuleType("triton.compiler")
+    cast(Any, fake_compiler).ASTSource = fake_ast_source
+    fake_backends_compiler = types.ModuleType("triton.backends.compiler")
+    cast(Any, fake_backends_compiler).GPUTarget = lambda backend, arch, warp_size: (
+        backend,
+        arch,
+        warp_size,
+    )
+    fake_triton = types.ModuleType("triton")
+    cast(Any, fake_triton).compile = fake_compile
+    cast(Any, fake_triton).compiler = fake_compiler
+    cast(Any, fake_triton).runtime = _Poisoned("triton.runtime")
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "triton": fake_triton,
+            "triton.compiler": fake_compiler,
+            "triton.backends.compiler": fake_backends_compiler,
+        },
+    ):
+        yield seen
+
+
+class TestTritonExport(unittest.TestCase):
+    _KERNEL = "class _Fn:\n    arg_names = ('A_ptr', 'M', 'BLOCK')\nkern = _Fn()\n"
+
+    @contextlib.contextmanager
+    def _exported(self, arch, signature="*fp32:16, i32, 64", **metadata):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "kernel.py")
+            with open(path, "w") as f:
+                f.write(self._KERNEL)
+            b = {
+                "prefix": "fake_bmm_f32",
+                "kernel_path": path,
+                "kernel_name": "kern",
+                "signature": signature,
+                "launch": {"grid_x": "M"},
+                "num_warps": 8,
+                "args": [{"name": "a", "kind": "tensor", "read_only": True}],
+            }
+            with _fake_triton(**metadata) as seen:
+                extra = toolchains.get_toolchain("triton").export(b, d, arch=arch)
+            yield d, extra, seen
+
+    def test_the_target_comes_from_the_arch_not_from_a_driver(self):
+        with self._exported("sm_100a") as (d, extra, seen):
+            self.assertEqual(seen["target"], ("cuda", 100, 32))
+            self.assertEqual(extra["symbol"], "_fake_kernel")
+            self.assertEqual((extra["shared"], extra["block_x"]), (256, 8 * 32))
+            with open(os.path.join(d, "fake_bmm_f32.cubin"), "rb") as f:
+                self.assertEqual(f.read(), b"\x7fELF-fake")
+
+    def test_divisibility_hints_leave_the_signature_and_constants_split_out(self):
+        with self._exported("sm_90") as (_, _extra, seen):
+            self.assertEqual(seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"})
+            self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
+
+    def test_a_divisibility_hint_reaches_the_compiler_as_an_attr(self):
+        # Dropped from the signature and not passed on, the hint would be inert and
+        # the SASS generically addressed -- measured ~7x slower on bmm. The key is an
+        # index into the kernel's full parameter list, constexprs included, which is
+        # how ast_to_ttir sizes the table it looks them up in.
+        with self._exported("sm_90", signature="*fp32:16, i32:16, 64") as (_, _e, seen):
+            self.assertEqual(
+                seen["src"]["attrs"],
+                {(0,): [["tt.divisibility", 16]], (1,): [["tt.divisibility", 16]]},
+            )
+
+    def test_the_compiled_warp_count_wins_over_the_requested_one(self):
+        # Warp specialization raises it (ttg.total-num-warps), and the launcher's
+        # blockDimX has to match what the cubin was built for.
+        with self._exported("sm_100a", num_warps=16) as (_, extra, seen):
+            self.assertEqual(seen["options"]["num_warps"], 8)
+            self.assertEqual(extra["block_x"], 16 * 32)
+
+    def test_the_sidecar_records_the_signature_it_compiled(self):
+        # validate_abi holds `args` against it, so it has to survive export.
+        with self._exported("sm_90") as (_, extra, _seen):
+            self.assertEqual(extra["signature"], "*fp32:16, i32, 64")
+
+    def test_a_signature_that_does_not_match_the_kernel_is_refused(self):
+        # Silently, the entries would pair with the wrong parameters: every attr key
+        # and baked constant lands on a neighbour.
+        with self.assertRaisesRegex(RuntimeError, "signature has 2 entries"):
+            with self._exported("sm_90", signature="*fp32:16, i32"):
+                pass
+
+    def test_a_kernel_that_wants_scratch_is_refused(self):
+        # The launcher passes both hidden pointers as null, so the kernel would
+        # dereference null on device.
+        for field in ("global_scratch_size", "profile_scratch_size"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(RuntimeError, field.removesuffix("_size")):
+                    with self._exported("sm_90", **{field: 128}):
+                        pass
+
+    def test_sm_number_ignores_the_arch_conditional_suffix(self):
+        tc = toolchains.TritonToolchain
+        self.assertEqual(tc._sm_number("sm_90a"), 90)
+        self.assertEqual(tc._sm_number("sm_100"), 100)
+
+    def test_sm_number_refuses_a_malformed_arch(self):
+        tc = toolchains.TritonToolchain
+        for bad in ("90a", "sm_90b"):
+            with self.subTest(arch=bad):
+                with self.assertRaisesRegex(ValueError, "must look like sm_90a"):
+                    tc._sm_number(bad)
+
+
+class TestTritonAbiValidation(unittest.TestCase):
+    """The signature decides what the cubin reads, `args` what the launcher pushes.
+    Both are hand-written in the builder, and a mismatch is a wrong value on device
+    rather than a compile error."""
+
+    def _validate(self, signature, args):
+        sc = {"prefix": "p", "signature": signature, "args": args}
+        toolchains.get_toolchain("triton").validate_abi(sc)
+
+    _ARGS = [
+        {"name": "a", "kind": "tensor", "read_only": True},
+        {"name": "M", "kind": "scalar", "ctype": "int32_t"},
+    ]
+
+    def test_a_matching_pair_is_accepted(self):
+        # The baked constants ("1", "64") are not pushed, so they are not counted.
+        self._validate("*fp32:16, 1, i32, 64", self._ARGS)
+
+    def test_a_missing_launcher_arg_is_refused(self):
+        with self.assertRaisesRegex(RuntimeError, "3 runtime args but the launcher"):
+            self._validate("*fp32:16, i32, i32", self._ARGS)
+
+    def test_a_pointer_pushed_as_a_scalar_is_refused(self):
+        with self.assertRaisesRegex(RuntimeError, "pushes M as a scalar"):
+            self._validate("*fp32:16, *fp32", self._ARGS)
+
+    def test_a_scalar_pushed_as_a_tensor_is_refused(self):
+        args = [dict(self._ARGS[0]), {"name": "M", "kind": "tensor"}]
+        with self.assertRaisesRegex(RuntimeError, "pushes M as a tensor"):
+            self._validate("*fp32:16, i32", args)
+
+    def test_a_width_the_launcher_narrows_is_refused(self):
+        # i64 read out of a 4-byte slot: the high half is whatever followed it.
+        with self.assertRaisesRegex(RuntimeError, "which is int64_t"):
+            self._validate("*fp32:16, i64", self._ARGS)
+
+    def test_an_unknown_type_spelling_is_refused_not_skipped(self):
+        with self.assertRaisesRegex(RuntimeError, "no C type known"):
+            self._validate("*fp32:16, fp8e4nv", self._ARGS)
 
 
 class TestLauncherGeneration(unittest.TestCase):
@@ -1931,6 +2126,13 @@ class TestToolchainRegistry(unittest.TestCase):
     def test_cutedsl_registered(self):
         self.assertIn("cutedsl", toolchains.TOOLCHAINS)
 
+    def test_triton_registered(self):
+        # A kind absent from the registry makes every declaration naming it fatal at
+        # collection, so the registration is what a triton declaration stands on.
+        tc = toolchains.get_toolchain("triton")
+        self.assertEqual((tc.kind, tc.artifact_exts), ("triton", (".cubin",)))
+        self.assertEqual(tc.REQUIRED_RUNTIMES, ("triton",))
+
     def test_unknown_kind_raises(self):
         with self.assertRaisesRegex(RuntimeError, "unknown toolchain kind"):
             toolchains.get_toolchain("nvfuser")
@@ -1941,8 +2143,9 @@ class TestToolchainRegistry(unittest.TestCase):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
 
 
-CUBIN_SIDECAR = {
+CUBIN_SIDECAR: dict[str, Any] = {
     "prefix": "fakemm_f32",
+    "arch": "sm_100a",
     "kind": "triton",
     "symbol": "_fakemm_kernel",
     "spec": {"dtype": "float32"},
@@ -1955,6 +2158,108 @@ CUBIN_SIDECAR = {
         {"name": "M", "kind": "scalar", "ctype": "int32_t"},
     ],
 }
+
+
+class TestCubinLauncher(unittest.TestCase):
+    SRC: str
+
+    @staticmethod
+    def _gen(tmpdir, **overrides):
+        with open(os.path.join(tmpdir, "fakemm_f32.cubin"), "wb") as f:
+            f.write(b"\x7fELF-fake")
+        sc = dict(CUBIN_SIDECAR, _dir=tmpdir, **overrides)
+        return toolchains.get_toolchain("triton").gen_launcher(sc)
+
+    @classmethod
+    def setUpClass(cls):
+        # One launcher for every test that only reads it; the shared-memory case
+        # generates its own, since the opt-in turns on the byte count.
+        with tempfile.TemporaryDirectory() as d:
+            cls.SRC = cls._gen(d)
+
+    def test_the_cubin_is_embedded_and_loaded_once_per_device(self):
+        self.assertIn("const unsigned char fakemm_f32_cubin[]", self.SRC)
+        self.assertIn("c10::call_once(fakemm_f32_once[device]", self.SRC)
+        self.assertIn(
+            'nvrtc.cuModuleGetFunction(&fakemm_f32_fn[device], mod, "_fakemm_kernel")',
+            self.SRC,
+        )
+
+    def test_a_load_failure_raises_rather_than_exiting(self):
+        # Every driver call is checked, and by the throwing macro: a CUDA_CHECK-style
+        # abort would take the process down over a kernel aten can serve itself.
+        calls = re.findall(r"nvrtc\.cu\w+\(", self.SRC)
+        checked = re.findall(r"AT_CUDA_DRIVER_CHECK\(\s*nvrtc\.cu\w+\(", self.SRC)
+        self.assertEqual(len(checked), len(calls), calls)
+        self.assertNotIn("std::exit", self.SRC)
+
+    def test_every_driver_call_goes_through_atens_dlopen_wrapper(self):
+        # A raw call links torch_cuda against libcuda, which breaks driver-less
+        # machines; a wrapped one is always a member of the NVRTC table.
+        for name in ("cuModuleLoadData", "cuModuleGetFunction", "cuLaunchKernel"):
+            self.assertIsNone(re.search(rf"(?<![\w.]){name}\(", self.SRC), name)
+        self.assertIn("at::globalContext().getNVRTC()", self.SRC)
+
+    def test_the_grid_block_and_shared_bytes_come_from_the_sidecar(self):
+        self.assertIn("const unsigned gx = B_dim*((M+31)/32);", self.SRC)
+        self.assertIn("128, 1, 1, 512,", self.SRC)
+        self.assertIn("cuda_stream.stream()", self.SRC)
+
+    def test_an_empty_grid_is_checked_per_dimension(self):
+        # The product wraps at 2^32, so a 2^30 x 4 grid would read as empty and skip a
+        # launch the caller is owed.
+        self.assertIn("if (gx == 0 || gy == 0 || gz == 0) return;", self.SRC)
+
+    def test_the_device_comes_from_the_stream_not_the_ambient_one(self):
+        # The module is cached per device, and the launch goes to the stream's device:
+        # keyed on the ambient one instead, a launch off the current device fetches
+        # another device's module and hands this one a foreign context.
+        self.assertIn("const auto device = cuda_stream.device_index();", self.SRC)
+        self.assertNotIn("cudaGetDevice", self.SRC)
+        self.assertIn("fakemm_f32_get(device)", self.SRC)
+
+    def test_a_context_less_thread_gets_one_before_the_launch(self):
+        # The driver API never creates a context on demand, so in a thread that has
+        # not touched CUDA both the module load and the launch fail with
+        # CUDA_ERROR_INVALID_CONTEXT.
+        src = self.SRC
+        retain = src.index("cuDevicePrimaryCtxRetain")
+        self.assertLess(src.index("cuCtxGetCurrent"), retain)
+        self.assertLess(retain, src.index("cuCtxSetCurrent"))
+        self.assertLess(src.index("cuCtxSetCurrent"), src.index("cuLaunchKernel"))
+
+    def test_the_per_device_cache_is_sized_and_bounds_checked(self):
+        # A fixed 8 would be silent memory corruption on a 16-GPU host.
+        self.assertIn("fakemm_f32_fn[C10_COMPILE_TIME_MAX_GPUS]", self.SRC)
+        self.assertIn("fakemm_f32_once[C10_COMPILE_TIME_MAX_GPUS]", self.SRC)
+        self.assertIn("device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS", self.SRC)
+
+    def test_shared_memory_over_48kb_opts_in(self):
+        # The driver caps a launch at 48KB unless the function opts in; below it every
+        # device has the memory, so the query would buy nothing.
+        with tempfile.TemporaryDirectory() as d:
+            small = self._gen(d, shared=49152)
+            large = self._gen(d, shared=49153)
+        self.assertNotIn("CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN", small)
+        self.assertIn("CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN", large)
+        self.assertIn("49153 < shared_optin", large)
+        self.assertIn("CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES", large)
+        # Inside the once-block: the attribute belongs to the function, not the launch.
+        self.assertLess(large.index("shared_optin"), large.index("} // namespace"))
+
+    def test_tritons_hidden_scratch_pointers_follow_the_visible_args(self):
+        self.assertIn("&M, &global_scratch, &profile_scratch}", self.SRC)
+
+    def test_the_launcher_signature_matches_every_other_kind(self):
+        self.assertIn(
+            "void launch_fakemm_f32(const at::Tensor& a, int32_t B_dim, int32_t M, c10::Stream stream)",
+            self.SRC,
+        )
+
+    def test_the_embedded_cubin_reaches_no_linker_input(self):
+        tc = toolchains.get_toolchain("triton")
+        self.assertEqual(tc.link_exts, ())
+        self.assertNotIn(".o", tc.artifact_exts)
 
 
 class TestEndToEndGeneration(unittest.TestCase):
@@ -1973,29 +2278,37 @@ class TestEndToEndGeneration(unittest.TestCase):
     )
 
     @contextlib.contextmanager
-    def _generated(self, touch=True, header=None, arch_list=None):
+    def _generated(self, base=SIDECAR, touch=True, header=None, arch_list=None, **over):
         """Run main() over a one-kernel tree; yield (artifacts_dir, error|None).
 
-        ``touch`` writes the artifacts the sidecar claims; ``header`` overwrites
-        the ABI header, for the cases where generation must REFUSE and the
-        interesting assertion is that nothing was left behind; ``arch_list`` is
-        passed through as --arch-list."""
+        ``base`` picks the kind: the default CuTeDSL sidecar leaves an object for the
+        linker, a triton one a cubin to embed. ``touch`` writes the artifacts the sidecar
+        claims; ``header`` overwrites the ABI header, for the cases where generation must
+        REFUSE and the interesting assertion is that nothing was left behind;
+        ``arch_list`` is passed through as --arch-list, and ``over`` replaces sidecar
+        fields. Yielded from inside the patched context, so the body may run main()
+        again over the same tree."""
+        prefix, kind = base["prefix"], base["kind"]
         with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
             art_op = os.path.join(art, "sm_100a", "fakeop")
             os.makedirs(art_op)
-            if touch:
-                _touch_artifacts(art_op, SIDECAR["prefix"])
+            if touch and kind == "triton":
+                with open(os.path.join(art_op, prefix + ".cubin"), "wb") as f:
+                    f.write(b"\x7fELF-fake")
+            elif touch:
+                _touch_artifacts(art_op, prefix)
             if header is not None:
-                with open(os.path.join(art_op, SIDECAR["prefix"] + ".h"), "w") as f:
+                with open(os.path.join(art_op, prefix + ".h"), "w") as f:
                     f.write(header)
             sidecar = dict(
-                SIDECAR,
+                base,
                 spec={"N": 1024, "K": 8},
                 sources=_current_sources(),
-                runtimes=_RUNTIMES,
+                runtimes=export.runtime_versions(kind),
                 version=export.SIDECAR_VERSION,
+                **over,
             )
-            with open(os.path.join(art_op, SIDECAR["prefix"] + ".json"), "w") as f:
+            with open(os.path.join(art_op, prefix + ".json"), "w") as f:
                 json.dump(sidecar, f)
             os.makedirs(os.path.join(ops, "fakeop"))
             with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
@@ -2009,54 +2322,38 @@ class TestEndToEndGeneration(unittest.TestCase):
                     gen_aot_lib.main(argv)
                 except Exception as e:
                     err = e
-            yield art, err
+                yield art, err
 
     def test_a_second_generation_over_the_same_inputs_touches_nothing(self):
         # These files are build inputs: restamping them recompiles the generated
         # sources and relinks torch_cuda, dirtying all ~110 targets that consume it.
-        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
-            art_op = os.path.join(art, "sm_100a", "fakeop")
-            os.makedirs(art_op)
-            _touch_artifacts(art_op, SIDECAR["prefix"])
-            sidecar = dict(
-                SIDECAR,
-                spec={"N": 1024, "K": 8},
-                sources=_current_sources(),
-                runtimes=_RUNTIMES,
-                version=export.SIDECAR_VERSION,
-            )
-            with open(os.path.join(art_op, SIDECAR["prefix"] + ".json"), "w") as f:
-                json.dump(sidecar, f)
-            os.makedirs(os.path.join(ops, "fakeop"))
-            with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
-                f.write(self._DECL)
 
-            # By INODE, not mtime: os.replace gives a rewritten file a new inode, while
-            # two runs inside one filesystem timestamp tick share an mtime. The include
-            # is exempt -- it is rewritten by construction (invalidated first, then
-            # written) and only its timestamp is restored, which is what the build reads.
-            def stamps():
-                out = {}
-                for root, _, files in os.walk(art):
-                    for name in files:
-                        p = os.path.join(root, name)
-                        st = os.stat(p)
-                        rel = os.path.relpath(p, art)
-                        keep = (
-                            st.st_mtime_ns
-                            if name == gen_aot_lib.CMAKE_INCLUDE
-                            else st.st_ino
-                        )
-                        out[rel] = (keep, st.st_size)
-                return out
+        # By INODE, not mtime: os.replace gives a rewritten file a new inode, while two
+        # runs inside one filesystem timestamp tick share an mtime. The include is
+        # exempt -- it is rewritten by construction (invalidated first, then written)
+        # and only its timestamp is restored, which is what the build reads.
+        def stamps(art):
+            out = {}
+            for root, _, files in os.walk(art):
+                for name in files:
+                    p = os.path.join(root, name)
+                    st = os.stat(p)
+                    rel = os.path.relpath(p, art)
+                    keep = (
+                        st.st_mtime_ns
+                        if name == gen_aot_lib.CMAKE_INCLUDE
+                        else st.st_ino
+                    )
+                    out[rel] = (keep, st.st_size)
+            return out
 
-            with _patched_generation(ops, declarations=None):
-                gen_aot_lib.main(["--artifacts-dir", art])
-                first = stamps()
-                # Past a timestamp tick, so a restamped file is visible as one.
-                time.sleep(0.05)
-                gen_aot_lib.main(["--artifacts-dir", art])
-                self.assertEqual(stamps(), first)
+        with self._generated() as (art, err):
+            self.assertIsNone(err)
+            first = stamps(art)
+            # Past a timestamp tick, so a restamped file is visible as one.
+            time.sleep(0.05)
+            gen_aot_lib.main(["--artifacts-dir", art])
+            self.assertEqual(stamps(art), first)
 
     def test_main_writes_aot_source(self):
         # Artifacts live at <root>/<arch>/<decl_id>/. _generated writes them for real,
@@ -2123,6 +2420,36 @@ class TestEndToEndGeneration(unittest.TestCase):
         ):
             self.assertIsNotNone(err, "expected a refusal")
             self.assertIn("must be declared 64-bit", str(err))
+            self.assertFalse(glob.glob(os.path.join(art, "*", "aot_*.cpp")))
+
+    def test_main_embeds_a_triton_point_and_links_nothing(self):
+        # The kind's contract end to end: the cubin is embedded in the emitted source,
+        # so the manifest names the source and NO object for the linker, and the
+        # launcher the dispatch branch calls is the one generation emitted.
+        pre = CUBIN_SIDECAR["prefix"]
+        with self._generated(CUBIN_SIDECAR, signature="*fp32:16, i32, i32") as (
+            art,
+            err,
+        ):
+            self.assertIsNone(err)
+            out = os.path.join(art, "fakeop", "aot_fakeop_cuda.cpp")
+            with open(out) as f:
+                src = f.read()
+            self.assertIn(f"{pre}_cubin[]", src)
+            self.assertIn(f"launch_{pre}(", src)
+            man = _manifest(art)
+            self.assertEqual(man["sources"], [out])
+            self.assertEqual(man["objects"], [])
+
+    def test_main_refuses_a_triton_point_whose_launcher_args_do_not_match(self):
+        # validate_abi's production call site for this kind: a signature the launcher
+        # pushes one slot short of is a wrong value on device, not a compile error.
+        with self._generated(CUBIN_SIDECAR, signature="*fp32:16, i32, i32, i32") as (
+            art,
+            err,
+        ):
+            self.assertIsNotNone(err, "expected a refusal")
+            self.assertIn("runtime args but the launcher", str(err))
             self.assertFalse(glob.glob(os.path.join(art, "*", "aot_*.cpp")))
 
     def test_main_tolerates_missing_artifacts_dir(self):
