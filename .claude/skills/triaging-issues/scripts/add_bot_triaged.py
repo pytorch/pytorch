@@ -11,9 +11,10 @@ Exit codes:
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime
+
+from gh_api import gh_api
 
 
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
@@ -49,20 +50,14 @@ def main():
             )
             sys.exit(0)
 
-        cmd = [
-            "gh",
-            "issue",
-            "edit",
-            str(issue_number),
-            "--repo",
-            f"{owner}/{repo}",
-            "--add-label",
-            BOT_TRIAGED_LABEL,
-        ]
-        debug_log(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, check=False)
-        debug_log(
-            f"gh exit code: {result.returncode}, stderr: {result.stderr.decode()}"
+        # REST append endpoint; the previous `gh issue edit` (GraphQL) path hit
+        # 503s and silently left the marker off. If this still fails, the
+        # catch-all below logs it and check_triage_outcome.py re-applies the
+        # marker from the workflow.
+        endpoint = f"repos/{owner}/{repo}/issues/{issue_number}/labels"
+        gh_api(
+            ["-X", "POST", endpoint, "-f", f"labels[]={BOT_TRIAGED_LABEL}"],
+            log=debug_log,
         )
         sys.exit(0)
 

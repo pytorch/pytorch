@@ -17,10 +17,11 @@ Exit codes:
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from gh_api import gh_api
 
 
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
@@ -111,32 +112,20 @@ def strip_redundant(labels: list[str]) -> tuple[list[str], list[str]]:
 
 
 def fetch_existing_labels(owner: str, repo: str, issue_number: int) -> list[str]:
-    result = subprocess.run(
-        [
-            "gh",
-            "issue",
-            "view",
-            str(issue_number),
-            "--repo",
-            f"{owner}/{repo}",
-            "--json",
-            "labels",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=15,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Cannot fetch existing labels (gh exit {result.returncode}): "
-            f"{result.stderr.strip()}"
-        )
-    data = json.loads(result.stdout)
-    return [label["name"] for label in data.get("labels", [])]
+    # REST rather than `gh issue view` (GraphQL): the GraphQL endpoint has
+    # returned 503s that aborted triage with no labels applied. Failure still
+    # raises, since the MCP SET below would wipe the issue's existing labels.
+    endpoint = f"repos/{owner}/{repo}/issues/{issue_number}/labels"
+    out = gh_api(["--paginate", endpoint, "--jq", ".[].name"], log=debug_log)
+    return out.splitlines()
 
 
 def allow_with_updated_input(tool_input: dict, merged_labels: list[str]) -> None:
+    """Allow the call with `labels` replaced by the merged list.
+
+    A PreToolUse hook can print a JSON decision on stdout; `updatedInput`
+    there swaps in the arguments the tool actually receives.
+    """
     updated = dict(tool_input)
     updated["labels"] = merged_labels
     json.dump(

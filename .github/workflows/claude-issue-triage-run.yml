@@ -142,6 +142,19 @@ jobs:
             - Do not post a duplicate or substantially equivalent message that the triage bot has already posted
             - If a duplicate exists, perform only the remaining non-comment updates
 
+      # The agent's success flag is not evidence of triage: #195701 finished
+      # green after every tool call failed. Classify from the issue's live state
+      # and fail the job when nothing happened.
+      - name: Check triage outcome
+        id: outcome
+        if: always() && steps.issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .claude/skills/triaging-issues/scripts/check_triage_outcome.py \
+            "${{ github.repository }}" "${{ steps.issue.outputs.number }}" \
+            "${RUNNER_TEMP}/claude-execution-output.json"
+
       - name: Dump hook debug logs
         if: always()
         run: |
