@@ -39,9 +39,9 @@ _MAX_NARROW_N = min(256, tile.MAX_UNROLL)
 # at M=4096, up to 33.7x at M=262144.
 _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 
-# TMA fixes over-fetch when whole-row lane stride makes two lanes share a 128-byte line:
-# direct loads reach only 91-93% peak (7001 GB/s at N=16 versus 4584 at N=32).
-# It gains 1.49-1.86x only with smem rotation, whose mask requires power-of-two fp32 N.
+# Direct tpr=1 loads over-fetch once adjacent rows no longer share a 128-byte line:
+# 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
+# the rotation mask requires power-of-two fp32 N.
 _TMA_MIN_STRIDE = 128
 
 

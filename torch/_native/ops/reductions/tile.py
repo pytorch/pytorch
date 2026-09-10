@@ -444,8 +444,8 @@ class TileReduce:
             part_base = unit
             part_stride = Int32(1)
         else:
-            # (P, C) partials put this chunk's columns in row `by`; (C, P) interleaves them per
-            # column, which is what a block-per-column stage 2 needs (see kernel_coltile).
+            # (P, C) stores this chunk's columns in row `by`; (C, P) interleaves
+            # partials per column.
             part_base = (
                 Int32(by) * (nchunks * const_expr(self.nslots)) + out_base
                 if const_expr(self.pc)
