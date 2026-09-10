@@ -2588,9 +2588,7 @@ class OutputGraph(OutputGraphCommon):
         if not self.package:
             return
         if torch._dynamo.config.strict_precompile:
-            raise torch._dynamo.exc.PackageError(
-                "Detected a package bypass: %s", reason
-            )
+            raise torch._dynamo.exc.PackageError(f"Detected a package bypass: {reason}")
         log.warning("Detected a package bypass: %s", reason)
         torch._logging.trace_structured(
             "artifact",
