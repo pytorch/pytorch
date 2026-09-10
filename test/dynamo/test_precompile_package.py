@@ -3,10 +3,12 @@
 import contextlib
 import copy
 import dataclasses
+import functools
 import gc
 import importlib
 import inspect
 import itertools
+import math
 import os
 import pickle
 import sys
@@ -122,13 +124,123 @@ _BINDING_STACK_CASES = {
 }  # fmt: skip
 
 
+class PrecompileBlock(torch.nn.Module):
+    """With resume_work, the frame resumed after the break compiles too."""
+
+    def __init__(self, i, resume_work):
+        super().__init__()
+        self.i = i
+        self.resume_work = resume_work
+
+    def forward(self, x):
+        x = x * 2 + self.i
+        torch._dynamo.graph_break()
+        return x + 1.0 if self.resume_work else x
+
+
+class PrecompileStack(torch.nn.Module):
+    """All blocks share one forward code object, so variants pile onto it."""
+
+    def __init__(self, n, resume_work=False):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList(
+            [PrecompileBlock(i, resume_work) for i in range(n)]
+        )
+
+    def forward(self, x):
+        for b in self.blocks:
+            x = b(x)
+        return x.sum()
+
+
 PRECOMPILE_CONFIG = {"mode": "sum"}
+
+
+def staged_with_global_dict_conditional(x):
+    # The global is read on both sides of the break, so the entry frame and the
+    # resume frame each carry a guard on it.
+    if PRECOMPILE_CONFIG["mode"] == "sum":
+        x = x * 2
+    else:
+        x = x * 3
+    torch._dynamo.graph_break()
+    if PRECOMPILE_CONFIG["mode"] == "sum":
+        return x.sum()
+    return x.mean() * 10.0
+
+
+def _precompile_scale(t):
+    return t * 2
+
+
+class PrecompileNoDispatchSlot(torch.nn.Module):
+    """Ordinary code with no swappable slot: a torch op, stdlib, a local def."""
+
+    def forward(self, x):
+        y = torch.relu(_precompile_scale(x)) * math.sqrt(2.0)
+        torch._dynamo.graph_break()
+        return (y + 1).sum()
 
 
 PRECOMPILE_INV_CONFIG = {"mode": "sum"}
 
 
+class PrecompileInvariantModel(torch.nn.Module):
+    """Reads a global across a graph break, so the resume frame guards it."""
+
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        if PRECOMPILE_INV_CONFIG["mode"] == "sum":
+            return y.sum()
+        return y.mean()
+
+
 _TWO_SHAPES = [(torch.ones(4, 8),), (torch.ones(5, 8),)]
+
+
+class PrecompileSelfAct(torch.nn.Module):
+    """self.act = <callable> -- how configurable activations are usually written."""
+
+    def __init__(self, act):
+        super().__init__()
+        self.act = act
+
+    def forward(self, x):
+        y = self.act(x)
+        torch._dynamo.graph_break()
+        return (y + 1).sum()
+
+
+class PrecompileEmptyGraph(torch.nn.Module):
+    """Used to construct a legacy package with no guarded code in skip tests."""
+
+    def forward(self, x):
+        return x.sin()
+
+
+class PrecompilePartialForward(torch.nn.Module):
+    """self.forward = functools.partial(...) shadows the class method."""
+
+    def __init__(self, scale):
+        super().__init__()
+        self.forward = functools.partial(self._impl, scale)
+
+    def _impl(self, scale, x):
+        return (x * scale).sum()
+
+
+def _precompile_sin(t):
+    return t.sin()
+
+
+PRECOMPILE_ACTIVATION = _precompile_sin
+
+
+def staged_with_global_function_ref(x):
+    y = PRECOMPILE_ACTIVATION(x) + 1
+    torch._dynamo.graph_break()
+    return (y * 10).sum()
 
 
 _PRECOMPILE_OPS = {"len": len}
