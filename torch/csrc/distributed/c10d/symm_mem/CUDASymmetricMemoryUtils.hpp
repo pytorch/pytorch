@@ -129,6 +129,13 @@ class IpcChannel {
 // A set of store-based exchange methods with a preset prefix typically type of
 // the SymmetricMemory.  Most used as static instances at respective
 // SymmetricMemory implementation files.
+//
+// Two things the signatures cannot express. `store` and `group_name` must
+// belong to the same group; passing one group's store with another's name
+// gives mismatched counters and a hang. And the ranks of a group must issue
+// exchanges one at a time and in the same order: the mutex below makes the
+// counter increment atomic, not concurrent rendezvous safe, since nothing
+// makes two ranks hand out a sequence number to the same exchange.
 class StoreExchange {
  public:
   StoreExchange(std::string store_prefix)

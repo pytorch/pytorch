@@ -757,6 +757,7 @@ static void init_multicast_for_block(
     std::conditional_t<!use_fabric_handle, IpcChannel&, int&> ipc_channel,
     const std::vector<int>& pids,
     const c10::intrusive_ptr<c10d::ProcessGroup>& group,
+    const std::string& group_name,
     bool use_pg,
     int rank,
     int world_size) {
@@ -777,7 +778,7 @@ static void init_multicast_for_block(
     auto rank_flags = use_pg
         ? pg_all_gather(group, block->device_idx, flag)
         : storeExchange.all_gather(
-              store, rank, world_size, flag, group->getGroupName());
+              store, rank, world_size, flag, group_name);
     bool all_succeed = true;
     for (int r = 0; r < world_size; ++r) {
       all_succeed &= (rank_flags[r] != 0);
@@ -804,7 +805,7 @@ static void init_multicast_for_block(
     // TODO implement storeExchange.broadcast
     auto gathered_handles =
         storeExchange.all_gather(
-            store, rank, world_size, exported_handle, group->getGroupName());
+            store, rank, world_size, exported_handle, group_name);
     recv_handle = std::move(gathered_handles[0]);
   }
   if (memcmp(&recv_handle, &invalidator, sizeof(McHandleType)) == 0) {
@@ -1006,6 +1007,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         ipc_channel,
         pids,
         group,
+        group_name,
         use_pg,
         rank,
         world_size);
