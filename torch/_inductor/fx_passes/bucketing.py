@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import logging
+import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable
@@ -94,22 +95,20 @@ def _compute_foreach_groups(
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
 ) -> list[int] | None:
     """
-    Compute groups of indices that have the same src/dst dtype and shape.
+    Compute groups with the same dtypes and foreach fast-path eligibility.
 
-    Groups tensors by (src_dtype, dst_dtype, shape) to avoid falling back to the foreach slow path.
+    Tensor lengths may differ across pairs in a CUDA foreach operation. Keep
+    non-contiguous inputs separate so they do not put an otherwise contiguous
+    group on the slow path.
 
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
-        defaultdict(list)
+    groups: defaultdict[tuple[torch.dtype, torch.dtype, bool], list[int]] = defaultdict(
+        list
     )
-    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(
-            _hint_int_or_raise(s, context="all-gather foreach grouping")
-            for s in ag_in.shape
-        )
-        key = (ag_in.dtype, out_dtype, shape)
+    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes, strict=True)):
+        key = (ag_in.dtype, out_dtype, ag_in.is_contiguous())
         groups[key].append(i)
 
     if len(groups) <= 1:
@@ -995,6 +994,62 @@ def _pre_bucket_all_gather_fake(
 _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 
+def _unpack_bucketed_all_gather_output(
+    wait_tensor: torch.Tensor,
+    ins_sizes: list[torch.Size],
+    ins_split_sizes: list[int | torch.SymInt],
+    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+    group_size: int,
+    bucket_dtype: torch.dtype,  # type: ignore[name-defined]
+) -> list[torch.Tensor]:
+    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
+    static_split_sizes = [size for size in ins_split_sizes if isinstance(size, int)]
+    has_symbolic_split_size = len(static_split_sizes) != len(ins_split_sizes)
+    if not has_symbolic_split_size and sum(static_split_sizes) == 0:
+        return [
+            torch.empty(
+                (shape[0] * group_size,) + shape[1:],
+                dtype=out_dtype,
+                device=wait_tensor.device,
+            )
+            for shape, out_dtype in zip(ins_sizes, out_dtypes, strict=True)
+        ]
+    if group_size == 1 or len(ins_sizes) == 1 or has_symbolic_split_size:
+        outs_bucket_dtype = torch.split_with_sizes(
+            new_ag_out_reshaped,
+            ins_split_sizes,
+            dim=1,
+        )
+        return [
+            output.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
+            for output, shape, out_dtype in zip(
+                outs_bucket_dtype, ins_sizes, out_dtypes, strict=True
+            )
+        ]
+
+    outputs = [
+        torch.empty(
+            math.prod(shape) * group_size,
+            dtype=out_dtype,
+            device=wait_tensor.device,
+        )
+        for shape, out_dtype in zip(ins_sizes, out_dtypes, strict=True)
+    ]
+    outputs_bucket_dtype = [
+        output.view(group_size, -1).view(bucket_dtype) for output in outputs
+    ]
+    torch.ops.fsdp.split_with_sizes_copy.default(
+        new_ag_out_reshaped,
+        ins_split_sizes,
+        dim=1,
+        out=outputs_bucket_dtype,
+    )
+    return [
+        output.reshape((shape[0] * group_size,) + shape[1:])
+        for output, shape in zip(outputs, ins_sizes, strict=True)
+    ]
+
+
 def all_gather_merge_fn_to_trace_custom_ops(
     _ag_ins: list[torch.Tensor],
     group_name: Any,
@@ -1012,7 +1067,7 @@ def all_gather_merge_fn_to_trace_custom_ops(
         for ag_in, out_dtype in zip(ag_ins, out_dtypes)
     ]
     bucket_dtype_size_bytes = dtype.itemsize
-    ins_split_sizes = [
+    ins_split_sizes: list[int | torch.SymInt] = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
     ag_input_numel = sum(ins_split_sizes)
@@ -1038,17 +1093,14 @@ def all_gather_merge_fn_to_trace_custom_ops(
             new_ag_in, group_size, group_name, out=new_ag_out
         )
     )
-    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
-    outs_bucket_dtype = torch.split_with_sizes(
-        new_ag_out_reshaped,
+    return _unpack_bucketed_all_gather_output(
+        wait_tensor,
+        ins_sizes,
         ins_split_sizes,
-        dim=1,
+        out_dtypes,
+        group_size,
+        dtype,
     )
-    outs_reshaped = [
-        o.view(out_dtype).reshape((shape[0] * group_size,) + shape[1:])
-        for o, shape, out_dtype in zip(outs_bucket_dtype, ins_sizes, out_dtypes)
-    ]
-    return outs_reshaped
 
 
 def all_gather_merge_fn_to_trace(
