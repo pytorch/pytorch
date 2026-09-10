@@ -15,6 +15,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/complex_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/nextafter_native.h>
@@ -181,7 +182,36 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
 
 static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   using namespace mps;
-  auto type_str = scalarToMetalTypeString(iter.common_dtype());
+  // `lerp.Tensor` lets only a 0-dim `weight` differ in dtype from `self`/`end`, and
+  // TensorIterator materializes that promotion only when the common device is CPU, leaving
+  // other backends to cast while loading.
+  const auto common_dtype = iter.common_dtype();
+  const bool tensors_match =
+      iter.dtype(0) == common_dtype && iter.dtype(1) == common_dtype && iter.dtype(2) == common_dtype;
+
+  // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
+  // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
+  // for a single tensor dtype, so this needs the other operands to already agree.
+  if (tensors_match && iter.is_cpu_scalar(3)) {
+    const auto weight = iter.tensor(3).item();
+    iter.remove_operand(3);
+    return lerp_scalar_mps_kernel(iter, weight);
+  }
+
+  // The kernels below read every buffer as `common_dtype` and have no cast variants, so the
+  // remaining promotions are rejected rather than silently reinterpreting the bits.
+  TORCH_CHECK(tensors_match && iter.dtype(3) == common_dtype,
+              "lerp: MPS only supports a `weight` whose dtype differs from `self` when it is a CPU scalar, got self=",
+              iter.dtype(1),
+              ", end=",
+              iter.dtype(2),
+              ", weight=",
+              iter.dtype(3),
+              ", out=",
+              iter.dtype(0),
+              "; cast the operands to a common dtype first");
+
+  auto type_str = scalarToMetalTypeString(common_dtype);
   auto numel = static_cast<uint32_t>(iter.numel());
   auto ndim = static_cast<uint32_t>(iter.ndim());
 

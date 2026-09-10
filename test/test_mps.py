@@ -3721,6 +3721,21 @@ class TestMPS(TestCaseMPS):
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_lerp_scalar_weight_dtype(self, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196067
+        # A CPU scalar `weight` may have a dtype of its own, which the kernel must not
+        # reinterpret as the compute dtype
+        wdtype = torch.float16 if dtype == torch.float32 else torch.float32
+        cpu_x = torch.arange(6).reshape(2, 3).to(dtype)
+        cpu_w = torch.tensor(0.1, dtype=wdtype)
+        x = cpu_x.to("mps")
+        self.assertEqual(torch.lerp(cpu_x, cpu_x + 2, cpu_w), torch.lerp(x, x + 2, cpu_w))
+        self.assertEqual(cpu_x.clone().lerp_(cpu_x + 2, cpu_w), x.clone().lerp_(x + 2, cpu_w))
+        # a device-resident weight has to match: the kernels have no cast variants
+        with self.assertRaisesRegex(RuntimeError, "only supports a `weight`"):
+            torch.lerp(x, x + 2, cpu_w.to("mps"))
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16
