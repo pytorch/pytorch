@@ -1025,9 +1025,11 @@ def get_key_index_source(source: Any, index: Any) -> str:
 
 def raise_local_type_error(obj: object) -> NoReturn:
     # A PackageError like the sibling checks in serialize_guards: a bypass, or
-    # an error under strict_precompile, never an internal compiler error.
+    # an error under strict_precompile, never an internal compiler error. The
+    # message names the type only: repr(obj) is user code that can raise (this
+    # runs outside the mapped dump) and can be a multi-KB nn.Module printout.
     raise torch._dynamo.exc.PackageError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
+        f"Type {type(obj)} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
     )
@@ -4292,9 +4294,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # copies the wrapped function's __module__ and __qualname__ while living in
     # the decorator's file. Such a function becomes a _Missing sentinel, which is
     # right for one nothing depends on. When a guard's source walks THROUGH it,
-    # evaluating that source against the sentinel raises while the guard manager
-    # is still being built and the whole load fails, so it is rebuilt from its
-    # code object instead (FunctionPicklerBase._reduce_function).
+    # evaluating that source against the sentinel either raises while the guard
+    # manager is still being built, failing the whole load, or -- for a name the
+    # sentinel happens to have, like __module__ -- rebakes the guard against the
+    # sentinel's value and misses forever with no error. So it is rebuilt from
+    # its code object instead (FunctionPicklerBase._reduce_function).
     #
     # Rebuilding drags along whatever the function holds -- closure cells,
     # defaults, attributes, and the module scope its body reads -- and carrying
@@ -4317,24 +4321,28 @@ class GuardsStatePickler(FunctionPicklerBase):
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
 
-    def _prune(self, value: object, reason: str) -> object:
+    @staticmethod
+    def _is_literal(value: object) -> bool:
         # A literal always pickles, so carrying it costs nothing and keeps the
         # rebuilt state deterministic: an interned literal would otherwise be
         # kept only when some unrelated guard happens to register it.
-        if value is None or type(value) in (bool, int, float, str, bytes):
+        return value is None or type(value) in (bool, int, float, str, bytes)
+
+    def _prune(self, value: object, reason: str) -> object:
+        if self._is_literal(value) or self._keep(value):
             return value
-        return value if self._keep(value) else self._missing(reason)
+        return self._missing(reason)
 
     def _prune_cell(self, cell: types.CellType) -> types.CellType:
-        # A carried cell passes through UNCHANGED so pickle memoizes it and two
-        # functions closing over one variable still share it after reload.
-        if self._keep(cell):
-            return cell
+        # The contents decide: any guard that reads them registers them. A cell
+        # with kept (or empty) contents passes through UNCHANGED so pickle
+        # memoizes it and two functions closing over one variable still share it
+        # after reload.
         try:
             contents = cell.cell_contents
         except ValueError:
             return cell
-        if self._keep(contents):
+        if self._is_literal(contents) or self._keep(contents):
             return cell
         # Memoize by the ORIGINAL cell's identity so two functions sharing one
         # unguarded cell still share a single pruned cell after reload, rather
@@ -4376,7 +4384,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in obj.__dict__.items()
             }
         # An unguarded annotation/type param may be an unpicklable local class;
-        # prune it. (On 3.14 __annotations__ is a fresh dict, so always pruned.)
+        # prune it. (On 3.14 _read_raw_annotations returns a copy, so the dict is
+        # never kept and is always pruned per value.)
         raw_annotations = self._read_raw_annotations(obj)
         if self._keep(raw_annotations):
             annotations = raw_annotations
