@@ -65,7 +65,7 @@ OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 
 # Bump on any change to the sidecar layout or to the launcher-generation contract
 # that reads it; gen_aot_lib refuses mismatched sidecars.
-SIDECAR_VERSION = 1
+SIDECAR_VERSION = 2
 
 # forkserver, never "fork": a fork parent that has initialized CUDA gives workers a
 # dead context, silently. forkserver is as safe as spawn and pays the torch import

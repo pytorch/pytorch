@@ -510,30 +510,72 @@ class TritonToolchain(Toolchain):
 
     @staticmethod
     def _sm_number(arch: str) -> int:
-        """Arch string to the GPUTarget int: sm_90a and sm_100 give 90 and 100."""
+        """Arch string to the GPUTarget int: sm_90a and sm_100 give 90 and 100.
+
+        GPUTarget carries a capability number, not a spelling, and Triton then
+        compiles every capability >= 90 for the arch-conditional target regardless
+        (`sm_arch_from_capability` in its nvidia backend, whose own comment reads
+        "TODO: Handle non-'a' sms"). So the two spellings of one capability yield
+        byte-identical cubins, and a declaration listing both exports the same code
+        twice under two arch tags."""
         m = re.fullmatch(r"sm_(\d+)a?", arch)
         if not m:
             raise ValueError(f"arch must look like sm_90a, got {arch!r}")
         return int(m.group(1))
 
+    @staticmethod
+    def _const_entry(s: str) -> int | None:
+        """The constexpr value of one signature entry, or None if it is a runtime arg.
+
+        Triton spells a baked constant as its literal ("1"), so the same parse
+        decides what export bakes into `constants` and what the launcher must push.
+        """
+        try:
+            return int(s)
+        except ValueError:
+            return None
+
+    # Emitted only above 48KB: the driver caps a launch there unless the function
+    # opts in, and below it every device has the memory, so the query would buy
+    # nothing. Sequence and message from inductor's static launcher
+    # (torch/csrc/inductor/static_launcher/cuda.cpp).
+    SHARED_OPTIN_TMPL = """\
+    int shared_optin = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc.cuDeviceGetAttribute(
+        &shared_optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device));
+    TORCH_CHECK_WITH(OutOfMemoryError, {shared} < shared_optin,
+                     "{prefix}: out of resource, required ", {shared},
+                     " bytes of shared memory, hardware limit ", shared_optin,
+                     ". Reducing block sizes or num_stages may help.");
+    if (shared_optin > 49152) {{
+      int shared_static = 0;
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuFuncSetCacheConfig(
+          {prefix}_fn[device], CU_FUNC_CACHE_PREFER_SHARED));
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuFuncGetAttribute(
+          &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, {prefix}_fn[device]));
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuFuncSetAttribute(
+          {prefix}_fn[device], CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+          shared_optin - shared_static));
+    }}
+"""
+
     LAUNCHER_TMPL = """\
 namespace {{
 // {prefix}: raw cubin ({cubin_len} bytes), embedded, loaded per device on first use.
 const unsigned char {prefix}_cubin[] = {{{cubin_bytes}}};
-// Per-prefix: one file holds a block per kernel, so a shared constant would clash.
-constexpr int {prefix}_max_devices = 64;
-CUfunction {prefix}_fn[{prefix}_max_devices] = {{}};
-c10::once_flag {prefix}_once[{prefix}_max_devices];
+CUfunction {prefix}_fn[C10_COMPILE_TIME_MAX_GPUS] = {{}};
+c10::once_flag {prefix}_once[C10_COMPILE_TIME_MAX_GPUS];
 
 CUfunction {prefix}_get(int device) {{
-  TORCH_CHECK(device >= 0 && device < {prefix}_max_devices, "device index ", device);
+  TORCH_CHECK(
+      device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS, "device index ", device);
   c10::call_once({prefix}_once[device], [&] {{
     // Via ATen's NVRTC table: a CUDA build must run on a machine with no libcuda.
     const auto& nvrtc = at::globalContext().getNVRTC();
     CUmodule mod = nullptr;
     AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&mod, {prefix}_cubin));
     AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleGetFunction(&{prefix}_fn[device], mod, "{symbol}"));
-  }});
+{shared_optin}  }});
   return {prefix}_fn[device];
 }}
 }} // namespace
@@ -547,13 +589,28 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
   const unsigned gx = {grid_x};
   const unsigned gy = {grid_y};
   const unsigned gz = {grid_z};
-  if (gx * gy * gz == 0) return;
-  int device = -1;
-  TORCH_CHECK(cudaGetDevice(&device) == cudaSuccess, "{prefix}: cudaGetDevice failed");
-  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+  // Per dimension: the product wraps, so a grid of 2^30 x 4 would read as empty
+  // and skip a launch the caller is owed.
+  if (gx == 0 || gy == 0 || gz == 0) return;
+  const auto cuda_stream = c10::cuda::CUDAStream(stream);
+  // The stream's device rather than the ambient one, which the module is keyed on:
+  // fetching another device's module hands a foreign context to this launch.
+  const auto device = cuda_stream.device_index();
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  // The driver API, unlike the runtime API, never creates a context on demand, so
+  // in a thread that has not touched CUDA yet both the load above and this launch
+  // fail with CUDA_ERROR_INVALID_CONTEXT. Same fix as inductor's static launcher.
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuCtxGetCurrent(&pctx));
+  if (!pctx) {{
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc.cuDevicePrimaryCtxRetain(&pctx, static_cast<CUdevice>(device)));
+    AT_CUDA_DRIVER_CHECK(nvrtc.cuCtxSetCurrent(pctx));
+  }}
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
                                {prefix}_get(device), gx, gy, gz,
                                {block_x}, 1, 1, {shared},
-                               c10::cuda::CUDAStream(stream).stream(),
+                               cuda_stream.stream(),
                                kernel_args, nullptr));
 }}
 """
@@ -562,28 +619,37 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         import triton
         from triton.backends.compiler import GPUTarget
 
-        kernel_mod = _load_module_by_path("kernel", b["kernel_path"])
+        # An arbitrary path from the builder dict, not an importable module.
+        from torchgen.native_aot_decl import load_by_path
+
+        kernel_mod = load_by_path("kernel", b["kernel_path"])
         kernel = getattr(kernel_mod, b["kernel_name"])
 
         sig = [s.strip() for s in b["signature"].split(",")]
+        if len(sig) != len(kernel.arg_names):
+            raise RuntimeError(
+                f"{b['prefix']}: signature has {len(sig)} entries but "
+                f"{b['kernel_name']} takes {len(kernel.arg_names)}: "
+                f"{list(kernel.arg_names)}"
+            )
 
-        def _const(s: str):
-            try:
-                return int(s)
-            except ValueError:
-                return None
-
-        # Divisibility hints ("*bf16:16") reach str_to_ty as types and raise.
-        constants = {
-            kernel.arg_names[i]: _const(s)
-            for i, s in enumerate(sig)
-            if _const(s) is not None
-        }
-        arg_types = {
-            kernel.arg_names[i]: s.split(":")[0]
-            for i, s in enumerate(sig)
-            if _const(s) is None
-        }
+        # Divisibility hints ("*bf16:16") reach str_to_ty as types and raise, so they
+        # travel to the compiler as arg attrs instead. Dropping the suffix without
+        # passing it on would leave the hint inert and the SASS generically
+        # addressed, which is the whole reason a builder writes one.
+        constants, arg_types, attrs = {}, {}, {}
+        for i, s in enumerate(sig):
+            name = kernel.arg_names[i]
+            const = self._const_entry(s)
+            if const is not None:
+                constants[name] = const
+                continue
+            ty, _, hint = s.partition(":")
+            arg_types[name] = ty
+            if hint:
+                # Keyed by index into the kernel's full parameter list, constexprs
+                # included -- see ast_to_ttir, which sizes arg_types by arg_names.
+                attrs[(i,)] = [["tt.divisibility", int(hint)]]
 
         # Target built here, never asked of triton.runtime.driver: resolving the active
         # driver constructs CudaUtils, which needs a libcuda the builders have not got.
@@ -595,7 +661,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             cap = torch.cuda.get_device_capability()
             target = GPUTarget("cuda", cap[0] * 10 + cap[1], 32)
         src = triton.compiler.ASTSource(
-            fn=kernel, constexprs=constants, signature=arg_types
+            fn=kernel, constexprs=constants, signature=arg_types, attrs=attrs
         )
         compiled = triton.compile(
             src,
@@ -605,15 +671,88 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 "num_stages": b.get("num_stages", 3),
             },
         )
+        # The launcher passes both hidden scratch pointers as null, so a kernel that
+        # wants either would dereference null on device. Export holds the only copy
+        # of the metadata that says so.
+        for field in ("global_scratch_size", "profile_scratch_size"):
+            size = getattr(compiled.metadata, field, 0) or 0
+            if size:
+                raise RuntimeError(
+                    f"{b['prefix']}: kernel needs {size} bytes of "
+                    f"{field.removesuffix('_size')}, which the generated launcher "
+                    f"has no way to allocate"
+                )
         with open(os.path.join(out_dir, b["prefix"] + ".cubin"), "wb") as f:
             f.write(compiled.asm["cubin"])
         return {
             "args": b["args"],
             "launch": b["launch"],
+            # Recorded so validate_abi can hold the launcher's args against the
+            # signature the cubin was built from.
+            "signature": b["signature"],
             "symbol": compiled.metadata.name,
             "shared": compiled.metadata.shared,
-            "block_x": 32 * b.get("num_warps", 4),
+            # The compiled warp count, not the requested one: warp specialization
+            # raises it (ttg.total-num-warps), and a blockDimX short of what the
+            # kernel was built for is a wrong answer rather than an error.
+            "block_x": 32 * compiled.metadata.num_warps,
         }
+
+    # The C type the launcher must declare for each Triton scalar width. A narrower
+    # or wider one reads the wrong bytes out of kernel_args on device.
+    _ABI_CTYPES = {
+        "i1": "bool",
+        "i8": "int8_t",
+        "i16": "int16_t",
+        "i32": "int32_t",
+        "i64": "int64_t",
+        "u8": "uint8_t",
+        "u16": "uint16_t",
+        "u32": "uint32_t",
+        "u64": "uint64_t",
+        "fp32": "float",
+        "fp64": "double",
+    }
+
+    def validate_abi(self, sidecar: dict) -> None:
+        """Hold the launcher's `args` against the signature the cubin was built from.
+
+        Two independent statements about one ABI: the signature decides what the cubin
+        reads, `args` decides what the launcher pushes. A builder that adds a kernel
+        parameter and forgets `args` otherwise ships a launcher that pushes one slot
+        short, which is a wrong value on device rather than a compile error."""
+        prefix = sidecar["prefix"]
+        runtime = [
+            s
+            for s in (e.strip() for e in sidecar["signature"].split(","))
+            if self._const_entry(s) is None
+        ]
+        args = sidecar["args"]
+        if len(runtime) != len(args):
+            raise RuntimeError(
+                f"{prefix}: signature has {len(runtime)} runtime args but the "
+                f"launcher pushes {len(args)}: {[a['name'] for a in args]}"
+            )
+        for spec, arg in zip(runtime, args):
+            name, kind = arg["name"], arg["kind"]
+            ty = spec.partition(":")[0]
+            if ty.startswith("*") != (kind == "tensor"):
+                raise RuntimeError(
+                    f"{prefix}: signature has {spec!r} where the launcher pushes "
+                    f"{name} as a {kind}"
+                )
+            if kind == "tensor":
+                continue
+            want = self._ABI_CTYPES.get(ty)
+            if want is None:
+                raise RuntimeError(
+                    f"{prefix}: no C type known for signature entry {spec!r} ({name})"
+                )
+            if arg["ctype"] != want:
+                raise RuntimeError(
+                    f"{prefix}: {name} is {spec!r} in the signature, which is "
+                    f"{want}, but the launcher declares {arg['ctype']}"
+                )
 
     def gen_launcher(self, sidecar: dict) -> str:
         # Read at GENERATION time from beside the sidecar.
@@ -642,9 +781,16 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 tparams.append(f"{a['ctype']} {n}")
                 ptrs.append(f"&{n}")
         launch = sidecar["launch"]
+        shared = sidecar["shared"]
+        shared_optin = (
+            self.SHARED_OPTIN_TMPL.format(prefix=sidecar["prefix"], shared=shared)
+            if shared > 49152
+            else ""
+        )
         return self.LAUNCHER_TMPL.format(
             prefix=sidecar["prefix"],
             symbol=sidecar["symbol"],
+            shared_optin=shared_optin,
             cubin_len=len(data),
             cubin_bytes=cubin_bytes,
             tparams=", ".join(tparams),
@@ -656,13 +802,6 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             block_x=sidecar["block_x"],
             shared=sidecar["shared"],
         )
-
-
-def _load_module_by_path(name: str, path: str):
-    # An arbitrary path from the builder dict, not an importable module.
-    from torchgen.native_aot_decl import load_by_path
-
-    return load_by_path(name, path)
 
 
 TOOLCHAINS: dict[str, Toolchain] = {
