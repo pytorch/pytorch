@@ -27,16 +27,19 @@ TRITON_CPU_SLOW_TESTS = (
 )
 
 if HAS_CPU and TRITON_HAS_CPU:
+    # SweepInputsCpuTest is only defined when CPU tests are enabled
+    # (RUN_CPU); otherwise there is nothing to subclass.
+    if hasattr(test_torchinductor, "SweepInputsCpuTest"):
 
-    @config.patch(
-        {
-            "cpu_backend": "triton",
-            "test_configs.runtime_triton_dtype_assert": False,
-            "test_configs.runtime_triton_shape_assert": False,
-        }
-    )
-    class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
-        pass
+        @config.patch(
+            {
+                "cpu_backend": "triton",
+                "test_configs.runtime_triton_dtype_assert": False,
+                "test_configs.runtime_triton_shape_assert": False,
+            }
+        )
+        class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
+            pass
 
     @config.patch(
         {
