@@ -775,9 +775,11 @@ def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     return unaltered_fn
 
 
-# Every built-in nn.Module compiles through this one code object (OptimizedModule
-# wraps a skipfile forward in wrap_inline), so entries on it never say which
-# package owns the frame.
+# Every callable _TorchDynamoContext.__call__ routes through wrap_inline (a
+# skipfile function or built-in nn.Module forward, a top-level in-graph or
+# polyfilled function, and any module at all under config.wrap_top_frame)
+# compiles through this one shared `inner` code object, so entries on it never
+# say which package owns a frame and the refusal is skipped for all of them.
 _WRAP_INLINE_INNER_CODE = external_utils.wrap_inline(lambda: None).__code__
 
 
