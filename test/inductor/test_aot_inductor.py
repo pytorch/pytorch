@@ -90,6 +90,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
+    set_cwd,
     skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
@@ -203,7 +204,12 @@ try:
             SwitchModels,
             WhileLoopModels,
         )
-        from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            requires_multigpu,
+            skip_if_lite_mode,
+            TestFailure,
+        )
     except ImportError:
         from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
             AOTIRunnerUtil,
@@ -221,6 +227,7 @@ try:
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             copy_tests,
             requires_multigpu,
+            skip_if_lite_mode,
             TestFailure,
         )
 except (unittest.SkipTest, ImportError):
@@ -395,6 +402,7 @@ class AOTInductorTestsTemplate:
             )
             FileCheck().check_count("// subgraph: ", 2).run(code)
 
+    @skip_if_lite_mode("the region patch would match the ambient config")
     def test_invoke_subgraph_nested_region_config(self):
         # Same, but the region carries a per-region Inductor config patch, so
         # the config.patch in CppWrapperCpu.codegen_subgraph is on the path too.
@@ -7266,6 +7274,54 @@ class AOTInductorTestsTemplate:
                     f"after_launch - {kernel_call}",
                     count,
                 ).run(code)
+
+    def test_aoti_debug_printer_save_dir(self):
+        # SAVE_ONLY dumps each intermediate tensor through the
+        # aoti_torch_save_tensor_handle C shim at runtime, so this has to run the
+        # compiled model rather than only inspect the generated code.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + torch.nn.functional.relu(y)
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+        model = Model()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # A directory that does not exist yet, so the shim creates it. Anything
+            # written beside it rather than inside means the filename got
+            # concatenated onto the directory name instead of joined onto it.
+            save_dir = os.path.join(tmp_dir, "aoti_dump")
+            with (
+                config.patch({"aot_inductor.debug_intermediate_value_printer": "1"}),
+                patch.dict(os.environ, {"AOTI_TORCH_SAVE_DIR": save_dir}),
+            ):
+                AOTIRunnerUtil.run(model, example_inputs)
+
+            self.assertEqual(os.listdir(tmp_dir), ["aoti_dump"])
+            dumps = os.listdir(save_dir)
+            self.assertTrue(len(dumps) > 0)
+            self.assertTrue(all(name.endswith(".pt") for name in dumps))
+            self.assertTrue(
+                isinstance(torch.load(os.path.join(save_dir, dumps[0])), torch.Tensor)
+            )
+
+        # Unset, the dumps keep landing in <cwd>/tmp/aoti_torch, which schedulers
+        # collecting a job's working directory rely on. This process already ran
+        # with the variable set, so it also pins that the shim rereads the
+        # environment per call instead of caching the first value it saw.
+        with tempfile.TemporaryDirectory() as cwd, set_cwd(cwd):
+            with (
+                config.patch({"aot_inductor.debug_intermediate_value_printer": "1"}),
+                patch.dict(os.environ),
+            ):
+                os.environ.pop("AOTI_TORCH_SAVE_DIR", None)
+                AOTIRunnerUtil.run(model, example_inputs)
+
+            self.assertEqual(os.listdir(os.path.join(cwd, "tmp")), ["aoti_torch"])
+            self.assertTrue(len(os.listdir(os.path.join(cwd, "tmp", "aoti_torch"))) > 0)
 
     def test_aoti_debug_printing_model_inputs_codegen(self):
         if self.device not in ["cuda", "xpu"]:

@@ -7527,6 +7527,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         return False
 
+    def pointer_range_override(self) -> tuple[int, ...] | None:
+        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+
+        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
+        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
+        ``config_of`` decide, which is also where the config flag is applied. Only
+        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        """
+        if torch.version.hip is not None and self.atomic_add_found:
+            return ()
+        return None
+
     def codegen_kernel(self, name=None) -> str:
         """
         Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
@@ -7724,24 +7736,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Compute configs after codegen_body() so we know if the kernel
-        # uses atomic ops. On HIP, buffer ops don't support atomics, so
-        # we must not tag any args with pointer_range_32 in that case.
-        # Also disable pointer_range_32 when the config flag is off.
-        if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
-        ):
-            triton_meta["configs"] = [
-                config_of(
-                    signature,
-                    pointer_range_override=(),
-                    skip_cpp_wrapper_input_tensor_alignment=True,
-                )
-            ]
-        else:
-            triton_meta["configs"] = [
-                config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
-            ]
+        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        triton_meta["configs"] = [
+            config_of(
+                signature,
+                skip_cpp_wrapper_input_tensor_alignment=True,
+                pointer_range_override=self.pointer_range_override(),
+            )
+        ]
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -8759,15 +8761,12 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        disable_multi_kernel = kernel_kwargs.pop("disable_multi_kernel", False)
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        if disable_multi_kernel:
-            return [kernel]
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
     def add_multi_kernel_choices(
