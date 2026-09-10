@@ -32,6 +32,19 @@ jobs:
       curr_branch: ${{ github.head_ref }}
       check_experiments: lf
 
+  # TD runs but is not acted on: force-no-td keeps every shard at 100% of tests.
+  # The ranking is recorded so failures can be scored against what TD would have
+  # picked, using the heuristic inputs as they existed at this commit.
+  llm-td:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
+
   linux-jammy-py3_10-gcc11-build:
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
@@ -53,7 +66,9 @@ jobs:
   linux-jammy-py3_10-gcc11-test:
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_10-gcc11-build
+    needs:
+      - linux-jammy-py3_10-gcc11-build
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
@@ -87,7 +102,9 @@ jobs:
   linux-jammy-py3_10-clang21-test:
     name: linux-jammy-py3.10-clang21
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_10-clang21-build
+    needs:
+      - linux-jammy-py3_10-clang21-build
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang21-build.outputs.docker-image }}
