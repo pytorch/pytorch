@@ -30,7 +30,9 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login }}
       curr_branch: ${{ github.head_ref }}
-      check_experiments: lf
+      # Pin to the Meta fleet so shard timings and per-run cost stay comparable
+      # across the holdout window.
+      opt_out_experiments: lf
 
   # TD runs but is not acted on: force-no-td keeps every shard at 100% of tests.
   # The ranking is recorded so failures can be scored against what TD would have
