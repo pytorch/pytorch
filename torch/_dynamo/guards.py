@@ -1025,9 +1025,11 @@ def get_key_index_source(source: Any, index: Any) -> str:
 
 def raise_local_type_error(obj: object) -> NoReturn:
     # A PackageError like the sibling checks in serialize_guards: a bypass, or
-    # an error under strict_precompile, never an internal compiler error.
+    # an error under strict_precompile, never an internal compiler error. The
+    # message names the type only: repr(obj) is user code that can raise (this
+    # runs outside the mapped dump) and can be a multi-KB nn.Module printout.
     raise torch._dynamo.exc.PackageError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
+        f"Type {type(obj)} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
     )
