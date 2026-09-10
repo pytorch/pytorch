@@ -1,9 +1,20 @@
 # mypy: allow-untyped-defs
-"""Recognize grouped FlexGEMM layouts and reduction semantics.
+"""Lower FlexGEMM grouped local reductions into QuACK/CuTeDSL epilogues.
 
-PyTorch owns this FX-level analysis: grouped reshapes, pointwise dependency
-tracking, reduction classification, and shape contracts. The EpiMod emitter
-consumes these records while QuACK owns the physical grouped-reduction EpiOps.
+FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
+tile: an epilogue reshapes the accumulator to expose contiguous groups along M
+or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
+fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
+produce TensorSSA partials that QuACK combines physically.
+M-axis groups currently always use QuACK's physical row-lane/warp combine path,
+even when the group is small enough to fit in one fragment. Inductor owns FX
+normalization and output contracts; these helpers describe the supported
+TensorSSA shapes and generated combine/finalize expressions QuACK needs.
+
+The main caller is ``materialize_flex_gemm_epilogue`` in ``fx_cutedsl_codegen.py``.
+Shared GEMM epilogue analysis recognizes grouped layouts and reductions;
+materialization emits the accepted geometries as TensorSSA reshapes and
+reductions through the helpers below.
 """
 
 import dataclasses
