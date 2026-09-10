@@ -4057,14 +4057,25 @@ class TestTemplateConfigPruning(TestCase):
         if exceeds_checker is None:
             self.skipTest("Device does not support shared memory size query")
         pinned_heuristic_cls = self.pinned_heuristic_class(heuristic)
+        seen_pinned = set()
         for c in self.gemm_configs:
+            # ROCmConfigHeuristic._filter_configs rewrites num_stages in place (to 2
+            # on HIP), so measure the post-filter copy: that is what gets compiled.
+            filtered = heuristic._filter_configs([dataclasses.replace(c)])
+            if not filtered:
+                continue
+            pinned = filtered[0]
+            # On ROCm that collapses the [4, 5] stage axis into duplicates.
+            key = dataclasses.astuple(pinned)
+            if key in seen_pinned:
+                continue
+            seen_pinned.add(key)
+
             smem_estimation = heuristic.get_shared_memory_estimation(
-                c, dtype_size, **shared_memory_checker_opts
+                pinned, dtype_size, **shared_memory_checker_opts
             )
-            # Copy: ROCmConfigHeuristic._filter_configs rewrites num_stages in
-            # place, which would mutate the shared self.gemm_configs.
-            pinned_heuristic_cls().mm_configs = [dataclasses.replace(c)]
-            exceeds = exceeds_checker(c, dtype_size)
+            pinned_heuristic_cls().mm_configs = [pinned]
+            exceeds = exceeds_checker(pinned, dtype_size)
 
             original_precompile = CachingAutotuner.precompile
             original_autotune = AlgorithmSelectorCache.autotune
@@ -4130,19 +4141,19 @@ class TestTemplateConfigPruning(TestCase):
                 triton_choice_count,
                 1,
                 f"Config restriction stopped applying: got {triton_choice_count} "
-                f"Triton choices for config {c}, expected at most 1",
+                f"Triton choices for config {pinned}, expected at most 1",
             )
 
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    lambda msg: f"{msg}\nConfig {c} failed to compile due to shared memory, "
+                    lambda msg: f"{msg}\nConfig {pinned} failed to compile due to shared memory, "
                     "but the checker predicted it would NOT exceed shared memory limits.",
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
+                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
 
 
