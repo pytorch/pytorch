@@ -1517,20 +1517,8 @@ class DeviceCachingAllocator {
              alloc_block(params, true, context))));
     }
     if (!block_found) {
-      const auto& raw_device = c10::xpu::get_raw_device(device);
-      const auto device_total =
-          raw_device.get_info<sycl::info::device::global_mem_size>();
-      // Estimate the available device memory when the SYCL runtime does not
-      // support the corresponding aspect (ext_intel_free_memory).
-      size_t device_free = device_total -
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current;
-      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
-      // affected devices.
-      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
-        device_free =
-            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
-      }
+      const auto [device_free, device_total] = getMemoryInfo();
+
       std::string allowed_info;
       if (set_fraction) {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
@@ -1849,8 +1837,56 @@ class DeviceCachingAllocator {
         ") doesn't support querying the available free memory. ",
         "You can file an issue at https://github.com/pytorch/pytorch/issues ",
         "to help us prioritize its implementation.");
-    const size_t free =
+    size_t free =
         device.get_info<sycl::ext::intel::info::device::free_memory>();
+
+    /**
+     * Note [UMD Headroom]
+     *
+     * `global_mem_size` is the total usable memory size reported by L0 Sysman,
+     * corresponding to the KMD-reported `.physicalSize`.
+     *
+     * Starting with SYCL compiler 2026.2, `free_memory` on certain Intel GPUs
+     * (Xe2 and later) uses the L0 `.currUsableMemSize` API. Its accounting is
+     * based on the UMD-advertised memory size, which reserves a fixed fraction
+     * of `global_mem_size` as UMD headroom. Add this fraction back to keep
+     * `free_memory` consistent with `global_mem_size`.
+     *
+     * In earlier compiler versions `free_memory` use the L0 Sysman `.free` API,
+     * which is already based on `global_mem_size`.
+     *
+     * The static_assert below forces this workaround to be revalidated when
+     * upgrading the compiler beyond this version.
+     */
+#if SYCL_COMPILER_VERSION > 20260200
+    static_assert(
+        false,
+        "Re-validate the free-memory workaround above for this SYCL compiler version.");
+#elif SYCL_COMPILER_VERSION == 20260200
+    const auto arch = device.get_info<sycl::info::device::architecture>();
+    if (arch >=
+        sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21) {
+      // Fraction differs by GPU type and, for discrete GPUs, by OS, see
+      // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+      constexpr double kIntegratedGpuUsableFraction = 0.94;
+#ifdef _WIN32
+      constexpr double kDiscreteGpuUsableFraction = 0.98;
+#else
+      constexpr double kDiscreteGpuUsableFraction = 0.95;
+#endif
+      const bool is_integrated_gpu =
+          device.has(sycl::aspect::ext_oneapi_is_integrated_gpu);
+      const double usable_fraction = is_integrated_gpu
+          ? kIntegratedGpuUsableFraction
+          : kDiscreteGpuUsableFraction;
+      free += (1 - usable_fraction) * total;
+      TORCH_CHECK(
+          free <= total, "Calculated free memory exceeds total memory.");
+    }
+#else
+    // SYCL_COMPILER_VERSION < 20260200: the driver does not withhold memory,
+    // so no adjustment is needed.
+#endif
     return {free, total};
   }
 
