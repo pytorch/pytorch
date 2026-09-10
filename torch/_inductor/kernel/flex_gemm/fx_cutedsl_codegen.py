@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
-"""Plan FlexGEMM outputs on the shared GEMM epilogue analysis and emit QuACK EpiMod functions.
+"""Analyze FlexGEMM epilogue FX graphs and materialize CuTeDSL source.
 
-``gemm_epilogue_analysis`` identifies grouped layouts, local reductions, and
-grouped main-output lanes in the FX graph. This module binds those results to
-QuACK-owned stores and ``materialize_flex_gemm_epilogue`` then changes only the
-emission boundary, preserving the analysis as the semantic source of truth.
+``analyze_flex_gemm_epilogue`` indexes FX dependencies, identifies nodes that
+carry grouped TensorSSA layouts, matches supported local reductions, and plans
+the main, auxiliary, and local-reduction consumers.
+
+``materialize_flex_gemm_epilogue`` uses that analysis to generate the CuTeDSL
+epilogue and physical reduction callbacks.
 """
 
 import dataclasses
@@ -200,7 +202,7 @@ def validate_output_layout_transforms(
     graph: GemmEpilogueGraph,
     outputs: GemmOutputPlan,
 ) -> None:
-    """Require every storage transform to belong to the output plan."""
+    """Require every layout transform to be the output validated by the plan."""
     store = None if outputs.local_reduce is None else outputs.local_reduce.store
     selected_node = (
         store.node if store is not None and store.output_storage is not None else None
@@ -275,7 +277,7 @@ class FlexGemmEpilogueAnalysis:
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
-        """Return every grouped geometry that constrains kernel configuration."""
+        """Return the backend-neutral reduction plan produced by FX analysis."""
         geometries = OrderedSet(
             match.geometry for match in self.local_reduce.matches.values()
         )
@@ -357,7 +359,8 @@ def analyze_flex_gemm_epilogue(
 
     This is the analysis entry point called by FlexGEMM lowering. It builds a
     dependency index, performs topological local-reduction analysis, and
-    returns the shared immutable plan consumed by the QuACK EpiMod emitter.
+    returns the shared immutable plan consumed by config selection and
+    ``materialize_flex_gemm_epilogue``.
 
     Args:
         graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
@@ -391,7 +394,7 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
 
     @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
-        """Apply an IEEE min or max that propagates NaN in one operation."""
+        """Add FlexGEMM-specific NaN-propagating clamp semantics."""
         match op:
             case "min":
                 op_name, index_expr_fn = "min", Min
@@ -617,7 +620,40 @@ def epimod_local_reduce_spec(
 
 
 class FlexGemmEpilogueEmitter:
-    """Emit QuACK EpiMod source from shared FlexGEMM analysis."""
+    """Visit an analyzed FlexGEMM FX graph and emit its QuACK EpiMod source.
+
+    The analysis dataclasses flow into each other as follows:
+
+    ::
+
+        GemmEpilogueGraph
+          `--> GemmLocalReduceAnalysis
+                 +--> grouped_tensors
+                 `--> matches
+                        `--> GemmLocalReduceMatch
+                               `--> GemmOutputLocalReducePlan
+                                      `--> optional GemmLocalReduceStore
+
+        GemmLocalReduceAnalysis
+          `--> output_plan()
+                 `--> GemmOutputPlan
+
+        GemmLocalReduceAnalysis + GemmOutputPlan
+          `--> FlexGemmEpilogueAnalysis
+                 `--> FlexGemmEpilogueEmitter
+
+    At emitter construction, ``analysis.outputs`` becomes ``self.outputs``;
+    its local-reduce plan and optional store select the QuACK reduction op and
+    the compressed-store finalizer. ``analysis.required_geometries`` determines
+    the active grouped layouts.
+
+    The emitter owns all mutable code-generation state: FX values lowered so far,
+    grouped TensorSSA layouts, the local-reduce spec (sink, prepass, finalizer),
+    and the callback source slices. ``lower_graph`` performs a topological
+    traversal and delegates each ``call_function`` node to ordered handlers;
+    ``render`` turns the resulting state into the generated EpiMod and callback
+    source.
+    """
 
     def __init__(
         self,
@@ -1180,7 +1216,7 @@ class FlexGemmEpilogueEmitter:
         )
 
     def materialize(self) -> FlexGemmEpiModSource:
-        """Lower the shared FX graph and return a generated QuACK function."""
+        """Lower and render this epilogue under the CuTeDSL virtualized handlers."""
         self.lower_local_reduce_finalize()
         self.lower_local_reduce_prepass()
         self.lower_graph()
@@ -1198,7 +1234,25 @@ def materialize_flex_gemm_epilogue(
     fast_math: bool = False,
     mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
-    """Materialize an analyzed FlexGEMM body as QuACK EpiMod source."""
+    """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
+
+    This is the code-generation entry point called by FlexGEMM lowering after
+    ``analyze_flex_gemm_epilogue`` has classified outputs and local-reduction
+    matches. The emitter visits the FX graph once in topological order while
+    owning the environment and reduction state needed across nodes.
+
+    Args:
+        graph_module: FlexGEMM body graph containing the GEMM and epilogue nodes.
+        gemm_op: GEMM overload expected to occur exactly once in the body.
+        analysis: Shared output and local-reduction analysis for the graph.
+        epilogue_arg_placeholders: Captured tensor placeholders exposed as
+            generated epilogue parameters.
+        fast_math: Whether supported CuTeDSL math operations may use approximate
+            fast-math lowering.
+
+    Returns:
+        The generated epilogue function name and complete CuTeDSL source.
+    """
     return FlexGemmEpilogueEmitter(
         graph_module,
         analysis,
