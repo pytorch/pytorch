@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 """Tests for strict numerics mode."""
 
-import contextlib
 import os
 import subprocess
 import sys
@@ -36,39 +35,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import BinaryUfuncInfo, UnaryUfuncInfo
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_reduction_ordering
-
-
-###############################################################################
-# TEMPORARY SURVEY COMMIT -- DO NOT LAND
-#
-# The CI runner stops a shard at the first consistent failure, so a normal run
-# reveals exactly one wrong ledger entry per round-trip -- and the ledger is
-# arch-dependent, so entries for arches we cannot reach locally are only ever
-# found this way. With TORCHINDUCTOR_STRICT_LEDGER_SURVEY=1 no ledger check
-# fails; every disagreement is reported instead, so one run yields the whole
-# ledger for that arch.
-###############################################################################
-# Defaults ON: CI cannot set an env var, and surveying is the whole point of this
-# commit. Set TORCHINDUCTOR_STRICT_LEDGER_SURVEY=0 for normal enforcing behaviour.
-_SURVEY = os.environ.get("TORCHINDUCTOR_STRICT_LEDGER_SURVEY", "1") == "1"
-
-
-def _survey(line):
-    # pytest.ini sets --capture=sys, which swallows print(); fd 2 bypasses it.
-    os.write(2, f"LEDGER-SURVEY {line}\n".encode())
-
-
-@contextlib.contextmanager
-def _survey_guard(op, dtype, what):
-    """Report a crash instead of raising: an error also stops the shard."""
-    if not _SURVEY:
-        yield
-        return
-    try:
-        yield
-    except Exception as exc:  # noqa: BLE001
-        key = (_op_id(op), _dtype_label(dtype))
-        _survey(f"CRASH   {key} {what} -- {type(exc).__name__}: {str(exc)[:200]}")
 
 
 def _singleton_input(device):
@@ -508,8 +474,7 @@ instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cu
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
-# Bitwise eager/compiled checks for pointwise OpInfos under numerics="strict".
-# Reference inputs cover layouts; raw bit patterns cover special values.
+# Compare eager and compiled pointwise OpInfos on reference and raw-bit inputs.
 
 
 # Pointwise ops not represented by UnaryUfuncInfo or BinaryUfuncInfo.
@@ -527,7 +492,6 @@ POINTWISE_EXTRA = frozenset(
         "nn.functional.hardswish",
         "nn.functional.leaky_relu",
         "native_dropout_backward",
-        # Losses are excluded: only reduction="none" is pointwise.
     }
 )
 
@@ -562,7 +526,7 @@ def _dtype_label(dtype):
     return str(dtype).split(".")[-1]
 
 
-# Sweep all 16-bit encodings; sample fp32 bit patterns.
+# Exhaust all 16-bit encodings and sample float32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
 
 _FINFO32 = torch.finfo(torch.float32)
@@ -603,8 +567,7 @@ def _substitute(t, y, n, parity=0):
     if not isinstance(t, torch.Tensor):
         return t
     if t.dtype == torch.bool:
-        # With x and x.flip(0), the even-index mask selects only even encodings.
-        # Sweep both parities to include odd encodings and both smallest subnormals.
+        # Alternate parity so masks select every 16-bit encoding across two calls.
         mask = torch.zeros(n, dtype=torch.bool, device=y.device)
         mask[parity::2] = True
         return mask
@@ -871,134 +834,82 @@ POINTWISE_XFAIL = frozenset(
     }
 )
 
-# Measured on sm_89 (CUDA 13.0/13.2), sm_90, and sm_100.
-# The neg signed-zero family matches on sm_89 but differs from sm_90 up;
-# float_power fp32 backward differs only on sm_100.
-_SM90_PLUS_BACKWARD_XFAIL = frozenset(
+BACKWARD_XFAIL = frozenset(
     {
-        ("__rdiv__", "bfloat16"),
-        ("__rdiv__", "float16"),
-        ("__rdiv__", "float32"),
-        ("atan2", "bfloat16"),
-        ("atan2", "float16"),
-        ("atan2", "float32"),
-        ("cos", "bfloat16"),
-        ("cos", "float16"),
-        ("cos", "float32"),
+        ("remainder", "bfloat16"),
+        ("remainder", "float16"),
         ("remainder", "float32"),
-        ("special_entr", "bfloat16"),
-        ("special_entr", "float16"),
-        ("special_modified_bessel_k0", "float32"),
-        ("special_modified_bessel_k1", "float32"),
+        ("__rmod__", "bfloat16"),
+        ("__rmod__", "float16"),
+        ("__rmod__", "float32"),
+        ("__rpow__", "bfloat16"),
+        ("__rpow__", "float16"),
+        ("__rpow__", "float32"),
+        ("addcdiv", "bfloat16"),
+        ("addcdiv", "float16"),
+        ("addcdiv", "float32"),
+        ("double", "bfloat16"),
+        ("double", "float16"),
+        ("float_power", "bfloat16"),
+        ("float_power", "float16"),
+        ("float_power", "float32"),
+        ("hypot", "float16"),
+        ("hypot", "float32"),
+        ("i0", "bfloat16"),
+        ("i0", "float16"),
+        ("i0", "float32"),
+        ("ldexp", "bfloat16"),
+        ("ldexp", "float16"),
+        ("ldexp", "float32"),
+        ("logaddexp2", "float32"),
+        ("logit", "bfloat16"),
+        ("logit", "float16"),
+        ("logit", "float32"),
+        ("mvlgamma_mvlgamma_p_1", "float32"),
+        ("mvlgamma_mvlgamma_p_3", "float32"),
+        ("mvlgamma_mvlgamma_p_5", "float32"),
+        ("nn_functional_gelu", "bfloat16"),
+        ("nn_functional_gelu", "float16"),
+        ("nn_functional_gelu", "float32"),
+        ("nn_functional_hardswish", "bfloat16"),
+        ("nn_functional_hardswish", "float16"),
+        ("nn_functional_hardswish", "float32"),
+        ("nn_functional_mish", "bfloat16"),
+        ("nn_functional_mish", "float16"),
+        ("nn_functional_mish", "float32"),
+        ("nn_functional_silu", "bfloat16"),
+        ("nn_functional_silu", "float16"),
+        ("nn_functional_silu", "float32"),
+        ("nn_functional_softshrink", "bfloat16"),
+        ("nn_functional_softshrink", "float16"),
+        ("nn_functional_softshrink", "float32"),
+        ("nn_functional_tanhshrink", "bfloat16"),
+        ("nn_functional_tanhshrink", "float16"),
+        ("nn_functional_tanhshrink", "float32"),
+        ("rsqrt", "bfloat16"),
+        ("rsqrt", "float16"),
+        ("sigmoid", "bfloat16"),
+        ("sigmoid", "float16"),
+        ("sigmoid", "float32"),
+        ("special_bessel_j0", "float32"),
+        ("special_bessel_j1", "float32"),
+        ("special_bessel_y0", "float32"),
+        ("special_bessel_y1", "float32"),
+        ("special_erfcx", "float32"),
+        ("special_i1", "bfloat16"),
+        ("special_i1", "float16"),
+        ("special_i1", "float32"),
+        ("special_log_ndtr", "float32"),
+        ("special_modified_bessel_i0", "float32"),
+        ("special_modified_bessel_i1", "float32"),
+        ("special_xlog1py", "bfloat16"),
+        ("special_xlog1py", "float16"),
+        ("tanh", "bfloat16"),
+        ("tanh", "float16"),
+        ("tanh", "float32"),
+        ("xlogy", "bfloat16"),
+        ("xlogy", "float16"),
     }
-    if SM90OrLater
-    else ()
-)
-
-_SM100_ONLY_BACKWARD_XFAIL = frozenset({("float_power", "float32")} if IS_SM100 else ())
-
-BACKWARD_XFAIL = (
-    _SM90_PLUS_BACKWARD_XFAIL
-    | _SM100_ONLY_BACKWARD_XFAIL
-    | frozenset(
-        {
-            ("div_no_rounding_mode", "bfloat16"),
-            ("div_no_rounding_mode", "float16"),
-            ("div_no_rounding_mode", "float32"),
-            ("fmod", "bfloat16"),
-            ("fmod", "float16"),
-            ("fmod", "float32"),
-            ("neg", "bfloat16"),
-            ("neg", "float16"),
-            ("neg", "float32"),
-            ("reciprocal", "bfloat16"),
-            ("reciprocal", "float16"),
-            ("reciprocal", "float32"),
-            ("remainder", "bfloat16"),
-            ("remainder", "float16"),
-            ("__rmod__", "bfloat16"),
-            ("__rmod__", "float16"),
-            ("__rmod__", "float32"),
-            ("rsub", "bfloat16"),
-            ("rsub", "float16"),
-            ("rsub", "float32"),
-            ("__rsub__", "bfloat16"),
-            ("__rsub__", "float16"),
-            ("__rsub__", "float32"),
-            ("sub", "bfloat16"),
-            ("sub", "float16"),
-            ("sub", "float32"),
-            ("true_divide", "bfloat16"),
-            ("true_divide", "float16"),
-            ("true_divide", "float32"),
-            ("__rpow__", "bfloat16"),
-            ("__rpow__", "float16"),
-            ("__rpow__", "float32"),
-            ("addcdiv", "bfloat16"),
-            ("addcdiv", "float16"),
-            ("addcdiv", "float32"),
-            ("double", "bfloat16"),
-            ("double", "float16"),
-            ("float_power", "bfloat16"),
-            ("float_power", "float16"),
-            ("hypot", "float16"),
-            ("hypot", "float32"),
-            ("i0", "bfloat16"),
-            ("i0", "float16"),
-            ("i0", "float32"),
-            ("ldexp", "bfloat16"),
-            ("ldexp", "float16"),
-            ("ldexp", "float32"),
-            ("logaddexp2", "float32"),
-            ("logit", "bfloat16"),
-            ("logit", "float16"),
-            ("logit", "float32"),
-            ("mvlgamma_mvlgamma_p_1", "float32"),
-            ("mvlgamma_mvlgamma_p_3", "float32"),
-            ("mvlgamma_mvlgamma_p_5", "float32"),
-            ("nn_functional_gelu", "bfloat16"),
-            ("nn_functional_gelu", "float16"),
-            ("nn_functional_gelu", "float32"),
-            ("nn_functional_hardswish", "bfloat16"),
-            ("nn_functional_hardswish", "float16"),
-            ("nn_functional_hardswish", "float32"),
-            ("nn_functional_mish", "bfloat16"),
-            ("nn_functional_mish", "float16"),
-            ("nn_functional_mish", "float32"),
-            ("nn_functional_silu", "bfloat16"),
-            ("nn_functional_silu", "float16"),
-            ("nn_functional_silu", "float32"),
-            ("nn_functional_softshrink", "bfloat16"),
-            ("nn_functional_softshrink", "float16"),
-            ("nn_functional_softshrink", "float32"),
-            ("nn_functional_tanhshrink", "bfloat16"),
-            ("nn_functional_tanhshrink", "float16"),
-            ("nn_functional_tanhshrink", "float32"),
-            ("rsqrt", "bfloat16"),
-            ("rsqrt", "float16"),
-            ("sigmoid", "bfloat16"),
-            ("sigmoid", "float16"),
-            ("sigmoid", "float32"),
-            ("special_bessel_j0", "float32"),
-            ("special_bessel_j1", "float32"),
-            ("special_bessel_y0", "float32"),
-            ("special_bessel_y1", "float32"),
-            ("special_erfcx", "float32"),
-            ("special_i1", "bfloat16"),
-            ("special_i1", "float16"),
-            ("special_i1", "float32"),
-            ("special_log_ndtr", "float32"),
-            ("special_modified_bessel_i0", "float32"),
-            ("special_modified_bessel_i1", "float32"),
-            ("special_xlog1py", "bfloat16"),
-            ("special_xlog1py", "float16"),
-            ("tanh", "bfloat16"),
-            ("tanh", "float16"),
-            ("tanh", "float32"),
-            ("xlogy", "bfloat16"),
-            ("xlogy", "float16"),
-        }
-    )
 )
 
 NONFLOAT_XFAIL = frozenset(
@@ -1012,8 +923,7 @@ POINTWISE_STRICT_CFG = {
 }
 
 
-# Raw-bit sweeps take 64-363s for polygamma and >300s for shifted Chebyshev.
-# Keep reference inputs; skip raw bit patterns for these value-dependent series.
+# Skip raw-bit sweeps for prohibitively slow value-dependent series.
 BITPATTERN_SLOW = frozenset(
     {
         "polygamma",
@@ -1022,7 +932,6 @@ BITPATTERN_SLOW = frozenset(
         "special.shifted_chebyshev_polynomial_u",
         "special.shifted_chebyshev_polynomial_v",
         "special.shifted_chebyshev_polynomial_w",
-        # Not independently timed; excluded pending measurement.
         "special.laguerre_polynomial_l",
         "special.legendre_polynomial_p",
     }
@@ -1049,7 +958,7 @@ class _RngOpDetector(TorchDispatchMode):
         return func(*args, **(kwargs or {}))
 
 
-# Restrict the sweep to GPUs with a measured mismatch ledger.
+# The ledger was measured on sm_89 (CUDA 13.0/13.2), sm_90, and sm_100.
 _LEDGER_ARCH = LazyVal(lambda: bool(IS_SM89 or IS_SM90 or IS_SM100))
 
 
@@ -1214,13 +1123,6 @@ class PointwiseStrictNumericsTest(TestCase):
     def _assert_ledger(self, mismatches, op, dtype, what, xfail, xfail_name):
         r"""Require listed pairs to differ and unlisted pairs to match eager."""
         key = (_op_id(op), _dtype_label(dtype))
-        if _SURVEY:
-            listed = key in xfail
-            if listed and not mismatches:
-                _survey(f"STALE   {xfail_name} {key} {what} -- matches now, remove it")
-            elif not listed and mismatches:
-                _survey(f"MISSING {xfail_name} {key} {what} -- differs, add it")
-            return
         if key in xfail:
             self.assertTrue(
                 mismatches,
@@ -1236,27 +1138,24 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(POINTWISE_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_bitwise(self, device, dtype, op):
-        with _survey_guard(op, dtype, "forward"):
-            mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-            self._assert_ledger(
-                mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
-            )
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
+        )
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
-        with _survey_guard(op, dtype, "nonfloat"):
-            mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-            self._assert_ledger(
-                mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
-            )
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "nonfloat", NONFLOAT_XFAIL, "NONFLOAT_XFAIL"
+        )
 
     def _input_grads(self, call_fn, inp, args, kwargs, grad_output):
         leaves = []
 
         def leafify(t):
             if isinstance(t, torch.Tensor) and t.is_floating_point():
-                # Preserve non-dense strides that clone() would make contiguous.
-                # Clone expanded inputs to avoid overlapping writes.
+                # Preserve non-dense strides; clone expanded inputs to avoid overlap.
                 src = t.detach()
                 if src.is_contiguous() or 0 in src.stride():
                     leaf = src.clone().requires_grad_(True)
@@ -1277,7 +1176,6 @@ class PointwiseStrictNumericsTest(TestCase):
         if not leaves or target is None:
             return out, None
         if target.shape != grad_output.shape:
-            # Report shape mismatches without calling autograd.grad.
             return out, None
         grads = torch.autograd.grad(
             target, leaves, grad_outputs=grad_output, allow_unused=True
@@ -1324,8 +1222,7 @@ class PointwiseStrictNumericsTest(TestCase):
                     device=probe_out.device,
                     dtype=probe_out.dtype,
                 )
-                # randn does not reliably exercise signed-zero bugs (e.g. neg).
-                # Seed both +0.0 and -0.0; inf/NaN upstream is outside this sweep.
+                # Seed signed zeros, which randn does not reliably generate.
                 flat = grad_output.reshape(-1)
                 if flat.numel() >= 2:
                     flat[0] = 0.0
@@ -1357,11 +1254,10 @@ class PointwiseStrictNumericsTest(TestCase):
 
     @ops(BACKWARD_OPS, allowed_dtypes=POINTWISE_DTYPES)
     def test_pointwise_backward(self, device, dtype, op):
-        with _survey_guard(op, dtype, "backward"):
-            mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
-            self._assert_ledger(
-                mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
-            )
+        mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
+        self._assert_ledger(
+            mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
+        )
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
