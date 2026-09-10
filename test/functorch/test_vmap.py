@@ -64,6 +64,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     markDynamoStrictTest,
@@ -109,6 +110,8 @@ class EnableVmapFallbackWarnings:
 
 @markDynamoStrictTest
 class TestVmapAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
