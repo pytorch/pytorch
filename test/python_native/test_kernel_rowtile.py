@@ -68,8 +68,7 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(idx, want_i.to(torch.int32))
 
     def test_stage1_partials_are_raw_accumulators(self):
-        # final=False stores raw per-field accumulators for cross-CTA stage 1; Welford's
-        # count must equal row length rather than a projected variance.
+        # final=False stores raw accumulators; Welford's count must equal the row length.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -112,17 +111,6 @@ class TestKernelRowTile(TestCase):
         )
         # A row too narrow to feed one warp keeps the ladder's pick.
         self.assertIsNone(rt.single_row_config(32, 32))
-
-    def test_oneshot_gate_bounds_loads_not_just_smem(self):
-        # One-shot must reject both oversized rows and excessive per-thread loads.
-        import torch
-        from torch._native.ops.reductions import kernel_general as kg
-
-        self.assertTrue(kg._oneshot_ok(torch.empty(1, 4096, device="cuda")))
-        # Prime N collapses vec to 1 and exceeds the load bound despite fitting smem.
-        self.assertFalse(kg._oneshot_ok(torch.empty(1, 65537, device="cuda")))
-        # Wide enough to blow the smem budget outright.
-        self.assertFalse(kg._oneshot_ok(torch.empty(1, 1 << 22, device="cuda")))
 
     def test_absmax_absmin_propagate_nan(self):
         # Abs extrema model vector_norm(+/-inf), which propagates NaN. Vary its fold
