@@ -447,6 +447,13 @@ class LocalCache(CacheBase):
         self.update_local_cache(cache)
 
 
+def get_matmul_precision_key() -> str:
+    return (
+        f"cuda:{torch.backends.cuda.matmul.fp32_precision},"
+        f"mkldnn:{torch.backends.mkldnn.matmul.fp32_precision}"  # type: ignore[attr-defined]
+    )
+
+
 class PersistentCache(CacheBase):
     def lookup(
         self,
@@ -466,7 +473,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.get_float32_matmul_precision()
+        precision = get_matmul_precision_key()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}

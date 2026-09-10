@@ -2935,7 +2935,8 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # TMA needs the contiguous dim last. Use the same inner-dim rule as
             # can_use_tma, which already accepted these operands -- deriving it
             # separately here is how a [1, K] operand ended up transposed.
-            stride = node.layout.stride
+            # Stable TMA stride hooks constrain the selected kernel's layout.
+            stride = node.get_stride_hint()
             inner = tma_inner_dim(stride)
             if inner is None:
                 raise AssertionError(

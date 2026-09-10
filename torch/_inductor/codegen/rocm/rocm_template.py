@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta
-from ...ir import Buffer, IRNode, Layout
+from ...ir import Buffer, FlexibleLayout, IRNode, Layout
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
@@ -51,7 +51,14 @@ class ROCmTemplate(KernelTemplate):
 
         """
         super().__init__(name)
-        self.input_nodes = input_nodes
+        self.original_input_nodes = input_nodes
+        self.input_nodes = []
+        # Operation choices retain these layouts without constraining other choices.
+        for node in input_nodes:
+            input_layout = node.get_layout()
+            if isinstance(input_layout, FlexibleLayout):
+                input_layout = input_layout.get_fixed_layout_without_freezing()
+            self.input_nodes.append(Buffer(name=node.get_name(), layout=input_layout))
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
@@ -114,9 +121,23 @@ class ROCmTemplate(KernelTemplate):
         # The runtime args come right after the size args
         runtime_args = self.get_runtime_arg_values(**kwargs)
         extra_args = size_args_ints + runtime_args
+        nodes_by_name = {node.get_name(): node for node in self.input_nodes}
+        benchmark_nodes = [nodes_by_name[name] for name in expected_args[:-1]]
+        sizevars = V.graph.sizevars
+        input_tensor_meta = [
+            TensorMeta(
+                device=node.get_device_or_error(),
+                dtype=node.get_dtype(),
+                sizes=sizevars.optimization_hints(node.get_size()),
+                strides=sizevars.optimization_hints(node.get_stride()),
+                offset=sizevars.optimization_hint(node.get_layout().offset),
+                name=node.get_name(),
+            )
+            for node in benchmark_nodes
+        ]
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
-            input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
+            input_tensor_meta=input_tensor_meta,
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
             extra_args=extra_args,
             source_code=code,
@@ -143,7 +164,7 @@ class ROCmTemplate(KernelTemplate):
         return ROCmTemplateCaller(
             kernel_hash_name,
             self.name,
-            self.input_nodes,
+            self.original_input_nodes,
             self.output_node.get_layout(),
             make_kernel_render,
             bmreq,

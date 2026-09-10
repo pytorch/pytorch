@@ -393,10 +393,8 @@ def flex_attention(
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
-    # NB it is okay that the v_head_dim is different
-    # We are using these to match fill order of the output.
-    q_strides = query.get_stride()
-    # Construct output layout with strides matching the query.
+    # The independent output only uses the query's stride order as a preference.
+    q_strides = query.get_stride_hint()
     out_size = [B, Hq, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
 
@@ -928,9 +926,9 @@ def flex_attention_backward(*args, **kwargs):
             dq_kv_order_spt=dq_kv_order_spt,
         )
 
-    # Construct layout with stride order matching K
+    # Independently allocated gradients only use input stride order as a preference.
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
-    key_strides = infer_dense_strides(key_size, key.get_stride())
+    key_strides = infer_dense_strides(key_size, key.get_stride_hint())
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
@@ -955,7 +953,7 @@ def flex_attention_backward(*args, **kwargs):
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
-    grad_query_strides = infer_dense_strides(query_size, query.get_stride())
+    grad_query_strides = infer_dense_strides(query_size, query.get_stride_hint())
     grad_query = empty_strided(
         query_size,
         stride=[sympy.sympify(s) for s in grad_query_strides],
@@ -963,9 +961,8 @@ def flex_attention_backward(*args, **kwargs):
         device=query.get_device(),
     )
 
-    # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
-    value_strides = infer_dense_strides(value_size, value.get_stride())
+    value_strides = infer_dense_strides(value_size, value.get_stride_hint())
 
     broadcasted_grad_value = empty_strided(
         value_size,

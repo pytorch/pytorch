@@ -82,6 +82,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -180,6 +181,17 @@ class TestMaxAutotune(TestCase):
         a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
+
+    @parametrize("precision", ("ieee", "tf32"))
+    @parametrize("dtype", (torch.float16, torch.float32))
+    @recover_orig_fp32_precision
+    def test_bmm_shared_a_configs_fp32_precision(self, precision, dtype):
+        from torch._inductor.kernel.bmm import _bmm_shared_a_configs
+
+        torch.backends.cuda.matmul.fp32_precision = precision
+        configs = list(_bmm_shared_a_configs(dtype))
+        self.assertTrue(configs)
+        self.assertEqual({cfg["ALLOW_TF32"] for cfg in configs}, {precision == "tf32"})
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
