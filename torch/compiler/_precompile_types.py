@@ -11,14 +11,6 @@ def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
 
 
 @dataclasses.dataclass(frozen=True)
-class ExampleInput:
-    """One call to make during capture, when args alone are not enough."""
-
-    args: tuple[object, ...] = ()
-    kwargs: dict[str, object] = dataclasses.field(default_factory=dict)
-
-
-@dataclasses.dataclass(frozen=True)
 class GuardFact:
     """One guard observed while compiling a frame variant."""
 
