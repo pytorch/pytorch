@@ -47,8 +47,10 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         {
             "fx_graph_cache": False,
             "fx_graph_remote_cache": False,
+            "graph_partition": True,
             "max_autotune_gemm_backends": "TRITON",
             "test_configs.max_mm_configs": 1,
+            "triton.cudagraphs": False,
         }
     )
     @parametrize("parent_max_autotune", (False, True))
