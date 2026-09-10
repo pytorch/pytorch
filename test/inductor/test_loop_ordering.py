@@ -20,6 +20,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
     _LoopMutationTracker,
+    _LoopStateSnapshot,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     refresh_group_node_dependencies,
@@ -32,6 +33,7 @@ from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symb
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1555,6 +1557,135 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
 
+def _square_block_broadcast(x, transpose_scale=False):
+    block_size = 16
+    rows, cols = x.shape
+    blocks = (
+        x.reshape(
+            rows // block_size,
+            block_size,
+            cols // block_size,
+            block_size,
+        )
+        .permute(0, 2, 1, 3)
+        .contiguous()
+    )
+    scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
+    divisor = scale.transpose(0, 1) if transpose_scale else scale
+    quantized = blocks / divisor
+    output = quantized.permute(0, 2, 1, 3).contiguous().reshape(rows, cols)
+    return output, scale.squeeze(-1).squeeze(-1)
+
+
+class LoopOrderingDeviceTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+        patch = inductor_config.patch(
+            {
+                "benchmark_kernel": True,
+                "loop_ordering_after_fusion": True,
+                "triton.unique_kernel_names": True,
+            }
+        )
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
+
+    def test_square_block_broadcast_vertical_fusion(self, device):
+        block_size = 16
+        original_memory = Scheduler._selected_tiling_memory
+        individual_sizes = []
+
+        def record_memory(scheduler, nodes):
+            if len(nodes) == 1:
+                individual_sizes.extend(
+                    tuple(sn._sizes[0]) for sn in nodes[0].get_nodes()
+                )
+            return original_memory(scheduler, nodes)
+
+        x = torch.randn(6 * block_size, 7 * block_size, device=device)
+        fn = _square_block_broadcast
+        with mock.patch.object(Scheduler, "_selected_tiling_memory", record_memory):
+            self.assertEqual(fn(x), torch.compile(fn)(x))
+        self.assertEqual(1, metrics.generated_kernel_count)
+        self.assertIn((6, 16, 7, 16), individual_sizes)
+        self.assertNotIn((6, 7, 16, 16), individual_sizes)
+
+    @inductor_config.patch(loop_ordering_after_fusion=False)
+    def test_square_block_broadcast_respects_disabled_loop_ordering(self, device):
+        x = torch.randn(6 * 16, 7 * 16, device=device)
+        fn = _square_block_broadcast
+        self.assertEqual(fn(x), torch.compile(fn)(x))
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    @inductor_config.patch(force_disable_caches=True)
+    def test_square_block_broadcast_reorder_rollback(self, device):
+        original_restore = _LoopStateSnapshot.restore
+        restored = []
+
+        def record_restore(snapshot):
+            original_restore(snapshot)
+            for sn, state in snapshot.scheduler_node_states.items():
+                self.assertEqual(state, sn.snapshot_loop_state())
+            restored.append(True)
+
+        x = torch.randn(6 * 16, 7 * 16, device=device)
+        fn = _square_block_broadcast
+        with (
+            mock.patch.object(
+                Scheduler,
+                "_reindexing_regresses_memory_coalescing",
+                return_value=True,
+            ),
+            mock.patch.object(_LoopStateSnapshot, "restore", record_restore),
+        ):
+            self.assertEqual(fn(x), torch.compile(fn)(x))
+        self.assertTrue(restored)
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    @parametrize("reindexing", (False, True))
+    def test_square_block_broadcast_reorder_only(self, device, reindexing):
+        x = torch.randn(6 * 16, 7 * 16, device=device)
+        fn = _square_block_broadcast
+        with (
+            inductor_config.patch(loop_reindexing_after_fusion=reindexing),
+            mock.patch.object(
+                SchedulerNode,
+                "apply_loop_reindexing",
+                side_effect=AssertionError("broadcast fusion needs only reordering"),
+            ),
+        ):
+            self.assertEqual(fn(x), torch.compile(fn)(x))
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_square_block_broadcast_transposed_reduction_output(self, device):
+        x = torch.randn(6 * 16, 6 * 16, device=device)
+        fn = _square_block_broadcast
+        self.assertEqual(fn(x, True), torch.compile(fn)(x, True))
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    def test_broadcast_reorder_normalizes_dependencies(self, device):
+        def fn(x, y):
+            scale = x.abs().amax(1).clamp(min=1e-6).reshape(6, 1, 7, 1)
+            return y / scale
+
+        x = torch.randn(42, 256, device=device)
+        y = torch.randn(6, 16, 7, 16, device=device)
+        self.assertEqual(fn(x, y), torch.compile(fn, fullgraph=True)(x, y))
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    @parametrize("size", (6, 7))
+    def test_square_block_fused_consumer_dependencies(self, device, size):
+        def fn(x, a, b, c):
+            scale = x.abs().amax(dim=(1, 3), keepdim=True).clamp(min=1e-6)
+            u = x / scale + a + b + c
+            v = u + scale.transpose(0, 2)
+            return u, v
+
+        args = [torch.randn(size, 16, size, 16, device=device) for _ in range(4)]
+        self.assertEqual(fn(*args), torch.compile(fn, fullgraph=True)(*args))
+
+
 @inductor_config.patch(
     {
         "triton.unique_kernel_names": True,
@@ -2691,6 +2822,9 @@ class TestIndexInversion(TestCase):
                 sympy.S.Zero,
             )
         )
+
+
+instantiate_device_type_tests(LoopOrderingDeviceTest, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":

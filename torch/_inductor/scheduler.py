@@ -8936,20 +8936,22 @@ class Scheduler:
         if not common_buffer_names:
             return -1
 
+        reordered = False
         if config.loop_ordering_after_fusion:
             score = self._try_reorder_loops_for_candidates(node1, node2)
             if score >= 0:
                 return score
+            reordered = self._try_reorder_broadcast(node1, node2)
 
-        # No reordering candidates found (or loop ordering disabled).
-        # Try reindexing the pointwise to match the reduction's iteration
+        # If reordering did not work (or loop ordering is disabled),
+        # try reindexing the pointwise to match the reduction's iteration
         # domain (e.g., [1024, 8192] -> [65536, 128] for RMS norm with
         # reshape), then retry loop reordering if enabled. The retry is
         # needed because FusedSchedulerNodes may have more loop vars than
         # the reindexed pointwise (e.g., 3 vs 2), and only the normalize()
         # comparison in _try_reorder_loops_for_candidates handles that
         # num_vars mismatch.
-        if (
+        if not reordered and (
             not config.loop_reindexing_after_fusion
             or not self._try_reindex_pointwise_for_reduction(node1, node2)
         ):
@@ -9273,6 +9275,75 @@ class Scheduler:
                 refresh_group_node_dependencies(pw_node)
 
         return True
+
+    def _try_reorder_broadcast(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        r"""_try_reorder_broadcast(node1, node2) -> bool
+
+        Move a pointwise consumer's broadcast dimensions last to match a
+        reduction. Restore its original loops if the attempt is rejected.
+        """
+        from .codegen.simd import SIMDKernel
+
+        if any(node.is_cpu() or node.is_foreach() for node in (node1, node2)):
+            return False
+        if (
+            not node1.is_reduction()
+            or not isinstance(node2, SchedulerNode)
+            or node2.is_reduction()
+        ):
+            return False
+        target_sizes = node1.group[1]
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(node2._sizes[0]), sympy_product(target_sizes)
+        ) or SIMDKernel.is_compatible(target_sizes, node2.get_ranges()):
+            return False
+
+        order = self._broadcast_dims_last_order(node2, node1.get_buffer_names())
+        if order is None or not SIMDKernel.is_compatible(
+            target_sizes, (ir.same_reorder(order)(node2._sizes[0]), node2._sizes[1])
+        ):
+            return False
+
+        # Measure the original access patterns before changing any loops.
+        unfused_memory: tuple[MemoryCoalescing, ...] | None = None
+        memory = tuple(self._selected_tiling_memory([node]) for node in (node1, node2))
+        if all(m is not None for m in memory):
+            unfused_memory = typing.cast("tuple[MemoryCoalescing, ...]", memory)
+
+        snapshot = _LoopStateSnapshot.create((node2,))
+        node2.apply_new_loop_order(order)
+        if not self.can_fuse_vertical(
+            node1, node2
+        ) or self._reindexing_regresses_memory_coalescing(node1, node2, unfused_memory):
+            snapshot.restore()
+            return False
+        return True
+
+    @staticmethod
+    def _broadcast_dims_last_order(
+        sn: SchedulerNode, outputs: OrderedSet[str]
+    ) -> list[int] | None:
+        reads = [
+            dep
+            for dep in sn.read_writes.reads
+            if isinstance(dep, MemoryDep) and dep.name in outputs
+        ]
+        loop_vars = sn.read_writes.range_vars
+        if (
+            len(reads) != 1
+            or reads[0].is_indirect()
+            or loop_vars is None
+            or len(loop_vars) != len(sn._sizes[0])
+        ):
+            return None
+        # Move broadcast dims last, preserving order within each group:
+        # (6, 16, 7, 16) reading scale[7*d0 + d2] becomes (6, 7, 16, 16).
+        used_vars = reads[0].index.free_symbols
+        return sorted(
+            range(len(loop_vars)), key=lambda i: loop_vars[i] not in used_vars
+        )
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -10024,13 +10095,18 @@ class Scheduler:
 
             # Vertical fusion failed - the iteration domains may not
             # match (e.g. pointwise reads buf[x//32] while reduction
-            # writes buf[x]).  Try reindexing the pointwise to the
-            # reduction's domain and retry. A staged plan keeps its original
-            # frame because reindexing would invalidate its exact matches.
-            if (
-                plan is None
-                and config.loop_reindexing_after_fusion
-                and self._try_reindex_pointwise_for_reduction(node1, node2)
+            # writes buf[x]). Try broadcast reordering, then reindexing the
+            # pointwise. A staged plan keeps its original frame because loop
+            # transformations would invalidate its exact matches.
+            if plan is None and (
+                (
+                    config.loop_ordering_after_fusion
+                    and self._try_reorder_broadcast(node1, node2)
+                )
+                or (
+                    config.loop_reindexing_after_fusion
+                    and self._try_reindex_pointwise_for_reduction(node1, node2)
+                )
             ):
                 return (
                     self.can_fuse_vertical(node1, node2)
