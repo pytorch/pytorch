@@ -32,6 +32,12 @@ _GLOBAL_SCALE = 10
 _PRECOMPILE_FIXED_INPUT = torch.randn(4)
 
 
+@torch._dynamo.disable
+def _brk_disabled_fn(t):
+    """A disabled callee: calling it breaks the graph (gb0098)."""
+    return t * 1.0
+
+
 _PRECOMPILE_PUBLIC_METHODS = [
     name
     for name in dir(torch.compiler.precompile)
@@ -43,7 +49,37 @@ _PRECOMPILE_X4 = torch.randn(4)
 _PRECOMPILE_X28 = torch.randn(2, 8)
 
 
+def _precompile_only_disabled(x):
+    return _brk_disabled_fn(x)
+
+
 _PRECOMPILE_GRAD_MODES_SEEN: list[bool] = []
+
+
+def _precompile_multi_graph(x):
+    x = x * 2
+    torch._dynamo.graph_break()
+    x = x + 3
+    torch._dynamo.graph_break()
+    return x.sum()
+
+
+def _precompile_empty_resume(x, flag):
+    y = x + 1
+    torch._dynamo.graph_break()
+    if flag:
+        return y
+    return y.cos() * 100
+
+
+def _precompile_single_graph(x):
+    return x.sin()
+
+
+def _precompile_raises_on_flag(x, fail):
+    if fail:
+        raise KeyError("automatic example failed")
+    return x + 1
 
 
 # A custom pytree node whose context (a set) is not JSON-dumpable and which has no

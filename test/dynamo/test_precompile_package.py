@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import contextlib
 import copy
 import dataclasses
@@ -9,6 +10,7 @@ import importlib
 import inspect
 import itertools
 import math
+import math as _precompile_stdlib_alias
 import os
 import pickle
 import sys
@@ -23,6 +25,7 @@ import torch._dynamo.precompile_package as dynamo_package_lint
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.nn.functional as F
 from torch._dynamo.package import (
     _defining_module_name,
     CompilePackage,
@@ -243,12 +246,257 @@ def staged_with_global_function_ref(x):
     return (y * 10).sum()
 
 
+def staged_with_builtin_calls(x, cfg):
+    # len() and sorted() are resolved through the builtins dict Dynamo installs
+    # in this module, which is where a builtin read the ordinary way comes from.
+    n = len(cfg)
+    torch._dynamo.graph_break()
+    return x.sum() * n * len(sorted(cfg))
+
+
+def _precompile_house_op(t):
+    return t * 5.0
+
+
 _PRECOMPILE_OPS = {"len": len}
+
+
+def staged_with_injected_builtin(x):
+    # The test installs this into builtins, so it is read exactly the way len()
+    # is, off a namespace anyone can write to at runtime.
+    y = precompile_house_op(x)  # noqa: F821
+    torch._dynamo.graph_break()
+    return (y + 1).sum()
+
+
+def _with_injected_builtin(test):
+    builtins.precompile_house_op = _precompile_house_op
+    test.addCleanup(lambda: delattr(builtins, "precompile_house_op"))
+    return staged_with_injected_builtin
+
+
+def staged_with_a_registry_keyed_by_a_builtin_name(x, cfg):
+    n = _PRECOMPILE_OPS["len"](cfg)
+    torch._dynamo.graph_break()
+    return x.sum() * n
+
+
+def _precompile_user_act(t):
+    return -t
+
+
+def _precompile_closure_over(fn):
+    def inner(x):
+        return fn(x).sum()
+
+    return inner
+
+
+class _PrecompileRegistry:
+    def __init__(self, act):
+        self.act = act
+
+
+PRECOMPILE_DISPATCH = {"act": _precompile_user_act}
+PRECOMPILE_REGISTRY = _PrecompileRegistry(_precompile_user_act)
+
+
+def _in_inference_mode(tensor):
+    """Tag a tensor so the call using it runs under inference_mode."""
+    return _InferenceInput(tensor)
+
+
+def _marked_static(tensor):
+    torch._dynamo.mark_static(tensor, 0)
+    return tensor
+
+
+class _InferenceInput:
+    """Marker: the corpus runs this input inside inference_mode."""
+
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+
+class PrecompileBuiltinReadingModel(torch.nn.Module):
+    """Iterates a ModuleList, which reads ``iter`` off Dynamo's builtins dict."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(2)])
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x.sum()
 
 
 # One source LINE, so the two entries agree on file AND lineno: what separates
 # them can only come from the code body. This is the ACT2FN shape.
 _LAMBDA_TABLE = {"a": lambda x: x.sin(), "b": lambda x: x.cos()}
+
+
+class PrecompileSelfActPair(torch.nn.Module):
+    """Two PrecompileSelfAct instances, so their shared forward compiles twice."""
+
+    def __init__(self, *acts):
+        super().__init__()
+        self.ms = torch.nn.ModuleList([PrecompileSelfAct(act) for act in acts])
+
+    def forward(self, x):
+        out = x.sum()
+        for m in self.ms:
+            out = out + m(x)
+        return out
+
+
+def _pin_item_in_a_branch(x):
+    scale = x.abs().max().item()
+    y = x * 2 if scale > 0.5 else x * 3
+    return y.sum()
+
+
+def _pin_item_across_a_break(x):
+    """.item() pins the stack slot AND the local the resume frame reads it from."""
+    scale = x.abs().max().item()
+    torch._dynamo.graph_break()
+    return (x * 2 if scale > 0.5 else x * 3).sum()
+
+
+def _pin_int_arg(x, k):
+    y = x * k
+    torch._dynamo.graph_break()
+    return (y + k).sum()
+
+
+def _pin_keys_arg(x, ks):
+    """A dict_keys argument is pinned by EQUALS_MATCH, not CONSTANT_MATCH."""
+    y = x * float(len(ks))
+    torch._dynamo.graph_break()
+    return (y + 1).sum()
+
+
+def _precompile_break_then_cos(t):
+    torch._dynamo.graph_break()
+    return t.cos()
+
+
+def _tensor_across_a_break(x):
+    """x.sin() sits on the stack across the break, so it gets a ___stackN name."""
+    return (x.sin() + _precompile_break_then_cos(x)).sum()
+
+
+class PrecompileIntAttr(torch.nn.Module):
+    def __init__(self, k):
+        super().__init__()
+        self.k = k
+
+    def forward(self, x):
+        y = x * self.k
+        torch._dynamo.graph_break()
+        return (y + self.k).sum()
+
+
+class PrecompileConfigConstants(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ln = torch.nn.LayerNorm(8)
+        self.drop = torch.nn.Dropout(0.1)
+        self.lin = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return self.drop(self.lin(self.ln(x))).relu().sum()
+
+
+# The stateless corpus shapes are plain functions; precompile_capture takes
+# either, and only the guard sources matter here.
+def _aliased_torch_import(x):
+    """import torch.nn.functional as F -- the global name is not the module's."""
+    return F.gelu(x).sum()
+
+
+def _fully_qualified(x):
+    """torch.nn.functional.gelu spelled out -- the namespace is two hops down."""
+    return torch.nn.functional.gelu(x).sum()
+
+
+def _function_scoped_torch_import(x):
+    """A function-scoped `import torch`, which transformers is full of. Dynamo
+    reaches it through the `__import_torch` alias and guards the attributes read
+    off that alias, never the alias itself."""
+    import torch
+
+    if isinstance(x, torch.Tensor):
+        return torch.relu(x).sum()
+    return x
+
+
+class PrecompileModuleInAttribute(torch.nn.Module):
+    """self.ns = importlib.import_module(cfg.backend) -- a config-picked module."""
+
+    def __init__(self, ns):
+        super().__init__()
+        self.ns = ns
+
+    def forward(self, x):
+        return self.ns.gelu(x).sum()
+
+
+def _dict_dispatch(x):
+    """CFG["act"] -- the same dispatch slot spelled as a dict lookup."""
+    return PRECOMPILE_DISPATCH["act"](x).sum()
+
+
+def _registry_lookup(x):
+    """REGISTRY.act -- a dispatch table parked in a module-level object."""
+    return PRECOMPILE_REGISTRY.act(x).sum()
+
+
+def _function_arg(x, fn):
+    return fn(x).sum()
+
+
+def _function_default(x, fn=_precompile_user_act):
+    return fn(x).sum()
+
+
+class PrecompileStockEncoderLayer(torch.nn.Module):
+    """nn.TransformerEncoderLayer parks its activation in an attribute, and
+    which callable lands there is a constructor keyword -- torch's own spelling
+    of self.act = getattr(F, cfg.activation)."""
+
+    def __init__(self):
+        super().__init__()
+        self.enc = torch.nn.TransformerEncoderLayer(
+            8, 2, 16, batch_first=True, dropout=0.0
+        )
+
+    def forward(self, x):
+        return self.enc(x)
+
+
+class PrecompileStockSequential(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 8)
+        )
+
+    def forward(self, x):
+        return self.net(x).sum()
+
+
+def _aliased_stdlib_import(x):
+    """import math as <alias> -- a stdlib module under a name it does not own."""
+    return (x * _precompile_stdlib_alias.sqrt(2.0)).sum()
+
+
+def _stdlib_attribute(x):
+    return (x * math.sqrt(2.0)).sum()
+
+
+def _same_module_helper(x):
+    return _precompile_scale(x).sum()
 
 
 # The modules the corpus needs on disk, because a dispatch read off another
@@ -402,6 +650,137 @@ class LazyUserImport(torch.nn.Module):
 
 _CORPUS_X = torch.randn(4, 8)
 _CORPUS_SEQ = torch.randn(2, 4, 8)
+
+# Every shape below was once a silent wrong answer on a serving machine that
+# somebody had to find by hand. _is_risky_drop regressed three review rounds
+# running -- each fix closed the previous round's false negative and opened a
+# new one -- so the shapes live in a table rather than in prose: adding one is
+# a single entry, and nothing here may ever stop being flagged. Each row names
+# the guard sources (by suffix) the risky-drop report must carry.
+_RISKY_DROP_CORPUS = {
+    "aliased_module_import": (("G['impl']", "G['impl'].op"), lambda t: (t._corpus_model("calias"), (_CORPUS_X,))),
+    # self.act is a dispatch slot whatever it holds, and classifying by the
+    # binding site is what catches the torch-owned and builtin cases: an
+    # ACT2FN-style table holds abs next to torch.relu, and which one lands in
+    # the slot is exactly what config decides.
+    "attribute_builtin_fn": (("self.act",), lambda t: (PrecompileSelfAct(abs), (_CORPUS_X,))),
+    "attribute_torch_fn": (("self.act",), lambda t: (PrecompileSelfAct(F.gelu), (_CORPUS_X,))),
+    "attribute_torch_relu": (("self.act",), lambda t: (PrecompileSelfAct(torch.relu), (_CORPUS_X,))),
+    "attribute_user_fn": (("self.act",), lambda t: (PrecompileSelfAct(_precompile_user_act), (_CORPUS_X,))),
+    "bare_global_fn": (("G['PRECOMPILE_ACTIVATION']",), lambda t: (staged_with_global_function_ref, (_CORPUS_X,))),
+    "closure_cell": (("fn",), lambda t: (_precompile_closure_over(_precompile_user_act), (_CORPUS_X,))),
+    "cross_module_from_import": (("G['op']",), lambda t: (t._corpus_model("cfrom"), (_CORPUS_X,))),
+    "dict_lookup": (("G['PRECOMPILE_DISPATCH']['act']",), lambda t: (_dict_dispatch, (_CORPUS_X,))),
+    "dispatch_in_inlined_helper": (("G['__import_chelpers'].op",), lambda t: (t._corpus("InlinedHelper"), (_CORPUS_X,))),
+    "function_argument": (("fn",), lambda t: (_function_arg, (_CORPUS_X, _precompile_user_act))),
+    "function_default_arg": (("fn",), lambda t: (_function_default, (_CORPUS_X,))),
+    # builtins is writable and per-process, so a plugin doing `builtins.op =
+    # impl_a` here and impl_b there produces a read that comes off the right
+    # namespace but holds user code.
+    "injected_builtin": (("['precompile_house_op']",), lambda t: (_with_injected_builtin(t), (_CORPUS_X,))),
+    "module_in_attribute": (("self.ns", "self.ns.gelu"), lambda t: (PrecompileModuleInAttribute(F), (_CORPUS_X,))),
+    "module_level_global": (("G['cconf'].ACT",), lambda t: (t._corpus("ModuleAttr"), (_CORPUS_X,))),
+    "module_valued_global": (("G['OPS'].op",), lambda t: (t._corpus("ModuleSwitch"), (_CORPUS_X,))),
+    "object_attribute": (("G['PRECOMPILE_REGISTRY'].act",), lambda t: (_registry_lookup, (_CORPUS_X,))),
+    "package_reexport": (("G['cpkg'].op",), lambda t: (t._corpus("PackageReexport"), (_CORPUS_X,))),
+    "package_submodule_alias": (("G['cpkg'].impl.op",), lambda t: (t._corpus("PackageSubmoduleAlias"), (_CORPUS_X,))),
+    # A table under a user global has the same source shape as the builtins
+    # dict while being a slot, whatever it happens to hold.
+    "registry_keyed_by_builtin_name": (("G['_PRECOMPILE_OPS']['len']",), lambda t: (staged_with_a_registry_keyed_by_a_builtin_name, (_CORPUS_X, {"a": 1}))),
+    "sibling_module": (("G['cdispatch'].op",), lambda t: (t._corpus("SiblingModule"), (_CORPUS_X,))),
+    "stock_layer_activation": (("self._modules['enc'].activation",), lambda t: (PrecompileStockEncoderLayer(), (_CORPUS_SEQ,))),
+}  # fmt: skip
+
+# The other half of the corpus, and the half that keeps the report worth
+# reading: the lint only warns by default, so if ordinary code trips it the
+# warning is noise nobody audits and nobody ever opts into enforcement. Each
+# row names the identity guards (by suffix) that ARE dropped without being
+# flagged: torch internals, stdlib modules and their attributes, a global bound
+# to a def of its own name, reads off Dynamo's import aliases and its builtins
+# dict.
+_BENIGN_DROP_CORPUS = {
+    "aliased_stdlib_import": ((), lambda t: (_aliased_stdlib_import, (_CORPUS_X,))),
+    "aliased_torch_import": (("G['F']",), lambda t: (_aliased_torch_import, (_CORPUS_X,))),
+    "builtin_read_ordinary": (("['len']", "['sorted']"), lambda t: (staged_with_builtin_calls, (_CORPUS_X, {"alpha": 1, "beta": 2}))),
+    "direct_functional_call": (("G['torch'].nn.functional.gelu",), lambda t: (_fully_qualified, (_CORPUS_X,))),
+    "function_scoped_torch_import": (("G['__import_torch'].Tensor", "G['__import_torch'].relu"), lambda t: (_function_scoped_torch_import, (torch.ones(4),))),
+    "function_scoped_user_import": (("G['__import_lazy_helper'].op",), lambda t: (t._corpus("LazyUserImport"), (_CORPUS_X,))),
+    "library_spellings": (("G['relu']", "G['sqrt']", "G['_math']", "G['_abc']"), lambda t: (t._corpus_model("clibspell"), (torch.ones(4),))),
+    "no_dispatch_slot": (("G['math']", "G['math'].sqrt", "G['_precompile_scale']"), lambda t: (PrecompileNoDispatchSlot(), (_CORPUS_X,))),
+    "own_name_def_in_own_module": (("G['cown']", "G['gelu']", "G['__import_cown']._scale"), lambda t: (t._corpus("OwnNameDef"), (_CORPUS_X,))),
+    "real_submodule": (("G['cpkg'].cimpl", "G['cpkg'].cimpl.op"), lambda t: (t._corpus("RealSubmodule"), (_CORPUS_X,))),
+    "same_module_helper": ((), lambda t: (_same_module_helper, (_CORPUS_X,))),
+    "stdlib_attribute": ((), lambda t: (_stdlib_attribute, (_CORPUS_X,))),
+    "stock_linear_layernorm": ((), lambda t: (PrecompileConfigConstants(), (_CORPUS_X,))),
+    "stock_sequential": ((), lambda t: (PrecompileStockSequential(), (_CORPUS_X,))),
+}  # fmt: skip
+
+# A value crossing a graph break or arriving as a non-tensor argument is
+# guarded by equality, so the artifact only serves inputs reproducing it, and
+# nothing else in the summary says so. Model config -- LayerNorm eps, Dropout p,
+# a plain int attribute -- is CONSTANT_MATCH too but constant for the model the
+# artifact is loaded onto; counting it would flag every model. Rows: builder,
+# args, the wont_generalize report, and a (type, source substring) guard that
+# must have been KEPT, so a row cannot pass by Dynamo not emitting the guard.
+_VALUE_PIN_CORPUS = {
+    "item_in_a_branch": (lambda: _pin_item_in_a_branch, (_CORPUS_X,), ("___stack0",), ("CONSTANT_MATCH", "___stack0")),
+    "item_across_a_break": (lambda: _pin_item_across_a_break, (_CORPUS_X,), ("___stack0", "scale"), ("CONSTANT_MATCH", "scale")),
+    "plain_argument": (lambda: _pin_int_arg, (_CORPUS_X, 7), ("k",), ("CONSTANT_MATCH", "k")),
+    "equals_match_argument": (lambda: _pin_keys_arg, (_CORPUS_X, {"a": 1, "b": 2}.keys()), ("ks",), ("EQUALS_MATCH", "ks")),
+    "tensor_across_a_break": (lambda: _tensor_across_a_break, (_CORPUS_X,), (), ("TENSOR_MATCH", "___stack")),
+    "layer_config_constants": (lambda: PrecompileConfigConstants().eval(), (torch.randn(2, 8),), (), ("CONSTANT_MATCH", "")),
+    "int_attribute": (lambda: PrecompileIntAttr(3), (torch.randn(2, 8),), (), ("CONSTANT_MATCH", "")),
+}  # fmt: skip
+
+
+def _sum_if_tensor(x):
+    return x.sum() if type(x) is torch.Tensor else x
+
+
+# Rows: builder, input calls, text the invariants file must contain, and a
+# pattern it must not -- object ids, the per-process counter in Dynamo's
+# builtins-dict name, and the address install_global_by_id bakes into an
+# identifier ("<prefix>_<id(value)>_c<n>": `type(x) is torch.Tensor` installs
+# one) are all normalized so the file is stable enough to commit and diff.
+_INVARIANTS_FILE_CASES = {
+    "config_read_across_a_break": (PrecompileInvariantModel, _TWO_SHAPES, ("frame forward", "invariant [enforced]", "varies"), r"\b\d{9,}\b"),
+    "dynamo_global_counter": (PrecompileBuiltinReadingModel, _TWO_SHAPES, ("__builtins_dict___<n>",), r"__builtins_dict___\d"),
+    "global_named_by_object_id": (lambda: _sum_if_tensor, [(torch.ones(4),)], ("_<id>_c<n>",), r"_\d{9,}_c\d"),
+}  # fmt: skip
+
+
+def _scale_by_first_value(x, d):
+    return x * next(iter(d.values()))
+
+
+def _mul_or_add(x, flag, k):
+    return x * k if flag else x + k
+
+
+# Shapes where the guard that SPLIT two compilations must show up as varying
+# and never as an invariant of both. Rows: builder, capture kwargs, calls,
+# substrings some varying fact must carry, substrings some invariant fact must
+# carry, substrings no invariant fact may carry, and whether the single call
+# must be made once under no_grad and once under enable_grad to split it.
+_VARYING_CORPUS = {
+    # _normalize strips object ids so the file diffs clean. It must not strip a
+    # user constant with it: these two variants pin the dict to different keys.
+    "large_constant": (lambda: _scale_by_first_value, {"dynamic": False}, [(torch.ones(4), {1000000001: 2}), (torch.ones(4), {2000000002: 3})], ("[1000000001]", "[2000000002]"), (), ("dict.keys",), False),
+    # k is unspecialized, so its guard is "k is an int" in both variants and
+    # is a real precondition. Fingerprinting the value it happened to hold
+    # would split one shared guard into two indistinguishable varying facts.
+    "shared_int_guard": (lambda: _mul_or_add, {"dynamic": True}, [(torch.ones(4), True, 1), (torch.ones(4), False, 2)], (), ("___check_type_id(L['k']",), (), False),
+    # The id in an identity guard's code is normalized away, so the object has
+    # to be named some other way, or self.act is reported invariant.
+    "identity_guard_named": (lambda: PrecompileSelfActPair(torch.relu, torch.sigmoid), {"dynamic": False}, [(torch.ones(4),)], ("relu on self.act", "sigmoid on self.act"), (), (".act",), False),
+    # Every entry of an ACT2FN-style table is "<lambda>" in one module on one
+    # line; _object_identity must still tell them apart.
+    "lambda_table_pair": (lambda: PrecompileSelfActPair(*_LAMBDA_TABLE.values()), {"dynamic": False}, [(torch.randn(3, 4),)], ("self.act",), (), ("self.act",), False),
+    # The same call made once under no_grad and once under enable_grad compiles
+    # twice; global-state guards carry no value of their own, so without a
+    # fingerprint nothing would be reported varying.
+    "grad_mode": (PrecompileInvariantModel, {"dynamic": False}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), (), True),
+}  # fmt: skip
 
 _BUILTIN_ACROSS_BREAK_SRC = """\
 import torch
@@ -961,6 +1340,46 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(summary(backend_graphs=0).complete)
         self.assertFalse(summary(guarded_codes=0).complete)
         self.assertFalse(summary(capture_errors=("boom",)).complete)
+
+    # Every shape found to split a compilation while the report called it an
+    # invariant. The fingerprint has failed open three times -- shapes, then
+    # python type and conj/neg, then the dispatch key set -- each fix revealing
+    # the next, so the shapes are asserted here rather than described. A new
+    # one is one line. See _value_fingerprint.
+    _SPLIT_CORPUS = {
+        "shape": lambda: (torch.ones(4, 8), torch.ones(5, 8)),
+        "dtype": lambda: (torch.ones(4, 8), torch.ones(4, 8, dtype=torch.float64)),
+        "requires_grad": lambda: (
+            torch.ones(4, 8),
+            torch.ones(4, 8, requires_grad=True),
+        ),
+        "python_type": lambda: (
+            torch.nn.Parameter(torch.ones(4, 8)),
+            torch.ones(4, 8),
+        ),
+        "conjugate_key": lambda: (
+            torch.ones(4, dtype=torch.complex64),
+            torch.ones(4, dtype=torch.complex64).conj(),
+        ),
+        "negative_key": lambda: (torch.ones(4), torch.ones(4)._neg_view()),
+        "memory_format": lambda: (
+            torch.ones(2, 3, 4, 5),
+            torch.ones(2, 3, 4, 5).to(memory_format=torch.channels_last),
+        ),
+        # TensorCheck stores the TLS-ADJUSTED key set, so a tensor built
+        # OUTSIDE inference_mode still splits the guard when the call is made
+        # inside it. Rendering the tensor's own key set missed exactly this.
+        "tls_dispatch_keys": lambda: (
+            torch.ones(4, 8),
+            _in_inference_mode(torch.ones(4, 8)),
+        ),
+        # The dimension-marking guards live entirely in code_list, which an
+        # earlier version discarded as boilerplate.
+        "dimension_marking": lambda: (
+            torch.ones(4, 8),
+            _marked_static(torch.ones(4, 8)),
+        ),
+    }
 
     def test_stale_module_memo_is_revalidated(self):
         # The filename -> module memo caches a hit outright, and its ABA check
