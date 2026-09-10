@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import sys
+import unittest
 from collections import OrderedDict
 
 import torch
@@ -31,7 +32,7 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
 )
 from torch.testing._internal.common_distributed import requires_world_size
-from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -89,16 +90,11 @@ def distribute_rmsnorm(module, device_mesh):
 
 
 class TPFSDPIntegrationTestBase(FSDPTestContinuous):
-    """Device-agnostic base.
+    """Device-agnostic base class for TP + FSDP integration tests.
 
-    FSDPTestContinuous inherits the module-level ``DEVICE_TYPE`` /
-    ``DEVICE_COUNT`` / ``DISTRIBUTED_BACKEND`` globals from ``common_fsdp``,
-    which only recognize cuda/hpu/xpu. Override the device-resolution hooks so
-    the test runs on any accelerator (incl. out-of-tree PrivateUse1 backends)
-    once instantiated via ``instantiate_device_type_tests``. Mirrors the
-    ``DTensorPPTestBase`` pattern in PR #192051: the intermediate base holds
-    ``backend_str`` so the device-specific generated class inherits it rather
-    than ports it (a ported classmethod cannot see the variant's device_type).
+    The intermediate class holds ``backend_str`` so device-specific generated
+    classes inherit the method instance rather than port it (a ported classmethod
+    cannot see the variant's ``device_type``).
     """
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -114,16 +110,21 @@ class TPFSDPIntegrationTestBase(FSDPTestContinuous):
     def backend_str(cls) -> str:
         try:
             return dist.get_default_backend_for_device(cls._resolved_device_type())
-        except ValueError:
+        except ValueError as e:
             # Devices without a registered default backend (e.g. ``hpu`` unless
-            # the vendor extension registers ``hccl`` via ``register_backend``):
-            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
-            # ("hccl" on HPU), preserving the pre-refactor behavior.
-            return DISTRIBUTED_BACKEND
+            # the vendor extension registers ``hccl`` via ``register_backend``).
+            # There is no correct global fallback: ``common_fsdp``'s
+            # ``DISTRIBUTED_BACKEND`` is computed from the host's TEST_* flags at
+            # import time, so it can hand e.g. ``nccl`` to an HPU variant on a
+            # mixed host. Skip the variant instead of running collectives on the
+            # wrong transport.
+            raise unittest.SkipTest(
+                f"no default distributed backend registered for device {cls.device_type}: {e}"
+            ) from e
 
     @property
     def world_size(self) -> int:
-        return _get_device_module(self.device_type).device_count()
+        return _get_device_module(self._resolved_device_type()).device_count()
 
 
 class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
