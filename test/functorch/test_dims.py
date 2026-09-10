@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
 )
 
@@ -134,7 +135,7 @@ class _TestMinBase(TestCase):
         device=None,
         time=False,
     ):
-        device_type = None if device is None else device.type
+        device_type = None if device is None else torch.device(device).type
 
         def maybe_to(x):
             return x if device is None else x.to(device)
@@ -705,7 +706,7 @@ class TestMinDevice(_TestMinBase):
         super().tearDown()
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
+        not TEST_XPU and (IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS),
         "https://github.com/pytorch/pytorch/issues/86710",
     )
     @onlyAccelerator
@@ -722,7 +723,7 @@ class TestMinDevice(_TestMinBase):
         )
 
 
-instantiate_device_type_tests(TestMinDevice, globals())
+instantiate_device_type_tests(TestMinDevice, globals(), allow_xpu=True)
 
 
 skip_functorch_only = ["test_time_mm_fuse"]
