@@ -9,7 +9,11 @@ from torch.distributed._composable import replicate
 from torch.distributed._composable.replicate_with_fsdp import (
     replicate as replicate_with_fsdp,
 )
-from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
+from torch.distributed.fsdp import (
+    DataParallelMeshDims,
+    fully_shard,
+    MixedPrecisionPolicy,
+)
 from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
@@ -368,7 +372,14 @@ class TestFullyShardDTensor(FSDPTest):
             mesh_dim_names=("dp", "ep"),
         )
         model = TwoExpertParams(mesh["ep"])
-        fully_shard(model, mesh=mesh["dp"], reshard_after_forward=True)
+        fully_shard(
+            model,
+            mesh=mesh["dp"],
+            reshard_after_forward=True,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            ),
+        )
         model.set_reduce_scatter_unused_params(True)
 
         loss = model(torch.ones(1, device=device_type))

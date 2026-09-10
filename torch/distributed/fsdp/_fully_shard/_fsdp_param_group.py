@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import warnings
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -56,9 +55,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
-# Every parameter group with a mixed grad_dtype would otherwise warn, which is
-# once per layer on a real model.
-_warned_non_uniform_grad_dtype = False
 _GradInputs = TypeVarTuple("_GradInputs")
 
 
@@ -306,30 +302,6 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        # Gradients are produced at grad_dtype, and one reduce-scatter copy-in
-        # cannot take mixed dtypes, so a group has to be uniform. Fall back to
-        # the pre-existing behavior of ignoring grad_dtype rather than failing a
-        # configuration that runs today.
-        grad_dtypes = {p._explicit_grad_dtype or p.orig_dtype for p in trainable_params}
-        if len(trainable_params) > 0 and len(grad_dtypes) != 1:
-            global _warned_non_uniform_grad_dtype
-            # Only the warning is rank-gated. The fallback below must run on
-            # every rank, or they would disagree on gradient dtypes and the
-            # reduce-scatter would mismatch. `get_rank` is a local lookup, so
-            # this adds no collective and cannot deadlock.
-            if not _warned_non_uniform_grad_dtype and (
-                not dist.is_initialized() or dist.get_rank() == 0
-            ):
-                _warned_non_uniform_grad_dtype = True
-                warnings.warn(
-                    "FSDP expects uniform grad_dtype within a parameter group "
-                    f"but got {grad_dtypes}; ignoring grad_dtype for the "
-                    "affected groups. Set the same grad_dtype on every "
-                    "parameter in a group to have it honored. This warning is "
-                    "shown once."
-                )
-            for fsdp_param in self.fsdp_params:
-                fsdp_param.clear_explicit_grad_dtype()
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -590,6 +562,7 @@ class FSDPParamGroup:
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
             for fsdp_param in self.fsdp_params:
+                fsdp_param.restore_unsharded_grad()
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
@@ -628,6 +601,8 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.restore_unsharded_grad()
             if default_prefetch:
                 self._backward_prefetch()
 
@@ -648,15 +623,15 @@ class FSDPParamGroup:
                 and self._training_state == TrainingState.FORWARD  # partial path taken
             )
             self._training_state = TrainingState.POST_BACKWARD
-            with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
-                for fsdp_param in self.fsdp_params:
-                    fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
+                    reduce_op = "avg" if self.gradient_divide_factor is None else "sum"
+                    for fsdp_param in self.fsdp_params:
+                        fsdp_param.publish_unsharded_grad(
+                            reduce_op, self.gradient_divide_factor
+                        )
                     if self.reshard_after_backward:
                         self.reshard()
-                    for fsdp_param in self.fsdp_params:
-                        fsdp_param.to_accumulated_grad_if_needed()
                     return
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
@@ -666,15 +641,10 @@ class FSDPParamGroup:
                 for fsdp_param in self.fsdp_params:
                     if not hasattr(fsdp_param, "_unsharded_param"):
                         continue
-                    # May have an accumulated gradient of the reduce dtype if the
-                    # previous backward did not reduce-scatter
-                    if fsdp_param.unsharded_accumulated_grad is not None:
-                        fsdp_params_with_grad.append(fsdp_param)
-                        unsharded_grads.append(
-                            fsdp_param.unsharded_accumulated_grad_data
-                        )
-                        fsdp_param.unsharded_accumulated_grad = None
-                    elif fsdp_param.unsharded_param.grad is not None:
+                    # A group unused in this microbatch may still own gradients
+                    # from an earlier backward without synchronization.
+                    fsdp_param.restore_unsharded_grad()
+                    if fsdp_param.unsharded_param.grad is not None:
                         fsdp_params_with_grad.append(fsdp_param)
                         unsharded_grads.append(fsdp_param.unsharded_grad_data)
                         fsdp_param.unsharded_param.grad = None
@@ -748,8 +718,6 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
-                    self._reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
                     (
