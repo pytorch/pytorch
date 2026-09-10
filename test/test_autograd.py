@@ -18390,6 +18390,7 @@ class _InputGradBufferProducer(Function):
         return grad_input, None, None, None
 
 
+@skipIfTorchDynamo("input_grad_buffers requires eager autograd engine state")
 class TestInputGradBuffers(TestCase):
     def test_first_producer_falls_back(self, device):
         observed_buffers = []
@@ -18629,6 +18630,24 @@ class TestInputGradBuffers(TestCase):
             else:
                 out.sum().backward()
 
+    def test_create_graph_cannot_be_masked(self, device):
+        class Producer(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad_output):
+                ctx.input_grad_buffers
+                return grad_output
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with self.assertRaisesRegex(RuntimeError, "create_graph=True"):
+                Producer.apply(x).sum().backward(create_graph=True)
+
     @onlyCUDA
     def test_user_stream_switch_does_not_change_execution_stream(self, device):
         observed_buffers = []
@@ -18743,14 +18762,16 @@ class TestInputGradBuffers(TestCase):
     @onlyCUDA
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
         script = """
+import sys
 import threading
-import time
 
 import torch
 from torch.autograd import Function
 from torch.utils._pytree import tree_map
 
 dispatch_entered = threading.Event()
+getter_entering_lookup = threading.Event()
+sys.setswitchinterval(10)
 
 class DispatchTensor(torch.Tensor):
     @staticmethod
@@ -18772,7 +18793,8 @@ class DispatchTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         dispatch_entered.set()
-        time.sleep(0.1)
+        if not getter_entering_lookup.wait(timeout=5):
+            raise RuntimeError("timed out waiting for InputBuffer lookup")
         kwargs = {} if kwargs is None else kwargs
         unwrap = lambda value: value.elem if isinstance(value, cls) else value
         return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
@@ -18786,6 +18808,7 @@ class Getter(Function):
     def backward(ctx, grad_output):
         if not dispatch_entered.wait(timeout=5):
             raise RuntimeError("timed out waiting for Python dispatch")
+        getter_entering_lookup.set()
         ctx.input_grad_buffers
         return grad_output
 

@@ -428,7 +428,7 @@ variable_list get_current_input_grad_buffers(Node* node) {
       "input_grad_buffers is only supported by backward() without the inputs "
       "argument");
   TORCH_CHECK(
-      !at::GradMode::is_enabled(),
+      !graph_task->thread_locals_.get_grad_mode(),
       "input_grad_buffers does not support backward(create_graph=True)");
   TORCH_CHECK(
       !AnomalyMode::is_enabled(),
@@ -458,9 +458,7 @@ variable_list get_current_input_grad_buffers(Node* node) {
         ? input_buffer.opt_overridden_consumer_stream
         : next.function->stream();
     result[i] = input_buffer.get_for_direct_accumulation(
-        next.input_nr,
-        opt_producer_stream,
-        opt_consumer_stream);
+        next.input_nr, opt_producer_stream, opt_consumer_stream);
   }
   return result;
 }
