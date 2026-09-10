@@ -2854,6 +2854,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
+                           "torch._inductor.kernel.flex_gemm.quack_ops",  # depends on cutlass
                            "torch.profiler._cuspy",  # depends on cupti-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
