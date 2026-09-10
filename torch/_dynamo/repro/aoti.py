@@ -329,8 +329,6 @@ def repro_run(
 
     gm, args, kwargs = repro_common(options, exported_program)
 
-    from torch.cuda import synchronize
-
     _aoti_compile_and_package_inner(
         gm,
         args,
@@ -340,15 +338,11 @@ def repro_run(
         inductor_configs=config_patches,
     )
 
-    need_sync = False
-
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-            need_sync = True
-            break
-
-    if need_sync:
-        synchronize()  # ensure segfaults are surfaced
+    if (
+        any(isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args)
+        and torch.accelerator.is_available()
+    ):
+        torch.accelerator.synchronize()  # ensure segfaults are surfaced
 
 
 def export_for_aoti_minifier(
@@ -414,14 +408,9 @@ def repro_minify(
     strict = options.minifier_export_mode == "dynamo"
     skip_export_error = options.skip_export_error
 
-    from torch.cuda import synchronize
-
-    need_sync = False
-
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-            need_sync = True
-            break
+    need_sync = any(
+        isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args
+    )
 
     def module_fails(
         gm: torch.fx.GraphModule,
@@ -451,8 +440,9 @@ def repro_minify(
                 check_accuracy=options.accuracy,
                 inductor_configs=inductor_configs,
             )
-            if need_sync:
-                synchronize()  # ensure segfaults are surfaced
+            if need_sync and torch.accelerator.is_available():
+                # Ensures that segfaults are surfaced
+                torch.accelerator.synchronize()
             return False
         except Exception as e:
             if check_str is not None and check_str not in repr(e):
