@@ -195,7 +195,10 @@ def evaluate_platform_supports_flash_attention():
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
-        return True
+        from torch.testing._internal.common_xpu import (
+            evaluate_platform_supports_flash_attention as xpu_supports_flash_attention,
+        )
+        return xpu_supports_flash_attention()
     return False
 
 def evaluate_platform_supports_ck_sdpa():
