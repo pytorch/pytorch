@@ -2,10 +2,57 @@
 
 from typing import Type, Union
 
+import cutlass
 import cutlass.cute as cute
 import cutlass.utils.blackwell_helpers as sm100_utils_og
 from cutlass.cutlass_dsl import Numeric, dsl_user_op
-from cutlass.cute.nvgpu import OperandMajorMode
+from cutlass.cute.nvgpu import OperandMajorMode, tcgen05
+
+
+class MmaMXF4NVF4Op(tcgen05.MmaMXF4NVF4Op):
+    """tcgen05 kind::mxf4nvf4 MMA op with the scale config as a parameter.
+
+    kind::mxf4nvf4 is ONE MMA atom covering both both-fp4 scale configs -
+    scale_vec::2X (vec 32, e8m0; the mxfp4 instantiation, which PTX also
+    spells ``kind::mxf4``) and scale_vec::4X (vec 16; nvfp4) - mirroring
+    CUTLASS C++'s ``SM100_MMA_MXF4_SS<..., VS>``. The DSL class pins
+    sf_vec_size = 16; this subclass restores the parameter. Both vec sizes
+    build the identical MLIR atom type (it has no kind attribute - the
+    backend derives the PTX spelling from the vec size), so this changes
+    which Python op models the atom, not the lowered instruction.
+    """
+
+    def __init__(self, sf_dtype, sf_vec_size, instruction_shape, cta_group, a_src):
+        tcgen05.BlockScaledMmaOp.__init__(
+            self,
+            cutlass.Float4E2M1FN,
+            cutlass.Float4E2M1FN,
+            cutlass.Float32,
+            sf_dtype,
+            sf_vec_size,
+            instruction_shape,
+            cta_group,
+            a_src,
+            OperandMajorMode.K,
+            OperandMajorMode.K,
+        )
+        self._verify()
+
+
+def make_blockscaled_trivial_tiled_mma(
+    a_dtype, b_dtype, a_major, b_major, sf_dtype, sf_vec_size, cta_group, mma_tiler_mn
+) -> cute.TiledMma:
+    """Like the DSL helper, but both-fp4 pairs always run the single
+    kind::mxf4nvf4 atom with the format's scale config (the DSL helper splits
+    them into MmaMXF4Op / MmaMXF4NVF4Op by vec size)."""
+    if a_dtype is cutlass.Float4E2M1FN and b_dtype is cutlass.Float4E2M1FN:
+        op = MmaMXF4NVF4Op(
+            sf_dtype, sf_vec_size, (*mma_tiler_mn, 64), cta_group, tcgen05.OperandSource.SMEM
+        )
+        return cute.make_tiled_mma(cute.make_mma_atom(op))
+    return sm100_utils_og.make_blockscaled_trivial_tiled_mma(
+        a_dtype, b_dtype, a_major, b_major, sf_dtype, sf_vec_size, cta_group, mma_tiler_mn
+    )
 
 
 @dsl_user_op
