@@ -135,7 +135,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     host, port = parse_rendezvous_endpoint(params.endpoint, default_port=DEFAULT_PORT)
 
     cfg_is_host = params.get_as_bool("is_host")
-    # If the user has explicitly specified whether our process should host the
+    # If the user has explicitly specified whether our process should host
     # the store, respect it.
     if cfg_is_host is not None:
         is_host = cfg_is_host
@@ -192,7 +192,8 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
         try:
             # The temporary file is readable and writable only by the user of
             # this process.
-            _, path = tempfile.mkstemp()
+            fd, path = tempfile.mkstemp()
+            os.close(fd)
         except OSError as exc:
             raise RendezvousError(
                 "The file creation for C10d store has failed. See inner exception for details."
