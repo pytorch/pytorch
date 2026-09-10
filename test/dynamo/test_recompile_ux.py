@@ -1,5 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import queue
+import sys
+import textwrap
+import threading
+import time
 import unittest
 import weakref
 from functools import cache
@@ -10,11 +15,13 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
+from torch._C._dynamo.eval_frame import _clear_cache_entries_for_region
 from torch._dynamo.eval_frame import (
     _get_cache_entries_for_region,
     _get_total_cache_entry_count,
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -482,19 +489,846 @@ def _count_add_graphs(graphs):
     return _count_graphs(graphs, "call_function", operator.add)
 
 
+def _reraise_worker_error(raised):
+    # For a concurrency failure the worker traceback is the finding, and a bare
+    # "a call wedged" would mask it. Surface the first with its traceback, but
+    # name the rest: two threads failing differently is the diagnostic, not one.
+    if not raised:
+        return
+    first = raised[0]
+    extra = raised[1:]
+    if extra:
+        note = f"+{len(extra)} more worker error(s): " + "; ".join(
+            repr(e) for e in extra
+        )
+        if hasattr(first, "add_note"):
+            first.add_note(note)
+        else:
+            # add_note is 3.11+; on 3.10 fold the extras into the message so
+            # the second-failure diagnostic is not silently dropped.
+            if first.args:
+                first.args = (f"{first.args[0]}\n{note}",) + first.args[1:]
+            else:
+                first.args = (note,)
+    raise first
+
+
 class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
-    """Tests for isolate_recompiles=True on torch.compile().
+    """ExtraState: isolated cache regions, the cache lock, and the
+    exec-strategy/precompile APIs.
 
     Each torch.compile() call with isolate_recompiles=True gets its own
     isolated cache bucket via the per-compile cache map in ExtraState.
     Without isolation, all compile calls on the same code object share a
-    single cache — entries from one call interfere with another's lookup,
-    recompile limit, and FrameExecStrategy.
+    single cache -- entries from one call interfere with another's lookup,
+    recompile limit, and FrameExecStrategy. The concurrency, lifetime, and
+    exec-strategy tests below exercise the ExtraState lock and the
+    region/owner APIs, which are not specific to isolate_recompiles.
     """
 
     @staticmethod
     def _num_cache_entries(code):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
+
+    # ===== ExtraState cache lock: concurrency and lifetime =====
+
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        """lookup() takes the ExtraState cache lock to snapshot the cache
+        entries and drain any pending evictions and invalidations -- brief,
+        but it touches Python objects, so the GIL can drop under it -- then
+        releases the lock before evaluating guards. And create_cache_entry holds
+        the same lock across its pybind attribute stores while it installs a new
+        entry. A thread that blocks on that lock while HOLDING the GIL wedges the
+        owner, who needs the GIL to finish. The lock therefore has to release
+        the GIL before it waits. A short switch interval makes the handoff
+        frequent.
+
+        Each hammer thread mixes cache-hit lookups on the warmed shapes with a
+        private stream of fresh shapes that MISS and compile: the compile path
+        is the only locked region that runs Python (create_cache_entry), so this
+        drives that region under contention rather than lookups alone (which a
+        warm-only hammer can never reach). The joins are bounded by a shared
+        deadline and catch a wedge in which the blocked thread has released the
+        GIL (any thread still alive after the deadline trips the assertion
+        below). A wedge that blocks while HOLDING the GIL -- the regression this
+        test guards -- cannot be caught from Python: the main thread cannot
+        reacquire the GIL to return from join, so it surfaces as a process hang
+        and a job timeout rather than an attributable failure.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(f, backend=cnt, dynamic=False)
+        warm = [torch.randn(n) for n in (3, 4, 5)]
+        for arg in warm:
+            opt(arg)
+        warmup_frames = cnt.frame_count
+
+        errors = queue.SimpleQueue()
+        stop = threading.Event()
+
+        def hammer(tid):
+            try:
+                # config.patch is thread-local (a ContextVar), so the limits
+                # must be raised inside the worker or its fresh-shape misses hit
+                # the default recompile_limit and go RUN_ONLY, collapsing this
+                # into a warm-only lookup hammer that never reaches
+                # create_cache_entry -- the one locked region that runs Python.
+                with torch._dynamo.config.patch(
+                    recompile_limit=10000, accumulated_recompile_limit=100000
+                ):
+                    # Fresh shapes disjoint across threads (so each miss compiles
+                    # a new entry, none collide) interleaved with the warm hits.
+                    size = 1000 * (tid + 1)
+                    for _ in range(50):
+                        if stop.is_set():
+                            break
+                        for arg in warm:
+                            opt(arg)
+                        size += 1
+                        opt(torch.randn(size))
+            except Exception as e:
+                errors.put(e)
+
+        threads = [
+            threading.Thread(target=hammer, args=(i,), daemon=True) for i in range(4)
+        ]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in threads:
+                thread.start()
+            deadline = time.monotonic() + 120
+            for thread in threads:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        finally:
+            # A worker that outran the join must be told to stop and re-joined,
+            # or it runs on into the next test and corrupts its cache state.
+            stop.set()
+            rejoin_deadline = time.monotonic() + 30
+            for thread in threads:
+                thread.join(timeout=max(0.0, rejoin_deadline - time.monotonic()))
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        _reraise_worker_error(raised)
+        self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
+        # Pin that compiles actually raced the lookups: without a new entry
+        # installed under the lock, this degrades to the warm-only lookup smoke
+        # test the fresh-shape streams were added to strengthen.
+        # A real floor: 4 threads x 50 fresh shapes compile ~200 entries, so
+        # this separates a raced compile hammer from the ~5 stray compiles a
+        # thread-local-limit miss would leave (> warmup_frames alone cannot).
+        self.assertGreater(
+            cnt.frame_count, warmup_frames + 100, "compiles did not race"
+        )
+
+    @unittest.skip(
+        "Flaky SIGSEGV (~12%): reset_code/remove_from_cache racing a compile on "
+        "another thread. ConvertFrameAssert.__call__ (convert_frame.py) holds the "
+        "non-owning CacheEntry wrappers from _get_cache_entries_for_region for "
+        "the whole compile; compile_lock serializes the reset itself, but a reset "
+        "parked on a third thread's cache_python_depth is drained later by a "
+        "lookup holding no compile_lock, freeing the snapshot. Reachable from "
+        "user code (pre-#195355 the same race crashed 30/30; the parking narrows "
+        "it). Durable fix: owning references from the C++ layer "
+        "(pytorch/pytorch#196394); re-enable once that lands."
+    )
+    def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
+        """reset_code can run while other threads are parked on the same
+        ExtraState's cache lock -- the lock releases the GIL while it waits --
+        so destroying the state there deletes the very mutex the waiter is
+        blocked on. reset_code must empty the state in place instead. This
+        drives resets against concurrent lookups and the recompiles they
+        force; every call must either serve the cache or recompile cleanly,
+        and the emptied state must serve fresh compiles like a new one.
+        Stress test; not a deterministic reproduction.
+        """
+
+        def f(x):
+            # numel bakes the static shape into the graph, so serving the wrong
+            # entry gives a wrong answer rather than an interchangeable one.
+            return x.sin() + x.numel()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(f, backend=cnt, dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        for arg in args:
+            opt(arg)
+        warmup_frames = cnt.frame_count
+
+        errors = queue.SimpleQueue()
+        iters = queue.SimpleQueue()
+        stop = threading.Event()
+
+        def caller():
+            n = 0
+            try:
+                while not stop.is_set():
+                    for arg in args:
+                        opt(arg)
+                    n += 1
+            except Exception as e:
+                errors.put(e)
+            finally:
+                iters.put(n)
+
+        def resetter():
+            try:
+                # A bare range(30) finishes in well under a millisecond, so the
+                # callers observe stop after a single iteration and never race a
+                # reset against an in-flight lookup. Reset on a wall-clock budget
+                # instead, so the callers accumulate real iterations against a
+                # continuously emptied cache.
+                # The public reset path holds compile_lock, so it races the
+                # LOOKUPS here (which take no compile lock) but not an in-flight
+                # compile's cache-entry snapshot.
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    torch._dynamo.eval_frame.remove_from_cache(f.__code__)
+            except Exception as e:
+                errors.put(e)
+            finally:
+                stop.set()
+
+        threads = [threading.Thread(target=caller, daemon=True) for _ in range(4)]
+        threads.append(threading.Thread(target=resetter, daemon=True))
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in threads:
+                thread.start()
+            deadline = time.monotonic() + 120
+            for thread in threads:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        finally:
+            # A caller that outran the join (a tripped deadline) must be told to
+            # stop and re-joined, or it runs on into the next test and corrupts
+            # its cache state.
+            stop.set()
+            rejoin_deadline = time.monotonic() + 30
+            for thread in threads:
+                thread.join(timeout=max(0.0, rejoin_deadline - time.monotonic()))
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        _reraise_worker_error(raised)
+        self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
+        self.assertEqual(opt(args[0]), f(args[0]))
+        # Pin that the resets actually forced recompiles the callers drove --
+        # without this the test can pass while no reset ever interleaved with a
+        # lookup (every other assertion holds whether or not the race happened).
+        self.assertGreater(cnt.frame_count, warmup_frames, "resets forced no recompile")
+        # Pin that the callers actually interleaved with the resets rather than
+        # observing stop after one pass -- the frame_count guard above cannot
+        # tell the intended stress apart from a handful of serialized calls.
+        total_iters = 0
+        while not iters.empty():
+            total_iters += iters.get_nowait()
+        self.assertGreater(total_iters, 20, "callers never raced the resets")
+
+    def test_concurrent_install_and_reset_against_lookups(self):
+        """Eight threads look f up while two install and reset precompile
+        entries on its code object. lookup() snapshots precompile_entries
+        under the cache lock and raises cache_python_depth, then releases the
+        lock and runs their guards -- Python, so the GIL can drop. An
+        installer takes the same lock to append to the list; an owner-scoped
+        reset does not splice under contention -- it parks (on a failed
+        try-lock or the raised depth), so the raised depth keeps any destroy
+        deferred until the readers holding the snapshot finish, and a reader
+        never touches a freed node. The threads are joined under a shared
+        deadline and asserted not alive, so a GIL-released wedge fails this test
+        (a GIL-holding wedge hangs the process instead). Stress test; not a
+        deterministic reproduction. It pins that the
+        install / owner-reset / lookup paths stay consistent under contention:
+        every lookup serves the right graph (a precompile hit must be the
+        shape-matching graph; a precompile guard miss falls through to the
+        matching cache entry -- the cache entries are never evicted here, so no
+        caller recompiles), and the parked owner resets leave no entry behind.
+        """
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+        )
+
+        def f(x):
+            # numel bakes the static shape into the graph, so a mis-dispatched
+            # entry is a wrong answer, not an interchangeable one.
+            return x.sin() + x.numel()
+
+        code = f.__code__
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        expected = [f(arg) for arg in args]
+        for arg in args:
+            opt(arg)
+        # Each installer re-installs the compiled variants' own guard managers
+        # and code as precompile entries, so a hit serves the same graph.
+        installables = [
+            (e.guard_manager, e.code) for e in _debug_get_cache_entry_list(code)
+        ]
+        self.assertEqual(len(installables), 2)
+
+        errors = queue.SimpleQueue()
+        iters = queue.SimpleQueue()
+        stop = threading.Event()
+        owners = [object(), object()]
+
+        def caller():
+            n = 0
+            try:
+                while not stop.is_set():
+                    for arg, want in zip(args, expected):
+                        if not torch.equal(opt(arg), want):
+                            raise AssertionError("lookup served the wrong result")
+                    n += 1
+            except Exception as e:
+                errors.put(e)
+            finally:
+                iters.put(n)
+
+        def installer(owner):
+            try:
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    if stop.is_set():
+                        break
+                    for guard_manager, dynamo_code in installables:
+                        _load_precompile_entry(
+                            code, guard_manager, dynamo_code, -1, owner
+                        )
+                    _reset_precompile_entries_for_owner(code, -1, owner)
+            except Exception as e:
+                errors.put(e)
+
+        callers = [threading.Thread(target=caller, daemon=True) for _ in range(8)]
+        installers = [
+            threading.Thread(target=installer, args=(owner,), daemon=True)
+            for owner in owners
+        ]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in callers + installers:
+                thread.start()
+            deadline = time.monotonic() + 120
+            for thread in installers:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            stop.set()
+            # Callers cannot begin exiting until stop.set() above, so a slow
+            # installer phase must not spend their grace: give them their own
+            # window rather than the already-drawn-down shared deadline.
+            deadline = max(deadline, time.monotonic() + 30)
+            for thread in callers:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        finally:
+            stop.set()
+            rejoin_deadline = time.monotonic() + 30
+            for thread in callers + installers:
+                thread.join(timeout=max(0.0, rejoin_deadline - time.monotonic()))
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        _reraise_worker_error(raised)
+        self.assertFalse(
+            any(t.is_alive() for t in callers + installers), "a call wedged"
+        )
+        # Pin that the callers actually ran against the installers -- without a
+        # floor the two phases can stop overlapping and the test degrades into a
+        # smoke test while every assertion below still holds.
+        total_iters = 0
+        while not iters.empty():
+            total_iters += iters.get_nowait()
+        self.assertGreater(total_iters, 20, "callers never interleaved with installers")
+        # Every installer ends its loop with its own owner reset; one that raced
+        # an in-flight lookup was parked (on the raised cache_python_depth, or a
+        # failed try-lock during the snapshot window). With every thread joined
+        # the entry reader below drains whatever is still parked, so nothing
+        # survives without any further reset.
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        self.assertEqual(opt(args[0]), expected[0])
+
+    def test_isolate_recompiles_id_is_thread_local(self):
+        """The current region is a property of the call in flight, so it is
+        per thread: a worker spawned from inside a region reads the default
+        (and compiles into the default bucket) unless it enters a region
+        itself, and a region the worker enters is invisible to its parent."""
+        from torch._C._dynamo.eval_frame import (
+            get_eval_frame_isolate_recompiles_id,
+            set_eval_frame_isolate_recompiles_id,
+        )
+
+        seen = []
+
+        def worker():
+            seen.append(get_eval_frame_isolate_recompiles_id())
+            set_eval_frame_isolate_recompiles_id(9)
+            seen.append(get_eval_frame_isolate_recompiles_id())
+
+        prior = set_eval_frame_isolate_recompiles_id(7)
+        try:
+            self.assertEqual(prior, -1)
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+            thread.join(timeout=120)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+        finally:
+            set_eval_frame_isolate_recompiles_id(prior)
+        self.assertEqual(seen, [-1, 9])
+        self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
+
+    def test_reset_code_from_python_run_by_lookup_is_safe(self):
+        """try_lookup_without_guard_eval() snapshots its candidates under the
+        recursive cache lock, raises cache_python_depth, then releases the
+        lock and runs the backend comparison -- Python, which can call
+        torch._dynamo back in on the SAME thread -- with the depth still
+        raised. reset_code arriving there used to free the very list nodes the
+        interrupted lookup was walking (a same-thread use-after-free); the
+        raised depth now parks it so it lands as if it ran just after that
+        lookup."""
+        from torch._C._dynamo.eval_frame import reset_code
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        resets = []
+
+        class ResettingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, ResettingBackend):
+                    resets.append(_get_total_cache_entry_count(code))
+                    reset_code(code)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        x = torch.randn(8)
+        first, second = ResettingBackend(), ResettingBackend()
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+        # A second-but-equal backend makes try_lookup_without_guard_eval
+        # compare it against the saved one lock-free (depth raised, cache
+        # lock released); that __eq__ resets this code object, parking the
+        # eviction until the depth returns to zero.
+        opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+        # The fast path bails (the entry is guarded), so the fallback lookup
+        # runs at depth 0, drains the parked reset, and compiles fresh -- all
+        # on this one call.
+        self.assertEqual(opt2(x), f(x))
+        self.assertEqual(resets, [1])
+        # The backend is now pointer-identical, so this is a plain cache hit.
+        self.assertEqual(opt2(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+
+    def test_invalidation_racing_an_in_flight_lookup_parks_and_drains(self):
+        """invalidate() reached from weakref.finalize must never block behind
+        an in-flight lookup (GC can fire it while a second ExtraState holds its
+        cache_mutex across the Python it runs under the lock -- e.g.
+        create_cache_entry's guard-manager attribute stores; two threads doing
+        that against each other's states would deadlock ABBA-style, so
+        invalidate() must never block on cache_mutex). This pins the contended
+        path itself: the very call finalize runs, arriving while a lookup is
+        mid-comparison at raised depth, must return promptly (parked on
+        cache_python_depth > 0 -- the cache lock is free here, so it is the
+        depth and not a failed try-lock that parks it), and the parked
+        invalidation must be applied by a later lock holder rather than serve
+        forever."""
+        from torch._dynamo.guards import DeletedGuardManagerWrapper
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        in_eq = threading.Event()
+        release_eq = threading.Event()
+
+        class BlockingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, BlockingBackend):
+                    in_eq.set()
+                    release_eq.wait(timeout=120)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        first, second = BlockingBackend(), BlockingBackend()
+        x = torch.randn(8)
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        wrapper = _get_cache_entries_for_region(code, -1)[0].guard_manager
+
+        errors = queue.SimpleQueue()
+
+        def _reraise_worker_errors():
+            raised = []
+            while not errors.empty():
+                raised.append(errors.get_nowait())
+            _reraise_worker_error(raised)
+
+        def caller():
+            try:
+                opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+                opt2(x)
+            except Exception as e:
+                errors.put(e)
+
+        thread = threading.Thread(target=caller, daemon=True)
+        inv_thread = None
+        try:
+            # One shared wall-clock budget for the whole race: the polls below
+            # and the joins in finally all draw from this single deadline, so a
+            # wedge fails at ~120s rather than summing each wait's independent
+            # timeout. Started inside the try so a raise between here and the
+            # finally still runs release_eq.set() and frees the caller.
+            deadline = time.monotonic() + 120
+            thread.start()
+            # If the caller raised before reaching __eq__, in_eq never fires;
+            # surface that exception instead of waiting out the full timeout.
+            while not in_eq.wait(timeout=1):
+                _reraise_worker_errors()
+                self.assertTrue(thread.is_alive(), "caller exited before __eq__")
+                now = time.monotonic()
+                self.assertLess(now, deadline, "caller never reached __eq__")
+            # The caller thread is inside try_lookup_without_guard_eval,
+            # mid-backend-comparison with cache_python_depth raised (the cache
+            # lock is released here).
+            # This is exactly what a guarded object's weakref.finalize runs;
+            # it must park on the raised depth rather than serve the eviction
+            # underneath the in-flight lookup.
+            invalidator_done = threading.Event()
+
+            def invalidator():
+                try:
+                    wrapper.extra_state.invalidate(
+                        DeletedGuardManagerWrapper("test object"),
+                        wrapper,
+                    )
+                    invalidator_done.set()
+                except Exception as e:
+                    errors.put(e)
+
+            inv_thread = threading.Thread(target=invalidator, daemon=True)
+            inv_thread.start()
+            # A raise inside invalidator() queues onto errors without setting
+            # the event, so poll both: surface the worker traceback rather than
+            # waiting out the timeout and asserting a contentless False.
+            while not invalidator_done.wait(timeout=1):
+                _reraise_worker_errors()
+                self.assertLess(time.monotonic(), deadline, "invalidator never drained")
+            # invalidate() returned while the caller is still parked in __eq__
+            # (release_eq is unset until finally) and cache_python_depth is
+            # still raised, so the read below does not drain the park either
+            # (drain_pending_invalidations / apply_pending_evictions both no-op
+            # at depth != 0): the request must be parked, not applied. Nothing
+            # is marked Invalidated until a later depth-zero holder drains it,
+            # which is what separates parking from an immediate apply. The read
+            # below is also the regression probe for lookup holding cache_mutex
+            # across guard/backend evaluation: _get_cache_entries_for_region
+            # takes a BLOCKING cache_mutex, so its return here (rather than a
+            # hang to the deadline) can only happen because the parked lookup
+            # released cache_mutex before entering __eq__.
+            region_entries = _get_cache_entries_for_region(code, -1)
+            self.assertLess(
+                time.monotonic(),
+                deadline,
+                "lookup held cache_mutex across guard evaluation",
+            )
+            self.assertEqual(len(region_entries), 1)
+            self.assertTrue(
+                all(e.trace_annotation != "Invalidated" for e in region_entries)
+            )
+        finally:
+            # Join inside finally: an assertion above must not leave the caller
+            # (or the invalidator, whose blocking is what this test asserts on)
+            # running into the next test holding a Dynamo-internal lock.
+            release_eq.set()
+            # The polls above assert against `deadline`, so arriving here via a
+            # tripped deadline leaves no budget and the joins below become
+            # join(timeout=0) -- exactly the leak this finally exists to prevent.
+            # Grant a fresh window so the threads get a real chance to unwind.
+            deadline = max(deadline, time.monotonic() + 30)
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if inv_thread is not None:
+                inv_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        _reraise_worker_errors()
+        self.assertFalse(thread.is_alive())
+        # The invalidator's prompt return is half of what this test asserts, so
+        # pin that it unwound rather than merely joining it above.
+        self.assertFalse(inv_thread.is_alive(), "invalidator wedged")
+        # A later lock holder drains the parked request: the entry reports
+        # itself invalidated and a fresh compile serves the next call.
+        self.assertEqual(opt1(x), f(x))
+        entries = _get_cache_entries_for_region(code, -1)
+        self.assertTrue(any(e.trace_annotation == "Invalidated" for e in entries))
+
+    def test_invalidate_targets_the_entry_by_guard_manager_identity(self):
+        # invalidate_locked finds its victim by the identity of the live guard
+        # manager, never by a handed-in node/entry address. (The motivation:
+        # a std::list node address can be recycled onto a fresh entry, so an
+        # address check could hit the wrong one -- this test does not recreate
+        # that recycling, it pins the identity semantics directly.) With two
+        # live entries, a wrapper that owns no entry must invalidate nothing,
+        # and invalidating one entry must leave the other intact.
+        from torch._dynamo.guards import DeletedGuardManagerWrapper
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        opt(torch.randn(3))
+        opt(torch.randn(4))  # a second static shape -> a second cache entry
+        code = f.__code__
+        entries = _get_cache_entries_for_region(code, -1)
+        self.assertEqual(len(entries), 2)
+        w0, w1 = entries[0].guard_manager, entries[1].guard_manager
+        extra_state = w0.extra_state
+
+        def invalidated():
+            return [
+                e
+                for e in _get_cache_entries_for_region(code, -1)
+                if e.trace_annotation == "Invalidated"
+            ]
+
+        # A wrapper that is not any entry's guard manager names no victim.
+        extra_state.invalidate(
+            DeletedGuardManagerWrapper("unrelated"),
+            DeletedGuardManagerWrapper("owns no entry"),
+        )
+        self.assertEqual(invalidated(), [])
+        self.assertEqual(len(_get_cache_entries_for_region(code, -1)), 2)
+
+        # Invalidating w0 marks exactly the w0 entry; w1 survives unchanged.
+        extra_state.invalidate(DeletedGuardManagerWrapper("gone"), w0)
+        entries = _get_cache_entries_for_region(code, -1)
+        marked = [e for e in entries if e.trace_annotation == "Invalidated"]
+        survived = [e for e in entries if e.trace_annotation != "Invalidated"]
+        self.assertEqual(len(marked), 1)
+        self.assertEqual(len(survived), 1)
+        self.assertIs(survived[0].guard_manager, w1)
+        # invalidate_locked relinks the victim to the tail (move_to_back), so
+        # the survivor is now at the front.
+        self.assertEqual(entries[-1].trace_annotation, "Invalidated")
+        self.assertIs(entries[0].guard_manager, w1)
+
+        # The identity walk spans every region bucket and the victim need not be
+        # the front entry: invalidate the second entry of an isolated region.
+        def g(x):
+            return x.sin() + x.cos()
+
+        opt = torch._dynamo.optimize(
+            backend="eager", dynamic=False, isolate_recompiles=True
+        )(g)
+        opt(torch.randn(3))
+        opt(torch.randn(4))
+        region = opt._isolate_recompiles_id
+        entries = _get_cache_entries_for_region(g.__code__, region)
+        self.assertEqual(len(entries), 2)
+        v0, v1 = entries[0].guard_manager, entries[1].guard_manager
+        v1.extra_state.invalidate(DeletedGuardManagerWrapper("gone"), v1)
+        entries = _get_cache_entries_for_region(g.__code__, region)
+        self.assertEqual(
+            [e.trace_annotation == "Invalidated" for e in entries], [False, True]
+        )
+        self.assertIs(entries[0].guard_manager, v0)
+        self.assertEqual(_get_cache_entries_for_region(g.__code__, -1), [])
+
+    def test_region_clear_from_inside_a_lookup_is_parked(self):
+        # _clear_cache_entries_for_region run by a backend __eq__ inside
+        # try_lookup_without_guard_eval() used to splice and destroy the very
+        # list the lookup was walking (a use-after-free that segfaulted); the
+        # cache-entry splice now parks like reset_code does, and the next
+        # depth-zero holder applies it. The region strategy reset rides along and
+        # parks with it: resetting a RUN_ONLY region back to DEFAULT while its
+        # eviction is still queued would let it recompile, and the drain would
+        # then discard those fresh entries and re-enter the compile/limit cycle.
+        # Only the region_frame_state_map erasure stays unconditional (it touches
+        # no iterator the lookup holds, and any recompile that repopulates it
+        # mid-park is benign -- a fresh compile at DEFAULT just re-seeds the
+        # per-region frame-id counter, matching extra_state.cpp). The strategy
+        # readback below still shows the seeded strategy mid-lookup, cleared
+        # only once the eviction drains.
+        from torch._C._dynamo.eval_frame import (
+            get_code_region_exec_strategy,
+            set_code_region_exec_strategy,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        hook = []
+        compiles = []
+        compile_strategies = []
+        region_box = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                compiles.append(gm)
+                if region_box:
+                    compile_strategies.append(
+                        get_code_region_exec_strategy(
+                            code, region_box[0]
+                        ).recursive_action
+                    )
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        opt1 = torch._dynamo.optimize(
+            backend=Backend(), dynamic=False, isolate_recompiles=True
+        )(f)
+        self.assertEqual(opt1(x), f(x))
+        region = opt1._isolate_recompiles_id
+        region_box.append(region)
+        self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+        ctx = torch._dynamo.optimize(
+            backend=Backend(), dynamic=False, isolate_recompiles=True
+        )
+        ctx._isolate_recompiles_id = region
+
+        # Seed a distinct region strategy so the deferral of its reset is
+        # observable: DEFAULT mid-lookup would be vacuous otherwise. Only
+        # recursive_action is set (cur_action stays DEFAULT) so the region is
+        # not RUN_ONLY/SKIP, which would suppress the recompile this test also
+        # asserts on.
+        set_code_region_exec_strategy(
+            code,
+            region,
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+        )
+
+        seen = []
+        strategy_seen = []
+        hook_errors = []
+
+        def clear():
+            # An exception raised inside a backend __eq__ is swallowed by the
+            # lookup as a mismatch, so a failure here would otherwise surface as
+            # a contentless seen != [1]. Capture it to re-raise attributably.
+            try:
+                # Three parks queue three CACHE_REGION evictions (they do not
+                # coalesce); the drain must apply them idempotently, which the
+                # total count assertion below pins.
+                for _ in range(3):
+                    _clear_cache_entries_for_region(code, region)
+                seen.append(len(_get_cache_entries_for_region(code, region)))
+                strategy_seen.append(
+                    get_code_region_exec_strategy(code, region).recursive_action
+                )
+            except Exception as e:
+                hook_errors.append(e)
+
+        hook.append(clear)
+        self.assertEqual(ctx(f)(x), f(x))
+        if hook_errors:
+            raise hook_errors[0]
+        # Still walked by the interrupted lookup, so neither the cache entry nor
+        # the region strategy reset has applied yet: the entry is still present
+        # and the strategy still reads the seeded SKIP.
+        self.assertEqual(seen, [1])
+        self.assertEqual(strategy_seen, [FrameAction.SKIP])
+        # The next depth-zero lookup applies the parked clear before scanning
+        # candidates, so the bucket is already empty: it misses with no guard to
+        # evaluate and recompiles into the region.
+        self.assertEqual(len(compiles), 2)
+        self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+        # Draining the parked eviction also applied the deferred strategy reset
+        # before the recompile ran: the backend already saw the region back at
+        # the inherited DEFAULT, and it still reads so now.
+        self.assertEqual(compile_strategies, [FrameAction.DEFAULT])
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region).recursive_action,
+            FrameAction.DEFAULT,
+        )
+
+    def test_precompile_region_reset_from_inside_a_lookup_is_parked(self):
+        # _reset_precompile_entries_for_region run by a backend __eq__ inside a
+        # lookup parks (PendingEviction::PRECOMPILE_REGION) rather than splicing
+        # the precompile list a sibling lookup may be walking; the next
+        # depth-zero holder applies it. The other parked kinds have deterministic
+        # drivers of their own (CACHE_REGION and CLEAR_ALL here, OWNER and
+        # PRECOMPILE_ALL in the region-owned install PR); this closes the last.
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+        entry = _debug_get_cache_entry_list(code)[0]
+        _load_precompile_entry(code, entry.guard_manager, entry.code, 7)
+        self.assertTrue(_has_precompile_entries(code, 7))
+        seen = []
+
+        def reset():
+            _reset_precompile_entries_for_region(code, 7)
+            seen.append(_has_precompile_entries(code, 7))
+
+        hook.append(reset)
+        self.assertEqual(
+            torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
+        )
+        self.assertFalse(hook, "the backend __eq__ hook never fired")
+        # Parked, not evicted, while the lookup was live; the depth-zero
+        # fallback lookup() that follows drains it.
+        self.assertEqual(seen, [True])
+        self.assertFalse(_has_precompile_entries(code, 7))
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
 
     # ===== Basic isolation: independent caches per compile call =====
 
@@ -1121,10 +1955,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     def test_isolate_recompiles_inherits_default_skip(self):
         """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
         TorchScript __init__ / etc.) is a correctness decision — the code
-        must not be traced. Isolated regions inherit this SKIP, so neither
-        the default nor isolated wrapper compiles a skip_code-marked code
-        object. Only the automatic RUN_ONLY (from a prior non-isolated
-        recompile-limit hit) is prevented from bleeding into regions."""
+        must not be traced. Regions with no recorded strategy of their own
+        inherit this SKIP, so neither the default nor isolated wrapper
+        compiles a skip_code-marked code object (a region that already
+        recorded a strategy keeps it: pytorch/pytorch#196520). Only the
+        automatic RUN_ONLY (from a prior non-isolated recompile-limit hit) is
+        prevented from bleeding into regions."""
         cnt = torch._dynamo.testing.CompileCounter()
 
         def f(x):
@@ -1626,7 +2462,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """When an isolated compile wrapper is GC'd, orphaned cache entries
         remain. A new torch.compile gets a fresh region and compiles
         independently. reset() clears everything including orphans."""
-        import gc
 
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -1637,6 +2472,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         opt_a(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(self._num_cache_entries(f), 1)
+
+        import gc
 
         del opt_a
         gc.collect()
@@ -1654,6 +2491,489 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
+
+    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
+        # get_backend walks the callback chain on every intercepted frame, and
+        # looking for _torchdynamo_cache_key there is a MISS at every level for
+        # anyone who never precompiles -- a raising attribute lookup per level
+        # per frame, measured at ~1 us on a steady-state compiled call. The
+        # lookup is therefore gated on a flag that only a backend carrying such
+        # a key turns on. Nothing else in the tree sets that attribute, so the
+        # gate is invisible; this pins that the switch exists and is one-way.
+        # The gate is process-global, one-way, and never cleared: flipping it
+        # in-process would poison every later test in this file, so the OFF half
+        # is measured in a fresh interpreter. Two wrappers over ONE shared
+        # backend are the discriminator: with the gate off get_backend follows
+        # _torchdynamo_orig_backend to that shared object and both compilations
+        # share one cache identity; with it on, their distinct cache keys are
+        # two identities.
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _enable_precompile_cache_keys,
+            )
+
+            def fn(x):
+                return x.sin()
+
+            class Backend:
+                # Carries the _torchdynamo_cache_key / _torchdynamo_orig_backend
+                # attributes get_backend inspects; nothing here enables the gate
+                # (_enable_precompile_cache_keys) before the OFF half is measured.
+                def __init__(self, inner):
+                    self._torchdynamo_orig_backend = inner
+                    self._torchdynamo_cache_key = object()
+
+                def __call__(self, gm, inputs):
+                    return self._torchdynamo_orig_backend(gm, inputs)
+
+            inner = torch._dynamo.lookup_backend("eager")
+
+            def entries(same_key):
+                torch._dynamo.reset()
+                x = torch.randn(4)
+                a, b = Backend(inner), Backend(inner)
+                if same_key:
+                    b._torchdynamo_cache_key = a._torchdynamo_cache_key
+                # optimize(), not compile(backend=): compile() wraps the backend
+                # in a _TorchCompileWrapper, which get_backend returns as the
+                # chain terminus (it has no _torchdynamo_orig_backend), so the
+                # real backend stashed in its compiler_fn is off-chain and its
+                # _torchdynamo_cache_key is never reached.
+                torch._dynamo.optimize(a)(fn)(x)
+                torch._dynamo.optimize(b)(fn)(x)
+                return len(_debug_get_cache_entry_list(fn.__code__))
+
+            print("off", entries(False))
+            _enable_precompile_cache_keys()
+            _enable_precompile_cache_keys()  # idempotent
+            print("on", entries(False))
+            print("on_same_key", entries(True))
+            """
+        )
+        stdout, stderr = self.run_process_no_exception(script)
+        out = stdout.decode()
+        self.assertIn("off 1\n", out, stderr.decode())
+        self.assertIn("on 2\n", out, stderr.decode())
+        # The key IS the identity, so two backends sharing one key still share
+        # one cache entry -- the gate must not simply split every backend.
+        self.assertIn("on_same_key 1\n", out, stderr.decode())
+
+    def test_has_precompile_entries_is_region_exact(self):
+        """_has_precompile_entries answers for one region only. lookup() never
+        serves a precompile entry from another region, so an entry belonging to
+        a second artifact installed on the same code object is not coverage for
+        the first. It exists so that a caller can ask that question without
+        building the list of wrappers _debug_get_precompile_entries returns."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def never_compiled(x):
+            return x + 1
+
+        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _has_precompile_entries(never_compiled, -1)
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+        entry = _debug_get_cache_entry_list(code)[0]
+        _load_precompile_entry(code, entry.guard_manager, entry.code, 7)
+        try:
+            self.assertTrue(_has_precompile_entries(code, 7))
+            self.assertFalse(_has_precompile_entries(code, 9))
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, 7)
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+    def test_precompile_entries_are_removed_by_owner_not_by_region(self):
+        """Several packages may legitimately hold entries for one code object in
+        one region -- a library frame two loaded models both reach -- and lookup
+        picks between them by evaluating guards. Teardown must therefore remove
+        what one installer put there and leave the neighbour's alone; clearing
+        the whole region evicts a live artifact that, because lookup is
+        region-exact, nothing else can serve."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        opt(torch.randn(3))
+        opt(torch.randn(4))  # a second static shape -> a second cache entry
+        code = f.__code__
+        e0, e1 = _debug_get_cache_entry_list(code)
+
+        first, second = object(), object()
+        _load_precompile_entry(code, e0.guard_manager, e0.code, -1, first)
+        _load_precompile_entry(code, e1.guard_manager, e1.code, -1, second)
+        try:
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
+            # Pin the entries to region -1 specifically: the global count above
+            # is region-agnostic, so a region-scoped readback is what catches an
+            # entry that landed in the wrong region.
+            self.assertTrue(_has_precompile_entries(code, -1))
+            self.assertFalse(_has_precompile_entries(code, 7))
+            # None is not a valid scoping owner (Py_None is a singleton, so it
+            # would match every no-owner entry); the binding rejects it.
+            with self.assertRaisesRegex(RuntimeError, "non-None owner"):
+                _reset_precompile_entries_for_owner(code, -1, None)
+            _reset_precompile_entries_for_owner(code, -1, first)
+            # The neighbour survives -- and it is second's entry, not first's.
+            # Distinct guard managers are what make "which one survived"
+            # observable; a bare count passes even if the owner test is inverted.
+            survivors = _debug_get_precompile_entries(code)
+            self.assertEqual(len(survivors), 1)
+            self.assertIs(survivors[0].guard_manager, e1.guard_manager)
+            # Removing an owner that holds nothing here is a no-op.
+            _reset_precompile_entries_for_owner(code, -1, first)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Same owner, different region: also a no-op, and region -1 still
+            # holds the survivor while region 7 never held anything.
+            _reset_precompile_entries_for_owner(code, 7, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            self.assertTrue(_has_precompile_entries(code, -1))
+            self.assertFalse(_has_precompile_entries(code, 7))
+            _reset_precompile_entries_for_owner(code, -1, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, -1)
+
+    # ===== Exec strategy / region API =====
+
+    def test_exec_strategy_token_and_compare_and_set(self):
+        """The token API is the concurrency contract installers rely on: a
+        strategy read returns a generation, and a later compare-and-set with
+        that generation succeeds only if nothing -- including a reset -- wrote
+        the strategy in between."""
+        from torch._C._dynamo.eval_frame import (
+            compare_and_set_code_exec_strategy,
+            get_code_exec_strategy,
+            get_code_exec_strategy_token,
+            reset_code,
+            set_code_exec_strategy_with_token,
+        )
+
+        def f(x):
+            return x + 1
+
+        # A fresh, unattached code object each run: f is a constant of this
+        # method, so f.__code__ is the same object across in-process reruns
+        # (--repeat, --flake-runs) and its ExtraState -- and thus its nonzero
+        # strategy_generation -- would survive to fail the generation-0 asserts
+        # below. replace() mints a distinct object; nothing here runs it.
+        code = f.__code__.replace()
+        # Never-touched code object: DEFAULT strategy, generation 0, and a
+        # compare-and-set against it fails outright (no state to write).
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        strategy, generation = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
+        self.assertEqual(generation, 0)
+        skip = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, generation, skip))
+
+        prior, generation = set_code_exec_strategy_with_token(
+            code, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        self.assertEqual(prior.cur_action, FrameAction.DEFAULT)
+        self.assertGreater(generation, 0)
+        strategy, token = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.RUN_ONLY)
+        self.assertEqual(token, generation)
+
+        # A compare-and-set with the current generation wins and bumps it...
+        self.assertTrue(compare_and_set_code_exec_strategy(code, token, skip))
+        strategy, new_token = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.SKIP)
+        self.assertNotEqual(new_token, token)
+        # ...and the stale token now loses, leaving the strategy alone.
+        default = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, token, default))
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+
+        # A reset invalidates every outstanding token.
+        reset_code(code)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, new_token, skip))
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+
+        # Zero must not be a resurrection token either. A state created by a
+        # region write hands out generation 0 before any global write; that
+        # token must lose after a global write plus a reset, so the reset may
+        # not put the generation back to 0.
+        from torch._C._dynamo.eval_frame import set_code_region_exec_strategy
+
+        def g(x):
+            return x + 2
+
+        # Fresh object per run, same reason as `code` above.
+        code2 = g.__code__.replace()
+        set_code_region_exec_strategy(
+            code2, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        strategy, zero_token = get_code_exec_strategy_token(code2)
+        self.assertEqual(zero_token, 0)
+        set_code_exec_strategy_with_token(code2, skip)
+        reset_code(code2)
+        self.assertFalse(compare_and_set_code_exec_strategy(code2, zero_token, skip))
+        self.assertEqual(get_code_exec_strategy(code2).cur_action, FrameAction.DEFAULT)
+        # Before any global write the generation-0 token is live, so the same
+        # region-created state still accepts it.
+        code3 = g.__code__.replace()
+        set_code_region_exec_strategy(
+            code3, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        _, token3 = get_code_exec_strategy_token(code3)
+        self.assertEqual(token3, 0)
+        self.assertTrue(compare_and_set_code_exec_strategy(code3, token3, skip))
+        self.assertEqual(get_code_exec_strategy(code3).cur_action, FrameAction.SKIP)
+
+    def test_region_exec_strategy_inherits_skip_but_not_run_only(self):
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            get_code_region_exec_strategy,
+            reset_code,
+            set_code_region_exec_strategy,
+        )
+
+        def f(x):
+            return x + 1
+
+        code = f.__code__
+        try:
+            # A region write is region-local: neither its siblings nor the
+            # global strategy see it.
+            set_code_region_exec_strategy(
+                code, 7, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+            )
+            region7 = get_code_region_exec_strategy(code, 7)
+            self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(
+                get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT
+            )
+            # A global RUN_ONLY (a recompile-limit hit) must not poison fresh
+            # regions...
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(region9.recursive_action, FrameAction.DEFAULT)
+            # Region -1 itself reads back its raw global unfiltered: the
+            # SKIP-only inheritance filter applies to id >= 0, so hoisting it
+            # above the id < 0 early return would silently disable a
+            # recompile-limit RUN_ONLY for every non-isolated frame.
+            self.assertEqual(
+                get_code_region_exec_strategy(code, -1).cur_action,
+                FrameAction.RUN_ONLY,
+            )
+            # ...but a global SKIP (a deliberate do-not-trace mark) reaches every
+            # region without a recorded strategy of its own. A recorded region
+            # strategy (even the DEFAULT/DEFAULT a compile leaves) shadows it;
+            # that precedence gap is pytorch/pytorch#196520.
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.SKIP)
+            self.assertEqual(region9.recursive_action, FrameAction.SKIP)
+            region7 = get_code_region_exec_strategy(code, 7)
+            self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+            self.assertEqual(region7.recursive_action, FrameAction.DEFAULT)
+            # A mixed global (only recursive_action is SKIP) inherits per field:
+            # SKIP flows to recursive_action, RUN_ONLY does not flow to
+            # cur_action. The SKIP/SKIP and RUN_ONLY/RUN_ONLY cases above are
+            # symmetric, so this asymmetric case is what pins the two fields to
+            # distinct values -- a transposed cur/recursive mapping fails here.
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.SKIP)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(region9.recursive_action, FrameAction.SKIP)
+        finally:
+            reset_code(code)
+
+    def test_clear_cache_entries_for_region_is_region_exact(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_a = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        opt_b = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        # Two distinct static shapes give region A two entries, so the clear
+        # has to drop both and decrement the total by their full count.
+        opt_a(torch.randn(3))
+        opt_a(torch.randn(4))
+        opt_b(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 3)
+        code = f.__code__
+        region_a = opt_a._isolate_recompiles_id
+        region_b = opt_b._isolate_recompiles_id
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 2)
+
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _clear_cache_entries_for_region(f, region_a)
+        with self.assertRaisesRegex(ValueError, "default cache region"):
+            _clear_cache_entries_for_region(code, -1)
+
+        from torch._C._dynamo.eval_frame import (
+            get_code_region_exec_strategy,
+            set_code_region_exec_strategy,
+        )
+
+        # The clear also wipes the region's strategy_map and frame_state_map
+        # entries, not just its cache entries. Seed a region strategy so a
+        # dropped region_strategy_map.erase (extra_state.cpp) is caught.
+        set_code_region_exec_strategy(
+            code,
+            region_a,
+            FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY),
+        )
+        # Seed the neighbour a DISTINCT strategy so the post-clear assertion on
+        # it is not vacuous: a clear that wrongly wiped a neighbour's
+        # region_strategy_map entry would reset it to DEFAULT and be caught.
+        set_code_region_exec_strategy(
+            code,
+            region_b,
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+        )
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_a).cur_action,
+            FrameAction.RUN_ONLY,
+        )
+        total_before = _get_total_cache_entry_count(code)
+        _clear_cache_entries_for_region(code, region_a)
+        # The whole region is gone and the total drops by exactly its size: a
+        # dropped C++ count decrement or a partial clear fails here.
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 0)
+        self.assertEqual(_get_total_cache_entry_count(code), total_before - 2)
+        # The region strategy is erased too: it reads back the inherited DEFAULT
+        # it had before any strategy was recorded, while the untouched neighbour
+        # KEEPS the distinct strategy it was seeded (proving the clear did not
+        # reach into region_b's strategy_map entry).
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_a).cur_action,
+            FrameAction.DEFAULT,
+        )
+        self.assertEqual(
+            get_code_region_exec_strategy(code, region_b).recursive_action,
+            FrameAction.SKIP,
+        )
+        # The neighbour region is untouched and still serves its entry.
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
+        opt_b(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 3)
+        # Clearing an already-empty region is a no-op.
+        _clear_cache_entries_for_region(code, region_a)
+
+    def test_force_callback_on_cache_miss_marker_overrides_run_only(self):
+        """Contract of the `_torchdynamo_force_callback_on_cache_miss` marker
+        (read by eval_frame_cpp.cpp): a RUN_ONLY frame whose installed callback
+        carries it still reaches the callback on a cache miss. A precompile
+        serving callback is the intended setter, so a miss errors or recaptures
+        instead of silently running eager."""
+        from torch._C._dynamo.eval_frame import reset_code
+        from torch._dynamo.eval_frame import set_code_exec_strategy
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        ctx = torch._dynamo.optimize(cnt, dynamic=False)
+        opt = ctx(f)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+        try:
+            set_code_exec_strategy(
+                f.__code__,
+                FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY),
+            )
+            # A miss without the marker runs eager: no new compile.
+            opt(torch.randn(4, 4))
+            self.assertEqual(cnt.frame_count, 1)
+            ctx.callback._torchdynamo_force_callback_on_cache_miss = True
+            opt(torch.randn(5, 5))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            # Set inside the try: a failed assertion above must not leak the
+            # RUN_ONLY strategy or the marker onto f.__code__ into the next test.
+            if hasattr(ctx.callback, "_torchdynamo_force_callback_on_cache_miss"):
+                del ctx.callback._torchdynamo_force_callback_on_cache_miss
+            reset_code(f.__code__)
+
+    def test_force_callback_on_cache_miss_marker_reaches_a_recursive_frame(self):
+        """The recursive_action half of the marker contract
+        (eval_frame_cpp.cpp): with cur_action DEFAULT the frame itself keeps
+        tracing, but recursive_action RUN_ONLY governs a sub-frame -- here the
+        resume frame after a graph break. On that sub-frame's cache miss the
+        marker forces the callback (a compile) instead of the run-only demotion
+        that would silently run it eager. This exercises the demotion-skip
+        branch that the cur_action test above cannot reach."""
+        from torch._C._dynamo.eval_frame import reset_code
+        from torch._dynamo.eval_frame import set_code_exec_strategy
+
+        def f(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y.cos()
+
+        default = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        # cur_action DEFAULT keeps f tracing; recursive_action RUN_ONLY governs
+        # the resume sub-frame.
+        recursive_run_only = FrameExecStrategy(
+            FrameAction.DEFAULT, FrameAction.RUN_ONLY
+        )
+
+        def run(force):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            ctx = torch._dynamo.optimize(cnt, dynamic=False)
+            opt = ctx(f)
+            try:
+                set_code_exec_strategy(f.__code__, default)
+                opt(torch.randn(3))  # f's frame + the resume frame
+                self.assertEqual(cnt.frame_count, 2)
+                set_code_exec_strategy(f.__code__, recursive_run_only)
+                if force:
+                    ctx.callback._torchdynamo_force_callback_on_cache_miss = True
+                opt(torch.randn(4, 4))
+                return cnt.frame_count
+            finally:
+                if hasattr(ctx.callback, "_torchdynamo_force_callback_on_cache_miss"):
+                    del ctx.callback._torchdynamo_force_callback_on_cache_miss
+                set_code_exec_strategy(f.__code__, default)
+                reset_code(f.__code__)
+
+        # New shape: f recompiles (cur_action DEFAULT) either way. The resume
+        # frame misses under RUN_ONLY -- eager without the marker (3), a compile
+        # that reaches the callback with it (4).
+        self.assertEqual(run(force=False), 3)
+        self.assertEqual(run(force=True), 4)
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
