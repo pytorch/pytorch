@@ -227,6 +227,25 @@ class TestAOTCompileToPython(TestCase):
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
+    def test_graph_has_dynamic_shapes_reads_example_value(self):
+        # A Dynamo graph stashes its fake under "example_value", not "val".
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_has_dynamic_shapes,
+        )
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        graph.output(node)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        node.meta["example_value"] = mode.from_tensor(
+            torch.randn(3), static_shapes=False
+        )
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
+
     def test_dynamic_shapes_runs_at_multiple_shapes(self):
         # compile_to_python has no dynamic_shapes knob: it auto-detects symbolic shapes
         # (_graph_has_dynamic_shapes) and picks the internal shapes_mode accordingly. A
