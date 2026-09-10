@@ -288,3 +288,47 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    def test_create_backend_closes_mkstemp_fd_when_endpoint_missing(
+        self, filestore_mock, mkstemp_mock, close_mock
+    ) -> None:
+        # Regression for pytorch/pytorch#191394: mkstemp's FD must be closed
+        # because FileStore opens the path on its own.
+        fd = 42
+        path = "/tmp/pytorch-rendezvous-test-file"
+        mkstemp_mock.return_value = (fd, path)
+        filestore_mock.return_value = mock.MagicMock()
+        self._params_filestore.endpoint = ""
+
+        create_backend(self._params_filestore)
+
+        close_mock.assert_called_once_with(fd)
+        filestore_mock.assert_called_once_with(path)
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    def test_create_backend_closes_mkstemp_fd_if_filestore_fails(
+        self, filestore_mock, mkstemp_mock, close_mock
+    ) -> None:
+        fd = 43
+        path = "/tmp/pytorch-rendezvous-test-file-fail"
+        mkstemp_mock.return_value = (fd, path)
+        filestore_mock.side_effect = RuntimeError("test error")
+        self._params_filestore.endpoint = ""
+
+        with self.assertRaisesRegex(
+            RendezvousConnectionError,
+            r"^The connection to the C10d store has failed. See inner exception for "
+            r"details.$",
+        ):
+            create_backend(self._params_filestore)
+
+        close_mock.assert_called_once_with(fd)
