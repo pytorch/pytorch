@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import unittest
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -14,6 +15,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.tensor import DTensor, Partial, Shard
 from torch.testing._internal.common_distributed import (
@@ -459,6 +461,95 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         for param in module.parameters():
             if param.grad is not None:
                 param.grad.div_(group.size())
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("grouped", [False, True])
+    @parametrize("all_reduce_only", [False, True])
+    def test_grad_dtype_fused_copy(self, grouped: bool, all_reduce_only: bool):
+        if all_reduce_only and self.world_size != 4:
+            self.skipTest("HSDP requires four devices")
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2) if all_reduce_only else (self.world_size,),
+            mesh_dim_names=("replicate", "shard") if all_reduce_only else ("shard",),
+        )
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Linear(8, 8, bias=False)
+                self.second = nn.Linear(8, 8, bias=False)
+
+            def forward(self, inp, use_second):
+                out = self.first(inp)
+                return out + self.second(inp) if use_second else out
+
+        model = Model().to(device_type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        if grouped:
+            fully_shard([model.first, model.second], mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_reduce_scatter_unused_params(True)
+        inp = torch.arange(16, device=device_type, dtype=torch.bfloat16).reshape(2, 8)
+        inp = inp / 16 + self.rank / 8
+        local_grad = inp.float().sum(dim=0).expand(8, -1)
+        reduced_grad = local_grad.clone()
+        dist.all_reduce(reduced_grad, op=dist.ReduceOp.AVG)
+        reduced_grad = reduced_grad.chunk(mesh["shard"].size())[
+            mesh.get_local_rank("shard")
+        ]
+        copy_dtypes = []
+
+        def copy_in(grads, buffer, world_size):
+            copy_dtypes.append(tuple(grad.dtype for grad in grads))
+            self.assertEqual(buffer.dtype, torch.float32)
+            foreach_reduce_scatter_copy_in(grads, buffer, world_size)
+
+        with patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+            "foreach_reduce_scatter_copy_in",
+            copy_in,
+        ):
+            for iteration in range(13):
+                # Ten fresh backwards, accumulation, synchronization, then a
+                # fresh backward using the same cached autograd leaves.
+                sync = iteration != 10
+                if iteration != 11:
+                    model.zero_grad(set_to_none=iteration % 2 == 0)
+                copy_dtypes.clear()
+                loss = model(inp, use_second=sync).sum()
+                if all_reduce_only:
+                    model.set_requires_all_reduce(sync)
+                else:
+                    model.set_requires_gradient_sync(sync)
+                loss.backward()
+                if not sync:
+                    if all_reduce_only:
+                        self.assertEqual(copy_dtypes, [(torch.float32, torch.float32)])
+                        for param in model.parameters():
+                            self.assertIsNone(param.grad)
+                        continue
+                    self.assertEqual(copy_dtypes, [])
+                    self.assertIsNone(model.second.weight.grad)
+                    self.assertEqual(
+                        model.first.weight.grad.placements, (Partial("avg"),)
+                    )
+                    self.assertEqual(model.first.weight.grad.dtype, torch.float32)
+                    self.assertEqual(model.first.weight.grad.to_local(), local_grad)
+                    continue
+                source_dtype = (
+                    torch.float32
+                    if iteration == 11 and not all_reduce_only
+                    else torch.bfloat16
+                )
+                self.assertEqual(copy_dtypes, [(source_dtype, source_dtype)])
+                for index, param in enumerate(model.parameters()):
+                    factor = 2 if iteration == 11 and index == 0 else 1
+                    self.assertEqual(param.grad.dtype, torch.float32)
+                    self.assertEqual(param.grad.placements, param.placements)
+                    self.assertEqual(param.grad.to_local(), reduced_grad * factor)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("reshard_after_backward", [False, True])

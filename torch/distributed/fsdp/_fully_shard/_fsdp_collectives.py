@@ -525,6 +525,7 @@ def foreach_reduce(
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
+    reduce_dtype: torch.dtype | None,
     device: torch.device,
     gradient_divide_factor: float | None,
     all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
@@ -554,7 +555,7 @@ def foreach_reduce(
         _raise_assert_with_print(
             f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
         )
-    reduce_dtype = unsharded_grads[0].dtype
+    reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,

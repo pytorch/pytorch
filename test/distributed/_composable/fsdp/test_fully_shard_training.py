@@ -2565,6 +2565,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             reduce_scatter_group: dist.ProcessGroup,
             reduce_scatter_stream: torch.Stream,
             reduce_scatter_comm: ReduceScatter,
+            reduce_dtype: torch.dtype | None,
             device: torch.device,
             gradient_divide_factor: float | None,
             all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
@@ -2582,6 +2583,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 reduce_scatter_group,
                 reduce_scatter_stream,
                 reduce_scatter_comm,
+                reduce_dtype,
                 device,
                 gradient_divide_factor,
                 all_reduce_group,

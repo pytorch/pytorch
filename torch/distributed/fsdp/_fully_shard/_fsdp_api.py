@@ -30,13 +30,15 @@ class MixedPrecisionPolicy:
             the unsharded parameter uses the original dtype. The optimizer step
             uses the sharded parameter in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
-            and gradient reduction (reduce-scatter or all-reduce). FSDP sets
-            the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
-            produces and accumulates gradients in this dtype without additional
-            FSDP casts. If ``None``, this uses the compute dtype. Reduced sharded
-            gradients use each parameter's ``grad_dtype`` as specified before
-            calling :func:`fully_shard`. (Default: ``None``)
+        reduce_dtype (Optional[torch.dtype]): The dtype for gradient reduction
+            (reduce-scatter or all-reduce). Synchronized backward produces
+            gradients in the compute dtype and casts them during batched copy-in.
+            When either reduction is disabled or unsharded accumulation is pending,
+            FSDP instead sets the unsharded parameter's ``grad_dtype`` to this dtype
+            so autograd accumulates without additional FSDP casts. If ``None``,
+            this uses the compute dtype. Reduced sharded gradients use each
+            parameter's ``grad_dtype`` as specified before calling
+            :func:`fully_shard`. (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed

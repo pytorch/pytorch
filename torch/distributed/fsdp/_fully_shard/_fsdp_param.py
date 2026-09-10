@@ -1344,7 +1344,9 @@ class FSDPParam:
     @property
     def unsharded_zero_grad_data(self) -> torch.Tensor:
         return self._get_grad_inner_tensor(
-            torch.zeros_like(self.unsharded_param, dtype=self.unsharded_grad_dtype)
+            torch.zeros_like(
+                self.unsharded_param, dtype=self.unsharded_param.grad_dtype
+            )
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
