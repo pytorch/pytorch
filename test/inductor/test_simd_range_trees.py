@@ -3,17 +3,20 @@
 import sys
 import typing
 import unittest
+from types import SimpleNamespace
 
 import sympy
 
+from torch._dynamo.source import ConstantSource
 from torch._inductor.codegen.simd import DerivedIterationRangesRoot, IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import IndexingOptions, TritonKernel, TritonSymbols
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import MockGraphHandler
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CeilDiv, FloorDiv
 
 
 try:
@@ -114,6 +117,165 @@ class TestSIMDRangeTrees(TestCase):
 
                 self.assertEqual(kernel.range_trees, [x_tree, r_tree])
                 self.assertFalse(indexing.has_rmask())
+
+    def test_derived_reduction_extent_reuses_r_numel(self):
+        graph = self._make_graph()
+        with V.set_graph_handler(graph):
+            reduction_extent = graph.sizevars.shape_env.create_symbol(
+                512,
+                source=ConstantSource("__test_reduction_numel"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            )
+            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_extent)
+            kernel = TritonKernel(
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
+                features=features,
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
+            x_tree, r_tree = kernel.range_trees
+            derived = self._make_derived_root(r_tree, group_size=sympy.Integer(2))
+            r_numel_symbol = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
+
+            index_before = reduction_extent
+            expected_index = r_numel_symbol
+            derived_index_before = derived.numel
+            expected_derived_index = FloorDiv(r_numel_symbol, 2)
+
+            kernel.finalize_indexing([index_before])
+            self.assertEqual(
+                kernel._r_numel_reuse_replacements,
+                {r_numel_symbol: reduction_extent},
+            )
+            self.assertEqual(
+                kernel._r_numel_reuse_eliminated_symbols,
+                OrderedSet([reduction_extent]),
+            )
+            with kernel.use_range_trees([x_tree, derived]):
+                self.assertEqual(
+                    kernel._replace_reduction_numel_in_index(index_before),
+                    expected_index,
+                )
+                self.assertEqual(
+                    kernel._replace_reduction_numel_in_index(derived_index_before),
+                    expected_derived_index,
+                )
+
+    def test_reduction_numel_reuse_supports_joint_elimination(self):
+        graph = self._make_graph()
+        with V.set_graph_handler(graph):
+            source = graph.sizevars.shape_env.create_symbol(
+                109,
+                source=ConstantSource("__test_joint_source"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            )
+            r0_extent = CeilDiv(source, 2)
+            r1_extent = CeilDiv(source, 3)
+            kernel = TritonKernel(
+                {
+                    "x": sympy.Integer(1),
+                    "r0_": r0_extent,
+                    "r1_": r1_extent,
+                },
+                features=SIMDKernelFeatures(
+                    [], sympy.Integer(1), r0_extent * r1_extent
+                ),
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
+
+            index_before = r0_extent + r1_extent
+            expected_index = sympy.Symbol(
+                "r0_numel", integer=True, nonnegative=True
+            ) + sympy.Symbol("r1_numel", integer=True, nonnegative=True)
+
+            kernel.finalize_indexing([r0_extent, r1_extent])
+            self.assertEqual(
+                kernel._r_numel_reuse_eliminated_symbols,
+                OrderedSet([source]),
+            )
+            self.assertEqual(
+                kernel._replace_reduction_numel_in_index(index_before),
+                expected_index,
+            )
+
+    def test_reduction_numel_reuse_requires_dead_size_argument(self):
+        graph = self._make_graph()
+        with V.set_graph_handler(graph):
+            dynamic_size = graph.sizevars.shape_env.create_symbol(
+                1023,
+                source=ConstantSource("__test_dynamic_size"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            )
+            reduction_extent = CeilDiv(dynamic_size, 2)
+            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_extent)
+            kernel = TritonKernel(
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
+                features=features,
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
+            r_numel_symbol = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
+            index_before = reduction_extent
+            expected_index = r_numel_symbol
+
+            kernel.finalize_indexing([index_before])
+            self.assertEqual(
+                kernel._replace_reduction_numel_in_index(index_before),
+                expected_index,
+            )
+
+            kernel.finalize_indexing([index_before, dynamic_size])
+            self.assertEqual(
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
+            )
+
+            # A range-tree expression still uses dynamic_size, deliberately
+            # preventing removal of its scalar argument and making the
+            # replacement unprofitable.
+            kernel.range_tree_nodes[sympy.Symbol("__test_range")] = SimpleNamespace(
+                expr=dynamic_size
+            )
+            kernel.finalize_indexing([index_before])
+            self.assertEqual(
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
+            )
+
+    def test_reduction_numel_reuse_skips_staged_indexing_schedule(self):
+        graph = self._make_graph()
+        with V.set_graph_handler(graph):
+            dynamic_size = graph.sizevars.shape_env.create_symbol(
+                1023,
+                source=ConstantSource("__test_staged_dynamic_size"),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            )
+            reduction_extent = CeilDiv(dynamic_size, 2)
+            features = SIMDKernelFeatures(
+                [],
+                sympy.Integer(4),
+                reduction_extent,
+                indexing_node_schedule=[],
+            )
+            kernel = TritonKernel(
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
+                features=features,
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
+
+            index_before = reduction_extent
+
+            kernel.finalize_indexing([index_before])
+            self.assertEqual(
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
+            )
 
     def test_use_range_trees_clears_simplify_indexing_cache(self):
         graph = self._make_graph()
