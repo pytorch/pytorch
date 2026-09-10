@@ -16,6 +16,7 @@ from torch.cuda._graph_annotations import (
     mark_stream,
     resolve_and_remap,
     resolve_pending_annotations,
+    source_node_ids_available,
 )
 from torch.cuda._utils import _check_cuda_bindings, _check_cuda_bindings_driver
 from torch.cuda.graph_annotations import (
@@ -218,6 +219,52 @@ class TestMarkKernels(TestCase):
                 lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
             )
             self.assertEqual(annotations[tools_id], [{"name": "reduction"}])
+
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_key_by_source_keeps_capture_keys(self):
+        """``key_by="source"`` leaves annotations on the capture graph, for a consumer
+        reading CUPTI's sourceGraphNodeId. Nothing is rekeyed -- not on the first
+        instantiate, and not on a re-instantiate, which mints a fresh exec id the default
+        keying would have chased. The capture id is still handed to the destroy hooks, so
+        the entries are purged with the graph."""
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(
+            graph, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("phase_a"):
+                _ = x + 1
+
+        capture_id = graph._capture_graph_id
+        keys = set(get_kernel_annotations())
+        self.assertEqual({k >> 32 for k in keys}, {capture_id})
+
+        for _ in range(2):
+            graph.instantiate()
+            self.assertIsNone(graph._remapped_exec_id)
+            self.assertEqual(set(get_kernel_annotations()), keys)
+        self.assertIn(capture_id, graph._recorded_exec_ids)
+
+    def test_key_by_exec_is_the_default(self):
+        """The default rekeys to the exec graph, which is what a consumer reading CUPTI's
+        (exec) graphNodeId needs. Guards the default against key_by's introduction."""
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels("phase_a"):
+                _ = x + 1
+        graph.instantiate()
+
+        self.assertIsNotNone(graph._remapped_exec_id)
+        self.assertNotEqual(graph._remapped_exec_id, graph._capture_graph_id)
+        self.assertEqual(
+            {k >> 32 for k in get_kernel_annotations()}, {graph._remapped_exec_id}
+        )
 
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
@@ -2307,6 +2354,10 @@ class TestCuptiAnnotationBackend(TestCase):
         with self.assertRaisesRegex(ValueError, "unrecognized annotation_config key"):
             torch.cuda.graph(
                 torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
+            )
+        with self.assertRaisesRegex(ValueError, r"annotation_config\['key_by'\]"):
+            torch.cuda.graph(
+                torch.cuda.CUDAGraph(), annotation_config={"key_by": "capture"}
             )
 
 

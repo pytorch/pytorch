@@ -266,6 +266,20 @@ def _probe_tools_id() -> bool:
     return True
 
 
+def source_node_ids_available() -> bool:
+    """Whether the driver reports a node's source (capture-time) graph node on replayed
+    work, which is what lets annotations stay keyed to the capture graph instead of being
+    rekeyed to each exec graph. CUPTI surfaces it as ``sourceGraphNodeId``, added in the
+    13.4 ABI and only populated by a 13.4 user-mode driver, so the driver version is the
+    gate. Not a public API."""
+    if not _HAS_CUDA_BINDINGS:
+        return False
+    rt = _cuda_runtime
+    ok = rt.cudaError_t.cudaSuccess  # pyrefly: ignore[missing-attribute]
+    err, version = rt.cudaDriverGetVersion()  # pyrefly: ignore[missing-attribute]
+    return err == ok and version >= 13040
+
+
 def _is_tools_id_unavailable() -> bool:
     """Return True if cudaGraphNodeGetToolsId is not usable."""
     global _tools_id_available
@@ -460,9 +474,13 @@ def _get_annotatable_type_values() -> frozenset[int]:
 
 
 # Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
-# bodies). The dependent-edge walk does not descend into such a node, and the nodes
-# inside are numbered in the body graph's id space, which remap_to_exec_graph never
-# rekeys -- so annotations there would be silently lost. See mark_kernels. Initialized
+# bodies). The dependent-edge walk does not descend into such a node, so annotations
+# there would be silently lost. Descending is not enough on its own, and neither is
+# annotation_config["key_by"] == "source" (which otherwise removes the exec-graph
+# renumbering as an obstacle): cudaGraphAddChildGraphNode *clones* the body, so CUPTI
+# reports the clone's node as sourceGraphNodeId rather than the body the caller built and
+# annotated, and work inside a conditional body produces no CUPTI activity record at all
+# (even with CUPTI_ACTIVITY_ATTR_ENABLE_DEVICE_GRAPH_TRACE set). See mark_kernels. Initialized
 # lazily, like _ANNOTATABLE_TYPES above: _cuda_driver is None when cuda.bindings is
 # absent, so reading the enum at import time would break `import torch`.
 _NESTED_GRAPH_TYPES: set[Any] | None = None
@@ -850,12 +868,17 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         ``cudaGraph_t`` that this walk does not descend into, so their work is
         left unannotated and a warning is issued. Descending is possible
         (``cudaGraphNodeGetParams`` exposes the body graphs), but would not be
-        enough on its own: a body's nodes are numbered in that graph's id space
-        and are renumbered again when the exec graph inlines them, and nothing
-        exposes that renumbering, so :func:`remap_to_exec_graph` could not key
-        the annotations to what a profiler reports. For the same reason a scope
-        *inside* a conditional body (``torch.cond`` / ``torch.while_loop``)
-        records nothing at all.
+        enough on its own. With the default ``annotation_config["key_by"]``
+        (``"exec"``) a body's nodes are renumbered when the exec graph inlines
+        them and nothing exposes that renumbering, so
+        :func:`remap_to_exec_graph` could not key the annotations to what a
+        profiler reports. ``"source"`` keying removes that obstacle but not the
+        other two: ``cudaGraphAddChildGraphNode`` clones the body, so CUPTI
+        reports a node of the clone -- an id the caller never saw -- as the
+        source, and work inside a conditional body
+        (``torch.cond`` / ``torch.while_loop``) yields no CUPTI activity record
+        to attribute in the first place. A scope *inside* a conditional body
+        therefore records nothing at all.
 
     .. warning::
         This API is in prototype and may change in future releases.
@@ -904,14 +927,15 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         and _graph_id(scope.graph) != _capture_root_graph_id
     ):
         # Inside a conditional node's body: torch.cond / torch.while_loop capture into a
-        # separate cudaGraph_t. Its node ids are in that graph's id space and are
-        # renumbered again in the exec graph, so anything recorded here would be a key
-        # that matches nothing in a trace. Record nothing rather than dead keys.
+        # separate cudaGraph_t, and the work in it produces no CUPTI activity record --
+        # so anything recorded here would be a key nothing in a trace can match. Record
+        # nothing rather than dead keys. Unaffected by key_by="source": there is no
+        # record to carry a source node id.
         warnings.warn(
             "mark_kernels: this scope is inside a CUDA graph conditional-node body "
             "(torch.cond / torch.while_loop), which is captured into a separate "
-            "cudaGraph_t whose node ids are never remapped to the exec graph; "
-            "nothing is annotated for it",
+            "cudaGraph_t whose work a profiler does not report; nothing is annotated "
+            "for it",
             stacklevel=3,
         )
         yield

@@ -75,8 +75,10 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
     # logs it rather than letting it reach CUPTI's C dispatch.
     tools_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(graph_data.node))
     # Nodes reported for any other graph belong to a child-graph or conditional body, whose
-    # ids live in that body graph's space and are renumbered again in the exec graph -- so
-    # recording them would produce keys matching nothing. disarm() warns about the total.
+    # work a profiler cannot attribute back to the id recorded here -- so recording them
+    # would produce keys matching nothing. Holds under annotation_config["key_by"] ==
+    # "source" too (see _graph_annotations._NESTED_GRAPH_TYPES for why the source node id
+    # does not rescue either body kind). disarm() warns about the total.
     if tools_id >> 32 != capture_root_graph_id():
         global _dropped_body_nodes
         _dropped_body_nodes += 1
@@ -184,8 +186,8 @@ def disarm() -> None:
         warnings.warn(
             f"mark_kernels: {_dropped_body_nodes} node(s) created inside a CUDA graph "
             "child-graph or conditional-node body (torch.cond / torch.while_loop) were "
-            "not annotated -- such a body is captured into a separate cudaGraph_t whose "
-            "node ids are never remapped to the exec graph, so an annotation there would "
-            "match nothing in a profiler trace",
+            "not annotated -- such a body is captured into a separate cudaGraph_t that a "
+            "profiler does not report against the ids recorded here, so an annotation "
+            "there would match nothing in a trace",
             stacklevel=2,
         )
