@@ -1518,6 +1518,8 @@ def _make_case(op, input_getter=TensorFactory.randn):
 
 @markDynamoStrictTest
 class TestVmapOperators(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -1841,7 +1843,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([B0, 2], device), getter([B0], device, torch.double)))
         test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             return
 
         # TODO(rzou): fix the following
