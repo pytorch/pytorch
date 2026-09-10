@@ -52,7 +52,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ```{warning}
 `torch.compiler.precompile` and everything reached through it (`precompile.capture`,
-`precompile.accumulate`, `precompile.load`, `torch.compiler.PrecompiledRunnable`,
+`precompile.load`, `torch.compiler.PrecompiledRunnable`,
 `torch.compiler.PrecompiledCallable`, and the objects they return) is a prototype API.
 Signatures, error types and the artifact format may change between releases without a
 deprecation cycle.
@@ -79,9 +79,9 @@ deprecation cycle.
 
    Because the caller makes the calls, inputs flow through naturally and return values stay
    available, so the capture drops into an ordinary training or pipeline loop where
-   intermediate values are needed; to rewrite the artifact after every call instead of once
-   at exit, use :func:`precompile.accumulate`, the per-call-rewrite counterpart with the
-   same model. ``tracer`` picks the capture front-end and carries its tracer-specific
+   intermediate values are needed; to checkpoint the artifact partway instead of only at
+   exit, call ``cap.save()`` inside the block, which re-renders and rewrites both files.
+   ``tracer`` picks the capture front-end and carries its tracer-specific
    configuration: :class:`precompile.DynamoTracer` (the default) takes as many calls as you
    give it and captures every graph-break continuation and guarded recompilation those
    calls exercise; :class:`precompile.MakeFxTracer` is one non-strict ATen trace and takes
@@ -179,83 +179,6 @@ deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:function:: precompile.accumulate(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
-
-   Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
-
-   ``accumulate`` is the per-call-rewrite counterpart of :func:`precompile.capture`. Both are
-   caller-driven -- the calls are yours, so inputs flow through naturally and return values
-   stay available. They differ in when the artifact is written: ``capture`` writes it once
-   when the ``with`` block exits, whereas ``accumulate`` keeps its compiled region alive
-   ACROSS the calls of your loop -- stopping and resuming around each one -- and rewrites the
-   artifact to disk every call, so a later call reuses an earlier one's variants and a job
-   that dies partway through still leaves a working artifact. This is what a training step
-   whose inputs come off a queue the loop advances needs: it cannot be called twice in a row
-   (the second call would find the state the first consumed), so the caller must own the loop.
-
-   ``accumulate`` is dynamo-only: it captures across many calls, whereas
-   :class:`precompile.MakeFxTracer` records a single call, so pass a
-   :class:`precompile.DynamoTracer` (the default) and use :func:`precompile.capture` for a
-   make_fx trace.
-
-   Each call runs ``fn`` for real, folds whatever graphs and variants it newly exercised into
-   the capture, rewrites both files, and returns what ``fn`` returned. A call that exercises
-   nothing new adds nothing. There is no finalize step: the two files are a complete, loadable
-   artifact for everything captured so far from the first call onwards, so a job that dies
-   partway through leaves a working artifact for the batches it did reach.
-
-   Gradients pass straight through -- the calls are the caller's and run in whatever grad
-   mode the caller sets, so precompile neither snapshots nor clears the model's gradients.
-
-   The returned object holds a LIVE compiled region, because that is the only way a later call
-   can reuse an earlier one's variants: they are filed under an id that nothing can hand back
-   to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
-   it; a capture left open holds it, and every variant compiled into it, for the life of the
-   process.
-
-   A call whose ``fn`` raises propagates that error and leaves the capture open for the next
-   call. A refusal from the artifact gates (the ``DynamoTracer`` ``require_*`` fields) is
-   different and final: the step has already run by then, so the ``PrecompileError`` carries
-   what it returned as ``result``, the capture closes -- the files keep the last artifact that
-   passed -- and every later call raises without running. Calls are serialized: a second thread
-   calling the capture waits for the first call to finish, artifact rewrite included.
-
-   :param fn: The whole computation to capture, taking the model(s) and runtime inputs,
-       exactly as :func:`precompile.capture` does.
-   :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
-   :param cache_path: File to write the acceleration cache to. Required.
-   :param tracer: A :class:`precompile.DynamoTracer` (the default) carrying the guard/variant
-       configuration; a :class:`precompile.MakeFxTracer` is rejected.
-   :param backend: as :func:`precompile.capture`.
-   :param training: as :func:`precompile.capture`.
-   :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
-       ``summary()`` (coverage, recompilation, failure and guard information for everything
-       captured so far), ``invariants()`` (the guards that held across every captured variant
-       of each frame), ``calls()`` (how many calls have been folded in) and ``close()`` (give
-       back the compiled region; the files are unaffected, and closing twice is a no-op).
-   :raises PrecompileError: as :func:`precompile.capture` does, on the call that
-       violates the contract.
-   :raises TypeError: if ``tracer`` is a :class:`precompile.MakeFxTracer` (or not a tracer).
-
-   Example::
-
-       with torch.compiler.precompile.accumulate(
-           train_step, artifact_path="m.py", cache_path="m.cache",
-           training=True,
-           tracer=torch.compiler.precompile.DynamoTracer(require_no_risky_drops=False),
-       ) as capture:
-           for batch in loader:
-               losses = capture(model, batch)   # runs for real, returns its result
-               optimizer.step()
-
-   .. note::
-
-      Rewriting is proportional to everything captured so far, not to the call, so a long loop
-      over a large model pays it every time. Capture the batches that add variants rather than
-      all of them.
-```
-
-```{eval-rst}
 .. py:function:: precompile.load(artifact_path, cache_path, *, fn=None)
 
    Reconstruct a runnable from the two files a precompile capture wrote -- the
@@ -333,7 +256,7 @@ deprecation cycle.
 .. py:class:: precompile.DynamoTracer(guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
 
    The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
-   :func:`precompile.capture` or :func:`precompile.accumulate`. An execution-driven
+   :func:`precompile.capture`. An execution-driven
    multi-graph capture that analyzes the Python (bytecode) rather than tracing one path: it
    records graph-break continuations and every guarded recompilation the calls exercise, so
    a capture with this tracer takes as many calls as you make. The dynamo driver re-evaluates
@@ -369,38 +292,34 @@ deprecation cycle.
    The object :func:`precompile.capture` returns. Enter it as a context manager and call
    it like ``fn`` inside the block to fold each call into the capture (see
    :func:`precompile.capture` for the semantics); it is not constructed directly. The
-   artifact is written to the two files when the block exits. A dynamo capture also exposes
-   ``summary()``, ``invariants()`` and ``calls()``, with the same meaning as on
-   :class:`precompile.AccumulatingCapture`.
+   artifact is written to the two files when the block exits. Also exposes:
 
-.. py:class:: precompile.AccumulatingCapture
+   .. py:method:: save()
 
-   The object :func:`precompile.accumulate` returns. Call it like ``fn`` to fold one
-   call into the artifact (see :func:`precompile.accumulate` for the semantics); it is
-   not constructed directly. Also exposes:
+      Checkpoint everything captured so far to the two files without ending the capture.
+      Call it as often as you like inside the block; each call re-renders and rewrites both
+      files, so a job that dies between saves leaves the last checkpoint loadable. A gate
+      refusal (the ``DynamoTracer`` ``require_*`` fields) or a write failure raises but
+      writes nothing partial: the previous files stay intact and the capture stays open.
 
    .. py:method:: summary()
 
-      A :class:`precompile.PrecompileSummary` for everything captured so far.
+      A :class:`precompile.PrecompileSummary` for everything captured so far. Dynamo capture
+      only.
 
    .. py:method:: invariants()
 
       A tuple of :class:`precompile.FrameInvariants`, one per captured frame -- the guards that held
-      across every captured variant of each frame.
+      across every captured variant of each frame. Dynamo capture only.
 
    .. py:method:: calls()
 
-      How many calls have been folded into the capture.
-
-   .. py:method:: close()
-
-      Give back the live compiled region; the two files are unaffected, and closing twice
-      is a no-op. Entering the object as a context manager closes it on exit.
+      How many calls have been folded into the capture. Dynamo capture only.
 
 .. py:class:: precompile.PrecompileSummary
 
    Coverage and guard information from a capture, returned by
-   :meth:`precompile.AccumulatingCapture.summary`. Frozen dataclass; ``str(summary)`` renders a
+   :meth:`precompile.Capture.summary`. Frozen dataclass; ``str(summary)`` renders a
    one-line digest and :attr:`complete` says whether the capture covers everything it
    exercised.
 
