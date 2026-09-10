@@ -297,10 +297,8 @@ class ListTests(TupleTests):
 
     @make_dynamo_test
     def test_pop_index_conversion(self):
-        # list_pop_impl wraps a negative index and then bounds-checks, so both
-        # ends are out of range; the index itself goes through the Py_ssize_t
-        # clinic converter, which honours __index__ and rejects everything
-        # else before the body runs.
+        # CPython wraps a negative index then bounds-checks, so both ends can
+        # be out of range, and the clinic converter runs before the body.
         p = self.thetype("abcd")
         self.assertEqual(p.pop(-2), "c")
         self.assertEqual(p.pop(IndexForListPop()), "b")
@@ -628,9 +626,8 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
 
 
 class SymIntIndexTests(torch._dynamo.test_case.TestCase):
-    # A shape-derived index is a SymNodeVariable, not a Python constant. Which
-    # element leaves the list decides what the traced graph does, so list.pop()
-    # specializes the index under a guard instead of refusing it.
+    # A shape-derived index is a SymNodeVariable. The element it selects is
+    # structural, so list.pop() specializes it under a guard.
     # See https://github.com/pytorch/pytorch/issues/196285.
     def _check(self, fn, sizes):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -655,7 +652,7 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         self._check(fn, [3])
 
     def test_pop_sym_index_recompiles(self):
-        # The specialized index is guarded, so a size that selects a different
+        # The specialized index is guarded, so a size selecting a different
         # element recompiles rather than reusing the graph.
         def fn(x):
             values = [x + 1, x + 2, x + 3]
@@ -683,9 +680,8 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         self._check(fn, [3])
 
     def test_pop_unbacked_index_raises(self):
-        # A value-dependent index is unbacked: there is no shape guard that
-        # could make the choice of element sound, so pop has to refuse it
-        # rather than specialize on whatever the first sample happened to be.
+        # An unbacked index has no guard that could make the choice sound, so
+        # pop must refuse it rather than specialize on the first sample.
         def fn(x):
             return [1, 2, 3].pop(x.sum().item() % 3)
 

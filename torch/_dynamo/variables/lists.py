@@ -587,11 +587,9 @@ class BaseListVariable(VariableTracker):
             return None
         check_positional(tx, "pop", len(args), 0, 1)
 
-        # list_pop_impl signs the index as `Py_ssize_t = -1`, so Argument
-        # Clinic converts it before the body runs -- ahead of the empty-list
-        # check -- via _PyNumber_Index + PyLong_AsSsize_t. A symbolic index
-        # specializes here (installing a guard) because which element leaves
-        # the list has to be known while tracing.
+        # Clinic converts the index (`Py_ssize_t = -1`) before the body, so a
+        # bad index raises ahead of the empty-list check. A symbolic index has
+        # to specialize under a guard; the element removed is structural.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1049-L1076
         idx = -1
         if args:
