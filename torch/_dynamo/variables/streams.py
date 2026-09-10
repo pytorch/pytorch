@@ -507,9 +507,14 @@ class StreamVariable(StreamContextVariable):
             )
         else:
             # The real record_event() runs first because we need the
-            # event object to exist before we can register it.  The
-            # mutation check below is always deferred for sourceless
-            # events, so ordering is safe.
+            # event object to exist before we can register it. Safe to
+            # run ahead of the mutation check: the call below passes the
+            # literal event_has_source=False, and
+            # check_event_record_after_input_mutation's only immediate
+            # raise is gated on event_has_source being true (else it
+            # defers by appending to _pending_event_record_violations
+            # and returning) -- so this call path can never raise before
+            # record_event() has already run.
             event = self.value.record_event()
             event_index = register_graph_created_object(
                 event,

@@ -2379,6 +2379,26 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device), []
             )
 
+    @torch._dynamo.config.patch(reorderable_logging_functions={print})
+    def test_event_record_after_input_mutation_escapes_via_debug_locals(self, device):
+        # Verifies the tx.debug_locals root: passing the event to a
+        # reorderable logging call (print) is a real escape, because
+        # codegen_suffix always codegens debug_locals as an actual call
+        # at subgraph exit, handing the event to user code at runtime.
+        def fn(x):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            print("{}".format(e))  # noqa: UP032 (needs .format() to trace as StringFormatVariable)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device)
+            )
+
     def test_event_record_before_input_mutation_no_error(self, device):
         def fn(x):
             s = torch.Stream(device=device)

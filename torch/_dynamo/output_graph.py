@@ -1406,7 +1406,9 @@ class OutputGraph(OutputGraphCommon):
         raise RuntimeError(msg)
 
     def raise_pending_event_record_violations_if_escaping(
-        self, all_stack_values: list[list[VariableTracker]]
+        self,
+        tx: "InstructionTranslatorBase",
+        all_stack_values: list[list[VariableTracker]],
     ) -> None:
         """Escape analysis for deferred record-after-input-mutation
         violations (see :meth:`check_event_record_after_input_mutation`).
@@ -1440,19 +1442,32 @@ class OutputGraph(OutputGraphCommon):
         # pending event reachable from either is observable outside.
         roots.extend(self.side_effects.store_attr_mutations.keys())
         roots.extend(self.side_effects._get_modified_vars())
-        # backward_state, tensor_hooks, and save_for_backward can also
-        # keep objects alive across the subgraph boundary; include them
-        # so the escape scan sees any event reachable from them.
-        # save_for_backward args are codegen'd unconditionally by
-        # codegen_save_tempvars, independent of ctx's own modified state.
-        # local_generators is excluded: a returned generator is rewritten
-        # to a ListIteratorVariable before compile_subgraph (so its items
-        # are already in all_stack_values), and one surviving a graph
-        # break is itself in all_stack_values with remaining_items
-        # populated by codegen_suffix before the final scan.
+        # backward_state and tensor_hooks can also keep objects alive
+        # across the subgraph boundary; include them so the escape scan
+        # sees any event reachable from them.  local_generators is
+        # excluded: a returned generator is rewritten to a
+        # ListIteratorVariable before compile_subgraph (so its items are
+        # already in all_stack_values), and one surviving a graph break
+        # is itself in all_stack_values with remaining_items populated by
+        # codegen_suffix before the second (post-codegen_suffix) call to
+        # this method in compile_subgraph -- see the comment there.
+        #
+        # side_effects.save_for_backward is excluded too: ctx.save_for_backward()
+        # itself rejects a non-Tensor argument with a TypeError (both in
+        # eager and here, since Dynamo traces the real call), so an event
+        # can never actually land there.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
-        roots.extend(args for _, args in self.side_effects.save_for_backward)
+        # tx.debug_locals holds args to reorderable logging calls (e.g.
+        # print) that codegen_suffix always codegens as a real call at
+        # subgraph exit, so an event reachable only from there is
+        # genuinely handed to user code -- a real root.  A *nested*
+        # inlined call's own debug_locals (e.g. a generator's finally
+        # block) is not: it lives on that call's own
+        # InliningInstructionTranslator, and every codegen_suffix call
+        # site passes tx itself, never a nested tracer, so that list is
+        # never drained -- only tx's own list is walked here.
+        roots.extend(args for _, args in tx.debug_locals)
         # visit_keys=True so events stored as set elements or dict
         # keys (wrapped in HashableTracker) are reached; the default
         # visit walks dicts via .values() only.
@@ -2207,7 +2222,7 @@ class OutputGraph(OutputGraphCommon):
         # Deferred record-after-input-mutation errors: raise only if the
         # recorded event escapes the compiled region (must run after the
         # prune so dead sourceless stores don't count as escapes).
-        self.raise_pending_event_record_violations_if_escaping(all_stack_values)
+        self.raise_pending_event_record_violations_if_escaping(tx, all_stack_values)
 
         self.add_output_instructions(prefix_insts)
 
@@ -2590,7 +2605,7 @@ class OutputGraph(OutputGraphCommon):
         # scan above and can append new violations.  Re-run the escape
         # scan (rather than raising unconditionally) so a non-escaping
         # event recorded in a finally block still compiles.
-        self.raise_pending_event_record_violations_if_escaping(all_stack_values)
+        self.raise_pending_event_record_violations_if_escaping(tx, all_stack_values)
 
         return all_stack_locals_metas
 
