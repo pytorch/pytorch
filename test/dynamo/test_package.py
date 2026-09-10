@@ -11,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -20,12 +21,14 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
     _rename_globals,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -327,6 +330,61 @@ class TestPackage(torch._inductor.test_case.TestCase):
         probe.assert_not_called()
         self.assertFalse(resaved.requires_native_backend_compatibility)
         self.assertIsNone(resaved.system_info.cpu_codegen_target)
+
+    def test_loaded_eager_entry_does_not_disable_the_gate_on_an_inductor_run(self):
+        # The flag is a floor, not a replacement: reloading an eager artifact
+        # (requires=False) into a session whose backend emits native code must
+        # not clear the gate, or a CPU kernel compiled after the load is saved
+        # with no ISA fingerprint and reloads on any host (fail open).
+        def fn(x):
+            return x + 1
+
+        eager = CompilePackage(fn, requires_native_backend_compatibility=False)
+        torch._dynamo.optimize(backend="eager", package=eager)(fn)(torch.randn(3))
+        entry = eager.cache_entry()
+        self.assertFalse(entry.requires_native_backend_compatibility)
+
+        # A native-backend session (native_backend=True) reloads that entry.
+        reloaded = CompilePackage(fn, entry, requires_native_backend_compatibility=True)
+        self.assertTrue(reloaded._requires_native_backend_compatibility)
+
+    def test_codegen_drift_refuses_serialization_not_introspection(self):
+        # A drifted package can never be serialized, but building a
+        # cache_entry() for introspection (summary(), backend enumeration,
+        # session teardown) must keep working -- a refusal there would erupt
+        # out of __exit__ and mask the in-flight capture exception.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        base = SystemInfo.current(cpu_codegen=False)
+        target = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        first = dataclasses.replace(base, cpu_codegen_target=target)
+        package = CompilePackage(fn)
+        with (
+            mock.patch.object(SystemInfo, "current", return_value=first),
+            mock.patch(
+                "torch._dynamo.package._current_cpu_codegen_target",
+                return_value=(
+                    "x86_64",
+                    "avx512",
+                    512,
+                    ("CPU_CAPABILITY_AVX512",),
+                    None,
+                    None,
+                ),
+            ),
+            self.assertLogs("torch._dynamo.package", level="WARNING") as logs,
+        ):
+            package.update_device_type(graph)
+            package.update_device_type(graph)
+        self.assertIn("CPU codegen target changed during capture", logs.output[0])
+        self.assertIsNotNone(package.cache_entry())
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            package.refuse_unserializable()
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            DynamoCache.record_package(package)
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
@@ -788,7 +846,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -898,9 +955,14 @@ def add(x, y):
         # Wrapping is what reloads the cache; the bypassed entry installs nothing.
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+        # The reloaded entry is already flagged bypassed, so the recompile that
+        # reuses it skips guard serialization outright (convert_frame gates
+        # `save` on current_entry_bypassed()) -- it does NOT re-pickle the
+        # unpicklable guard just to bypass again. The frame still runs; there is
+        # simply no second "package bypass" warning to re-detect what load
+        # already knew.
+        with self.assertNoLogs("torch._dynamo.output_graph", level="WARNING"):
             self.assertEqual(compiled(x), expected)
-        self.assertTrue(any("package bypass" in line for line in logs.output))
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_recompile_drops_the_frames_earlier_variants(self):
@@ -928,6 +990,63 @@ def add(x, y):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled(x)
         self.assertEqual(compiled(x), expected)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypass_then_serializable_recompile_skips_serialization(self):
+        # bypass->success: a frame bypassed by an unpicklable guard stays
+        # bypassed for the rest of the process, so a later recompile that WOULD
+        # serialize fine must not re-pay guard serialization only for
+        # add_guarded_code to discard it. convert_frame gates `save` on the
+        # entry's bypassed flag; the observable difference from the old
+        # per-OutputGraph gate is a second serialize_guards call, not a warning.
+        from torch._dynamo import guards as guards_mod
+
+        calls = [0]
+        orig = guards_mod.CheckFunctionManager.serialize_guards
+
+        def counting(self, *args, **kwargs):
+            calls[0] += 1
+            return orig(self, *args, **kwargs)
+
+        def fn(x, cfg=None):
+            if cfg is not None and cfg.flag == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        with patch.object(
+            guards_mod.CheckFunctionManager, "serialize_guards", counting
+        ):
+            compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+            with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+                compiled(x, UnpicklableConfig())
+            self.assertTrue(any("package bypass" in line for line in logs.output))
+            after_bypass = calls[0]
+            # cfg=None recompiles the SAME code object; the entry is already
+            # bypassed, so serialization is skipped and no bypass is re-detected.
+            with self.assertNoLogs("torch._dynamo.output_graph", level="WARNING"):
+                self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(calls[0], after_bypass)
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
 
     def test_abandoned_package_uninstalls_on_gc(self):
         # Without the finalizer, each load+install of one artifact would leave
@@ -1491,6 +1610,241 @@ def add(x, y):
         )(mod)
         self.assertEqual(opt(x), mod(x))
         self.assertEqual(sum(len(e.guarded_codes) for e in pkg2._codes.values()), 1)
+
+    def test_system_info_is_read_once_per_package(self):
+        # SystemInfo.current probes the accelerator and the C++ toolchain, and
+        # update_device_type runs on every compile under caching_precompile.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        package = CompilePackage(fn)
+        with mock.patch.object(
+            SystemInfo, "current", wraps=SystemInfo.current
+        ) as current:
+            for _ in range(3):
+                package.update_device_type(graph)
+        self.assertEqual(current.call_count, 1)
+        self.assertIsNone(package._cpu_codegen_target_drift)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_unrecordable_package_warns_and_still_compiles(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        with (
+            mock.patch.object(
+                DynamoCache, "record_package", side_effect=PackageError("drifted")
+            ),
+            self.assertLogs("torch._dynamo.convert_frame", level="WARNING") as logs,
+        ):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        self.assertTrue(
+            any("Not recording compile package: drifted" in m for m in logs.output)
+        )
+
+    def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
+        # The serialization filter and the capture mode are independent: a
+        # package can carry a filter without being an explicit capture, and be
+        # an explicit capture without one.
+        def fn(x):
+            return x + 1
+
+        def keep_all(entries):
+            return [True] * len(entries)
+
+        filtered = CompilePackage(fn, serialization_guard_filter_fn=keep_all)
+        self.assertFalse(filtered.explicit_capture)
+        self.assertIs(filtered.serialization_guard_filter_fn, keep_all)
+        explicit = CompilePackage(fn, explicit_capture=True)
+        self.assertTrue(explicit.explicit_capture)
+        self.assertIsNone(explicit.serialization_guard_filter_fn)
+
+    def _saved_guard_names(self, package):
+        names = set()
+        for guarded in package.cache_entry().codes[0].guarded_codes:
+            state = load_guards_state(guarded.guards_state)
+            names |= {g.create_fn_name() for g in state.output_graph.guards}
+        return names
+
+    def test_serialization_filter_applies_to_the_saved_guards_only(self):
+        # The live guards keep checking what they check, so an explicit capture
+        # still recompiles on a dtype change; only the serialized copy is
+        # filtered. The same filter on a non-explicit package does the same, and
+        # an explicit package without a filter saves its guards unfiltered.
+        def fn(x):
+            return x + 1
+
+        def drop_tensor_match(entries):
+            return [e.guard_type != "TENSOR_MATCH" for e in entries]
+
+        for explicit_capture in (True, False):
+            torch._dynamo.reset()
+            pkg = CompilePackage(
+                fn,
+                explicit_capture=explicit_capture,
+                serialization_guard_filter_fn=drop_tensor_match,
+            )
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+            compiled(torch.randn(3))
+            compiled(torch.randint(0, 5, (3,)))
+            self.assertEqual(counter.frame_count, 2)
+            self.assertNotIn("TENSOR_MATCH", self._saved_guard_names(pkg))
+
+        torch._dynamo.reset()
+        bare = CompilePackage(fn, explicit_capture=True)
+        torch._dynamo.optimize(backend="eager", package=bare)(fn)(torch.randn(3))
+        self.assertIn("TENSOR_MATCH", self._saved_guard_names(bare))
+
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_truncated_frames_names_the_frame_that_hit_the_recompile_limit(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, explicit_capture=True)
+        compiled = torch._dynamo.optimize(backend="eager", package=pkg)(fn)
+        compiled(torch.randn(3))
+        self.assertEqual(pkg.truncated_frames, frozenset())
+        compiled(torch.randint(0, 5, (3,)))
+        code = fn.__code__
+        location = f"fn ({code.co_filename}:{code.co_firstlineno})"
+        self.assertEqual(pkg.truncated_frames, frozenset({location}))
+        # The variant captured before the limit stays in the package.
+        self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
+
+    def test_uncovered_frames_follows_the_entries(self):
+        # A frame that entered Dynamo without producing guarded code is a gap
+        # only while that stays true: a later variant that compiles covers it,
+        # whichever order the variants ran in.
+        def fn(x):
+            return x
+
+        code = fn.__code__
+        location = f"fn ({code.co_filename}:{code.co_firstlineno})"
+        pkg = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=pkg)(fn)(torch.randn(3))
+        self.assertEqual(pkg.uncovered_frames, frozenset({location}))
+        with pkg.code_context(fn.__code__):
+            pkg.add_guarded_code(b"", fn.__code__)
+        self.assertEqual(pkg.uncovered_frames, frozenset())
+
+    def test_uncovered_frames_distinguish_frames_that_share_a_name(self):
+        # Two frames that happen to share a co_name are still two gaps; keying
+        # uncovered_frames on the bare name collapses them and undercounts.
+        # Register the entries directly so the two code objects differ only in
+        # filename, isolating the key from the compile path.
+        from torch._dynamo.package import _DynamoCodeCacheEntry, SerializedCode
+
+        def fn(x):
+            return x
+
+        def one(x):
+            return x
+
+        def two(x):
+            return x + 0
+
+        code_a = one.__code__.replace(co_name="frame", co_filename="a.py")
+        code_b = two.__code__.replace(co_name="frame", co_filename="b.py")
+        pkg = CompilePackage(fn)
+        for code in (code_a, code_b):
+            pkg._codes[code] = _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(code),
+                python_module="m",
+                function_names=[],
+                guarded_codes=[],
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=False,
+                has_compile_id=True,
+            )
+        self.assertEqual(
+            pkg.uncovered_frames,
+            frozenset(
+                {
+                    f"frame (a.py:{code_a.co_firstlineno})",
+                    f"frame (b.py:{code_b.co_firstlineno})",
+                }
+            ),
+        )
+
+    def test_add_function_dedups_function_name(self):
+        # Two installs of one artifact re-add the same resume function under the
+        # same name. Appending it twice makes _resume_global_renames raise on
+        # the duplicate, which the failed-install fallback turns into a hard
+        # crash; _add_function must skip a name already present.
+        from torch._dynamo.package import _FunctionId
+
+        def fn(x):
+            return x + 1
+
+        def resume(x):
+            return x
+
+        pkg = CompilePackage(fn)
+        code = resume.__code__
+        name = _FunctionId("__resume_at_2_1")
+        pkg._add_function(
+            code, resume.__module__, function_name=name, install_to_global=True
+        )
+        pkg._add_function(
+            code, resume.__module__, function_name=name, install_to_global=True
+        )
+        self.assertEqual(pkg._codes[code].function_names, [name])
+
+    def test_resume_global_renames_rejects_duplicate_name(self):
+        # Two install_to_global entries in one package sharing a capture-time
+        # resume name would collapse onto one token-suffixed global (second
+        # wins). Surface it as a RuntimeError -- recoverable by the failed-
+        # install fallback -- rather than silently rebinding.
+        from torch._dynamo.package import (
+            _DynamoCodeCacheEntry,
+            _FunctionId,
+            _resume_global_renames,
+            SerializedCode,
+        )
+
+        def fn(x):
+            return x
+
+        def one(x):
+            return x
+
+        def two(x):
+            return x + 0
+
+        name = _FunctionId("__resume_at_6_1")
+        entries = [
+            _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(f.__code__),
+                python_module=f.__module__,
+                function_names=[name],
+                guarded_codes=[],
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=True,
+            )
+            for f in (one, two)
+        ]
+        with self.assertRaisesRegex(RuntimeError, "duplicate resume-function name"):
+            _resume_global_renames(entries, "tok")
+
+    def test_serving_package_records_nothing_and_still_recompiles(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, serving=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+        compiled(torch.randn(3))
+        compiled(torch.randint(0, 5, (3,)))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(pkg.cache_entry().codes[0].guarded_codes, [])
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))

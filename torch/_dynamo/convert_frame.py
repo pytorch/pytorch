@@ -57,6 +57,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+from torch._C._dynamo.eval_frame import _get_cache_entry_count_for_region
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
@@ -104,6 +105,7 @@ from .cache_size import (
 from .code_context import code_context
 from .eval_frame import (
     _get_cache_entries_for_region,
+    _get_explicit_compile_regions,
     _get_total_cache_entry_count,
     add_skip_reason,
     always_optimize_code_objects,
@@ -152,7 +154,13 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
+from .types import (
+    ConvertFrameReturn,
+    FrameAction,
+    FrameExecStrategy,
+    GuardFilterEntry,
+    wrap_guarded_code,
+)
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -399,6 +407,21 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
+
+
+def _inductor_codegen_config(compiler_fn: Any) -> dict[str, Any] | None:
+    # The precompile fingerprint's cpu_codegen_target is sampled after backend()
+    # returns, so the _TorchCompileInductorWrapper's config patch (e.g.
+    # cpp.simdlen) has already exited. Recover it from the wrapper chain so
+    # update_device_type can re-apply it while sampling; otherwise the
+    # fingerprint records the ambient ISA, not the one the kernels were tiled
+    # for, and a plain host reloads 256-tiled kernels under 512-bit flags.
+    fn = compiler_fn
+    while fn is not None:
+        if isinstance(fn, torch._TorchCompileInductorWrapper):
+            return fn.config
+        fn = getattr(fn, "_torchdynamo_orig_backend", None)
+    return None
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
@@ -655,7 +678,18 @@ class ConvertFrameAssert:
             )
         else:
             cache_entries_for_reasons = cache_entries
-        total_count = _get_total_cache_entry_count(code)
+        package = self._package
+        explicit_package = package is not None and package.explicit_capture
+        if explicit_package:
+            if package is None:
+                raise AssertionError("explicit package must not be None")
+            total_count = package.guarded_code_count(code)
+            if package.serving:
+                total_count += len(cache_entries)
+        else:
+            total_count = _get_total_cache_entry_count(code)
+            for region_id in _get_explicit_compile_regions():
+                total_count -= _get_cache_entry_count_for_region(code, region_id)
         cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
@@ -771,9 +805,21 @@ class ConvertFrameAssert:
         try:
             compile_ctx = compile_context(CompileContext(compile_id))
             # When recompile_limit is set, temporarily override the global
-            # config so the existing exceeds_recompile_limit check uses it.
+            # config so the existing exceeds_recompile_limit check uses it. An
+            # explicit package also raises a lower accumulated cap; ordinary
+            # torch.compile keeps the ambient global safety limit.
             recompile_ctx = (
-                config.patch(recompile_limit=self._recompile_limit)
+                config.patch(
+                    recompile_limit=self._recompile_limit,
+                    accumulated_recompile_limit=(
+                        max(
+                            config.accumulated_recompile_limit,
+                            self._recompile_limit,
+                        )
+                        if explicit_package
+                        else config.accumulated_recompile_limit
+                    ),
+                )
                 if self._recompile_limit is not None
                 else contextlib.nullcontext()
             )
@@ -804,11 +850,21 @@ class ConvertFrameAssert:
             # Restore the previous initial_global_state for nested compilation handling
             initial_global_state = prev_initial_global_state
 
-        if config.caching_precompile and self._package is not None:
+        if (
+            config.caching_precompile
+            and self._package is not None
+            and not self._package.explicit_capture
+        ):
             from .package import DynamoCache
 
-            # Record that the dynamo package has changed
-            DynamoCache.record_package(self._package)
+            # Record that the dynamo package has changed. A package that
+            # cannot be serialized (e.g. its CPU codegen target drifted
+            # mid-capture) must not fail the user's compile; it just is not
+            # persisted.
+            try:
+                DynamoCache.record_package(self._package)
+            except PackageError as e:
+                log.warning("Not recording compile package: %s", e)
         return result
 
 
@@ -1009,6 +1065,12 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1029,14 +1091,28 @@ class DynamoOutput:
 
         if not fx_experimental_config.translation_validation:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
 
         try:
             return self._build_guards(
-                code, output_graph, cache_entries, hooks, save, strict_error
+                code,
+                output_graph,
+                cache_entries,
+                hooks,
+                save,
+                strict_error,
+                serialization_guard_filter_fn,
+                explicit_capture,
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1050,6 +1126,12 @@ class DynamoOutput:
         hooks: Hooks | None,
         save: bool,
         strict_error: bool,
+        serialization_guard_filter_fn: collections.abc.Callable[
+            [collections.abc.Sequence[GuardFilterEntry]],
+            collections.abc.Sequence[bool],
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1057,6 +1139,8 @@ class DynamoOutput:
             cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
+            serialization_guard_filter_fn=serialization_guard_filter_fn,
+            explicit_capture=explicit_capture,
             save_guards=save,
             strict_error=strict_error,
         )
@@ -1960,25 +2044,46 @@ def _compile(
             build_guards_ctx.enter_context(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
+        explicit_capture = package is not None and package.explicit_capture
+        record = package is not None and not package.serving
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=output.package is not None,
+                save=record
+                and output.package is not None
+                and not output.package.current_entry_bypassed(),
                 cache_entries=cache_entries,
+                serialization_guard_filter_fn=(
+                    package.serialization_guard_filter_fn
+                    if package is not None
+                    else None
+                ),
+                explicit_capture=explicit_capture,
+                strict_error=record and explicit_capture,
             )
 
         # bypass_package sets output.package to None when this entry was bypassed
         # (unserializable guards, or a graph holding named parameters); the local
         # `package` still holds the object.
-        # Skip the whole block in that case: a bypassed entry contributes none
-        # of its guards, inlined source, or device type to the package.
-        if output.package is not None:
+        # An entry bypassed on an earlier recompile stays bypassed, and
+        # add_guarded_code/add_inlined_source/update_device_type all no-op on it.
+        # Skip the whole block in either case: a bypassed entry contributes none
+        # of its guards, inlined source, or device type, and `save` above is
+        # gated identically so guards_state is deliberately None here.
+        if (
+            record
+            and output.package is not None
+            and not output.package.current_entry_bypassed()
+        ):
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
             output.package.add_inlined_source(output.tracing_context.traced_code)
-            output.package.update_device_type(output.current_tracer.graph)
+            output.package.update_device_type(
+                output.current_tracer.graph,
+                codegen_config=_inductor_codegen_config(compiler_fn),
+            )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -2069,6 +2174,29 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+
+            if package is not None and package.current_entry is not None:
+                # This frame will stop compiling new variants, so the ones
+                # past the limit will never be captured. Record that so a caller
+                # building an artifact can detect the gap. Deliberately not a
+                # bypass: the variants captured so far are still valid and must
+                # stay installable, and for a cache a miss just recompiles.
+                # Only this frame is named even though the RUN_ONLY strategy set
+                # below is recursive: frames called beneath it go short too, and
+                # never re-enter here, so the record is a lower bound.
+                package.mark_current_entry_truncated()
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_truncated",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: {
+                        "reason": f"hit {limit_type}",
+                        "function": format_func_info(code),
+                    },
+                    expect_trace_id=False,
+                )
 
             def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
