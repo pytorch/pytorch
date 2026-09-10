@@ -1,7 +1,5 @@
-# Shared launch-plan memoization. A plan is the compiled kernel plus every shape-invariant host
-# decision, derived once per operand signature -- without it the eager host cost is dominated
-# by re-deriving the plan rather than by the launch. A plan of None is a valid memoized result
-# meaning "declined", cached so a non-trivial decline is not recomputed.
+# Cache compiled kernels and shape-invariant host decisions by operand signature. None is a
+# cached decline, avoiding repeated plan derivation on eager calls.
 
 from __future__ import annotations
 
@@ -13,19 +11,15 @@ if TYPE_CHECKING:
 
 
 def cached_plan(cache: dict, key, build: Callable, *, op: str | None = None):
-    """Return ``build()``'s plan for ``key``, memoized in ``cache``; None means declined.
-
-    ``op`` wraps the build -- which fires only on a MISS, i.e. exactly when a real compile
-    happens -- in the TLParse instrumentation. This is the chokepoint every CuteDSL native op
-    shares, so instrumenting here covers the family; None gives the plain memo.
+    """Memoize build() by key, including None declines. When op is set, instrument
+    the miss-only build so every real compile emits TLParse data.
     """
     plan = cache.get(key, _MISS)
     if plan is _MISS:
         if op is not None:
             from torch._native.instrumentation import instrument_cutedsl_compile
 
-            # compiled=True, not inferred: `build` is a plain closure with no cache_info and runs only on
-            # the MISS arm, so the miss-delta inference would call every real compile a cache hit.
+            # build is a miss-only closure without cache_info, so mark compilation explicitly.
             plan = instrument_cutedsl_compile(
                 op, key_fn=lambda: str(key), compiled=True
             )(build)()
