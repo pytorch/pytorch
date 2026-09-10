@@ -27,13 +27,20 @@ from torch._inductor.comms import (
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.dependencies import WeakDep
 from torch._inductor.fx_passes.bucketing import (
+    _ALL_DTYPES,
+    _compute_foreach_groups,
     _insert_fn_trace_before_node,
+    _match_dim0_padded_cat,
+    _pre_bucket_all_gather,
+    _pre_bucket_reduce_scatter,
     _trace as bucketing_trace,
+    _unpack_all_gather_output,
     all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
     is_all_to_all_tensor,
     is_reduce_scatter_tensor,
+    merge_reduce_scatter_bucket,
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.memory import SNodeMemory
@@ -46,6 +53,7 @@ from torch._inductor.scheduler import (
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch._subclasses import FakeTensorMode
 from torch.distributed.distributed_c10d import GroupMember
+from torch.distributed.tensor.placement_types import Shard
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -141,25 +149,238 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("16*((u0//2))" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.fsdp.split_with_sizes_copy.default
+                for node in gm.graph.nodes
+            )
+        )
 
-    def test_all_gather_bucket_trace_requires_unbacked_chunk_hint(self):
+    def test_all_gather_bucket_trace_uses_fused_unpack_for_static_shapes(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertEqual(
+            targets.count(torch.ops.fsdp.split_with_sizes_copy.default),
+            1,
+        )
+        self.assertNotIn(torch.ops.aten.split_with_sizes.default, targets)
+
+    def test_all_gather_singleton_bucket_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+
+        gm = bucketing_trace(
+            lambda value: all_gather_merge_fn_to_trace_custom_ops(
+                [value],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32],
+                0,
+            ),
+            (x,),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.fsdp.split_with_sizes_copy.default
+                for node in gm.graph.nodes
+            )
+        )
+
+    def test_all_gather_group_size_one_does_not_copy_unpack(self):
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(3, 4)
+            y = torch.empty(5, 2)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                1,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        self.assertFalse(
+            any(
+                node.target == torch.ops.fsdp.split_with_sizes_copy.default
+                for node in gm.graph.nodes
+            )
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_fused_all_gather_unpack_handles_mixed_dtypes(self):
+        group_size = 2
+        expected_bfloat16 = torch.arange(
+            6,
+            device="cuda",
+            dtype=torch.bfloat16,
+        ).reshape(group_size, 3)
+        expected_float32 = torch.arange(
+            8,
+            device="cuda",
+            dtype=torch.float32,
+        ).reshape(group_size, 4)
+        expected_empty = torch.empty(
+            group_size,
+            0,
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        rank_major_bytes = torch.cat(
+            [
+                torch.cat(
+                    [
+                        expected_bfloat16[rank].view(torch.uint8),
+                        expected_float32[rank].view(torch.uint8),
+                        expected_empty[rank].view(torch.uint8),
+                    ]
+                )
+                for rank in range(group_size)
+            ]
+        )
+
+        actual = _unpack_all_gather_output(
+            rank_major_bytes,
+            [torch.Size((3,)), torch.Size((2, 2)), torch.Size((0,))],
+            [6, 16, 0],
+            [torch.bfloat16, torch.float32, torch.bfloat16],
+            group_size,
+            torch.uint8,
+        )
+
+        self.assertEqual(actual[0], expected_bfloat16.flatten())
+        self.assertEqual(actual[1], expected_float32.reshape(4, 2))
+        self.assertEqual(actual[2].numel(), 0)
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_all_gather_unpack_handles_all_empty_outputs(self):
+        actual = _unpack_all_gather_output(
+            torch.empty(2, 0, device="cuda", dtype=torch.uint8),
+            [torch.Size((0,)), torch.Size((0, 3))],
+            [0, 0],
+            [torch.float32, torch.bfloat16],
+            2,
+            torch.uint8,
+        )
+
+        self.assertEqual(actual[0].shape, (0,))
+        self.assertEqual(actual[1].shape, (0, 3))
+        self.assertTrue(all(output.is_contiguous() for output in actual))
+
+    def test_all_gather_bucket_trace_accepts_unhinted_unbacked_chunk_numel(self):
         x, y = self._make_hinted_unbacked_chunked_fake_inputs()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Collective bucketing requires hinted symbolic sizes",
-        ):
-            bucketing_trace(
-                lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
-                    [a, b],
-                    "0",
-                    2,
-                    torch.float32,
-                    [torch.float32, torch.float32],
-                    0,
-                ),
-                (x, y),
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertFalse(
+            any(
+                node.target == torch.ops.fsdp.split_with_sizes_copy.default
+                for node in gm.graph.nodes
             )
+        )
+
+    def test_all_gather_foreach_groups_ignore_tensor_shape(self):
+        inputs = [torch.empty(3), torch.empty(2, 4), torch.empty(0)]
+
+        self.assertIsNone(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs))
+        )
+
+    def test_all_gather_foreach_groups_preserve_dtype_pairs(self):
+        inputs = [
+            torch.empty(3, dtype=torch.bfloat16),
+            torch.empty(4, dtype=torch.bfloat16),
+            torch.empty(5, dtype=torch.float32),
+            torch.empty(6, dtype=torch.bfloat16),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(
+                inputs,
+                [
+                    torch.bfloat16,
+                    torch.float32,
+                    torch.float32,
+                    torch.bfloat16,
+                ],
+            ),
+            [0, 3, -1, 1, -1, 2],
+        )
+
+    def test_all_gather_foreach_groups_isolate_noncontiguous_inputs(self):
+        inputs = [
+            torch.empty(3),
+            torch.empty(8)[::2],
+            torch.empty(5),
+        ]
+
+        self.assertEqual(
+            _compute_foreach_groups(inputs, [torch.float32] * len(inputs)),
+            [0, 2, -1, 1],
+        )
+
+    @unittest.skipUnless(HAS_GPU, "CUDA required")
+    def test_pre_bucket_all_gather_foreach_handles_different_lengths(self):
+        inputs = [
+            torch.arange(3, device="cuda", dtype=torch.bfloat16),
+            torch.arange(8, device="cuda", dtype=torch.bfloat16).reshape(2, 4).T,
+            torch.empty(0, device="cuda", dtype=torch.bfloat16),
+            torch.arange(5, device="cuda", dtype=torch.bfloat16),
+        ]
+        out_dtypes = [torch.bfloat16] * len(inputs)
+
+        actual = _pre_bucket_all_gather(
+            inputs,
+            1,
+            torch.bfloat16,
+            [_ALL_DTYPES.index(dtype) for dtype in out_dtypes],
+            0,
+            _compute_foreach_groups(inputs, out_dtypes),
+        )
+
+        expected = torch.cat([value.reshape(-1) for value in inputs])
+        self.assertEqual(actual, expected)
 
     def test_reduce_scatter_bucket_trace_preserves_hinted_unbacked_chunk_shapes(self):
         x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
@@ -184,6 +405,248 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
+
+    def test_pre_bucket_reduce_scatter_chunk_cat_handles_uneven_and_empty(self):
+        group_size = 4
+        inputs = [
+            torch.arange(20, dtype=torch.float32).reshape(5, 4),
+            torch.arange(12, dtype=torch.float32).reshape(6, 2),
+            torch.empty(0, 3),
+        ]
+
+        rank_chunks = []
+        for rank in range(group_size):
+            chunks = []
+            for value in inputs:
+                if value.numel() == 0:
+                    continue
+                chunk_size = (value.shape[0] + group_size - 1) // group_size
+                chunk = value.narrow(
+                    0,
+                    min(rank * chunk_size, value.shape[0]),
+                    max(
+                        0,
+                        min(chunk_size, value.shape[0] - rank * chunk_size),
+                    ),
+                ).flatten()
+                chunks.append(
+                    torch.nn.functional.pad(
+                        chunk,
+                        (0, chunk_size * value[0].numel() - chunk.numel()),
+                    )
+                )
+            rank_chunks.append(torch.cat(chunks))
+        expected = torch.cat(rank_chunks)
+
+        actual = _pre_bucket_reduce_scatter(
+            inputs,
+            group_size,
+            list(range(len(inputs))),
+        )
+
+        self.assertEqual(actual, expected)
+        packed_second_input = torch.nn.functional.pad(inputs[1], (0, 0, 0, 2))
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [inputs[0], packed_second_input, inputs[2]],
+                group_size,
+                [0],
+            ),
+            expected,
+        )
+        self.assertEqual(
+            _pre_bucket_reduce_scatter(
+                [torch.empty(0, 3), torch.empty(4, 0)],
+                group_size,
+                [0, 1],
+            ).numel(),
+            0,
+        )
+
+    def test_pre_bucket_reduce_scatter_preserves_packed_symbolic_numel(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            symbolic_size = fake_mode.shape_env.create_unbacked_symint()
+            logical_input = torch.empty(5, 4)
+            packed_input = torch.empty(symbolic_size, 3)
+            output = _pre_bucket_reduce_scatter(
+                [logical_input, packed_input],
+                2,
+                [0],
+            )
+
+        self.assertEqual(
+            output.shape[0].node.expr,
+            24 + 3 * symbolic_size.node.expr,
+        )
+
+    def test_match_dim0_padded_cat(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        def add_reduce_scatter_consumer(gm, cat):
+            output = next(node for node in gm.graph.nodes if node.op == "output")
+            with gm.graph.inserting_before(output):
+                reduce_scatter = gm.graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(cat, "sum", 4, "0"),
+                )
+            output.args = (reduce_scatter,)
+            return reduce_scatter
+
+        gm = make_fx(padded_input)(torch.empty(5, 4, device="meta"))
+        cat = next(
+            node for node in gm.graph.nodes if node.target == torch.ops.aten.cat.default
+        )
+        reduce_scatter = add_reduce_scatter_consumer(gm, cat)
+
+        match = _match_dim0_padded_cat(cat, 4, reduce_scatter)
+
+        self.assertIsNotNone(match)
+        source, packing_nodes = match
+        self.assertEqual(source.op, "placeholder")
+        self.assertIn(cat, packing_nodes)
+
+        def padded_input_with_promoted_empty(value):
+            chunks = list(torch.chunk(value, 4, dim=0))
+            empty = chunks[0].new_zeros((0, value.shape[1]), dtype=torch.float64)
+            chunks.extend([empty] * (4 - len(chunks)))
+            chunk_size = (value.shape[0] + 3) // 4
+            chunks = [
+                torch.nn.functional.pad(
+                    chunk,
+                    (0, 0, 0, chunk_size - chunk.shape[0]),
+                )
+                for chunk in chunks
+            ]
+            return torch.cat(chunks, dim=0)
+
+        promoted_gm = make_fx(padded_input_with_promoted_empty)(
+            torch.empty(5, 4, device="meta")
+        )
+        promoted_cat = next(
+            node
+            for node in promoted_gm.graph.nodes
+            if node.target == torch.ops.aten.cat.default
+        )
+        promoted_reduce_scatter = add_reduce_scatter_consumer(
+            promoted_gm,
+            promoted_cat,
+        )
+        self.assertEqual(promoted_cat.meta["val"].dtype, torch.float64)
+        self.assertIsNone(
+            _match_dim0_padded_cat(promoted_cat, 4, promoted_reduce_scatter)
+        )
+
+        pad = next(
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.constant_pad_nd.default
+        )
+        original_args = pad.args
+        original_kwargs = pad.kwargs
+        pad.args = pad.args[:2]
+        pad.kwargs = {"value": 1}
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4, reduce_scatter))
+        pad.args = original_args
+        pad.kwargs = original_kwargs
+
+        with gm.graph.inserting_before(reduce_scatter):
+            mutation = gm.graph.call_function(
+                torch.ops.aten.add_.Tensor,
+                args=(source, 1),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4, reduce_scatter))
+        gm.graph.erase_node(mutation)
+
+        with gm.graph.inserting_before(reduce_scatter):
+            cat_fanout = gm.graph.call_function(
+                torch.ops.aten.neg.default,
+                args=(cat,),
+            )
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4, reduce_scatter))
+        gm.graph.erase_node(cat_fanout)
+
+        cat_inputs = list(cat.args[0])
+        cat_inputs[0], cat_inputs[1] = cat_inputs[1], cat_inputs[0]
+        cat.args = (cat_inputs,)
+        self.assertIsNone(_match_dim0_padded_cat(cat, 4, reduce_scatter))
+
+    def test_reduce_scatter_bucket_unwraps_dim0_padding(self):
+        def padded_input(value):
+            chunks, _ = Shard(0)._split_tensor(
+                value,
+                4,
+                with_padding=True,
+                contiguous=True,
+            )
+            return torch.cat(chunks, dim=0)
+
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            x = torch.empty(5, 4)
+            y = torch.empty(7, 2)
+        gm = make_fx(lambda x, y: (padded_input(x), padded_input(y)))(x, y)
+        graph = gm.graph
+        output = next(node for node in graph.nodes if node.op == "output")
+        packed_inputs = output.args[0]
+        waits = []
+        reduce_scatters = []
+        with graph.inserting_before(output):
+            for packed_input in packed_inputs:
+                reduce_scatter = graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    args=(packed_input, "sum", 4, "0"),
+                )
+                output_shape = (packed_input.meta["val"].shape[0] // 4,) + tuple(
+                    packed_input.meta["val"].shape[1:]
+                )
+                reduce_scatter.meta["val"] = packed_input.meta["val"].new_empty(
+                    output_shape
+                )
+                wait = graph.call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    args=(reduce_scatter,),
+                )
+                wait.meta["val"] = reduce_scatter.meta["val"]
+                reduce_scatters.append(reduce_scatter)
+                waits.append(wait)
+        output.args = (tuple(waits),)
+
+        _, replacements = merge_reduce_scatter_bucket(
+            graph,
+            reduce_scatters,
+            mode="custom_ops",
+        )
+        graph.lint()
+
+        pre_bucket = next(
+            node
+            for node in graph.nodes
+            if node.target == torch.ops.bucketing._pre_bucket_reduce_scatter.default
+        )
+        self.assertEqual(
+            [node.op for node in pre_bucket.args[0]],
+            ["placeholder", "placeholder"],
+        )
+        targets = {node.target for node in graph.nodes}
+        self.assertNotIn(torch.ops.aten.split.Tensor, targets)
+        self.assertNotIn(torch.ops.aten.constant_pad_nd.default, targets)
+        self.assertNotIn(torch.ops.aten.new_zeros.default, targets)
+        self.assertNotIn(torch.ops.aten.cat.default, targets)
+        self.assertEqual(
+            [replacements[wait].meta["val"].shape for wait in waits],
+            [torch.Size((2, 4)), torch.Size((2, 2))],
+        )
 
     def test_replacement_updates_layout_dependent_user_metadata(self):
         graph = torch.fx.Graph()
