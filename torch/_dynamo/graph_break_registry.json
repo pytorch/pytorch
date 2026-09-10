@@ -3974,6 +3974,16 @@
       ]
     }
   ],
+  "GB8982": [
+    {
+      "Gb_type": "Unsupported callable in torch.autograd.Function staticmethod",
+      "Context": "{self.fn_cls.__qualname__}.{name}",
+      "Explanation": "Dynamo could not determine how to trace a staticmethod on a torch.autograd.Function subclass.",
+      "Hints": [
+        "Use a standard function or another supported callable."
+      ]
+    }
+  ],
   "GB3069": [
     {
       "Gb_type": "Custom op missing fake impl during tracing",
@@ -6370,6 +6380,16 @@
         "Detach the input tensor before passing to the compiled function: `tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
         "Or move the autograd.grad() call outside the compiled region.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9958": [
+    {
+      "Gb_type": "Missing attribute on torch.autograd.Function subclass",
+      "Context": "{self.fn_cls.__qualname__}.{name}",
+      "Explanation": "Dynamo could not statically resolve an attribute access on a torch.autograd.Function subclass.",
+      "Hints": [
+        "Define the missing autograd.Function attribute before compiling."
       ]
     }
   ],
