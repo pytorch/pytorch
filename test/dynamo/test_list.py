@@ -7,7 +7,9 @@ import collections
 import sys
 
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
@@ -22,6 +24,11 @@ class AlwaysEqualForListRemove:
 class NeverEqualForListRemove:
     def __eq__(self, other):
         return False
+
+
+class IndexForListPop:
+    def __index__(self):
+        return 1
 
 
 class CmpKeyForListSort:
@@ -287,6 +294,24 @@ class ListTests(TupleTests):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)
+
+    @make_dynamo_test
+    def test_pop_index_conversion(self):
+        # list_pop_impl wraps a negative index and then bounds-checks, so both
+        # ends are out of range; the index itself goes through the Py_ssize_t
+        # clinic converter, which honours __index__ and rejects everything
+        # else before the body runs.
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(-2), "c")
+        self.assertEqual(p.pop(IndexForListPop()), "b")
+        self.assertEqual(p, ["a", "d"])
+        self.assertRaises(IndexError, p.pop, -3)
+        self.assertRaises(TypeError, p.pop, 1.0)
+        self.assertRaises(OverflowError, p.pop, 2**80)
+
+        # The conversion precedes the empty-list check.
+        self.assertRaises(TypeError, self.thetype().pop, 1.0)
+        self.assertRaises(IndexError, self.thetype().pop, 0)
 
     @make_dynamo_test
     def test_remove(self):
@@ -600,6 +625,73 @@ class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
                 return str(e)
 
         self._check(fn)
+
+
+class SymIntIndexTests(torch._dynamo.test_case.TestCase):
+    # A shape-derived index is a SymNodeVariable, not a Python constant. Which
+    # element leaves the list decides what the traced graph does, so list.pop()
+    # specializes the index under a guard instead of refusing it.
+    # See https://github.com/pytorch/pytorch/issues/196285.
+    def _check(self, fn, sizes):
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True, dynamic=True)
+        for n in sizes:
+            x = torch.ones(n)
+            self.assertEqual(compiled(x), fn(x))
+        return cnts
+
+    def test_pop_sym_index(self):
+        def fn(x):
+            values = [x * 2, x * 3, x * 4]
+            return values.pop(x.shape[0] - 2) + values[0]
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_negative(self):
+        def fn(x):
+            values = [x * 2, x * 3, x * 4]
+            return values.pop(-x.shape[0]) + values[0]
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_recompiles(self):
+        # The specialized index is guarded, so a size that selects a different
+        # element recompiles rather than reusing the graph.
+        def fn(x):
+            values = [x + 1, x + 2, x + 3]
+            return values.pop(x.shape[0] - 3) * 10 + values[0]
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_sym_index_out_of_range(self):
+        def fn(x):
+            try:
+                [1, 2, 3].pop(x.shape[0] + 5)
+            except IndexError as e:
+                return str(e)
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_out_of_range_negative(self):
+        def fn(x):
+            try:
+                [1, 2, 3].pop(-x.shape[0] - 5)
+            except IndexError as e:
+                return str(e)
+
+        self._check(fn, [3])
+
+    def test_pop_unbacked_index_raises(self):
+        # A value-dependent index is unbacked: there is no shape guard that
+        # could make the choice of element sound, so pop has to refuse it
+        # rather than specialize on whatever the first sample happened to be.
+        def fn(x):
+            return [1, 2, 3].pop(x.sum().item() % 3)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled(torch.ones(3, dtype=torch.int64))
 
 
 if __name__ == "__main__":
