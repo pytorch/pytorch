@@ -496,7 +496,12 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i32",
+                "XBLOCK": "constexpr",
+            },
             "device": DeviceProperties.create(torch.device(GPU_TYPE)),
             "constants": {},
             "configs": [
@@ -876,10 +881,6 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
-# Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
-# attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
-# used by these tests. CUDA paths are unaffected.
-@skipIfRocm
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
