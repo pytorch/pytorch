@@ -16,13 +16,21 @@ inline void arange_check_bounds(
     auto stepc = step.to<c10::complex<double>>();
 
     TORCH_CHECK(stepc.real() != 0 || stepc.imag() != 0, "step must be nonzero");
-    TORCH_CHECK(((stepc.real() > 0) && (endc.real() >= startc.real())) ||
-        ((stepc.real() <= 0) && (endc.real() <= startc.real())),
-        "upper bound and lower bound inconsistent with step sign for real part");
+    if(stepc.real() == 0) {
+      TORCH_CHECK(endc.real() == startc.real(),
+                  "step real part is zero but range is nonzero");
+    } else {
+      TORCH_CHECK(((stepc.real() > 0) && (endc.real() >= startc.real())) ||
+          ((stepc.real() < 0) && (endc.real() <= startc.real())),
+          "upper bound and lower bound inconsistent with step sign for real part");
+    }
 
-    if(stepc.imag() != 0) {
-    TORCH_CHECK(((stepc.imag() > 0) && (endc.imag() >= startc.imag())) ||
-        ((stepc.imag() <= 0) && (endc.imag() <= startc.imag())),
+    if(stepc.imag() == 0) {
+      TORCH_CHECK(endc.imag() == startc.imag(),
+                  "step imaginary part is zero but range is nonzero");
+    } else {
+      TORCH_CHECK(((stepc.imag() > 0) && (endc.imag() >= startc.imag())) ||
+        ((stepc.imag() < 0) && (endc.imag() <= startc.imag())),
         "upper bound and lower bound inconsistent with step sign for imaginary part");
     }
 
@@ -91,7 +99,8 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
     auto xstepc = step.to<step_t>();
     auto distance = xendc - xstartc;
 
-    TORCH_CHECK(!(xstepc.real() == 0 && xstepc.imag() == 0), "complex step must be nonzero");
+    TORCH_CHECK(!(xstepc.real() == 0 && xstepc.imag() == 0),
+                "complex step must be nonzero");
     if(xstepc.real() == 0) {
       size_d = std::ceil((distance.imag()) / xstepc.imag());
     } else if (xstepc.imag() == 0) {

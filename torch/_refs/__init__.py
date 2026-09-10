@@ -5564,7 +5564,12 @@ def arange(
         end = complex(end)
         step = complex(step)
 
-        if step.real > 0:
+        if step.real == 0:
+            torch._check(
+                end.real == start.real,
+                lambda: "step real part is zero but real range is nonzero",
+            )
+        elif step.real > 0:
             torch._check(
                 end.real >= start.real,
                 lambda: "upper bound and lower bound inconsistent with step sign in real part",
@@ -5575,7 +5580,12 @@ def arange(
                 lambda: "upper bound and lower bound inconsistent with step sign in real part",
             )
 
-        if step.imag > 0:
+        if step.imag == 0:
+            torch._check(
+                end.imag == start.imag,
+                lambda: "step imaginary part is zero but imaginary range is nonzero",
+            )
+        elif step.imag > 0:
             torch._check(
                 end.imag >= start.imag,
                 lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
