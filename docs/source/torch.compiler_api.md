@@ -304,6 +304,19 @@ deprecation cycle.
 .. autoexception:: torch.compiler.PrecompileError
    :members: result
 
+.. autoclass:: torch.compiler.PrecompiledRunnable
+   :members: unload
+
+   Every object :func:`precompile.load` returns is one of these, whichever of the
+   two shapes below the capture produced, so ``isinstance(loaded,
+   torch.compiler.PrecompiledRunnable)`` holds for both.
+
+.. autoclass:: torch.compiler.PrecompiledCallable
+   :members: unload, serve_time_compiles
+
+   Returned by :func:`precompile.load` for an artifact that serves by installing,
+   and used as a callable or context manager; it is not constructed directly.
+
 .. py:class:: precompile.MakeFxTracer(decompositions=None)
 
    The ``make_fx`` capture front-end, passed as ``tracer=`` to
