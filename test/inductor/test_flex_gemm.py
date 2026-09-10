@@ -302,13 +302,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         ):
             check_quack_fp32_operand(fp32)
 
-    def test_tensorssa_clamp_codegen_uses_public_cutlass_api(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmTensorSSAOpOverrides,
+    def test_clamp_codegen_uses_public_cutlass_api(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmCuteDSLOpOverrides,
         )
 
         self.assertEqual(
-            FlexGemmTensorSSAOpOverrides.clamp("x", "lower", "upper"),
+            FlexGemmCuteDSLOpOverrides.clamp("x", "lower", "upper"),
             "cutlass.min(cutlass.max(x, lower), upper)",
         )
 
@@ -316,17 +316,15 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
             use_cutedsl_fast_math,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmTensorSSAOpOverrides,
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            FlexGemmCuteDSLOpOverrides,
         )
 
         with use_cutedsl_fast_math(False):
-            self.assertEqual(
-                FlexGemmTensorSSAOpOverrides.sqrt("a"), "cute.math.sqrt(a)"
-            )
+            self.assertEqual(FlexGemmCuteDSLOpOverrides.sqrt("a"), "cute.math.sqrt(a)")
         with use_cutedsl_fast_math(True):
             self.assertEqual(
-                FlexGemmTensorSSAOpOverrides.sqrt("a"),
+                FlexGemmCuteDSLOpOverrides.sqrt("a"),
                 "cute.math.sqrt(a, fastmath=True)",
             )
 
@@ -457,18 +455,18 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(flex_gemm_search_space(unranked, varlen=True), unranked)
         # Grouped-main stores only accept cluster_n == 1 configs (tile_m 128 needs
         # cluster_m 1); the varlen table ranks two of them after the others.
-        grouped_main_legal = (
+        output_contraction_legal = (
             quack_default,
             key(128, 128, 1, 1, False),
             key(256, 128, 2, 1, True),
             key(128, 128, 1, 1, True),
         )
         self.assertEqual(
-            flex_gemm_default_config(grouped_main_legal, varlen=True),
+            flex_gemm_default_config(output_contraction_legal, varlen=True),
             key(128, 128, 1, 1, True),
         )
         self.assertEqual(
-            flex_gemm_search_space(grouped_main_legal, varlen=True),
+            flex_gemm_search_space(output_contraction_legal, varlen=True),
             (key(128, 128, 1, 1, True), key(256, 128, 2, 1, True)),
         )
 
@@ -716,7 +714,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
 
     def test_local_reduce_propagates_before_grouped_view_matching(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import gemm_node
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import gemm_node
         from torch._inductor.kernel.gemm_epilogue_analysis import (
             GemmLocalReduceAnalysis,
         )
@@ -772,13 +770,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertIsNone(grouped_tensor_layout((4, 5, group), (4, 8)))
         self.assertEqual(shape_env.guards, [])
 
-    def test_grouped_main_output_recognizer_only_mutates_analysis_on_match(self):
+    def test_output_contraction_plan_only_mutates_analysis_on_match(self):
         """Rejected recognitions must not leak grouped layouts or guards."""
         from torch._dynamo.source import ConstantSource
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -795,7 +793,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             halves = acc.chunk(2, dim=-1)
             return torch.nn.functional.silu(halves[0]) * halves[1]
 
-        chunked = FlexGemmGroupedMainOutputTransform(group=2, chunked=True)
+        chunked = FlexGemmOutputContraction(group=2, chunked=True)
         for body, expected_transform in (
             (swap_halves_plus_acc, None),
             (silu_mul_halves, chunked),
@@ -819,11 +817,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     if node.target is torch.ops.aten.split.Tensor
                 ]
                 self.assertTrue(split_nodes)
-                self.assertEqual(analysis.outputs.main_transform, expected_transform)
+                self.assertEqual(
+                    analysis.outputs.output_contraction, expected_transform
+                )
                 registered = [
                     node
                     for node in split_nodes
-                    if node in analysis.grouped_main_layouts
+                    if node in analysis.output_contraction_layouts
                 ]
                 self.assertEqual(registered, split_nodes if expected_transform else [])
                 if shape_env is not None:
@@ -832,9 +832,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
     @parametrize("chunked", (False, True))
     def test_nested_tensorssa_contraction_reduction_analysis(self, chunked):
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -861,8 +861,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertEqual(local_reduce.match.physical_span, 2)
         self.assertEqual(local_reduce.match.geometry.group, 32)
         self.assertEqual(
-            analysis.outputs.main_transform,
-            FlexGemmGroupedMainOutputTransform(group=2, chunked=chunked),
+            analysis.outputs.output_contraction,
+            FlexGemmOutputContraction(group=2, chunked=chunked),
         )
         output_fact = analysis.local_reduce.tensorssa_facts[analysis.outputs.output]
         self.assertTrue(output_fact.complete)
@@ -871,9 +871,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
     def test_nested_tensorssa_nvfp4_storage_analysis(self):
         from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
         from torch._inductor.kernel.flex_gemm.constraints import (
-            FlexGemmGroupedMainOutputTransform,
+            FlexGemmOutputContraction,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -898,8 +898,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertEqual(
-            analysis.outputs.main_transform,
-            FlexGemmGroupedMainOutputTransform(group=4, chunked=True),
+            analysis.outputs.output_contraction,
+            FlexGemmOutputContraction(group=4, chunked=True),
         )
         local_reduce = analysis.outputs.local_reduce
         self.assertIsNotNone(local_reduce)
@@ -912,7 +912,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("case", ("capture", "partial_lane", "unknown_transform"))
     def test_nested_tensorssa_composition_fails_closed(self, case):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -945,7 +945,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("case", ("storage_reduce", "span4_reduce", "store_only"))
     def test_nested_tensorssa_reduction_domain_fails_closed(self, case):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -982,7 +982,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_rejected_grouped_select_does_not_install_index_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1025,14 +1025,14 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         analysis = analyze_flex_gemm_epilogue(
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
-        self.assertIsNone(analysis.outputs.main_transform)
-        self.assertEqual(analysis.grouped_main_layouts, {})
+        self.assertIsNone(analysis.outputs.output_contraction)
+        self.assertEqual(analysis.output_contraction_layouts, {})
         self.assertEqual(shape_env.guards, [])
 
     @parametrize("pointwise", (False, True))
     def test_accepted_grouped_reduction_installs_group_guard(self, pointwise):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1064,7 +1064,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_active_grouped_layout_installs_own_structural_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1102,8 +1102,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(len(shape_env.guards), 1)
 
-    def test_grouped_main_output_does_not_contract_other_axes(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+    def test_output_contraction_does_not_contract_other_axes(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1126,10 +1126,10 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 analysis = analyze_flex_gemm_epilogue(
                     graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
                 )
-                self.assertIsNone(analysis.outputs.main_transform)
+                self.assertIsNone(analysis.outputs.output_contraction)
 
     def test_indexed_output_accepts_gather_from_converted_main(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1171,7 +1171,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 "terminal dtype views",
             ),
             (
-                "grouped_main_composition",
+                "output_contraction_composition",
                 paired_difference_main,
                 torch.tensor([0, 3, 4, 7]),
                 "do not yet compose",
@@ -1180,7 +1180,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         name_fn=lambda case: case[0],
     )
     def test_indexed_output_rejects(self, case):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1199,7 +1199,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             )
 
     def test_indexed_output_rejects_shared_terminal_conversion(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             flex_gemm_indexed_output_store,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -1219,7 +1219,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertIsNone(flex_gemm_indexed_output_store(main, indexed))
 
     def test_indexed_output_plan_preserves_aux_order(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1251,7 +1251,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_indexed_output_debug_report(self):
         from torch._inductor.kernel.flex_gemm.debug import format_flex_gemm_analysis
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1281,7 +1281,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             format_flex_gemm_analysis_details,
             log_flex_gemm_artifact,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1298,27 +1298,27 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         report = format_flex_gemm_analysis(analysis)
         details = format_flex_gemm_analysis_details(analysis)
         self.assertIn("outputs:\n  main: relu: shape=(4, 64)", report)
-        self.assertIn("auxiliary:\n  (none)", report)
-        self.assertIn("main_transform: none", report)
+        self.assertIn("  auxiliary: (none)", report)
+        self.assertIn("output_contraction: none", report)
         self.assertIn("geometry: axis=N, group=32", report)
         self.assertIn("consumers: returned", report)
         self.assertIn("output_layout: dense", report)
         self.assertIn("config_constraints:\n  axis=N, group=32", report)
-        self.assertIn("grouped_tensors:\n  view:", details)
+        self.assertIn("grouped_layouts:\n  view:", details)
         self.assertIn("local_reduce_matches:\n", details)
-        self.assertIn("grouped_select_indices:\n  (none)", details)
+        self.assertIn("output_contraction_select_indices:\n  (none)", details)
         with self.assertLogs(flex_gemm_log, level="INFO") as records:
             log_flex_gemm_artifact("analysis", lambda: report)
             log_flex_gemm_artifact("analysis_details", lambda: details, verbose=True)
         self.assertEqual(len(records.output), 1)
         self.assertIn(" ===== ANALYSIS =====", records.output[0])
 
-    def test_grouped_main_debug_report(self):
+    def test_output_contraction_debug_report(self):
         from torch._inductor.kernel.flex_gemm.debug import (
             format_flex_gemm_analysis,
             format_flex_gemm_analysis_details,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1333,12 +1333,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertIn(
-            "main_transform: grouped-N, group=2, layout=interleaved",
+            "output_contraction: N-axis, group=2, layout=interleaved",
             format_flex_gemm_analysis(analysis),
         )
         details = format_flex_gemm_analysis_details(analysis)
         self.assertIn("aten.select.int", details)
-        self.assertNotIn("grouped_select_indices:\n  (none)", details)
+        self.assertNotIn("output_contraction_select_indices:\n  (none)", details)
 
     def test_nvfp4_pack_debug_report(self):
         from torch._higher_order_ops.flex_gemm import nvfp4_pack
@@ -1346,7 +1346,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             format_flex_gemm_analysis,
             format_flex_gemm_analysis_details,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1365,7 +1365,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
         )
         self.assertIn(
-            "main_transform: grouped-N, group=2, layout=interleaved",
+            "output_contraction: N-axis, group=2, layout=interleaved",
             format_flex_gemm_analysis(analysis),
         )
         self.assertIn(
@@ -1379,7 +1379,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             format_flex_gemm_analysis,
             format_flex_gemm_analysis_details,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -1578,9 +1578,9 @@ class FlexGemmTestCase(TestCase):
         (
             FileCheck()
             .check("from torch._inductor.kernel.flex_gemm.runtime import (")
-            .check("gemm_epimod as flex_gemm_runtime")
+            .check("gemm_epilogue as flex_gemm_epilogue")
             .check("@cute.jit")
-            .check("flex_gemm_runtime(")
+            .check("flex_gemm_epilogue(")
             .check("config=((")
             .check("stream=stream")
             .check_not("config_key=")
@@ -1673,7 +1673,7 @@ class FlexGemmTestCase(TestCase):
         """Check generated code passes a structural EpiMod compressed-aux plan."""
         (
             FileCheck()
-            .check("local_reduce=FlexGemmEpiModLocalReducePlan")
+            .check("local_reduce=FlexGemmRuntimeLocalReducePlan")
             .check(self.localReduceGeometryPattern(group, axis))
             .check("out=")
             .check("combine=")
@@ -1755,7 +1755,7 @@ class FlexGemmTestCase(TestCase):
 
     def assertPhysicalFeedMainCode(self, code, group=None):
         """Check generated code uses the QuACK EpiMod feed-main plan."""
-        file_check = FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan")
+        file_check = FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan")
         if group is None:
             file_check = file_check.check("FlexGemmLocalReduceGeometry(group=").check(
                 "axis=0)"
@@ -1910,34 +1910,34 @@ class TestFlexGemmAnalysis(TestCase):
         with self.assertRaisesRegex(RuntimeError, "local_reduce_axis must be 0 or 1"):
             FlexGemmLocalReduceGeometry(8, 2)
 
-    def test_epimod_local_reduce_plan_validates_consumers(self):
+    def test_runtime_local_reduce_plan_validates_consumers(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
-            FlexGemmEpiModLocalReducePlan,
+            FlexGemmRuntimeLocalReducePlan,
         )
 
         axis0 = FlexGemmLocalReduceGeometry(8, 0)
         with self.assertRaisesRegex(RuntimeError, "local_reduce_out"):
-            FlexGemmEpiModLocalReducePlan(axis0, combine="add")
+            FlexGemmRuntimeLocalReducePlan(axis0, combine="add")
         with self.assertRaisesRegex(RuntimeError, "require a combine"):
-            FlexGemmEpiModLocalReducePlan(axis0, out=torch.empty(1))
+            FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1))
         with self.assertRaisesRegex(RuntimeError, "prepass finalizers"):
-            FlexGemmEpiModLocalReducePlan(
+            FlexGemmRuntimeLocalReducePlan(
                 axis0,
                 out=torch.empty(1),
                 combine="add",
                 prepass_finalize="mean",
             )
-        FlexGemmEpiModLocalReducePlan(
+        FlexGemmRuntimeLocalReducePlan(
             FlexGemmLocalReduceGeometry(16, 1),
             feeds_main=True,
             combine="add",
             prepass=lambda acc: {"local_reduce0": acc},
             prepass_combine="add",
         )
-        FlexGemmEpiModLocalReducePlan(axis0, out=torch.empty(1), combine="max")
+        FlexGemmRuntimeLocalReducePlan(axis0, out=torch.empty(1), combine="max")
 
     def test_epilogue_analysis_matches_prepare_softmax(self):
         from torch._inductor import inductor_prims
@@ -2083,7 +2083,7 @@ class TestFlexGemmAnalysis(TestCase):
     def test_analysis_diagnoses_ungrouped_reductions(self, case):
         from torch._higher_order_ops.flex_gemm import flex_gemm_body_decomposition_table
         from torch._inductor.decomposition import select_decomp_table
-        from torch._inductor.kernel.flex_gemm.epilogue import (
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             analyze_flex_gemm_epilogue,
             gemm_node,
         )
@@ -2113,7 +2113,9 @@ class TestFlexGemmAnalysis(TestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import tuple_output_plan
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            tuple_output_plan,
+        )
         from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph
         from torch._inductor.kernel.gemm_epilogue_analysis import (
             GemmIndexedOutputStore,
@@ -2178,11 +2180,11 @@ class TestFlexGemmAnalysis(TestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_local_reduce_output_storage_classifies_transpose(self, case):
+    def test_flex_gemm_local_reduce_output_storage_classifies_transpose(self, case):
         from torch._inductor.kernel.flex_gemm.output_layout import TRANSPOSED
         from torch._inductor.kernel.gemm_epilogue_analysis import (
-            GemmLocalReduceOutputStorage,
-            match_gemm_local_reduce_output_storage,
+            FlexGemmLocalReduceOutputStorage,
+            match_flex_gemm_local_reduce_output_storage,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -2191,11 +2193,11 @@ class TestFlexGemmAnalysis(TestCase):
         output = next(
             node for node in graph_module.graph.nodes if node.op == "output"
         ).args[0]
-        storage = match_gemm_local_reduce_output_storage(output)
+        storage = match_flex_gemm_local_reduce_output_storage(output)
         if expected_nodes is None:
             self.assertIsNone(storage)
             return
-        self.assertIsInstance(storage, GemmLocalReduceOutputStorage)
+        self.assertIsInstance(storage, FlexGemmLocalReduceOutputStorage)
         self.assertIs(storage.layout, TRANSPOSED)
         self.assertEqual(len(storage.nodes), expected_nodes)
         self.assertIs(storage.nodes[-1], output)
@@ -2727,7 +2729,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         self.assertEqual(actual.dtype, view_dtype)
         # The kernel stores bf16 and the result is re-viewed, not converted.
-        FileCheck().check("flex_gemm_runtime(").run(code)
+        FileCheck().check("flex_gemm_epilogue(").run(code)
         self.assertEqual(actual.view(torch.bfloat16), a @ b, atol=0, rtol=0)
 
     @skipIfNoCuteDSL
@@ -2790,7 +2792,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             if "===== FALLBACK =====" in r.getMessage()
         ]
         self.assertIn("float32 GEMM operands in TF32", fallback)
-        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertNotIn("flex_gemm_epilogue", code)
         self.assertIn("extern_kernels.mm", code)
         torch.testing.assert_close(actual, (a @ b).relu(), rtol=0, atol=1e-5)
         fp64 = (a.double() @ b.double()).relu()
@@ -2816,7 +2818,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
 
-        self.assertIn("flex_gemm_runtime(", code)
+        self.assertIn("flex_gemm_epilogue(", code)
         self.assertMatchesLowPrecisionEager(
             actual, (a @ b).relu(), (a.double() @ b.double()).relu(), a.shape[1]
         )
@@ -2948,7 +2950,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
-    def test_scaled_mm_grouped_main_and_local_reduce(self):
+    def test_scaled_mm_output_contraction_and_local_reduce(self):
         import torch.nn.functional as F
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -2994,7 +2996,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             scale_b,
         )
         torch.testing.assert_close(grouped, grouped_main(base), rtol=0.03, atol=0.3)
-        self.assertIn("GroupedMainOutputTransform(group=2", grouped_code)
+        self.assertIn("OutputContraction(group=2", grouped_code)
 
         def local_reduce(acc):
             grouped = acc.float().view(m, -1, group)
@@ -3012,7 +3014,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(
             scale.float(), expected_scale.float(), rtol=0.125, atol=0.0625
         )
-        self.assertIn("local_reduce=FlexGemmEpiModLocalReducePlan", reduce_code)
+        self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", reduce_code)
         self.assertNotIn("aten._scaled_mm_v2", grouped_code + reduce_code)
 
     @skipIfNoCuteDSL
@@ -3209,7 +3211,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, expected)
         self.assertIn("_scaled_mm_v2", code)
-        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertNotIn("flex_gemm_epilogue", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3254,7 +3256,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch.testing.assert_close(actual, epilogue_fn(base), rtol=0.03, atol=0.3)
         self.assertIn("_scaled_mm_v2", code)
-        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertNotIn("flex_gemm_epilogue", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -3335,7 +3337,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ),
         name_fn=lambda case: case[0],
     )
-    def test_mm_grouped_main_output_matches_reference(self, case):
+    def test_mm_output_contraction_matches_reference(self, case):
         _, group, chunked, tuned, n, config = case
         if group == 4 and torch.cuda.get_device_capability()[0] != 10:
             self.skipTest("group-4 grouped main outputs are currently SM100-only")
@@ -3379,13 +3381,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             k,
         )
         self.assertIn("'main':", code)
-        self.assertIn("FlexGemmGroupedMainOutputTransform(", code)
+        self.assertIn("FlexGemmOutputContraction(", code)
         self.assertIn(f"group={group}", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_grouped_main_output_uint8(self):
+    def test_mm_output_contraction_uint8(self):
         m = n = k = 64
         group = 2
 
@@ -3412,13 +3414,13 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         self.assertEqual(actual, fn(a, b))
         self.assertEqual(actual.shape, (m, n))
-        self.assertIn("FlexGemmGroupedMainOutputTransform(group=2", code)
+        self.assertIn("FlexGemmOutputContraction(group=2", code)
         self.assertNotIn("extern_kernels.mm", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_grouped_main_output_rejects_unsafe_explicit_config(self):
+    def test_mm_output_contraction_rejects_unsafe_explicit_config(self):
         m, n, k, group = 128, 128, 64, 2
 
         def epilogue_fn(acc):
@@ -3446,7 +3448,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_grouped_main_output_rejects_unsupported_composition(self):
+    def test_mm_output_contraction_rejects_unsupported_composition(self):
         m = k = n = 64
         a = torch.randn(m, k, device="cuda", dtype=torch.float16)
 
@@ -3505,7 +3507,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_grouped_main_output_chunked_view(self):
+    def test_mm_output_contraction_chunked_view(self):
         m, n, k = 128, 128, 64
 
         def epilogue_fn(acc):
@@ -3534,7 +3536,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("indices", ((0, 1), (1, 0), (-1, -2)))
-    def test_mm_grouped_main_output_specializes_select_indices(self, indices):
+    def test_mm_output_contraction_specializes_select_indices(self, indices):
         m, n, k = 128, 128, 64
         first, second = indices
 
@@ -3564,7 +3566,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("split_size", (64, 128))
-    def test_mm_grouped_main_output_specializes_split_size(self, split_size):
+    def test_mm_output_contraction_specializes_split_size(self, split_size):
         torch._dynamo.reset()
         m = k = 64
 
@@ -3587,7 +3589,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True), a, b
         )
         torch.testing.assert_close(actual, epilogue_fn(a @ b), atol=0.2, rtol=0.05)
-        FileCheck().check("FlexGemmGroupedMainOutputTransform(group=2").check(
+        FileCheck().check("FlexGemmOutputContraction(group=2").check(
             "chunked=True"
         ).check_not("extern_kernels.mm").run(code)
 
@@ -3595,7 +3597,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("chunked", (False, True))
-    def test_mm_grouped_main_output_dynamic_m(self, chunked):
+    def test_mm_output_contraction_dynamic_m(self, chunked):
         group, n, k = 2, 256, 64
 
         def epilogue_fn(acc):
@@ -3634,7 +3636,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_grouped_main_output_dynamic_n(self):
+    def test_mm_output_contraction_dynamic_n(self):
         m = k = 64
 
         def epilogue_fn(acc):
@@ -3661,7 +3663,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_chunked_grouped_main_rejects_grouped_reduction(self):
+    def test_mm_chunked_output_contraction_rejects_grouped_reduction(self):
         m, n, k, group = 128, 128, 64, 16
 
         def epilogue_fn(acc):
@@ -3688,7 +3690,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_chunked_grouped_main_rejects_contiguous_b(self):
+    def test_mm_chunked_output_contraction_rejects_contiguous_b(self):
         def epilogue_fn(acc):
             lhs, rhs = acc.chunk(2, dim=-1)
             return lhs + rhs
@@ -3741,7 +3743,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
         self.assertMxScaleCode(code, rounding)
-        self.assertIn("FlexGemmEpiModLocalReducePlan", code)
+        self.assertIn("FlexGemmRuntimeLocalReducePlan", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -4151,7 +4153,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (16, 32, 64))
-    def test_mm_tuple_aux_mx_scale_preserves_nan(self, group):
+    def test_mm_tuple_aux_physical_mx_scale_preserves_nan(self, group):
         m, n, k = 16, 128, 16
 
         def epilogue_fn(acc):
@@ -4685,7 +4687,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         self.assertEqual(actual, epilogue_fn(a @ b))
         self.assertIn("cvt.rn.satfinite.e2m1x2.f32", code)
-        self.assertIn("FlexGemmGroupedMainOutputTransform(group=2", code)
+        self.assertIn("FlexGemmOutputContraction(group=2", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5898,7 +5900,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ordinary, low_precision[3], high_precision[3], k
         )
         self.assertIn("indexed_out=", code)
-        self.assertIn("FlexGemmEpiModLocalReducePlan", code)
+        self.assertIn("FlexGemmRuntimeLocalReducePlan", code)
         if transposed:
             self.assertIn("flex_gemm_output_layout.TRANSPOSED", code)
 
@@ -6620,7 +6622,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("local_reduce_prepass", code)
-        FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 1)
         ).check("feeds_main=True").check("combine='add'").check(
             "prepass_combine='add'"
@@ -6706,7 +6708,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             atol=1e-3,
             rtol=1e-3,
         )
-        FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 0)
         ).check("out=").check("feeds_main=True").check("combine=").run(code)
 
@@ -7142,7 +7144,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("local_reduce_prepass", code)
-        FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 1)
         ).check("feeds_main=True").check("prepass_combine='add'").check(
             "prepass_finalize='mean'"
@@ -7596,7 +7598,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             atol=1e-3,
             rtol=1e-3,
         )
-        FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 0)
         ).check("out=").check("feeds_main=True").check("combine='add'").run(code)
 
@@ -7634,7 +7636,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("local_reduce_prepass", code)
-        FileCheck().check("FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 1)
         ).check("feeds_main=True").run(code)
 
@@ -7777,7 +7779,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         self.assertIn("local_reduce_prepass", code)
-        FileCheck().check("FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 1)
         ).check("feeds_main=True").check("torch.float8_e4m3fn").run(code)
 
@@ -7867,7 +7869,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             a.shape[1],
         )
         FileCheck().check("config=((").check(
-            "local_reduce=FlexGemmEpiModLocalReducePlan"
+            "local_reduce=FlexGemmRuntimeLocalReducePlan"
         ).check(self.localReduceGeometryPattern(group, 1)).check(
             "feeds_main=True"
         ).check("torch.float8_e4m3fn").run(code)
@@ -7905,7 +7907,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double()),
             a.shape[1],
         )
-        FileCheck().check("local_reduce=FlexGemmEpiModLocalReducePlan").check(
+        FileCheck().check("local_reduce=FlexGemmRuntimeLocalReducePlan").check(
             self.localReduceGeometryPattern(group, 1)
         ).check("feeds_main=True").run(code)
 
@@ -8034,8 +8036,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         expected = (h2 @ b2).float() * rstd
 
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
-        self.assertEqual(code.count("flex_gemm_runtime("), 2)
-        self.assertIn("local_reduce=FlexGemmEpiModLocalReducePlan", code)
+        self.assertEqual(code.count("flex_gemm_epilogue("), 2)
+        self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
         self.assertIn(
             f"FlexGemmLocalReduceGeometry(group={group}, axis=1)",
             code,
@@ -8367,12 +8369,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         torch.testing.assert_close(
             inside_actual, inside(a, b, bias), atol=2e-2, rtol=2e-2
         )
-        epimod_names = re.compile(r"flex_gemm_epimod_[0-9a-f]+")
+        epilogue_names = re.compile(r"flex_gemm_epilogue_[0-9a-f]+")
         self.assertEqual(
-            set(epimod_names.findall(inside_code)),
-            set(epimod_names.findall(hoisted_code)),
+            set(epilogue_names.findall(inside_code)),
+            set(epilogue_names.findall(hoisted_code)),
         )
-        self.assertTrue(epimod_names.findall(inside_code))
+        self.assertTrue(epilogue_names.findall(inside_code))
         self.assertIn("epilogue_arg_kinds=('row',)", inside_code)
 
     @skipIfNoCuteDSL
@@ -8575,7 +8577,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_baddbmm_beta_zero_ignores_nan_c(self):
+    def test_batched_epilogue_beta_zero_ignores_nan_c(self):
         batch, m, n, k = 2, 128, 128, 64
         bias = torch.full((m, n), float("nan"), device="cuda", dtype=torch.bfloat16)
         a = torch.randn(batch, m, k, device="cuda", dtype=torch.bfloat16)
@@ -9301,7 +9303,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertMatchesLowPrecisionEager(actual[:valid], eager, expected, self.K)
 
     def assertGroupedMmQuackCode(self, code):
-        self.assertIn("flex_gemm_runtime", code)
+        self.assertIn("flex_gemm_epilogue", code)
         self.assertIn("cu_seqlens_m=", code)
         self.assertNotIn("extern_kernels._grouped_mm(", code)
 
@@ -9484,7 +9486,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         if tuned:
             self.assertIn("config=", code)
         self.assertIn(
-            f"FlexGemmGroupedMainOutputTransform(group=2, chunked={spelling == 'chunked'})",
+            f"FlexGemmOutputContraction(group=2, chunked={spelling == 'chunked'})",
             code,
         )
         self.assertGroupedSwigluMatches(actual, x, w1, w3, offs)
@@ -9516,7 +9518,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         )
 
         self.assertIn("extern_kernels._grouped_mm(", code)
-        self.assertNotIn("flex_gemm_runtime", code)
+        self.assertNotIn("flex_gemm_epilogue", code)
         self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
 
 
@@ -9554,7 +9556,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double()),
             a.shape[1],
         )
-        self.assertIn("gemm_epimod as flex_gemm_runtime", code)
+        self.assertIn("gemm_epilogue as flex_gemm_epilogue", code)
         self.assertIn(f"config={tuple(sorted(config_key))!r}", code)
 
     @parametrize("tuned", (False, True))
@@ -9594,7 +9596,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double()),
             a.shape[1],
         )
-        self.assertIn("gemm_epimod as flex_gemm_runtime", code)
+        self.assertIn("gemm_epilogue as flex_gemm_epilogue", code)
         for item in pinned.items():
             self.assertIn(repr(item), code)
 
@@ -9744,7 +9746,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         )
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_tuple_aux_blocked_128x4_local_n_reduce(self, device):
+    def test_mm_tuple_aux_blocked_output_local_n_reduce(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -9990,9 +9992,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertEqual((error <= bound).all(), True)
         self.assertEqual((oracle_error <= bound).all(), True)
 
-        self.assertEqual(code.count("flex_gemm_runtime("), 1)
+        self.assertEqual(code.count("flex_gemm_epilogue("), 1)
         self.assertIn(
-            f"FlexGemmGroupedMainOutputTransform(group={2 if format_name == 'mx' else 4}",
+            f"FlexGemmOutputContraction(group={2 if format_name == 'mx' else 4}",
             code,
         )
         self.assertNotIn(
@@ -10065,7 +10067,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                     (payload, scale), (code,) = run_and_get_code(
                         compiled, a, weight.t()
                     )
-                    self.assertEqual(code.count("flex_gemm_runtime("), 1)
+                    self.assertEqual(code.count("flex_gemm_epilogue("), 1)
                 else:
                     payload, scale = compiled(a, weight.t())
                 acc = a.float() @ weight.float().t()
@@ -10228,7 +10230,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             output_dtype=torch.bfloat16,
         )
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
-        self.assertEqual(code.count("flex_gemm_runtime("), 1)
+        self.assertEqual(code.count("flex_gemm_epilogue("), 1)
         self.assertIn("_scaled_mm", code)
         self.assertNotIn("@triton.jit", code)
         # nvfp4 stores packed uint8 and hands the scaled GEMM a zero-copy dtype view.
@@ -10408,10 +10410,10 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
         self.assertIn("_scaled_mm", code)
-        self.assertIn("GroupedMainOutputTransform(group=2", code)
+        self.assertIn("OutputContraction(group=2", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_tuple_aux_blocked_128x4_zero_fills_padding(self, device):
+    def test_mm_tuple_aux_blocked_output_zero_fills_padding(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -10457,7 +10459,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("blocked", (False, True))
-    def test_mm_grouped_main_with_local_reduce_output(self, device, blocked):
+    def test_mm_output_contraction_with_local_reduce_output(self, device, blocked):
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -10504,13 +10506,13 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         expected, expected_scale = epilogue_fn(a @ b)
         torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.5)
         self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
-        self.assertIn("GroupedMainOutputTransform(group=2", code)
-        self.assertIn("local_reduce=FlexGemmEpiModLocalReducePlan", code)
+        self.assertIn("OutputContraction(group=2", code)
+        self.assertIn("local_reduce=FlexGemmRuntimeLocalReducePlan", code)
         if blocked:
             self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_tuple_aux_blocked_128x4_tuned_multitile(self, device):
+    def test_mm_tuple_aux_blocked_output_tuned_multitile(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
 
         m = n = 512
@@ -10545,7 +10547,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn("config=((", code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
-    def test_mm_tuple_aux_blocked_128x4_dynamic_shapes(self, device):
+    def test_mm_tuple_aux_blocked_output_dynamic_shapes(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -10599,7 +10601,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("quantized", (False, True))
-    def test_mm_tuple_aux_blocked_128x4_supports_swap_ab(self, device, quantized):
+    def test_mm_tuple_aux_blocked_output_supports_swap_ab(self, device, quantized):
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -10649,7 +10651,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
         self.assertIn("('swap_ab', True)", code)
 
-    def test_mm_tuple_aux_blocked_128x4_rejects_axis_m(self, device):
+    def test_mm_tuple_aux_blocked_output_rejects_axis_m(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
 
         m = n = 128
@@ -10674,7 +10676,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
-    def test_mm_tuple_aux_blocked_128x4_rejects_intermediate_transform(self, device):
+    def test_mm_tuple_aux_blocked_output_rejects_intermediate_transform(self, device):
         from torch._higher_order_ops.flex_gemm import to_blocked
 
         m = n = 128
@@ -10970,7 +10972,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             rtol=1e-3,
         )
         FileCheck().check("config=((").check(
-            "local_reduce=FlexGemmEpiModLocalReducePlan"
+            "local_reduce=FlexGemmRuntimeLocalReducePlan"
         ).check(self.localReduceGeometryPattern(group, 1)).run(code)
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
