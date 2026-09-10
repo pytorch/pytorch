@@ -8,6 +8,7 @@ import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
+from torch._utils import _is_privateuse1_backend_available
 import inspect
 import contextlib
 import os
@@ -688,6 +689,7 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
+                                               and not _is_privateuse1_backend_available()
                                                and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
                                                "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
 
