@@ -6903,7 +6903,10 @@ add_test(NewModuleTest(
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',
     with_tf32=True,
-    tf32_precision=0.005,
+    # ROCm: gfx942 XF32 param-grad error 0.0056 (1.24 x 2^-10, a single TF32-class gemm)
+    # against a tolerance with no headroom. 0.012 is 2x the measurement, see
+    # https://github.com/pytorch/pytorch/issues/196605.
+    tf32_precision=0.012 if TEST_WITH_ROCM else 0.005,
     default_dtype=torch.double))
 
 

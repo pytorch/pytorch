@@ -2591,7 +2591,10 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='multilayer_coder',
             with_tf32=True,
-            tf32_precision=0.05 if SM90OrLater else 0.03,
+            # ROCm: gfx942 XF32 fails deterministically at 0.129 abs; the K=4 multilayer
+            # composition amplifies a TF32-class single-gemm error ~130x. 0.26 is 2x the
+            # measurement, see https://github.com/pytorch/pytorch/issues/196605.
+            tf32_precision=0.26 if TEST_WITH_ROCM else 0.05 if SM90OrLater else 0.03,
             default_dtype=torch.double,
         ),
         dict(
