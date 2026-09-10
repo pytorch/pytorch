@@ -96,7 +96,8 @@ FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
     "GEMM output as an auxiliary"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
-    "FlexGEMM grouped main output shape must contract only the GEMM N dimension"
+    "unsupported FlexGEMM epilogue: contracted output shape must equal the "
+    "physical GEMM output shape with N divided by the contraction group"
 )
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
@@ -214,7 +215,12 @@ def local_reduce_compressed_shape(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmOutputContraction:
-    """Describe contraction of adjacent values along the GEMM N dimension."""
+    """Describe the contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
+
+    Attributes:
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether group values are contiguous N chunks rather than interleaved.
+    """
 
     group: int
     chunked: bool = False
