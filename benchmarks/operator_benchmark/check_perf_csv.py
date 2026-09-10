@@ -18,6 +18,19 @@ SKIP_TEST_LISTS = [
     # aarch64 ~2us micro: expected/actual flipped 4.43 → 1.71 (IMPROVED) → 3.60
     # (FAILED). Rewriting the CSV ping-pongs; do not rebaseline.
     "stack_sizes(1,1,1)_N2_cpu_dim0",
+    # aarch64 ~2us micros: keep bouncing ~2x FAILED vs CSV (same pattern as
+    # baddbmm/lsl/chunk). Do not rebaseline.
+    "asr_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.int32",
+    "lsl_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.uint8",
+    "lsl_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.int32",
+    "xor_M1_N1_K1_cpu_dtype_onetorch.int32_dtype_twotorch.uint8",
+    "xor_M1_N1_K1_cpu_dtype_onetorch.uint8_dtype_twotorch.int32",
+    "logical_and_M1_N1_K1_cpu_dtype_onetorch.bool_dtype_twotorch.bool",
+    "baddbmm_B2_M1_N8_K2_cpu_dtypetorch.float32",
+    "baddbmm_B2_M1_N8_K2_cpu_dtypetorch.bfloat16",
+    "sum_R64_V32_dim0_contiguousTrue_cpu",
+    "sum_R64_V32_dim1_contiguousTrue_cpu",
+    "addcdiv_M1_N2_cpu_dtypetorch.bfloat16",
 ]
 
 

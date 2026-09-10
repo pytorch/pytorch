@@ -597,8 +597,8 @@ PyTorch,ceil,ceil_M512_N512_cpu,short,False,47.018574,0.0,22.948767
 PyTorch,ceil_,ceil__M512_N512_cpu,short,False,46.014578,0.0,22.396068
 PyTorch,clamp,clamp_M512_N512_cpu,short,False,52.372333,0.0,21.701095
 PyTorch,clone,clone_M512_N512_cpu,short,False,48.709409,0.0,22.529496
-PyTorch,cos,cos_M512_N512_cpu,short,False,198.308288,0.0,10.575211
-PyTorch,cos_,cos__M512_N512_cpu,short,False,194.989258,0.0,10.755218
+PyTorch,cos,cos_M512_N512_cpu,short,False,106.658303,0.0,10.575211
+PyTorch,cos_,cos__M512_N512_cpu,short,False,104.899611,0.0,10.755218
 PyTorch,cosh,cosh_M512_N512_cpu,short,False,355.166527,0.0,5.904701
 PyTorch,digamma,digamma_M512_N512_cpu,short,False,552.944398,0.0,3.7927
 PyTorch,erf,erf_M512_N512_cpu,short,False,119.308047,0.0,17.577624
@@ -641,8 +641,8 @@ PyTorch,sigmoid,sigmoid_M512_N512_cpu,short,False,100.805806,0.0,13.718141
 PyTorch,sigmoid_,sigmoid__M512_N512_cpu,short,False,101.325204,0.0,13.669907
 PyTorch,sign,sign_M512_N512_cpu,short,False,52.15014,0.0,21.173998
 PyTorch,sgn,sgn_M512_N512_cpu,short,False,51.816253,0.0,21.264937
-PyTorch,sin,sin_M512_N512_cpu,short,False,171.54844,0.0,12.224839
-PyTorch,sin_,sin__M512_N512_cpu,short,False,170.246189,0.0,12.318349
+PyTorch,sin,sin_M512_N512_cpu,short,False,102.321229,0.0,12.224839
+PyTorch,sin_,sin__M512_N512_cpu,short,False,100.233761,0.0,12.318349
 PyTorch,sinh,sinh_M512_N512_cpu,short,False,520.917114,0.0,4.025884
 PyTorch,sqrt,sqrt_M512_N512_cpu,short,False,50.015572,0.0,22.414638
 PyTorch,sqrt_,sqrt__M512_N512_cpu,short,False,48.850778,0.0,22.299744
