@@ -24,9 +24,6 @@ struct AllocatorState {
   virtual ~AllocatorState() = default;
 };
 
-// returns the pointers freed in the pool
-// and the pointers allocated. Note: a pointer
-// may appear in both freed and allocated
 struct CheckpointDelta {
   std::vector<void*> ptrs_freed;
   std::vector<c10::DataPtr> dataptrs_allocd;
@@ -119,10 +116,6 @@ C10_XPU_API void endAllocateToPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
-// Notify the allocator that a SYCL command-graph capture has actually started /
-// ended. Distinct from begin/endAllocateToPool, which only routes allocations
-// into a private mempool and can be invoked without an active capture (e.g.
-// from MemPool usage).
 C10_XPU_API void markCaptureBegin(c10::DeviceIndex device);
 
 C10_XPU_API void markCaptureEnd(c10::DeviceIndex device);
