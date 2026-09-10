@@ -123,15 +123,13 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
 
 
 class FunctionPicklerBase(pickle.Pickler):
-    """Reducers for picklers that rebuild functions from their code object.
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
 
-    GuardsStatePickler is the first subclass; the AOT pickler in
-    torch/_dynamo/aot_compile.py is rebuilt on this base next. Both rebuild the
-    same kinds of objects that pickle cannot do by reference: code objects,
-    closure cells, python modules, bound methods, and functions rebuilt from
-    their code object. Each subclass keeps its own dispatch and decides what a
-    rebuilt function carries; this class fixes HOW it is rebuilt so a fix in one
-    pickler cannot be missed in the other.
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
 
     Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
@@ -200,7 +198,8 @@ class FunctionPicklerBase(pickle.Pickler):
         # sends the snapshot variant instead. A scope that only existed in
         # sys.modules at save (exec-created, transformers_modules.*) comes back
         # empty: safe on the guard path, which never calls the rebuilt function;
-        # a pickler that CALLS it surfaces that as a NameError at first call.
+        # AOTCompilePickler does call it, so there an empty scope surfaces as a
+        # NameError at first call, not a load error.
         f_globals: dict[str, Any] = {}
         # Not every __name__ is importable (".rel", a module whose body raises,
         # a non-str a decorator set); none should fail the load: require a
@@ -266,14 +265,25 @@ class FunctionPicklerBase(pickle.Pickler):
         return resolved is fn
 
     @staticmethod
-    def _read_raw_annotations(obj: Any) -> dict[str, Any]:
+    def _read_raw_annotations(obj: Any, *, resolve: bool = False) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
         # 3.14+, raising NameError for a TYPE_CHECKING-only name. The guard
         # pickler wants the unevaluated shape, so it takes FORWARDREF and prunes
-        # the proxies later.
+        # the proxies later. A caller that must SERIALIZE the annotations passes
+        # resolve=True instead: it gets real values, and an empty dict when a
+        # name will not resolve, because a ForwardRef -- even nested in
+        # list[Bar] -- is not picklable. This resolves the whole set or nothing;
+        # a caller that also needs per-value picklability filters on top.
         if sys.version_info >= (3, 14):
             import annotationlib
 
+            if resolve:
+                try:
+                    return annotationlib.get_annotations(
+                        obj, format=annotationlib.Format.VALUE
+                    )
+                except Exception:
+                    return {}
             return annotationlib.get_annotations(
                 obj, format=annotationlib.Format.FORWARDREF
             )
