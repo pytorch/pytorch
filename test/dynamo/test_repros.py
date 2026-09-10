@@ -7626,6 +7626,36 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         self.assertEqual(out.shape, (1, 1, seq, 8))
 
+    def test_flex_attention_unbacked_seq_lengths_raw_symint(self):
+        # https://github.com/pytorch/pytorch/issues/187547
+        # Raw unbacked SymInts used as BlockMask.seq_lengths should compile
+        # under strict torch.compile without graph breaks, sharing the
+        # symbolic dimension with q/k/v sizes.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def model(q, k, v, block_mask):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        with FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True):
+            q = torch.empty((1, 1, seq, 8), device="cpu")
+            k = torch.empty((1, 1, seq, 8), device="cpu")
+            v = torch.empty((1, 1, seq, 8), device="cpu")
+            kv_num_blocks = torch.ones((1, 1, 1), dtype=torch.int32)
+            kv_indices = torch.zeros((1, 1, 1, 1), dtype=torch.int32)
+            block_mask = BlockMask.from_kv_blocks(
+                kv_num_blocks,
+                kv_indices,
+                BLOCK_SIZE=128,
+                seq_lengths=(seq, seq),
+            )
+            out = model(q, k, v, block_mask)
+        self.assertEqual(out.shape, (1, 1, seq, 8))
+
     # https://github.com/pytorch/pytorch/issues/164990
     def test_guard_same_frame_fail_message(self):
         import torch._dynamo.guards as g
