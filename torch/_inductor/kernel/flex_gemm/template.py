@@ -11,17 +11,17 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplateCaller,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
-from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpiModSource
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import FlexGemmEpiModSource
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,7 +47,7 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
-    output_layout: FlexGemmOutputLayout | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
     feeds_main: bool = False
     combine: str | None = None
     finalize: str | None = None
@@ -59,7 +59,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     fragment_reduced: bool = False
 
     @classmethod
-    def from_output_plan(
+    def from_plan(
         cls,
         local_reduce: Any | None,
         out_index: int | None,
@@ -116,7 +116,7 @@ class FlexGemmEpilogueConfig:
     aux_out_indices: tuple[int, ...]
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
-    main_transform: FlexGemmGroupedMainOutputTransform | None
+    output_contraction: FlexGemmOutputContraction | None
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -141,11 +141,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         self.args.output(self.output_node.get_name())
         arg_defs, _, _, _ = self.args.python_argdefs()
         params = [arg_name for arg_name, _ in self._template_input_args]
-        params.extend(
-            arg_def.full_name()
-            for arg_def in arg_defs
-            if arg_def.full_name() not in self._seen_input_args
-        )
+        for arg_def in arg_defs:
+            if arg_def.full_name() not in self._seen_input_args:
+                params.append(arg_def.full_name())
         params.append("stream")
 
         template_input_arg_names = [
@@ -156,19 +154,19 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         call_kwargs += f", out={self.get_output()}, stream=stream"
 
         code = IndentedBuffer()
-        code.writeline("import torch")
         code.splice(
             """
+            import torch
             from torch._inductor.kernel.flex_gemm.constraints import (
-                FlexGemmGroupedMainOutputTransform,
+                FlexGemmOutputContraction,
                 FlexGemmLocalReduceGeometry,
             )
             from torch._inductor.kernel.flex_gemm import (
                 output_layout as flex_gemm_output_layout,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
-                FlexGemmEpiModLocalReducePlan,
-                gemm_epimod as flex_gemm_runtime,
+                FlexGemmRuntimeLocalReducePlan,
+                gemm_epilogue as flex_gemm_epilogue,
             )
             """
         )
@@ -176,7 +174,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         code.splice(
             f"""
             def {self.kernel_name}_main({", ".join(params)}):
-                flex_gemm_runtime({", ".join((*call_args, config.epilogue_name))}{call_kwargs})
+                flex_gemm_epilogue({", ".join((*call_args, config.epilogue_name))}{call_kwargs})
 
             def {self.kernel_name}_precompile(**metadata):
                 # Compile workers cannot initialize CUDA; the template caller
@@ -204,6 +202,16 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         """Render a built-in callback name or generated callable reference."""
         return repr(name) if name in {"add", "mul", "max", "min", "mean"} else name
 
+    def _local_reduce_geometry(
+        self, local_reduce: FlexGemmEpilogueLocalReduceConfig
+    ) -> str:
+        """Render the shared grouped M/N local-reduce geometry."""
+        geometry = local_reduce.geometry
+        return (
+            "FlexGemmLocalReduceGeometry("
+            f"group={geometry.group!r}, axis={geometry.axis!r})"
+        )
+
     def _local_reduce_kwargs(
         self,
         input_args: list[str],
@@ -211,7 +219,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         epilogue_name: str,
     ) -> str:
         """Render one structural local-reduce plan for runtime dispatch."""
-        plan = f"FlexGemmEpiModLocalReducePlan({local_reduce.geometry!r}"
+        geometry = self._local_reduce_geometry(local_reduce)
+        plan = f"FlexGemmRuntimeLocalReducePlan({geometry}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
         if local_reduce.output_layout is not None:
@@ -279,8 +288,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                     input_args, config.local_reduce, config.epilogue_name
                 )
             )
-        if config.main_transform is not None:
-            kwargs.append(f", main_transform={config.main_transform!r}")
+        if config.output_contraction is not None:
+            kwargs.append(f", output_contraction={config.output_contraction!r}")
         return "".join(kwargs)
 
 
