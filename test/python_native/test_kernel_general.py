@@ -50,6 +50,30 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
 
+    def test_family_has_exactly_one_cute_kernel(self):
+        # Assert every axis still shares one kernel. Glob files and match qualified or
+        # annotated decorators so new drivers and spellings cannot evade the check.
+        # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
+        import pathlib
+        import re
+
+        from torch._native.ops import reductions
+
+        root = pathlib.Path(reductions.__file__).parent
+        deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
+        found = [
+            f"{path.name}:{i}"
+            # Exclude the reference implementation.
+            for path in sorted(root.glob("*.py"))
+            if path.name != "inner_tree_kernel.py"
+            for i, line in enumerate(path.read_text().splitlines(), 1)
+            if deco.match(line.strip())
+        ]
+        self.assertEqual(
+            len(found), 1, f"expected one kernel in the family, got {found}"
+        )
+        self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
+
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
         # check on its documented invalid input.
@@ -66,6 +90,9 @@ class TestKernelGeneral(TestCase):
             kg.ReduceBlock(
                 trait, count=2**31, num_o=1, red_pairs=((2**31, 1),), kept_pairs=()
             )
+        # A missing reduced run would index vals[-1]; empty kept runs remain valid.
+        with self.assertRaisesRegex(AssertionError, "at least one reduced run"):
+            kg.ReduceBlock(trait, count=1, num_o=1, red_pairs=(), kept_pairs=())
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)

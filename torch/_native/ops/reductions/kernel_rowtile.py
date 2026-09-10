@@ -179,6 +179,12 @@ def reduce_row_tile(
             nchunks,
             nwaves,
             Int32(N),
+            None,  # q, npar: the col axis's split
+            None,
+            None,  # the general axis's decode: exts, strides, in_base, limit
+            None,
+            None,
+            None,
             None,
             None,
             _stream(),
@@ -189,6 +195,21 @@ def reduce_row_tile(
     key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    # read_only avoids COW materialization; None omits unused column arguments.
-    fn([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N), None, None, _stream())
+    # read_only avoids COW materialization; None omits unused-axis arguments.
+    fn(
+        [_L.read_only(x)],
+        list(outs),
+        nchunks,
+        nwaves,
+        Int32(N),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     return tuple(outs)

@@ -1,14 +1,12 @@
-# General CuteDSL reduction kernel and dispatcher. TensorIterator marks reduced dimensions
-# with zero output stride; compile-time (extent, element-stride) lists decode linear indices
-# for arbitrary dimensions and layouts. Reduce-all has no kept dimensions. Only pair counts
-# are compiled; runtime geometry lets one kernel serve all matching structures.
+# Reduction dispatcher and general-axis plan for the shared TileReduce kernel.
+# TensorIterator geometry handles every layout. Runtime values keep kernel count
+# O(op * dtype * pair-count); cache_sig compiles decode depths, outputs, index mode,
+# projection/partial mode, and fold clamps.
 
 import math
 from collections.abc import Sequence
 
-import cutlass
-import cutlass.cute as cute
-from cutlass import const_expr, Float32, Float64, Int32, Int64
+from cutlass import Float32, Float64, Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
@@ -16,25 +14,12 @@ from torch._tensor_iterator import reduce_op
 from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import block_reduce, WARP, warp_reduce
+from .._cutedsl.traits import WARP
+from . import tile
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
 Pairs = list[tuple[int, int]]
-
-
-def _decode_offset(linear, divs, strides, npairs):
-    # Mixed-radix linear-to-flat decode with only pair count compiled. Div/mod stays Int32
-    # because linear < 2**31; only stride products need Int64. Callers omit empty decodes.
-    rem = Int32(linear)
-    if npairs == 1:
-        return cutlass.Int64(rem) * strides[0]
-    off = cutlass.Int64(0)
-    for j in range(npairs - 1):
-        q, r = divmod(rem, divs[j])
-        off = off + cutlass.Int64(r) * strides[j]
-        rem = q
-    return off + cutlass.Int64(rem) * strides[npairs - 1]
 
 
 class ReduceBlock:
@@ -65,6 +50,9 @@ class ReduceBlock:
             raise AssertionError(
                 f"decode needs count and num_o < 2^31, got {count} and {num_o}"
             )
+        if not red_pairs:
+            # Missing reduced runs index vals[-1]; missing kept runs denote reduce-all.
+            raise AssertionError("a reduction needs at least one reduced run")
         # (extent, input-element-stride) pairs from TensorIterator, fastest first.
         self.red_pairs = tuple(red_pairs)
         self.kept_pairs = tuple(kept_pairs)
@@ -81,23 +69,27 @@ class ReduceBlock:
         self.ragged_chunk = ragged_chunk  # clamp each output's reduced run
         self.from_partials = from_partials
         self.block = block
-        self.num_warps = block // WARP
+        # Plan one general-axis block per output; the shared body performs mixed-radix folding.
+        self.tile = tile.TileReduce(
+            trait,
+            None,
+            "general",
+            0,
+            nt=block,
+            nouts=nouts,
+            final=final,
+            combine=from_partials,
+            npairs_red=self.npairs_red,
+            npairs_kept=self.npairs_kept,
+            gidx_from=gidx_from,
+            flat_tail=flat_tail,
+            ragged_chunk=ragged_chunk,
+        )
 
     @property
     def cache_sig(self):
-        # Callers prepend trait and dtype; all geometry values remain runtime arguments.
-        return (
-            self.npairs_red,
-            self.npairs_kept,
-            self.nouts,
-            self.final,
-            self.gidx_from,
-            self.flat_tail,
-            self.ragged_chunk,
-            self.from_partials,
-            self.block,
-            self.trait.nfields,
-        )
+        # Derive the key from every const_expr baked by the shared body.
+        return self.tile.cache_sig
 
     @property
     def geom_sig(self):
@@ -110,201 +102,6 @@ class ReduceBlock:
             self.limit,
             self.project_n,
         )
-
-    @cute.jit
-    def __call__(
-        self,
-        mIns: list,
-        mOuts: list,
-        rexts: list,
-        rstrides: list,
-        kexts: list,
-        kstrides: list,
-        count: cutlass.Int32,
-        in_base: cutlass.Int64,
-        limit: cutlass.Int64,
-        project_n: cutlass.Int64,
-        stream,
-    ):
-        # Build V2 divisors inside the MLIR context so .divisor crosses the kernel boundary.
-        rdivs = [cute.FastDivmodDivisorV2(e) for e in rexts]
-        kdivs = [cute.FastDivmodDivisorV2(e) for e in kexts]
-        # Dynamic grid: read the output row count live so one compile serves any M.
-        self.kernel(
-            mIns,
-            mOuts,
-            rdivs,
-            rstrides,
-            kdivs,
-            kstrides,
-            count,
-            in_base,
-            limit,
-            project_n,
-        ).launch(
-            grid=[mOuts[0].shape[0], 1, 1], block=[self.block, 1, 1], stream=stream
-        )
-
-    @cute.kernel
-    def kernel(
-        self,
-        mIns: list,
-        mOuts: list,
-        rdivs: list,
-        rstrides: list,
-        kdivs: list,
-        kstrides: list,
-        count: cutlass.Int32,
-        in_base: cutlass.Int64,
-        limit: cutlass.Int64,
-        project_n: cutlass.Int64,
-    ):
-        """Fold one kept coordinate per block. Decode its base, fold raw values or
-        partial tuples, merge threads, then project and store from thread zero.
-        """
-        trait = self.trait
-        tidx, _, _ = cute.arch.thread_idx()
-        o, _, _ = cute.arch.block_idx()
-        nfields = const_expr(trait.nfields)
-
-        acc = trait.init()
-        obase = in_base  # 0 kept pairs (reduce-all) -> in_base alone
-        if const_expr(self.npairs_kept > 0):
-            obase = in_base + _decode_offset(o, kdivs, kstrides, self.npairs_kept)
-        chunk_base = Int32(0)
-        rb = count  # flat_tail: clamp so the overhanging last chunk folds nothing out of range
-        if const_expr(self.flat_tail):
-            left = limit - obase
-            c64 = cutlass.Int64(count)
-            left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
-            zero = cutlass.Int64(0)
-            left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
-            rb = cutlass.Int32(left)
-        elif const_expr(self.ragged_chunk):
-            # Clamp a short final chunk to its reduced run. The fastest-varying kept
-            # pair identifies the chunk in steps, for either row or column splits.
-            _, cc = divmod(Int32(o), kdivs[0])
-            c = cutlass.Int64(cc)
-            cnt = cutlass.Int64(count)
-            chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
-            left = limit - c * cnt
-            c64 = cutlass.Int64(count)
-            left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
-            zero = cutlass.Int64(0)
-            left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
-            rb = cutlass.Int32(left)
-        n_full = rb // const_expr(self.block)
-        reduce_fn = trait.reduce  # local bind: attribute access trips a dyn loop
-        acc_dtype = trait.acc  # accumulator dtype (a compile-time Python class)
-        if const_expr(self.from_partials):
-            # Stage 2 uses a dynamic loop; static unrolling took about 3s at 1e5 partials.
-            combine_fn = trait.combine
-            fdtypes = trait.fdtypes
-            nf = const_expr(nfields)
-            r = tidx
-            for _ in cutlass.range(n_full):
-                rr = obase + cutlass.Int64(r)
-                part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
-                acc = combine_fn(acc, part)
-                r = r + const_expr(self.block)
-            # Runtime count always emits a predicated remainder; full waves disable every lane.
-            valid = r < rb
-            rr = (obase + cutlass.Int64(r)) if valid else in_base
-            part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
-            merged = combine_fn(acc, part)
-            acc = tuple((merged[f] if valid else acc[f]) for f in range(nf))
-        else:
-            # rb is pre-clamped, so r < rb is the only bounds check. A dynamic trip count
-            # keeps compile depth constant in the extent.
-            base_r = tidx
-            for _ in cutlass.range(n_full):
-                # Inline the offset to avoid a spurious loop-carried value. "flat" gidx
-                # repeats its single-pair decode, which is one multiply.
-                if const_expr(self.gidx_from == "flat"):
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase
-                                + _decode_offset(
-                                    base_r, rdivs, rstrides, self.npairs_red
-                                )
-                            ]
-                        ),
-                        Int32(
-                            obase
-                            + _decode_offset(base_r, rdivs, rstrides, self.npairs_red)
-                        ),
-                        True,
-                    )
-                elif const_expr(self.gidx_from == "chunk"):
-                    # Rebase the chunk-local index; inline it to avoid a loop-carried value.
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase
-                                + _decode_offset(
-                                    base_r, rdivs, rstrides, self.npairs_red
-                                )
-                            ]
-                        ),
-                        chunk_base + base_r,
-                        True,
-                    )
-                else:
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase
-                                + _decode_offset(
-                                    base_r, rdivs, rstrides, self.npairs_red
-                                )
-                            ]
-                        ),
-                        base_r,
-                        True,
-                    )
-                base_r = base_r + const_expr(self.block)
-            # Invalid lanes read in_base; obase may exceed the input for an empty tail chunk.
-            valid = base_r < rb
-            off = obase + _decode_offset(base_r, rdivs, rstrides, self.npairs_red)
-            off_s = off if valid else in_base
-            val = acc_dtype(mIns[0][off_s])
-            # gidx is the Int32 arg-reduction position; "flat" is the reduce-all offset.
-            if const_expr(self.gidx_from == "flat"):
-                acc = reduce_fn(acc, val, Int32(off_s), valid)
-            elif const_expr(self.gidx_from == "chunk"):
-                acc = reduce_fn(acc, val, chunk_base + base_r, valid)
-            else:
-                acc = reduce_fn(acc, val, base_r, valid)
-
-        acc = warp_reduce(trait, acc, WARP)
-        if const_expr(self.num_warps > 1):
-            smem = cutlass.utils.SmemAllocator()
-            bufs = [
-                smem.allocate_tensor(
-                    trait.fdtypes[f], cute.make_layout(self.num_warps), byte_alignment=8
-                )
-                for f in range(nfields)
-            ]
-            acc = block_reduce(trait, acc, bufs, self.num_warps)
-
-        if const_expr(self.final):
-            # Project once using the true reduction size, not stage 2's partial count.
-            result = trait.project(acc, acc_dtype(project_n))
-            if tidx == 0:
-                if const_expr(self.nouts == 1):
-                    mOuts[0][o] = mOuts[0].element_type(result)
-                else:
-                    for k in cutlass.range_constexpr(self.nouts):
-                        mOuts[k][o] = mOuts[k].element_type(result[k])
-        else:
-            # Cross-CTA stage 1: store the RAW (pre-project) accumulator fields.
-            if tidx == 0:
-                for f in cutlass.range_constexpr(nfields):
-                    mOuts[f][o] = trait.fdtypes[f](acc[f])
 
 
 # Host-side geometry and plans; no kernels below.
@@ -339,14 +136,17 @@ def _strides(pairs: Pairs) -> list:
 def _geom_args(op):
     # Runtime geometry: both decodes' extents/strides and scalar bounds.
     return (
+        Int32(op.count),
+        None,
+        Int64(op.project_n),
+        None,
+        None,
         _exts(op.red_pairs),
         _strides(op.red_pairs),
         _exts(op.kept_pairs),
         _strides(op.kept_pairs),
-        Int32(op.count),
         Int64(op.in_base),
         Int64(op.limit),
-        Int64(op.project_n),
     )
 
 
@@ -357,7 +157,9 @@ def _launch(op, key, ins, outs):
         fn = cached_plan(
             _COMPILE_CACHE,
             key,
-            lambda: _compile(op, _fakes(ins), _fakes(outs), *_geom_args(op), _stream()),
+            lambda: _compile(
+                op.tile, _fakes(ins), _fakes(outs), *_geom_args(op), _stream()
+            ),
             op=f"aten::{key[1]}",
         )
         plan = (fn, _geom_args(op))

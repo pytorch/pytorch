@@ -90,10 +90,16 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             ],
             [_L.fake_compact(torch2cute[d.dtype], (_L.sym(),)) for d in dsts],
             nchunks,
-            None,
+            None,  # nwaves: the row axis's
             nrows,
             q,
             Int32(npar),
+            None,  # the general axis's decode: exts, strides, in_base, limit
+            None,
+            None,
+            None,
+            None,
+            None,
             _stream(),
         )
 
@@ -101,7 +107,20 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     key = ("coltile", trait_key, x.dtype, out_dtype, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
-        [_L.read_only(x)], list(dsts), nchunks, None, nrows, q, Int32(npar), _stream()
+        [_L.read_only(x)],
+        list(dsts),
+        nchunks,
+        None,
+        nrows,
+        q,
+        Int32(npar),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
     )
     if single:
         return out
@@ -136,10 +155,16 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
             [_L.fake_compact(torch2cute[out.dtype], (_L.sym(),))],
             Int32(C),
-            None,
+            None,  # nwaves
             Int32(R),
-            None,
+            None,  # q
             Int32(npar),
+            None,  # the general axis's decode
+            None,
+            None,
+            None,
+            None,
+            None,
             _stream(),
         )
 
@@ -154,6 +179,12 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         Int32(R),
         None,
         Int32(npar),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         _stream(),
     )
     return out
