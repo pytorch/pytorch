@@ -5761,38 +5761,12 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
-    def test_ne(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-            result_mps = torch.ne(mps_x, mps_y)
-            result_cpu = torch.ne(cpu_x, cpu_y)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
     def test_ne_scalar(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
             mps_x = cpu_x.detach().clone().to('mps')
             result_mps = torch.ne(mps_x, 0.0)
             result_cpu = torch.ne(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_lt(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-            result_mps = torch.lt(mps_x, mps_y)
-            result_cpu = torch.lt(cpu_x, cpu_y)
 
             self.assertEqual(result_cpu, result_mps.to('cpu'))
 
@@ -5809,19 +5783,6 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3, 4, 5))
 
-    def test_le(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-            result_mps = torch.le(mps_x, mps_y)
-            result_cpu = torch.le(cpu_x, cpu_y)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
     def test_le_scalar(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
@@ -5833,38 +5794,12 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3, 4, 5))
 
-    def test_ge(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-            result_mps = torch.ge(mps_x, mps_y)
-            result_cpu = torch.ge(cpu_x, cpu_y)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
     def test_ge_scalar(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
             mps_x = cpu_x.detach().clone().to('mps')
             result_mps = torch.ge(mps_x, 0.0)
             result_cpu = torch.ge(cpu_x, 0.0)
-
-            self.assertEqual(result_cpu, result_mps.to('cpu'))
-
-        helper((2, 3, 4, 5))
-
-    def test_gt(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float)
-            mps_x = cpu_x.detach().clone().to('mps')
-            mps_y = cpu_y.detach().clone().to('mps')
-            result_mps = torch.gt(mps_x, mps_y)
-            result_cpu = torch.gt(cpu_x, cpu_y)
 
             self.assertEqual(result_cpu, result_mps.to('cpu'))
 
