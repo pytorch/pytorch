@@ -42,10 +42,12 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import BFloat16, const_expr, Float32, Int32, Int64
 from cutlass._mlir.dialects import llvm
-from cutlass.cutlass_dsl import dsl_user_op, T
+from cutlass.cutlass_dsl import BaseDSL, dsl_user_op, T
 
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
+
+from .aot import _ARCH_TAIL_ITERS, _MAX_TAIL_ITERS
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +223,10 @@ class _RadixSelectTopK:
         self.deterministic = deterministic
         self.in_dtype = in_dtype
         self.index_dtype = index_dtype
-        self.scalar_tail_iters = scalar_tail_iters
+        self.arch_tail_iters = scalar_tail_iters == _ARCH_TAIL_ITERS
+        self.scalar_tail_iters = (
+            _MAX_TAIL_ITERS if self.arch_tail_iters else scalar_tail_iters
+        )
         self.fixed_vec_iters = fixed_vec_iters
         self.min_blocks_per_mp = min_blocks_per_mp
         self.NUM_THREADS = _num_threads_for_k(K)
@@ -262,6 +267,11 @@ class _RadixSelectTopK:
         VEC_TAIL_START = ACTUAL_VEC_ITERS * TILE
         if const_expr(self.scalar_tail_iters is None):
             SCALAR_TAIL_ITERS = (N - VEC_TAIL_START + NT - 1) // NT
+        elif const_expr(self.arch_tail_iters):
+            if const_expr(BaseDSL._get_dsl().get_arch_enum().major >= 10):
+                SCALAR_TAIL_ITERS = (N - VEC_TAIL_START + NT - 1) // NT
+            else:
+                SCALAR_TAIL_ITERS = const_expr(self.scalar_tail_iters)
         else:
             SCALAR_TAIL_ITERS = const_expr(self.scalar_tail_iters)
         N_HIST_BINS = const_expr(_N_HIST_BINS)
@@ -694,7 +704,13 @@ def _radix_min_blocks_per_mp(
     k: int, deterministic: bool, scalar_tail_iters: int | None
 ) -> int:
     # These K=1024 tail rungs otherwise exceed the two-CTA register budget.
-    return 2 if deterministic and k == 1024 and scalar_tail_iters in (0, 3, 4) else 0
+    return (
+        2
+        if deterministic
+        and k == 1024
+        and scalar_tail_iters in (_ARCH_TAIL_ITERS, 0, 3, 4)
+        else 0
+    )
 
 
 def build(spec: dict) -> dict:
@@ -749,7 +765,13 @@ def build(spec: dict) -> dict:
     n_sym = cute.sym_int(divisibility=4)
     x_fake = _make_fake_tensor(dtype, (batch_sym, n_sym), 4)
     det_tag = "det" if deterministic else "nondet"
-    tail_tag = "dyn" if scalar_tail_iters is None else str(scalar_tail_iters)
+    tail_tag = (
+        "dyn"
+        if scalar_tail_iters is None
+        else "arch"
+        if scalar_tail_iters == _ARCH_TAIL_ITERS
+        else str(scalar_tail_iters)
+    )
     vec_tag = "dyn" if fixed_vec_iters is None else str(fixed_vec_iters)
     prefix = (
         f"topk_radix_{_DTYPE_SHORT[spec['dtype']]}_k{K}_{det_tag}"
@@ -1095,7 +1117,8 @@ def topk_register(x: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     M, N = x.shape
     from .aot import _register_rung
 
-    NS = tuple(int(n) for n in _register_rung(N, k).split("_"))
+    major = torch.cuda.get_device_capability(x.device)[0]
+    NS = tuple(int(n) for n in _register_rung(N, k, major).split("_"))
     out_v = torch.empty(M, k, dtype=torch.float32, device=x.device)
     out_i = torch.empty(M, k, dtype=torch.int64, device=x.device)
     _compile_topk_register_i64(NS, k)(x, out_v, out_i)

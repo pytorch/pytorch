@@ -67,6 +67,7 @@ class TestRadixKernelBuilder(TestCase):
         import cutlass.cute as cute
         import cutlass.cutlass_dsl.cutlass as cutlass_dsl
 
+        from torch._native.ops.topk.aot import _ARCH_TAIL_ITERS
         from torch._native.ops.topk.cutedsl_kernels import build
 
         b = build(
@@ -75,10 +76,11 @@ class TestRadixKernelBuilder(TestCase):
                 "dtype": "float32",
                 "K": 1024,
                 "deterministic": True,
-                "scalar_tail_iters": 4,
+                "scalar_tail_iters": _ARCH_TAIL_ITERS,
                 "fixed_vec_iters": None,
             }
         )
+        self.assertEqual(b["prefix"], "topk_radix_f32_k1024_det_vdyn_tarch")
         self.assertEqual(b["fn"].min_blocks_per_mp, 2)
         with mock.patch.object(
             cutlass_dsl.cuda_helpers,

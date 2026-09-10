@@ -42,6 +42,7 @@ _RADIX_MIN_N = {
     },
 }
 _MAX_TAIL_ITERS = 4
+_ARCH_TAIL_ITERS = -1
 
 
 def _radix_min_n(dtype, k, major):
@@ -62,14 +63,18 @@ def _kernel_for(dtype, n, k, major):
     return None
 
 
-def _register_rung(n, k):
+def _register_rung(n, k, major):
+    if major >= 10 and k == 16 and n == 1024:
+        return "1024"
     for rung in _REGISTER_RUNGS.get(k, ()):
         if n in rung:
             return "_".join(str(value) for value in rung)
     return None
 
 
-def _aot_register_rung(n, k):
+def _aot_register_rung(n, k, major):
+    if major >= 10 and k == 16 and n == 1024:
+        return None
     for rung in _AOT_REGISTER_RUNGS.get(k, ()):
         if n in rung:
             return "_".join(str(value) for value in rung)
@@ -87,11 +92,15 @@ def _specialization(n, k, deterministic):
         fixed_vec_iters = 1
     elif deterministic and k == 512 and vec_iters == 2:
         fixed_vec_iters = vec_iters
-    # The fixed upper bound is unrolled, while a uniform runtime guard skips
-    # wholly inactive tail iterations.
-    scalar_tail_iters = (
-        _MAX_TAIL_ITERS if deterministic or fixed_vec_iters is not None else None
-    )
+    # Blackwell handles the runtime tail loop well, while Hopper needs the
+    # fixed upper bound. The sentinel lets one manifest point compile to the
+    # best loop for each target architecture.
+    if fixed_vec_iters is not None:
+        scalar_tail_iters = _MAX_TAIL_ITERS
+    elif deterministic:
+        scalar_tail_iters = _ARCH_TAIL_ITERS
+    else:
+        scalar_tail_iters = None
     return scalar_tail_iters, fixed_vec_iters
 
 
@@ -127,7 +136,7 @@ def kernel_precompile_grid():
             "N": None,
             "K": [64, 128, 256, 1024],
             "deterministic": True,
-            "scalar_tail_iters": _MAX_TAIL_ITERS,
+            "scalar_tail_iters": _ARCH_TAIL_ITERS,
             "fixed_vec_iters": None,
             "eligible": True,
         },
@@ -138,7 +147,17 @@ def kernel_precompile_grid():
             "K": 512,
             "deterministic": True,
             "scalar_tail_iters": _MAX_TAIL_ITERS,
-            "fixed_vec_iters": [2, None],
+            "fixed_vec_iters": 2,
+            "eligible": True,
+        },
+        {
+            "kernel": "radix",
+            "dtype": list(_DTYPES),
+            "N": None,
+            "K": 512,
+            "deterministic": True,
+            "scalar_tail_iters": _ARCH_TAIL_ITERS,
+            "fixed_vec_iters": None,
             "eligible": True,
         },
         {
@@ -189,7 +208,7 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
         "eligible": eligible,
     }
     if kernel == "register":
-        axes["N_rung"] = _aot_register_rung(n, k)
+        axes["N_rung"] = _aot_register_rung(n, k, major)
         axes["eligible"] = eligible and axes["N_rung"] is not None
     elif kernel == "radix":
         scalar_tail_iters, fixed_vec_iters = _specialization(n, k, deterministic)
@@ -240,7 +259,8 @@ def cpp_covers():
           static_cast<uintptr_t>(4 * self.element_size()) != 0) return false;
       const auto* props = at::cuda::getDeviceProperties(self.device().index());
       if (self.numel() / N < props->multiProcessorCount) return false;
-      if (st == at::kFloat && ({register_accept})) return true;
+      if (st == at::kFloat && ({register_accept}) &&
+          !(props->major >= 10 && k == 16 && N == 1024)) return true;
       return N % 4 == 0 && ({radix_expr});
     """
 
@@ -278,10 +298,13 @@ def cpp_dispatch(spec):
     if kernel == "register":
         ns = tuple(int(n) for n in spec["N_rung"].split("_"))
         n_accept = " || ".join(f"N == {n}" for n in ns)
-        return (
+        condition = (
             f"self.scalar_type() == {_DTYPES[spec['dtype']]} && "
             f"k == {k} && ({n_accept})"
         )
+        if k == 16 and 1024 in ns:
+            condition += " && (cc_major < 10 || N != 1024)"
+        return condition
 
     deterministic = spec["deterministic"]
     num_threads = max(k, 256)

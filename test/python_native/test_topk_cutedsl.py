@@ -131,13 +131,20 @@ class TestCuTeDSLTopK(TestCase):
         torch.manual_seed(14)
         k = 16
         ns = (64, 128, 256, 512, 1024)
-        compiled = _compile_topk_register_i64(ns, k)
+        major = torch.cuda.get_device_capability()[0]
+        compiled_by_rung = {}
         for n in ns:
+            rung = (n,) if major >= 10 and n == 1024 else ns
+            compiled = _compile_topk_register_i64(rung, k)
+            self.assertIs(
+                compiled_by_rung.setdefault(rung, compiled),
+                compiled,
+            )
             x = torch.randn(4, n, device="cuda")
             with torch.backends.python_native.cutedsl.disabled():
                 ref_v, _ = torch.topk(x, k, dim=-1)
             got_v, got_i = topk_register(x, k)
-            self.assertIs(_compile_topk_register_i64(ns, k), compiled)
+            self.assertIs(_compile_topk_register_i64(rung, k), compiled)
             self.assertEqual(got_v, ref_v)
             self.assertEqual(torch.gather(x, -1, got_i), got_v)
 

@@ -145,6 +145,7 @@ class TestNativeAotTopKDeclaration(TestCase):
             }
         )
         self.assertNotIn("N % 4", register)
+        self.assertIn("cc_major < 10 || N != 1024", register)
         self.assertIn("N % 4 == 0", radix)
 
 
@@ -167,14 +168,17 @@ class TestNativeAotTopK(TestCase):
             self.assertEqual(r["index_dtype"], "torch.int64")
 
     @skipIfNoAotLib
-    def test_register_grid_routes_to_aot(self):
+    def test_register_grid_routing(self):
         cases = [
             {"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)
         ]
         results = _run_probe(cases, {"TORCH_DISABLE_NATIVE_JIT": "1"})
+        major = torch.cuda.get_device_capability()[0]
         for case, r in zip(cases, results):
-            self.assertTrue(
-                r["ran_dsl"], f"AOT register kernel did not fire for {case}"
+            self.assertEqual(
+                r["ran_dsl"],
+                not (major >= 10 and case["n"] == 1024),
+                f"unexpected AOT register routing for {case}",
             )
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
@@ -404,6 +408,13 @@ class TestNativeAotTopK(TestCase):
         self.assertEqual(register["N"], None)
         self.assertEqual(register["N_rung"], "64_128_256_512_1024")
         self.assertTrue(register["eligible"])
+        register_1024 = mod.covered_axes(torch.empty(M, 1024, device="cuda"), 16)
+        if torch.cuda.get_device_capability()[0] >= 10:
+            self.assertIsNone(register_1024["N_rung"])
+            self.assertFalse(register_1024["eligible"])
+        else:
+            self.assertEqual(register_1024["N_rung"], "64_128_256_512_1024")
+            self.assertTrue(register_1024["eligible"])
         base = torch.empty(M, 4096, device="cuda")
         cow = base._lazy_clone()
         data_ptr = cow.const_data_ptr()
@@ -431,10 +442,10 @@ class TestNativeAotTopK(TestCase):
         try:
             torch.use_deterministic_algorithms(True)
             for n, k, expected in (
-                (4100, 64, (4, None)),
+                (4100, 64, (mod._ARCH_TAIL_ITERS, None)),
                 (5120, 512, (4, 2)),
-                (6144, 512, (4, None)),
-                (36860, 1024, (4, None)),
+                (6144, 512, (mod._ARCH_TAIL_ITERS, None)),
+                (36860, 1024, (mod._ARCH_TAIL_ITERS, None)),
             ):
                 x = torch.empty(M, n, device="cuda")
                 axes = mod.covered_axes(x, k)
