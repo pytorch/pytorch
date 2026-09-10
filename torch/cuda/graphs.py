@@ -335,6 +335,10 @@ class CUDAGraph(_CUDAGraph):
     # graph, "source" leaves them on the capture graph for consumers reading CUPTI's
     # sourceGraphNodeId. Stamped from annotation_config at capture_begin.
     _annotation_key_by: str
+    # Nested body graphs (child-graph / conditional bodies) this capture annotated into,
+    # under key_by="source". Their ids are neither the capture nor an exec graph's, so they
+    # are carried here to reach the destroy hooks like the others.
+    _annotated_body_graph_ids: set[int]
     # Exec graph ids a consumer has recorded per-graph state under (one per
     # instantiate). Handed to the graph-destroy hooks on destruction so consumers
     # can purge that state and their maps do not grow across the run.
@@ -367,6 +371,7 @@ class CUDAGraph(_CUDAGraph):
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
         instance._annotation_key_by = "exec"
+        instance._annotated_body_graph_ids = set()
         instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
@@ -566,6 +571,7 @@ class CUDAGraph(_CUDAGraph):
             # exec id ever has to be tracked. The capture id still goes to the destroy
             # hooks, which is what purges these entries when the graph dies.
             self._recorded_exec_ids.add(self._capture_graph_id)
+            self._recorded_exec_ids |= self._annotated_body_graph_ids
             return
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
@@ -1306,6 +1312,7 @@ class graph:
         from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import (
             _set_annotation_backend,
+            _set_annotation_key_by,
             _set_annotations_enabled,
             maybe_stamp_capture_root,
         )
@@ -1354,6 +1361,7 @@ class graph:
                     "Use 'exec' to have them rekeyed to the exec graph instead."
                 )
         self.cuda_graph._annotation_key_by = key_by
+        _set_annotation_key_by(key_by)
 
         # Scope annotation recording to this capture: the capture-root stamp and
         # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
@@ -1408,6 +1416,7 @@ class graph:
             _set_annotations_enabled,
             discard_capture_annotations,
             resolve_pending_annotations,
+            take_body_graph_ids,
         )
 
         try:
@@ -1417,6 +1426,7 @@ class graph:
             _graph_node_callbacks.disarm()
             if self._enable_annotations:
                 resolve_pending_annotations()
+                self.cuda_graph._annotated_body_graph_ids = take_body_graph_ids()
 
             # For keep_graph=False capture_end instantiates, which remaps annotations
             # from the capture id (stamped back at capture_begin) to the exec id. For
