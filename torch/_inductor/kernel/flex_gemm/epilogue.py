@@ -433,210 +433,6 @@ class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         return FlexGemmTensorSSAOpOverrides.minimum(x, max)
 
 
-class FlexGemmScalarCallbackOpOverrides(CuteDSLOpOverrides):
-    """Emit per-element QuACK ``epi_math`` expressions for scalar callbacks.
-
-    The generated epilogue body is TensorSSA-only; this emitter serves QuACK's
-    scalar callback ABI, which invokes grouped-reduction finalizers and prepass
-    functions once per element.
-    """
-
-    def __init__(self, fast_math: bool) -> None:
-        self.fast_math = fast_math
-
-    @staticmethod
-    def _expr(value: Any) -> str:
-        return CuteDSLOpOverrides._as_expr(value)
-
-    @classmethod
-    def _binary_exprs(cls, a: Any, b: Any) -> tuple[str, str]:
-        a_expr, b_expr = cls._expr(a), cls._expr(b)
-        a_var = CuteDSLOpOverrides._get_cse_var(a)
-        b_var = CuteDSLOpOverrides._get_cse_var(b)
-        if (
-            a_var is not None
-            and a_var.dtype is not None
-            and a_var.dtype.is_floating_point
-        ):
-            if b_var is None and isinstance(b, (int, float)):
-                b_expr = repr(float(b))
-        if (
-            b_var is not None
-            and b_var.dtype is not None
-            and b_var.dtype.is_floating_point
-        ):
-            if a_var is None and isinstance(a, (int, float)):
-                a_expr = repr(float(a))
-        return a_expr, b_expr
-
-    @classmethod
-    def add(cls, a: Any, b: Any, *, alpha: Any = 1) -> str:
-        a_expr, b_expr = cls._binary_exprs(a, b)
-        rhs = b_expr if alpha == 1 else f"({b_expr} * {alpha})"
-        return f"({a_expr} + {rhs})"
-
-    @classmethod
-    def sub(cls, a: Any, b: Any, *, alpha: Any = 1) -> str:
-        a_expr, b_expr = cls._binary_exprs(a, b)
-        rhs = b_expr if alpha == 1 else f"({b_expr} * {alpha})"
-        return f"({a_expr} - {rhs})"
-
-    @classmethod
-    def mul(cls, a: Any, b: Any) -> str:
-        a_expr, b_expr = cls._binary_exprs(a, b)
-        return f"({a_expr} * {b_expr})"
-
-    def truediv(self, a: Any, b: Any) -> str:
-        a_expr, b_expr = self._binary_exprs(a, b)
-        return f"epi_math.divide({a_expr}, {b_expr}, fast={self.fast_math!r})"
-
-    @classmethod
-    def neg(cls, x: Any) -> str:
-        return f"(-{cls._expr(x)})"
-
-    def _unary_math(self, name: str, x: Any) -> str:
-        return f"epi_math.{name}({self._expr(x)}, fast={self.fast_math!r})"
-
-    def abs(self, x: Any) -> str:
-        return self._unary_math("abs", x)
-
-    def exp(self, x: Any) -> str:
-        return self._unary_math("exp", x)
-
-    def sqrt(self, x: Any) -> str:
-        return self._unary_math("sqrt", x)
-
-    def rsqrt(self, x: Any) -> str:
-        return self._unary_math("rsqrt", x)
-
-    def log(self, x: Any) -> str:
-        return self._unary_math("log", x)
-
-    def erf(self, x: Any) -> str:
-        return self._unary_math("erf", x)
-
-    # pyrefly: ignore [bad-override]
-    def tanh(self, x: Any) -> str:
-        return self._unary_math("tanh", x)
-
-    def reciprocal(self, x: Any) -> str:
-        return self._unary_math("reciprocal", x)
-
-    def log1p(self, x: Any) -> str:
-        return self._unary_math("log1p", x)
-
-    def sigmoid(self, x: Any) -> str:
-        return self._unary_math("sigmoid", x)
-
-    def relu(self, x: Any) -> str:
-        return self._unary_math("relu", x)
-
-    @classmethod
-    def _binary_math(cls, name: str, a: Any, b: Any) -> str:
-        a_expr, b_expr = cls._binary_exprs(a, b)
-        return f"epi_math.{name}({a_expr}, {b_expr})"
-
-    @classmethod
-    def maximum(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("maximum", a, b)
-
-    @classmethod
-    def minimum(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("minimum", a, b)
-
-    @classmethod
-    def where(cls, condition: Any, a: Any, b: Any) -> str:
-        a_expr, b_expr = cls._binary_exprs(a, b)
-        return f"epi_math.where({cls._expr(condition)}, {a_expr}, {b_expr})"
-
-    @classmethod
-    # pyrefly: ignore [bad-override]
-    def logical_not(cls, x: Any) -> str:
-        return f"epi_math.logical_not({cls._expr(x)})"
-
-    @classmethod
-    # pyrefly: ignore [bad-override]
-    def bitwise_and(cls, a: Any, b: Any) -> str:
-        return f"({cls._expr(a)} & {cls._expr(b)})"
-
-    @classmethod
-    def eq(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("eq", a, b)
-
-    @classmethod
-    def ne(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("ne", a, b)
-
-    @classmethod
-    def lt(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("lt", a, b)
-
-    @classmethod
-    def le(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("le", a, b)
-
-    @classmethod
-    def gt(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("gt", a, b)
-
-    @classmethod
-    def ge(cls, a: Any, b: Any) -> str:
-        return cls._binary_math("ge", a, b)
-
-    @classmethod
-    def pow(cls, a: Any, b: Any) -> str:
-        if cls._expr(b) not in ("2", "2.0"):
-            raise NotImplementedError(
-                "FlexGEMM EpiMod currently supports only square operations"
-            )
-        a_expr = cls._expr(a)
-        return f"({a_expr} * {a_expr})"
-
-    @classmethod
-    # pyrefly: ignore [bad-override]
-    def to_dtype(cls, x: Any, dtype: Any, **kwargs: Any) -> str:
-        unsupported_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if value not in (None, False, torch.preserve_format)
-        }
-        if unsupported_kwargs:
-            raise NotImplementedError(
-                f"unsupported FlexGEMM EpiMod cast options: {unsupported_kwargs}"
-            )
-        x_expr = cls._expr(x)
-        if dtype is torch.bool:
-            return f"epi_math.ne({x_expr}, 0)"
-        return f"epi_math.to_dtype({x_expr}, {dtype})"
-
-    @classmethod
-    def _to_copy(cls, x: Any, *, dtype: Any, **kwargs: Any) -> str:
-        return cls.to_dtype(x, dtype, **kwargs)
-
-    @classmethod
-    def convert_element_type(cls, x: Any, dtype: Any) -> str:
-        return cls.to_dtype(x, dtype)
-
-    @classmethod
-    def clamp(cls, x: Any, min: Any = None, max: Any = None) -> str:
-        x_expr = cls._expr(x)
-        options = []
-        if min is not None:
-            options.append(f"min={cls._binary_exprs(x, min)[1]}")
-        if max is not None:
-            options.append(f"max={cls._binary_exprs(x, max)[1]}")
-        suffix = f", {', '.join(options)}" if options else ""
-        return f"epi_math.clamp({x_expr}{suffix})"
-
-    @classmethod
-    def clamp_min(cls, x: Any, min: Any) -> str:
-        return cls._binary_math("clamp_min", x, min)
-
-    @classmethod
-    def clamp_max(cls, x: Any, max: Any) -> str:
-        return cls._binary_math("clamp_max", x, max)
-
-
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpiModSource:
     """Generated QuACK function plus optional grouped-reduction semantics."""
@@ -645,6 +441,7 @@ class FlexGemmEpiModSource:
     source: str
     local_reduce_combine: str | None = None
     local_reduce_finalize: str | None = None
+    local_reduce_finalize_operands: tuple[str, ...] = ()
     local_reduce_store_finalize: str | None = None
     local_reduce_prepass_combine: str | None = None
     local_reduce_prepass_finalize: str | None = None
@@ -855,10 +652,16 @@ class FlexGemmEpiModEmitter:
         self.local_reduce_source_nodes: frozenset[torch.fx.Node] = frozenset()
         self.local_reduce_finalize_nodes: frozenset[torch.fx.Node] = frozenset()
         self.local_reduce_finalize_uses_prepass = False
+        self.local_reduce_finalize_captures: tuple[torch.fx.Node, ...] = ()
         self.local_reduce_finalize_body: tuple[str, ...] = ()
         self.local_reduce_finalize_result: Any | None = None
         self.local_reduce_prepass_body: tuple[str, ...] = ()
         self.local_reduce_prepass_result: Any | None = None
+        self.epilogue_arg_placeholders = epilogue_arg_placeholders
+        self.epilogue_arg_kinds = epilogue_arg_kinds
+        self.operand_names = tuple(
+            f"operand{index}" for index in range(len(epilogue_arg_placeholders))
+        )
         if self.local_reduce is not None:
             spec = epimod_local_reduce_spec(analysis, self.local_reduce)
             self.local_reduce_spec = spec
@@ -888,22 +691,27 @@ class FlexGemmEpiModEmitter:
                     self.local_reduce.store.value_node,
                     sink_aliases | prepass_aliases,
                 )
+                self.local_reduce_finalize_captures = tuple(
+                    node
+                    for node in epilogue_arg_placeholders
+                    if node in self.local_reduce_finalize_nodes
+                )
+                # Only floating scalar captures travel to the sink's finalizer;
+                # row/col/tile captures have no per-group value.
                 if any(
-                    node.op == "placeholder"
-                    for node in self.local_reduce_finalize_nodes
+                    kind != "scalar" or not node.meta["val"].dtype.is_floating_point
+                    for node, kind in zip(
+                        epilogue_arg_placeholders, epilogue_arg_kinds, strict=True
+                    )
+                    if node in self.local_reduce_finalize_captures
                 ):
                     raise NotImplementedError(LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR)
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.alpha = alpha
         self.beta = beta
-        self.epilogue_arg_kinds = epilogue_arg_kinds
         self.fast_math = fast_math
-        self.operand_names = tuple(
-            f"operand{index}" for index in range(len(epilogue_arg_placeholders))
-        )
         if not 0 <= mainloop_scale_count <= len(self.operand_names):
             raise RuntimeError("invalid FlexGEMM main-loop scale operand count")
         self.mainloop_scale_count = mainloop_scale_count
@@ -917,9 +725,20 @@ class FlexGemmEpiModEmitter:
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
         self.env = dict(self.base_env)
 
+    @property
+    def local_reduce_finalize_operands(self) -> tuple[str, ...]:
+        """Return the scalar operand names the compressed-store finalizer reads."""
+        return tuple(
+            name
+            for node, name in zip(
+                self.epilogue_arg_placeholders, self.operand_names, strict=True
+            )
+            if node in self.local_reduce_finalize_captures
+        )
+
     @staticmethod
     def value(name: str, dtype: torch.dtype) -> CuteDSLCSEVariable:
-        """Represent one generated EpiMod scalar/F2 value with dtype metadata."""
+        """Represent one generated EpiMod TensorSSA value with dtype metadata."""
         return CuteDSLCSEVariable(
             name,
             ValueRanges.unknown(),
@@ -968,7 +787,7 @@ class FlexGemmEpiModEmitter:
         }
 
     def lower_local_reduce_finalize(self) -> None:
-        """Lower a compressed-output transform as a scalar QuACK finalizer."""
+        """Lower a compressed-output transform as a fragment QuACK finalizer."""
         spec = self.local_reduce_spec
         local_reduce = self.local_reduce
         if (
@@ -1003,9 +822,12 @@ class FlexGemmEpiModEmitter:
             )
             prepass_value = self.value("prepass_value", prepass_dtype)
             env.update((alias, prepass_value) for alias in prepass.aliases)
+        env.update(
+            (node, self.base_env[node]) for node in self.local_reduce_finalize_captures
+        )
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmScalarCallbackOpOverrides(self.fast_math)),
+            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -1040,7 +862,7 @@ class FlexGemmEpiModEmitter:
         env = dict(self.base_env)
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(FlexGemmScalarCallbackOpOverrides(self.fast_math)),
+            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -1284,10 +1106,16 @@ class FlexGemmEpiModEmitter:
         finalize_source = ""
         if self.local_reduce_finalize_result is not None:
             finalize_name = f"{name}_local_reduce_finalize"
-            finalize_params = (
-                "value, prepass_value"
-                if self.local_reduce_finalize_uses_prepass
-                else "value"
+            finalize_params = ", ".join(
+                (
+                    "value",
+                    *(
+                        ("prepass_value",)
+                        if self.local_reduce_finalize_uses_prepass
+                        else ()
+                    ),
+                    *self.local_reduce_finalize_operands,
+                )
             )
             finalize_source = (
                 f"def {finalize_name}({finalize_params}):\n"
@@ -1331,6 +1159,9 @@ class FlexGemmEpiModEmitter:
                 else sink.finalize
                 if self.local_reduce_prepass is not None
                 else finalize_name or sink.finalize
+            ),
+            local_reduce_finalize_operands=(
+                () if finalize_name is None else self.local_reduce_finalize_operands
             ),
             local_reduce_store_finalize=(
                 finalize_name if self.local_reduce_prepass is not None else None
