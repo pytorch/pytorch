@@ -587,17 +587,28 @@ class BaseListVariable(VariableTracker):
             return None
         check_positional(tx, "pop", len(args), 0, 1)
 
+        # list_pop_impl signs the index as `Py_ssize_t = -1`, so Argument
+        # Clinic converts it before the body runs -- ahead of the empty-list
+        # check -- via _PyNumber_Index + PyLong_AsSsize_t. A symbolic index
+        # specializes here (installing a guard) because which element leaves
+        # the list has to be known while tracing.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1049-L1076
+        idx = -1
+        if args:
+            idx = pynumber_as_ssize_t(
+                tx, args[0], err=OverflowError
+            ).as_python_constant()
+
         if len(self.items) == 0:
             raise_observed_exception(IndexError, tx, args=["pop from empty list"])
 
-        if len(args) != 0:
-            idx = args[0].as_python_constant()
-            if idx >= len(self.items):
-                raise_observed_exception(
-                    IndexError, tx, args=["pop index out of range"]
-                )
+        if idx < 0:
+            idx += len(self.items)
+        if not 0 <= idx < len(self.items):
+            raise_observed_exception(IndexError, tx, args=["pop index out of range"])
+
         tx.output.side_effects.mutation(self)
-        return self.items.pop(*[a.as_python_constant() for a in args])
+        return self.items.pop(idx)
 
     def list_clear(
         self,
