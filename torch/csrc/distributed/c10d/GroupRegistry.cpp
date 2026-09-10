@@ -1,6 +1,10 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 
+#include <mutex>
+#include <vector>
+
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 namespace {
 
@@ -49,9 +53,15 @@ class GroupRegistry {
     registry_.erase(group_name);
   }
 
-  void unregister_all_groups() {
+  std::vector<std::string> unregister_all_groups() {
     std::unique_lock write_lock(lock_);
+    std::vector<std::string> names;
+    names.reserve(registry_.size());
+    for (const auto& entry : registry_) {
+      names.push_back(entry.first);
+    }
     registry_.clear();
+    return names;
   }
 
  private:
@@ -101,19 +111,65 @@ bool is_process_group_registered(const std::string& group_name) {
   }
 }
 
+namespace {
+
+// Function-local so the list is built before any registration can reach it,
+// whatever order the translation units initialize in.
+std::vector<std::function<void(const std::string&)>>& unregister_hooks() {
+  static std::vector<std::function<void(const std::string&)>> hooks;
+  return hooks;
+}
+
+std::mutex& unregister_hooks_mutex() {
+  static std::mutex m;
+  return m;
+}
+
+void run_unregister_hooks(const std::string& group_name) {
+  // Copy, then call with the lock released: a hook runs arbitrary consumer
+  // code, and holding a non-recursive mutex across it deadlocks the moment
+  // one of them registers a hook or unregisters a group.
+  std::vector<std::function<void(const std::string&)>> hooks;
+  {
+    std::lock_guard<std::mutex> lock(unregister_hooks_mutex());
+    hooks = unregister_hooks();
+  }
+  for (const auto& hook : hooks) {
+    try {
+      hook(group_name);
+    } catch (const std::exception& e) {
+      C10D_ERROR(
+          "group unregister hook failed for '{}': {}", group_name, e.what());
+    }
+  }
+}
+
+} // namespace
+
+void register_group_unregister_hook(
+    std::function<void(const std::string&)> hook) {
+  std::lock_guard<std::mutex> lock(unregister_hooks_mutex());
+  unregister_hooks().push_back(std::move(hook));
+}
+
 void unregister_process_group(const std::string& group_name) {
   if (thread_isolation_mode) {
     RankLocal<::GroupRegistry>::get().unregister_group(group_name);
   } else {
     process_registry.unregister_group(group_name);
   }
+  run_unregister_hooks(group_name);
 }
 
 void unregister_all_process_groups() {
+  std::vector<std::string> names;
   if (thread_isolation_mode) {
-    RankLocal<::GroupRegistry>::get().unregister_all_groups();
+    names = RankLocal<::GroupRegistry>::get().unregister_all_groups();
   } else {
-    process_registry.unregister_all_groups();
+    names = process_registry.unregister_all_groups();
+  }
+  for (const auto& name : names) {
+    run_unregister_hooks(name);
   }
 }
 
