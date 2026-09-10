@@ -359,7 +359,9 @@ class TORCH_API NCCLDevCommManager {
             // RCCL 2.30.7 ncclDevCommDestroy leaves the calling thread in
             // Relaxed capture mode whether or not a capture is active, and
             // invalidates an active one. The balanced guard restores the
-            // caller's mode on exit. See ROCm/rccl#TBD.
+            // caller's mode on exit.
+            // TODO: drop this guard once RCCL restores the caller's capture
+            // thread mode.
             c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
                 cudaStreamCaptureModeRelaxed};
 #endif
