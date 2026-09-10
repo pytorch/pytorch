@@ -96,6 +96,38 @@ class LauncherApiTest(TestCase):
             "SIGTERM,SIGINT,SIGHUP,SIGQUIT",
         )
 
+    @patch("torch.distributed.launcher.api.LocalElasticAgent")
+    @patch("torch.distributed.launcher.api.rdzv_registry.get_rendezvous_handler")
+    def test_launch_agent_failing_rdzv_shutdown_does_not_mask_child_failed_error(
+        self, mock_get_handler, mock_agent
+    ):
+        """Test that a failing rendezvous shutdown does not mask ChildFailedError."""
+        from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
+
+        config = LaunchConfig(
+            min_nodes=1,
+            max_nodes=1,
+            nproc_per_node=1,
+            run_id="test_run",
+        )
+        entrypoint = "dummy_script.py"
+        args = []
+
+        mock_rdzv_handler = MagicMock()
+        mock_rdzv_handler.shutdown.side_effect = RuntimeError("Rendezvous store unreachable")
+        mock_get_handler.return_value = mock_rdzv_handler
+
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.run.return_value = MagicMock(
+            is_failed=lambda: True, failures={}
+        )
+        mock_agent.return_value = mock_agent_instance
+
+        with self.assertRaises(ChildFailedError):
+            launch_agent(config, entrypoint, args)
+
+        mock_rdzv_handler.shutdown.assert_called_once()
+
 
 if __name__ == "__main__":
     run_tests()
