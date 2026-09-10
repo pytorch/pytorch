@@ -99,7 +99,13 @@ class ShapePropagationOpsHandler:
             return ()
 
     @staticmethod
-    def store_reduction(name: str, index: int, value: ShapeArg) -> None:
+    def store_reduction(
+        name: str,
+        index: int,
+        value: ShapeArg,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         return None
 
     @staticmethod

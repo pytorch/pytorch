@@ -166,6 +166,7 @@ class CUDACombinedScheduling(BaseScheduling):
             not self._nv_universal_gemm_scheduling.has_conflicting_epilogue_reductions(
                 node1, node2
             )
+            and self._triton_scheduling.can_fuse_reduction_pair(node1, node2)
         )
 
     def can_fuse_reduction_epilogue(

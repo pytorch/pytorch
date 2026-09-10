@@ -348,7 +348,13 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
-    def store_reduction(name: str, index, value: DTypeArg) -> None:
+    def store_reduction(
+        name: str,
+        index,
+        value: DTypeArg,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         return None
 
     @staticmethod
@@ -409,10 +415,6 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def identity(x: DTypeArg) -> torch.dtype:
         return promote_types([x])
-
-    @staticmethod
-    def set_store_mask(value: DTypeArg, mask: DTypeArg) -> torch.dtype:
-        return promote_types([value])
 
     @staticmethod
     def frexp(x: DTypeArg) -> tuple[torch.dtype, torch.dtype]:

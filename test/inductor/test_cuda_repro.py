@@ -37,6 +37,10 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
     tf32_on_and_off,
 )
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -245,6 +249,202 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, False
+            )[0]
+
+        query, key, value = (
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+            )
+            for _ in range(3)
+        )
+
+        def compile_and_capture_bias(fn, *args, strict=False):
+            biases = []
+
+            def capture_bias(graph):
+                nodes = graph.find_nodes(
+                    op="call_function",
+                    target=aten._scaled_dot_product_efficient_attention.default,
+                )
+                biases.extend(node.args[3] for node in nodes)
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    numerics="strict" if strict else "default",
+                    joint_custom_post_pass=capture_bias,
+                ),
+                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            ):
+                compiled = torch.compile(fn, fullgraph=True)
+                actual = compiled(*args)
+            self.assertEqual(len(biases), 1)
+            return actual, biases[0], compiled
+
+        expected = fn(query, key, value)
+        actual, bias, _ = compile_and_capture_bias(fn, query, key, value)
+        self.assertEqual(actual, expected)
+        self.assertIsNone(bias)
+
+        strict_actual, strict_bias, _ = compile_and_capture_bias(
+            fn, query, key, value, strict=True
+        )
+        self.assertEqual(strict_actual, expected)
+        self.assertIsInstance(strict_bias, torch.fx.Node)
+
+        # Only compiler-proven zero masks may be removed; a runtime mask must
+        # remain an FX input because its contents can change between calls.
+        def runtime_mask_fn(query, key, value, attention_mask):
+            return F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask
+            )
+
+        padding_mask = torch.zeros(
+            batch_size,
+            1,
+            seq_len,
+            seq_len,
+            device=device_type,
+        )
+        padding_mask[..., -1] = torch.finfo(padding_mask.dtype).min
+        expected = runtime_mask_fn(query, key, value, padding_mask)
+        actual, runtime_bias, compiled_runtime_mask_fn = compile_and_capture_bias(
+            runtime_mask_fn, query, key, value, padding_mask
+        )
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(runtime_bias, torch.fx.Node)
+
+        # Reuse the same compiled graph with different mask contents.
+        padding_mask.zero_()
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            self.assertEqual(
+                compiled_runtime_mask_fn(query, key, value, padding_mask),
+                runtime_mask_fn(query, key, value, padding_mask),
+            )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias_backward(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        inputs = tuple(
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        eager_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        compiled_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        expected = fn(*eager_inputs)
+        expected.sum().backward()
+
+        biases = {}
+
+        def capture_biases(graph):
+            for target, bias_index in (
+                (aten._scaled_dot_product_efficient_attention.default, 3),
+                (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+            ):
+                nodes = graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), 1)
+                biases[target] = nodes[0].args[bias_index]
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_biases),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*compiled_inputs)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(actual_input.grad, expected_input.grad)
+        # check zero bias is removed.
+        self.assertIsNone(biases[aten._scaled_dot_product_efficient_attention.default])
+        self.assertIsNone(
+            biases[aten._scaled_dot_product_efficient_attention_backward.default]
+        )
+
+        def bias_grad_fn(query, key, value, bias_seed):
+            additive_mask = bias_seed * 0.0
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        bias_seed = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device_type,
+            requires_grad=True,
+        )
+        bias_grad_bias = []
+
+        def capture_bias_grad_bias(graph):
+            nodes = graph.find_nodes(
+                op="call_function",
+                target=aten._scaled_dot_product_efficient_attention_backward.default,
+            )
+            self.assertEqual(len(nodes), 1)
+            bias_grad_bias.append(nodes[0].args[4])
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_bias_grad_bias),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(bias_grad_fn, fullgraph=True)
+            compiled(*compiled_inputs, bias_seed).sum().backward()
+        # check zero bias is NOT removed due to rqurie bias grad.
+        self.assertEqual(len(bias_grad_bias), 1)
+        self.assertIsInstance(bias_grad_bias[0], torch.fx.Node)
+        self.assertIsNotNone(bias_seed.grad)
 
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
@@ -2828,6 +3028,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -2884,6 +3085,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
             return torch.index_add(x, -1, idx, src, alpha=0.5)
@@ -2908,6 +3110,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         not SM90OrLater and not TEST_WITH_ROCM,
         "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_scalar_index(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)
@@ -3100,7 +3303,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(16, 65, device=device_type)
         code = self._check_topk(f, x, x, 4)
-        self.assertEqual(code.count("async_compile.triton("), 1)
+        # Ranked results do not join mix-order reductions; the column sum splits.
+        self.assertEqual(code.count("async_compile.triton("), 2)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     def test_topk_fusible_ir_dynamic_rows(self):
@@ -3760,6 +3964,287 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.linalg.vector_norm(x, dim=(-2, -1))
 
         self.common(fn4, [y])
+
+
+class TopkRegressionTests(TestCase):
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @config.patch("triton.native_matmul", True)
+    def test_topk_fusible_ir_native_matmul_sibling(self, device):
+        def f(a, b):
+            candidates = a[:, None, :].expand(16, 16, 64)
+            return a @ b, torch.topk(candidates, 3)
+
+        a = torch.randn(16, 64, device=device, dtype=torch.float16)
+        b = torch.randn(64, 16, device=device, dtype=torch.float16)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), a, b)
+        expected = f(a, b)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1].values, expected[1].values)
+        candidates = a[:, None, :].expand(16, 16, 64)
+        self.assertEqual(actual[1].values, candidates.gather(-1, actual[1].indices))
+        FileCheck().check("tl.dot(").run(code)
+        FileCheck().check("topk_with_index").run(code)
+        self.assertEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width", [33, 8192])
+    @parametrize("dependent", [False, True])
+    def test_topk_fusible_ir_scan_kernel(self, device, width, dependent):
+        def f(x):
+            scanned = x.cumsum(-1)
+            values, indices = torch.topk(scanned if dependent else x, 3)
+            return values + 1, indices, scanned
+
+        x = (torch.arange(width * 64, device=device) % 97).float()
+        x = x.reshape(width, 64).t()
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        expected = f(x)
+        self.assertEqual(actual[0], expected[0], atol=0, rtol=0)
+        self.assertEqual(actual[2], expected[2], atol=0, rtol=0)
+        source = expected[2] if dependent else x
+        self.assertEqual(actual[0] - 1, source.gather(-1, actual[1]), atol=0, rtol=0)
+        FileCheck().check("topk_with_index").run(code)
+        if width == 8192:
+            FileCheck().check("triton_heuristics.split_scan").run(code)
+        self.assertEqual(code.count("async_compile.triton("), 2 if width == 8192 else 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("shape", [(33,), (4, 33), (2, 3, 512)])
+    @parametrize("upcast", [False, True])
+    def test_topk_fusible_ir_result_domain(self, device, dtype, shape, upcast):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return values + 1, indices + 1, values.float() + indices.float()
+
+        x = torch.randn(shape, device=device, dtype=dtype)
+        with config.patch("triton.codegen_upcast_to_fp32", upcast):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        indices = actual[1] - 1
+        selected = (x * 2).gather(-1, indices)
+        self.assertEqual(actual[0], torch.topk(x * 2, 3).values + 1)
+        self.assertEqual(actual[0], selected + 1)
+        self.assertEqual(actual[2], selected.float() + indices.float())
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_flat_result(self, device, reorder):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return values.flatten() + 1, indices.flatten() + 1
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @config.patch(
+        {
+            "expand_dimension_for_pointwise_nodes": True,
+            "loop_ordering_after_fusion": True,
+            "loop_reindexing_after_fusion": True,
+            "loop_index_inversion_in_fusion": True,
+        }
+    )
+    @parametrize("consumer", ["flat", "transpose", "repeat", "gather"])
+    def test_topk_fusible_ir_loop_transforms(self, device, consumer):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            if consumer == "flat":
+                return values.flatten() + 1, indices.flatten() + 1
+            if consumer == "transpose":
+                return values.T.contiguous() + 1, indices.T.contiguous() + 1
+            if consumer == "repeat":
+                return values.repeat(1, 11) + 1, indices.repeat(1, 11) + 1
+            return values.gather(-1, indices % 3) + 1, indices
+
+        x = torch.arange(264, device=device, dtype=torch.float32).reshape(8, 33)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        FileCheck().check("topk_with_index").run(code)
+        if consumer == "flat":
+            self.assertEqual(code.count("async_compile.triton("), 1)
+        elif consumer in ("repeat", "gather"):
+            self.assertGreater(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("source", ["input", "producer", "result"])
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_gather_epilogue(self, device, source, reorder):
+        def f(x):
+            candidates = x * 2 if source == "producer" else x
+            values, indices = torch.topk(candidates, 3)
+            if source == "result":
+                return values.gather(-1, indices % 3) + values, indices
+            return candidates.gather(-1, indices) + values, indices
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        expected_kernels = 2 if source == "result" else 1
+        self.assertEqual(code.count("async_compile.triton("), expected_kernels)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width", [33, 512])
+    @parametrize("sum_first", [False, True])
+    def test_topk_fusible_ir_scalar_and_ranked_results(self, device, width, sum_first):
+        def f(x):
+            if sum_first:
+                total = x.sum(-1, keepdim=True)
+            values, indices = torch.topk(x, 3)
+            if not sum_first:
+                total = x.sum(-1, keepdim=True)
+            return values + total, indices, total + 1
+
+        x = torch.randn(4, width, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x))
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("case", ["parent", "siblings", "column", "rowless"])
+    def test_topk_fusible_ir_result_stage_transitions(self, device, case):
+        def f(x):
+            if case == "rowless":
+                x = x.flatten()
+            total = x.sum(-1, keepdim=True) * 2 + 1
+            if case == "siblings":
+                values, indices = torch.topk(x, 3)
+                values2, indices2 = torch.topk(-x, 3)
+                return values + values2 + total, indices, indices2, total
+            candidates = x + (total.T if case == "column" else total)
+            values, indices = torch.topk(candidates, 3)
+            return values + total, indices, candidates, total
+
+        width = 17 if case == "column" else 33
+        x = torch.arange(17 * width, device=device, dtype=torch.float32)
+        x = x.reshape(17, width)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        if case != "column":
+            self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    def test_topk_fusible_ir_result_aliases(self, device):
+        def f(x):
+            values2, indices2 = torch.topk(x, 2)
+            values3, indices3 = torch.topk(x, 3)
+            return torch.cat((values2, values3), -1), torch.cat(
+                (indices2, indices3), -1
+            )
+
+        x = torch.arange(90, device=device, dtype=torch.float32).reshape(6, 15)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("reorder", [False, True])
+    def test_topk_fusible_ir_producer_into_cat(self, device, reorder):
+        def f(x):
+            values, indices = torch.topk(x * 2, 3)
+            return torch.cat((values, x[:, :1]), -1), indices
+
+        x = torch.arange(132, device=device, dtype=torch.float32).reshape(4, 33)
+        with config.patch("loop_ordering_after_fusion", reorder):
+            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        self.assertEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    def test_topk_fusible_ir_candidate_and_result(self, device):
+        def f(x):
+            candidates = x.sin() * 2
+            values, indices = torch.topk(candidates, 3)
+            return candidates, values + candidates[:, :3], indices
+
+        x = torch.randn(4, 33, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("rows", [33, 129])
+    @config.patch(
+        {
+            "triton.mix_order_reduction_non_strict_mode": True,
+            "triton.mix_order_reduction_split_size": 16,
+        }
+    )
+    def test_topk_fusible_ir_result_partial_row_tile(self, device, rows):
+        def f(x):
+            return *torch.topk(x, 3, dim=1), x.sum(dim=0)
+
+        x = torch.arange(rows * 65, device=device, dtype=torch.float32).reshape(
+            rows, 65
+        )
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        # The column sum stays out of the top-k kernel (it may itself split).
+        self.assertGreaterEqual(code.count("async_compile.triton("), 2)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("width", [33, 512])
+    @parametrize("largest", [True, False])
+    @config.patch({"triton.codegen_upcast_to_fp32": False})
+    def test_topk_fusible_ir_without_upcast(self, device, dtype, width, largest):
+        def f(x):
+            values, indices = torch.topk(x, 4, largest=largest)
+            return values, indices, values * 2
+
+        x = torch.randn(4, width, device=device, dtype=dtype)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        expected = f(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[0], x.gather(-1, actual[1]))
+        self.assertEqual(actual[2], expected[2])
+        FileCheck().check("topk_with_index").run(code)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_topk_fusible_ir_single_rank_rounding(self, device, dtype):
+        def f(x):
+            values, indices = torch.topk(x * 1.1, 1)
+            return values.float(), indices
+
+        x = torch.arange(16, device=device, dtype=dtype).reshape(2, 8)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(actual, f(x), atol=0, rtol=0)
+        self.assertEqual(code.count("async_compile.triton("), 1)
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_topk_fusible_ir_single_rank_nan_payload(self, device, dtype):
+        nan_bits = {
+            torch.float16: (0x7C01, 0xFE55),
+            torch.bfloat16: (0x7F81, 0xFFD5),
+            torch.float32: (0x7F800001, 0xFFC12345),
+        }
+        bits_dtype = torch.uint32 if dtype == torch.float32 else torch.uint16
+        x = torch.tensor(nan_bits[dtype], device=device, dtype=bits_dtype)
+        x = x.view(dtype).reshape(2, 1).expand(2, 33).contiguous()
+        values, indices = torch.compile(torch.topk, fullgraph=True)(x, 1)
+        selected = x.gather(-1, indices)
+        self.assertEqual(values.view(bits_dtype), selected.view(bits_dtype))
+
+    @skipCUDAIf(not SM90OrLater, "fusible topk requires SM90 or newer")
+    @parametrize("width, k", [(8, 2), (12, 3), (33, 3), (512, 4)])
+    @parametrize("add", [False, True])
+    def test_topk_fusible_ir_repeated_output(self, device, width, k, add):
+        def f(x):
+            values, indices = torch.topk(x, k)
+            if add:
+                values = values + 1
+                indices = indices + 1
+            return values.repeat(1, width // k), indices.repeat(1, width // k)
+
+        x = torch.arange(4 * width, device=device, dtype=torch.float32)
+        x = x.reshape(4, width)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+
+instantiate_device_type_tests(TopkRegressionTests, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
