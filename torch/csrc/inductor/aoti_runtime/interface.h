@@ -410,8 +410,9 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
 
 // Enables or disables pinned async H2D copies for constant loading and updates.
 // Eligible initial loads are coalesced into staging windows even when the CPU
-// copy thread count is one. Call before creating a model/container to affect
-// embedded constant loading.
+// copy thread count is one. Coalescing zero-fills the inter-constant alignment
+// padding in the device blob, which the per-range path left uninitialized. Call
+// before creating a model/container to affect embedded constant loading.
 AOTI_API AOTIRuntimeError
 AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 
@@ -422,8 +423,8 @@ AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
 
 // Sets the total number of CPU threads used to fill pinned staging buffers,
 // including the caller. Pass 0 to use AOTI_COPY_STAGE_CPU_THREADS or the
-// runtime default. Values greater than 16 are clamped. Setting this to 1
-// disables worker threads but eligible initial loads remain coalesced.
+// runtime default. Clamped to 16 and to the machine's core count. Setting this
+// to 1 disables worker threads but eligible initial loads remain coalesced.
 AOTI_API AOTIRuntimeError
 AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(size_t threads);
 

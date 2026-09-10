@@ -896,6 +896,10 @@ class PinnedStagingPool {
         }
 
         if (gap > 0) {
+          // Coalescing copies the inter-constant alignment padding along with
+          // the constants, so the padding is zero-filled here. The per-range
+          // path left it holding whatever cudaMalloc returned; anything that
+          // checksums or diffs raw constant blob bytes will see the change.
           std::memset(
               static_cast<uint8_t*>(stage_[buf_]) + pending_bytes_, 0, gap);
           pending_bytes_ += gap;
@@ -1025,10 +1029,16 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
       explicit_buffer_bytes > 0 ? explicit_buffer_bytes : env_buffer_bytes;
   const size_t explicit_cpu_copy_threads =
       torch::aot_inductor::pinnedAsyncConstantsCopyCpuThreads();
+  // Staging is memory-bandwidth bound and the shared H2D stream already
+  // serializes copies across concurrently loading models, so more copy threads
+  // than cores only adds contention. hardware_concurrency() may report 0.
+  const size_t max_cpu_copy_threads = std::min(
+      PinnedStagingPool::kMaxCpuCopyThreads,
+      static_cast<size_t>(std::max(std::thread::hardware_concurrency(), 1u)));
   const size_t cpu_copy_threads = std::min(
       explicit_cpu_copy_threads > 0 ? explicit_cpu_copy_threads
                                     : env_cpu_copy_threads,
-      PinnedStagingPool::kMaxCpuCopyThreads);
+      max_cpu_copy_threads);
   return PinnedStagingPool::tryCreate(
       buffer_bytes, use_copy_tasks, cpu_copy_threads);
 }
