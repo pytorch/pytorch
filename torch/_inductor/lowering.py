@@ -984,6 +984,23 @@ def to_dtype(
 
 register_pointwise_op("to_dtype")
 
+# Reached through custom lowerings or codegen itself rather than
+# register_pointwise; they commute with broadcasting all the same.
+for _pointwise_name in (
+    "where",
+    "pow",
+    "floor",
+    "round",
+    "trunc",
+    "fmod",
+    "remainder",
+    "identity",
+    "isnan",
+    "isinf",
+    "signbit",
+):
+    register_pointwise_op(_pointwise_name)
+
 
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
@@ -3751,6 +3768,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
+make_fallback(aten._scaled_addmm.default, warn=False)
+make_fallback(aten._scaled_addmm_.default, warn=False)
 
 
 # 1) Easy
