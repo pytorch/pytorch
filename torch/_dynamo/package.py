@@ -118,8 +118,8 @@ class FunctionPicklerBase(pickle.Pickler):
 
     GuardsStatePickler is the one subclass today and decides what a rebuilt
     function carries; this class fixes HOW it is rebuilt. AOTCompilePickler
-    keeps its own copies of these reducers and is moved onto this base
-    separately, so that a fix here cannot be missed in one pickler.
+    keeps its own copies of these reducers until it is moved onto this base
+    separately; once both share it, a fix here cannot be missed in one pickler.
 
     Defaults travel as pickle STATE, applied after memoization, so a default
     that reaches back to its own function ends. A closure cell is a reduce
@@ -186,12 +186,15 @@ class FunctionPicklerBase(pickle.Pickler):
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
         # functools.wraps copies __module__, so this scope can be a different
-        # file from the one the function lives in. A module that only
-        # existed in sys.modules at save (exec-created, transformers_modules.*)
-        # gets an empty scope. That is safe on the guard-serialization path,
-        # which reads attributes off the rebuilt function without calling it; a
-        # pickler whose functions are CALLED after load would see an empty scope
-        # as a NameError at first call, not a load error.
+        # file from the one the function lives in. Importing it here runs that
+        # module's top-level code at guard-load time if it is not loaded yet;
+        # for a wraps wrapper that is the wrapped function's module, almost
+        # always already imported. A module that only existed in sys.modules
+        # at save (exec-created, transformers_modules.*) gets an empty scope.
+        # That is safe on the guard-serialization path, which reads attributes
+        # off the rebuilt function without calling it; a pickler whose
+        # functions are CALLED after load would see an empty scope as a
+        # NameError at first call, not a load error.
         f_globals: dict[str, Any]
         # __module__ need not be an importable string: a decorator can set it to
         # a non-str (42), a <locals>/exec function can carry None or "" (bare
@@ -202,14 +205,17 @@ class FunctionPicklerBase(pickle.Pickler):
         if isinstance(module, str) and module:
             try:
                 f_globals = importlib.import_module(module).__dict__
-            except Exception:
+            except Exception as e:
+                logger.debug("rebuilding %s with an empty scope: %s", qualname, e)
                 f_globals = {}
         else:
             f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
-    @staticmethod
-    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+    @classmethod
+    def _apply_function_state(
+        cls, fn: types.FunctionType, state: tuple[Any, ...]
+    ) -> None:
         (defaults,) = state
         fn.__defaults__ = defaults
 
@@ -249,11 +255,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # __slots__ member descriptor. A type receiver (classmethod) is exempt:
         # its namespace is restored with the class.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        if not isinstance(receiver, type) and hasattr(cls, "__getattr__"):
-            return explicit
+        is_type = isinstance(receiver, type)
         try:
+            if not is_type and hasattr(cls, "__getattr__"):
+                return explicit
             self_dict = getattr(receiver, "__dict__", None)
-            if not isinstance(receiver, type) and (
+            if not is_type and (
                 (isinstance(self_dict, dict) and name in self_dict)
                 or (
                     name is not None
@@ -267,8 +274,9 @@ class FunctionPicklerBase(pickle.Pickler):
             inner = getattr(receiver, name, None) if name is not None else None
         except Exception:
             # A probe that raises anything -- a __getattribute__ override, a
-            # metaclass __getattr__, a property -- falls back to the explicit
-            # reduce, which is always correct.
+            # metaclass __getattr__ (which hasattr(cls, ...) also reaches), a
+            # property -- falls back to the explicit reduce, which is always
+            # correct.
             return explicit
         # Only a method BOUND to this receiver over this function proves the
         # class MRO resolves back to it. getattr can also hand back the raw
@@ -828,8 +836,9 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        # Backend ids the compile inside the current code_context registered,
-        # so a bypass can drop exactly those.
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
