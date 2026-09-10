@@ -55,6 +55,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCPU,
     onlyCUDA,
     OpDTypes,
     ops,
@@ -3719,7 +3721,9 @@ def _get_rand_no_zeros(*args, **kwargs):
 
 
 @markDynamoStrictTest
-class TestVmapBatchedGradient(Namespace.TestVmapBase):
+class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -3982,11 +3986,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
 
+    @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa(self, device, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
         def T(*args):
             return torch.randn(*args, dtype=torch.float16, device=device)
 
@@ -4036,11 +4038,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
+    @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa_unbatched_inputs(self, device, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
         query = torch.randn(
             3, 4, 32, 64, dtype=torch.float16, device=device, requires_grad=True
         )
@@ -4068,10 +4068,8 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(actual_backward_grads, expected_backward_grads)
         self.assertEqual(actual_grads, expected_grads)
 
+    @onlyCPU
     def test_sdpa_unbatched_inputs_cpu(self, device):
-        if device != "cpu":
-            raise unittest.SkipTest("This test is only for CPU")
-
         query = torch.randn(3, 4, 32, 64, device=device, requires_grad=True)
         key = torch.randn_like(query, requires_grad=True)
         value = torch.randn_like(query, requires_grad=True)
@@ -4099,6 +4097,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(actual_backward_grads, expected_backward_grads)
         self.assertEqual(actual_grads, expected_grads)
 
+    @onlyAccelerator
     @parametrize(
         "backend",
         [
@@ -4108,9 +4107,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         ],
     )
     def test_sdpa_unbatched_inputs_with_mask(self, device, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
         query = torch.randn(3, 4, 32, 64, dtype=torch.float16, device=device)
         key = torch.randn_like(query)
         value = torch.randn_like(query)
@@ -4124,14 +4120,17 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         self.assertEqual(actual, expected)
 
+    @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
+        device_type = torch.device(device).type
         # xfail for cuDNN version between 9.10 and 9.13
-        if backend == SDPBackend.CUDNN_ATTENTION and randomness == "different":
+        if (
+            backend == SDPBackend.CUDNN_ATTENTION
+            and randomness == "different"
+            and device_type == "cuda"
+        ):
             if 91100 <= TEST_CUDNN_VERSION <= 91300:
                 raise unittest.SkipTest(
                     "xfail on cuDNN 9.10-9.13 with CUDNN backend and randomness='different'"
@@ -4157,6 +4156,18 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             fail_with_randomness = randomness == "error"
             if backend != SDPBackend.MATH:
                 fail_with_randomness |= randomness == "same"
+
+            if device_type == "xpu":
+                # On XPU, EFFICIENT_ATTENTION currently maps/falls back to the
+                # MATH implementation, so randomness="same" is allowed here.
+                if backend == SDPBackend.EFFICIENT_ATTENTION and randomness == "same":
+                    fail_with_randomness = False
+
+                # On XPU, FLASH_ATTENTION with dropout and randomness="different"
+                # currently has no available kernel, so this path is expected to raise.
+                if backend == SDPBackend.FLASH_ATTENTION and randomness == "different":
+                    fail_with_randomness = True
+
             context = (
                 self.assertRaises(RuntimeError)
                 # We currently don't support randomness == "same", and "error" should always error with randomness
@@ -6789,13 +6800,14 @@ instantiate_device_type_tests(
 )
 
 only_for = ("cpu", "cuda")
+instantiate_device_type_tests(
+    TestVmapBatchedGradientDevice,
+    globals(),
+    only_for=only_for + ("xpu",),
+    allow_xpu=True,
+)
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
-instantiate_device_type_tests(
-    TestVmapBatchedGradient,
-    globals(),
-    only_for=only_for,
-)
 instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
