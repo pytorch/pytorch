@@ -1,8 +1,8 @@
 """Public ``torch.compiler.precompile`` surface.
 
 Prototype API: capture ``fn`` ahead of time and lower it to a self-contained
-Python source artifact, then reload it in a fresh process. See :func:`capture`,
-:func:`accumulate` and :func:`load`, and Note [precompile programming model] in
+Python source artifact, then reload it in a fresh process. See :func:`capture` and
+:func:`load`, and Note [precompile programming model] in
 ``torch/_precompile.py`` for the contract. Signatures, error types and the
 artifact format may change between releases without a deprecation cycle.
 
