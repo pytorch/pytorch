@@ -385,7 +385,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       // observed RCCL allocation behavior.
       // Relaxed: the destructor may run during HIP capture, and RCCL 2.30.7
       // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
-      // the guard restores the caller's mode on exit. See ROCm/rccl#TBD.
+      // the guard restores the caller's mode on exit.
+      // TODO: drop this guard once RCCL restores the caller's capture thread
+      // mode.
       auto& manager = NCCLDevCommManager::get(
           c10::Device(c10::DeviceType::CUDA, device_idx_));
       if (manager.comm_registration_is_live(
