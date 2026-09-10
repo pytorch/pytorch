@@ -589,15 +589,22 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Vendored upstream code - permanent, not debt.
+    # Vendored: raw throws are upstream's call, not ours.
+    'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
-    # Pre-existing violations; burn down over time. Nothing may be added here.
-    'aten/src/**',
-    'c10/util/**',
-    'test/cpp/**',
-    'test/cpp_extensions/**',
-    'torch/csrc/distributed/**',
-    'torch/csrc/inductor/**',
+    # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
+    # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
+    'c10/util/order_preserving_flat_hash_map.h',
+    # These headers are also compiled by qnnpack's own test/ and bench/ targets,
+    # which link the c10-free pytorch_qnnpack static lib, so pulling in
+    # c10/util/Exception.h would break those builds. AlignedAllocator.h has a
+    # second reason: its bad_alloc reaches Python as MemoryError.
+    'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    # Converting these changes the Python-visible exception type, so they get
+    # their own PR later in this stack.
+    'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
+    'c10/util/StringUtil.cpp',  # range_error -> ValueError
+    # Burned down later in this stack. Nothing may be added here.
     'torch/csrc/jit/**',
 ]
 command = [

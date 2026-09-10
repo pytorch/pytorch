@@ -244,9 +244,6 @@ CI_USE_SGD = {
 }
 
 
-DO_NOT_CAST_INPUTS = {"stable_diffusion"}
-
-
 # Maps a benchmark model name to a list of status codes. For any listed entry, we'll
 # capture TORCH_COMPILE_DEBUG logs in CI runs and preserve them (i.e., for upload) if
 # the result status matches one listed.
@@ -1092,7 +1089,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
             # the generate function
-            model.forward = torch._dynamo.run(model)
+            model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -2141,10 +2138,6 @@ class BenchmarkRunner:
         return start, end
 
     def get_fsdp_auto_wrap_policy(self, model_name: str):
-        from diffusers.models.transformer_2d import Transformer2DModel
-        from torchbenchmark.models.nanogpt.model import Block
-        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
         from torch.distributed.fsdp.wrap import (
             ModuleWrapPolicy,
             size_based_auto_wrap_policy,
@@ -2152,9 +2145,15 @@ class BenchmarkRunner:
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
-            "stable_diffusion_unet": (Transformer2DModel,),
-            "llama_v2_7b_16h": (LlamaDecoderLayer,),
-            "nanogpt": (Block,),
+            "stable_diffusion_unet": (
+                "diffusers.models.transformers.transformer_2d",
+                "Transformer2DModel",
+            ),
+            "llama_v2_7b_16h": (
+                "transformers.models.llama.modeling_llama",
+                "LlamaDecoderLayer",
+            ),
+            "nanogpt": ("torchbenchmark.models.nanogpt.model", "Block"),
         }
 
         if model_name not in MODEL_FSDP_WRAP:
@@ -2163,7 +2162,9 @@ class BenchmarkRunner:
                 size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
             )
 
-        return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
+        module_name, class_name = MODEL_FSDP_WRAP[model_name]
+        model_class = getattr(importlib.import_module(module_name), class_name)
+        return ModuleWrapPolicy((model_class,))
 
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
@@ -2945,11 +2946,13 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
-        niters = 5
+        measure_iters = 5
+        stabilization_iters = 0
         if getattr(self, "hf_llm", False):
             # If we're benchmarking an llm, we want to use the generate function
             self.model_iter_fn = self.generate
-            niters = 1
+            measure_iters = 1
+            stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2957,7 +2960,9 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
-        def warmup(fn, model, example_inputs, mode, niters=5):
+        def warmup(
+            fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
+        ):
             gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
@@ -2968,10 +2973,12 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for _ in range(measure_iters):
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
+                for _ in range(stabilization_iters):
+                    fn(model, example_inputs)
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -2994,14 +3001,6 @@ class BenchmarkRunner:
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
-        # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(model)
-
-        if not hasattr(model, name):
-            model.name = name
-
-        self.init_optimizer(name, current_device, model.parameters())
-
         # The self.autocast context is needed for the model we export with aot_compile,
         # similar to what we do in the check_accuracy function
         ctx = (
@@ -3021,21 +3020,38 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
                 with torch.compiler.set_stance("force_eager"):
-                    eager_latency, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn,
-                        copy.deepcopy(model),
-                        example_inputs,
-                        "eager",
-                        niters=niters,
-                    )
-                    if self.args.use_warm_peak_memory:
-                        _, eager_peak_mem, _ = warmup(
+                    eager_model = self.deepcopy_and_maybe_parallelize(model)
+                    if not hasattr(eager_model, name):
+                        eager_model.name = name
+                    self.init_optimizer(name, current_device, eager_model.parameters())
+                    try:
+                        eager_latency, eager_peak_mem, _ = warmup(
                             self.model_iter_fn,
-                            copy.deepcopy(model),
+                            eager_model,
                             example_inputs,
                             "eager",
-                            niters=1,
+                            measure_iters=measure_iters,
                         )
+                        if self.args.use_warm_peak_memory:
+                            _, eager_peak_mem, _ = warmup(
+                                self.model_iter_fn,
+                                eager_model,
+                                example_inputs,
+                                "eager",
+                                measure_iters=1,
+                            )
+                    finally:
+                        self.optimizer = None
+                        del eager_model
+                        if current_device in ("cuda", "xpu", "mps"):
+                            empty_gpu_cache(current_device)
+
+            # Use a fresh model for the compiled pass. In particular, generate()
+            # can mutate model and cache state during the eager warmup.
+            model = self.deepcopy_and_maybe_parallelize(model)
+            if not hasattr(model, name):
+                model.name = name
+            self.init_optimizer(name, current_device, model.parameters())
 
             if (
                 self.args.export_aot_inductor
@@ -3048,7 +3064,7 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model = optimize_ctx(model)
+                    model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3057,7 +3073,12 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                    optimized_model_iter_fn,
+                    model,
+                    example_inputs,
+                    "dynamo",
+                    measure_iters=measure_iters,
+                    stabilization_iters=stabilization_iters,
                 )
                 if self.args.use_warm_peak_memory:
                     _, dynamo_peak_mem, _ = warmup(
@@ -3065,7 +3086,7 @@ class BenchmarkRunner:
                         model,
                         example_inputs,
                         "dynamo",
-                        niters=1,
+                        measure_iters=1,
                     )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
@@ -4904,11 +4925,7 @@ def run(runner, args, original_dir=None):
                 torch.cuda.set_per_process_memory_fraction(
                     args.per_process_memory_fraction
                 )
-            if model_name in DO_NOT_CAST_INPUTS:
-                model, _ = runner.cast_based_on_args(model, example_inputs)
-
-            else:
-                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
             guard_ctx = contextlib.nullcontext()
             if name in runner.guard_on_nn_module_models:
