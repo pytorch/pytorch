@@ -6361,11 +6361,19 @@ Done""",
         with self.assertRaisesRegex(
             RuntimeError,
             "Function 'MyFuncBackward' returned nan values in its 0th output.",
-        ):
+        ) as context:
             with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     out.backward()
             self.assertIn("No forward pass information", str(w[0].message))
+        error = str(context.exception)
+        self.assertIn(
+            "grad_outputs: [Tensor(shape=[1], dtype=float, device=cpu)]", error
+        )
+        self.assertIn(
+            "grad_inputs: [Tensor(shape=[10], dtype=float, device=cpu), undefined]",
+            error,
+        )
 
         inp = torch.rand(size, requires_grad=True)
         with self.assertRaisesRegex(
@@ -6377,6 +6385,74 @@ Done""",
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn("MyFunc.apply", str(w[0].message))
+
+    @parametrize(
+        "initial_mode, pre_hook_mode, backward_mode, should_raise, expect_metadata",
+        [
+            (True, None, False, False, False),
+            (False, None, True, True, False),
+            (False, True, True, True, True),
+            (True, False, True, True, True),
+        ],
+    )
+    def test_anomaly_mode_changed_in_backward(
+        self,
+        initial_mode,
+        pre_hook_mode,
+        backward_mode,
+        should_raise,
+        expect_metadata,
+    ):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                torch.autograd.set_detect_anomaly(backward_mode)
+                return torch.full_like(grad, float("nan"))
+
+        def set_anomaly_mode(grad):
+            torch.autograd.set_detect_anomaly(pre_hook_mode)
+            return grad
+
+        inp = torch.ones(1, requires_grad=True)
+        with torch.autograd.set_detect_anomaly(initial_mode):
+            out = MyFunc.apply(inp)
+            if pre_hook_mode is not None:
+                out.register_hook(set_anomaly_mode)
+            if should_raise:
+                warning = (
+                    "Error detected in MyFuncBackward"
+                    if initial_mode
+                    else "No forward pass information available"
+                )
+                with self.assertWarnsRegex(
+                    UserWarning,
+                    warning,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Function 'MyFuncBackward' returned nan values in its 0th output.",
+                    ) as context:
+                        out.sum().backward()
+                error = str(context.exception)
+                expected_grad_outputs = (
+                    "[Tensor(shape=[1], dtype=float, device=cpu)]"
+                    if expect_metadata
+                    else "<unavailable: anomaly mode enabled during node execution>"
+                )
+                self.assertIn(
+                    f"grad_outputs: {expected_grad_outputs}",
+                    error,
+                )
+                self.assertIn(
+                    "grad_inputs: [Tensor(shape=[1], dtype=float, device=cpu)]",
+                    error,
+                )
+            else:
+                out.sum().backward()
 
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
