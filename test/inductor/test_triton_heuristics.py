@@ -258,7 +258,7 @@ class TestTritonHeuristics(TestCase):
             ),
         ],
     )
-    def test_scalar_online_softmax_reduction_configs(
+    def test_scalar_accumulator_reduction_configs(
         self, major, cc, expected_baseline_configs, expected_scalar_configs
     ):
         device = self._fake_cuda_device_properties()._replace(major=major, cc=cc)
@@ -307,14 +307,12 @@ class TestTritonHeuristics(TestCase):
             expected_baseline_configs,
         )
         self.assertEqual(
-            config_values({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
+            config_values({AutotuneHint.SCALAR_ACCUMULATORS}),
             expected_scalar_configs,
         )
         baseline_rblock = expected_baseline_configs[0][1]
         self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
-        scalar_tiled_products = tiled_block_products(
-            {AutotuneHint.SCALAR_ONLINE_SOFTMAX}
-        )
+        scalar_tiled_products = tiled_block_products({AutotuneHint.SCALAR_ACCUMULATORS})
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
@@ -574,7 +572,7 @@ class TestTritonHeuristics(TestCase):
         self.assertTrue(8 in seen_num_elements_per_warp)
         self.assertEqual(
             autotune_hints_to_configs(
-                {AutotuneHint.SCALAR_ONLINE_SOFTMAX},
+                {AutotuneHint.SCALAR_ACCUMULATORS},
                 size_hints,
                 block_size,
                 device_props,
