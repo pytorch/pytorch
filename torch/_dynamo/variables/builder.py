@@ -237,6 +237,7 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
+    PropertyVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -1971,6 +1972,10 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif type(value) is property:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = PropertyVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -5527,6 +5532,7 @@ class SourcelessBuilder:
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
         )
+        handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
             value, mutation_type=ValueMutationNew()
         )
