@@ -1,0 +1,218 @@
+[
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01FahjCUAdnaWZfNAReTugkT",
+     "name": "mcp__github__get_issue"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01FahjCUAdnaWZfNAReTugkT",
+     "is_error": true,
+     "content": "parameter issue_number is not of type float64"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01ME8euSgkAeWf3JS5iv3tv4",
+     "name": "mcp__github__get_issue"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01ME8euSgkAeWf3JS5iv3tv4",
+     "is_error": true,
+     "content": "parameter issue_number is not of type float64"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01T62K6exUm2PAB44qFr7HhW",
+     "name": "ToolSearch"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01T62K6exUm2PAB44qFr7HhW",
+     "is_error": false,
+     "content": "No matching deferred tools found"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01P4aChXtnUN1x2QH96TazgK",
+     "name": "mcp__github__get_issue"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01P4aChXtnUN1x2QH96TazgK",
+     "is_error": true,
+     "content": "parameter issue_number is not of type float64"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01UdxjAviqZrh2zvFCVAotyt",
+     "name": "Bash"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01UdxjAviqZrh2zvFCVAotyt",
+     "is_error": true,
+     "content": "This command requires approval"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_011qu5QJvsouEgwkUXVRVW7U",
+     "name": "mcp__github__get_issue"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_011qu5QJvsouEgwkUXVRVW7U",
+     "is_error": true,
+     "content": "parameter issue_number is not of type float64"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_01HMoEGKSog1UAbgpAoey1FR",
+     "name": "Bash"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_01HMoEGKSog1UAbgpAoey1FR",
+     "is_error": true,
+     "content": "This command requires approval"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_bdrk_013guFWPpGEdqWpnHdDxQVJg",
+     "name": "Bash"
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "toolu_bdrk_013guFWPpGEdqWpnHdDxQVJg",
+     "is_error": true,
+     "content": "This command requires approval"
+    }
+   ]
+  }
+ },
+ {
+  "type": "result",
+  "subtype": "success",
+  "result": "The `gh` command needs your approval to run (network access). Could you approve it, or should I retry the GitHub MCP tool instead?",
+  "permission_denials": [
+   {
+    "tool_name": "Bash"
+   },
+   {
+    "tool_name": "Bash"
+   },
+   {
+    "tool_name": "Bash"
+   }
+  ]
+ }
+]
