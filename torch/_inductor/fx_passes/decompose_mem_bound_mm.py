@@ -250,7 +250,8 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    # The matcher drops kwargs a pattern doesn't declare; pin beta/alpha to what repl computes
+    CallFunction(aten.addmm, Arg(), Arg(), Arg(), beta=1, alpha=1),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
 )
 def decompose_addmm(
