@@ -1023,13 +1023,14 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: object) -> NoReturn:
+def raise_local_type_error(t: type) -> NoReturn:
     # A PackageError like the sibling checks in serialize_guards: a bypass, or
     # an error under strict_precompile, never an internal compiler error. The
-    # message names the type only: repr(obj) is user code that can raise (this
-    # runs outside the mapped dump) and can be a multi-KB nn.Module printout.
+    # message names the type only: repr(obj) is user code that can raise (one
+    # caller runs outside the mapped dump) and can be a multi-KB nn.Module
+    # printout.
     raise torch._dynamo.exc.PackageError(
-        f"Type {type(obj)} cannot be saved "
+        f"Type {t} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
     )
@@ -2400,9 +2401,9 @@ class GuardBuilder(GuardBuilderBase):
             t = type(value)
 
         if t.__qualname__ != t.__name__:
-            # Type match guards must be local scope, this is
-            # raised in self.serialize_guards
-            guard._unserializable = True
+            # A local-scope type cannot be serialized; serialize_guards raises
+            # for it, naming this type rather than re-reading the value.
+            guard._unserializable = t
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = _safe_type_repr(t)
@@ -2438,7 +2439,7 @@ class GuardBuilder(GuardBuilderBase):
             t = type(value)
 
         if t.__qualname__ != t.__name__:
-            guard._unserializable = True
+            guard._unserializable = t
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = _safe_type_repr(t)
@@ -2860,7 +2861,10 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
-        if self.save_guards and type(val) in (dict, tuple):
+        # Only a plain tuple can get here as a function container: a whole-dict
+        # comparison lowers to DICT_KEYS_MATCH plus per-value guards, and
+        # EQUALS_MATCH's allowlist below rejects a plain dict.
+        if self.save_guards and type(val) is tuple:
             self.value_guarded_containers[id(val)] = val
         if np:
             np_types: tuple[type[Any], ...] = (
@@ -4169,17 +4173,18 @@ class GuardsStatePickler(FunctionPicklerBase):
         guard_tree_values: dict[int, Any],
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
+        value_guarded_containers: dict[int, Any],
         *args: Any,
-        value_guarded_containers: dict[int, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
-        # The plain dict/tuple values an EQUALS_MATCH reads whole, by id; see
-        # _keep_container_verbatim. Absent for the pickler-level unit tests.
-        self.value_guarded_containers = value_guarded_containers or {}
+        # The plain tuples an EQUALS_MATCH reads whole, by id; see
+        # _keep_container_verbatim. Required, because omitting it silently
+        # prunes every container per value.
+        self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
         self._missing_cache: dict[str, _Missing] = {}
@@ -4310,16 +4315,20 @@ class GuardsStatePickler(FunctionPicklerBase):
     # manager is still being built, failing the whole load, or -- for a name the
     # sentinel happens to have, like __module__ -- rebakes the guard against the
     # sentinel's value and misses forever with no error. So it is rebuilt from
-    # its code object instead (FunctionPicklerBase._reduce_function).
+    # its code object instead (FunctionPicklerBase._reduce_function), carrying
+    # __code__, __name__, __qualname__, __module__, __closure__, __defaults__,
+    # __kwdefaults__, __dict__, __doc__, __annotations__ and __type_params__.
     #
     # Rebuilding drags along whatever the function holds -- closure cells,
     # defaults, attributes, and the module scope its body reads -- and carrying
     # all of that would let an unpicklable neighbour fail a package that never
     # needed it. So only values some guard tree node references are carried
-    # (_keep) and the rest become sentinels. A container is carried verbatim only
-    # when an EQUALS_MATCH reads its values whole (`f.__defaults__ == (2.0, 1)`):
-    # that guard rebakes its comparison constant from the reconstructed function
-    # at load, so a pruned element would make it fail forever with no load error.
+    # (_keep) and the rest become sentinels. A plain tuple is carried verbatim
+    # only when an EQUALS_MATCH reads its values whole (`f.__defaults__ ==
+    # (2.0, (1, 2))`): that guard rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make it fail
+    # forever with no load error. A plain dict is never carried verbatim, since
+    # a whole-dict comparison lowers to DICT_KEYS_MATCH plus per-value guards.
     # A container registered by a length or type guard alone -- what bind_args
     # installs on __defaults__ for every called function with a positional
     # default -- is pruned per value, since those guards survive it
@@ -4337,10 +4346,25 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     @staticmethod
     def _is_literal(value: object) -> bool:
-        # A literal always pickles, so carrying it costs nothing and keeps the
-        # rebuilt state deterministic: an interned literal would otherwise be
-        # kept only when some unrelated guard happens to register it.
-        return value is None or type(value) in (bool, int, float, str, bytes)
+        # An always-picklable constant is carried whether or not a guard reads
+        # it: pruning it buys nothing and would make the rebuilt state depend on
+        # whether some unrelated guard happened to register the interned value.
+        # These are the singletons and scalars dynamo treats as constants; NOT
+        # every common_constant_type (torch.finfo/iinfo do not pickle).
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        return type(value) in (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        )
 
     def _prune(self, value: object, reason: str) -> object:
         if self._is_literal(value) or self._keep(value):
@@ -4351,18 +4375,22 @@ class GuardsStatePickler(FunctionPicklerBase):
         """Whether a function container (__defaults__/__dict__/...) is carried whole.
 
         A dict/tuple SUBCLASS is verbatim whenever it is kept: its type must
-        survive for the guard reading the slot. A plain dict/tuple is verbatim
-        only when an EQUALS_MATCH reads its values whole, since that guard
-        rebakes its constant from the reconstructed function at load. Every
-        other guard that can register a container -- SEQUENCE_LENGTH,
-        TYPE_MATCH, DICT_KEYS_MATCH, a guard rooted at one element -- survives
-        pruning the other values, so the container is pruned per value and an
-        unguarded unpicklable sibling (a threading.Lock a decorator stashed)
-        cannot fail the dump. Being registered is not what decides this: a
-        whole-tuple EQUALS_MATCH and a per-element guard through the same
-        tuple coexist in ordinary code (a call-site default binding next to
-        `f.__defaults__ == (...)`), and only the value guard says the tuple must
-        stay whole.
+        survive for the guard reading the slot. A plain tuple is verbatim only
+        when an EQUALS_MATCH reads its values whole, since that guard rebakes
+        its constant from the reconstructed function at load; the one path that
+        installs such a guard is wrap_listlike's CONSTANT_MATCH on an all-literal
+        tuple under an unspecialized nn.Module source, which also makes the
+        elements SOURCELESS, so it is exactly the shape with no per-element
+        registration to keep them. A plain dict is never verbatim: a whole-dict
+        comparison lowers to DICT_KEYS_MATCH plus per-value guards. Every other
+        guard that can register a container -- SEQUENCE_LENGTH, TYPE_MATCH,
+        DICT_KEYS_MATCH, a guard rooted at one element -- survives pruning the
+        other values, so the container is pruned per value and an unguarded
+        unpicklable sibling (a threading.Lock a decorator stashed) cannot fail
+        the dump. Being registered is not what decides this: a whole-tuple
+        EQUALS_MATCH and a per-element guard through the same tuple coexist in
+        ordinary code (a call-site default binding next to `f.__defaults__ ==
+        (...)`), and only the value guard says the tuple must stay whole.
         """
         if not self._keep(container):
             return False
@@ -4380,9 +4408,14 @@ class GuardsStatePickler(FunctionPicklerBase):
                 for name, value in f_globals.items()
             }
             # FunctionType binds builtins from the scope's __builtins__ at
-            # creation, so that entry has to be a real module (pickled by
-            # reference), never a sentinel; the key set stays as it was.
-            if "__builtins__" in snapshot:
+            # creation, so that entry can never be a sentinel: a pruned one
+            # becomes the real module (pickled by reference), a kept one (the
+            # builtins dict some guard read through) stays verbatim as the
+            # keep contract says. The key set is the module dict's at save time,
+            # names Dynamo installed into it included; a guard on the dict's
+            # shape compares against the live dict at run time and is only as
+            # portable as those names (see the commit message).
+            if isinstance(snapshot.get("__builtins__"), _Missing):
                 snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
@@ -4656,11 +4689,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
-            raise torch._dynamo.exc.PackageError(
-                f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
-            )
+            raise_local_type_error(type(obj))
 
         if (
             inspect.isclass(obj)
@@ -4723,44 +4752,48 @@ def pickle_guards_state(
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
 
-    leaves = pytree.tree_leaves(state.output_graph.local_scope)
-    for leaf in leaves:
-        if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
-            base = leaf.__self__
-            if id(base) not in guard_tree_values:
-                try:
-                    type(base).__new__(type(base))
-                    empty_values[id(base)] = base
-                except:  # noqa: E722
-                    pass
-        elif id(leaf) not in guard_tree_values:
-            # TODO See if we have lift this branch as the first one.
-            # Prune more objects in pytree hierarchy.
-            missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(
-        guard_tree_values,
-        empty_values,
-        missing_values,
-        buf,
-        value_guarded_containers=builder.value_guarded_containers,
-    )
-
-    if all(
-        torch.compiler.keep_portable_guards_unsafe(
-            [
-                make_guard_filter_entry(guard, builder)
-                for guard in state.output_graph.guards
-            ]
-        )
-    ):
-        # Prune more values in AOT precompile when complex pickling structure is not needed.
-        state.output_graph.guard_on_key_order = set()
-        state.output_graph.global_scope = {}
-
-    # Anything dump raises means a guarded value cannot be serialized, which is
-    # a bypass (an error under strict_precompile), never a compiler crash. A
-    # PackageError raised inside reducer_override already carries its message.
+    # Anything raised while walking or dumping the state means a guarded value
+    # cannot be serialized, which is a bypass (an error under
+    # strict_precompile), never a compiler crash. A PackageError raised inside
+    # reducer_override already carries its message. tree_leaves is inside the
+    # try too: it recurses into the local values, so a deep pytree in a local
+    # overflows there rather than in dump.
     try:
+        leaves = pytree.tree_leaves(state.output_graph.local_scope)
+        for leaf in leaves:
+            if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
+                base = leaf.__self__
+                if id(base) not in guard_tree_values:
+                    try:
+                        type(base).__new__(type(base))
+                        empty_values[id(base)] = base
+                    except:  # noqa: E722
+                        pass
+            elif id(leaf) not in guard_tree_values:
+                # TODO See if we have lift this branch as the first one.
+                # Prune more objects in pytree hierarchy.
+                missing_values[id(leaf)] = leaf
+        pickler = GuardsStatePickler(
+            guard_tree_values,
+            empty_values,
+            missing_values,
+            builder.value_guarded_containers,
+            buf,
+        )
+
+        if all(
+            torch.compiler.keep_portable_guards_unsafe(
+                [
+                    make_guard_filter_entry(guard, builder)
+                    for guard in state.output_graph.guards
+                ]
+            )
+        ):
+            # Prune more values in AOT precompile when complex pickling
+            # structure is not needed.
+            state.output_graph.guard_on_key_order = set()
+            state.output_graph.global_scope = {}
+
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
         raise
@@ -5032,10 +5065,8 @@ class CheckFunctionManager:
             # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
             # a chance that the guard is unserializable
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
-                if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw
-                    obj = builder.get(guard)
-                    raise_local_type_error(obj)
+                if guard._unserializable is not None:
+                    raise_local_type_error(guard._unserializable)
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
