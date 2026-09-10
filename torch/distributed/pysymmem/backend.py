@@ -36,7 +36,7 @@ from torch._C._distributed_c10d import (
 from torch.distributed import PrefixStore, Store
 
 
-__all__ = ["SymmemBackend"]
+__all__ = ["SymmemBackend", "cast_buffer", "nbytes_of", "reduce_op_name"]
 
 
 def nbytes_of(tensor: torch.Tensor) -> int:
