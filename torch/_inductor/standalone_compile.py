@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import itertools
 import logging
 import os
@@ -693,6 +694,18 @@ def load_from_python(
     return call
 
 
+@dataclasses.dataclass(frozen=True)
+class _InnerCompileResult:
+    inner_python: str
+    cache: bytes | None
+    # CompiledFxGraph.output_strides: the strides Inductor CHOSE for the graph's
+    # outputs, as PRINTED stride expressions (strings, symbolic under dynamic
+    # shapes -- not ints). They exist only once the graph has lowered, and a
+    # training backward must be lowered against the forward's actual choices
+    # (layout optimization is free to hand back channels-last saved activations).
+    output_strides: list[tuple[str, ...] | None]
+
+
 def compile_to_python(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -757,6 +770,23 @@ def compile_to_python(
     max_autotune benchmark lowerings (which compile to their own modules during
     autotuning) never become the returned graph, so nothing needs to be filtered out.
     """
+    result = _compile_to_python_result(gm, example_inputs, options=options)
+    return result.inner_python, result.cache
+
+
+def _compile_to_python_result(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    options: dict[str, Any] | None = None,
+    is_inference: bool = True,
+    is_backward: bool = False,
+) -> _InnerCompileResult:
+    """``compile_to_python`` with what a training lowering additionally needs:
+    ``is_inference`` selects inductor's layout-optimization heuristic,
+    ``is_backward`` gates GraphLowering's backward-only require_contiguous
+    safeguard for untagged implicit-fallback aten ops (#140452), and the result
+    reports the output strides the graph was compiled to."""
     if not isinstance(gm, torch.fx.GraphModule):
         raise TypeError(
             f"compile_to_python expects a post-AOTAutograd torch.fx.GraphModule, "
@@ -853,13 +883,19 @@ def compile_to_python(
             fake_inputs,
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
-            is_inference=True,
+            is_inference=is_inference,
+            # Gates GraphLowering's backward-only require_contiguous safeguard
+            # for untagged implicit-fallback aten ops (see #140452); a training
+            # backward must lower the way torch.compile's backward does.
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
-    inner_python = _runnable_source(compiled_graph)
-    cache = _acceleration_cache_bytes(artifacts)
-    return inner_python, cache
+    return _InnerCompileResult(
+        _runnable_source(compiled_graph),
+        _acceleration_cache_bytes(artifacts),
+        list(getattr(compiled_graph, "output_strides", None) or []),
+    )
 
 
 def autograd_cache_key(
