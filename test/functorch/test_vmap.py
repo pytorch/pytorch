@@ -6779,7 +6779,11 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
 
 
 instantiate_device_type_tests(
-    TestVmapAPIDevice, globals(), only_for=("cpu", "cuda", "mps"), allow_mps=True
+    TestVmapAPIDevice,
+    globals(),
+    only_for=("cpu", "cuda", "mps", "xpu"),
+    allow_mps=True,
+    allow_xpu=True,
 )
 
 only_for = ("cpu", "cuda")
