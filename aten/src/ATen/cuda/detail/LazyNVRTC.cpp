@@ -157,8 +157,7 @@ nvrtcResult nvrtcCompileProgram(nvrtcProgram prog,
                                 int numOptions,
                                 const char * const *options) {
   auto fn = reinterpret_cast<decltype(&nvrtcCompileProgram)>(getNVRTCLibrary().sym(__func__));
-  if (!fn)
-    throw std::runtime_error("Can't get nvrtcCompileProgram");
+  TORCH_CHECK(fn, "Can't get nvrtcCompileProgram");
   lazyNVRTC.nvrtcCompileProgram_real = fn;
   lazyNVRTC.nvrtcCompileProgram = &nvrtcCompileProgram_wrapped;
   return fn(prog, numOptions, options);
