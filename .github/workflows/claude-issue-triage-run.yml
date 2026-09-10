@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: bedrock
+    outputs:
+      issue_number: ${{ steps.issue.outputs.number }}
+      attempt: ${{ steps.issue.outputs.attempt }}
+      outcome: ${{ steps.outcome.outputs.outcome }}
     permissions:
       actions: read
       contents: read
@@ -38,7 +42,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             # gh extracts with O_EXCL; clear any partial file from a prior
             # attempt so a retry can't fail deterministically with "file exists".
-            rm -f issue_number.txt
+            rm -f issue_number.txt attempt.txt
             if gh run download "$RUN_ID" --repo "$REPO" --name issue-triage-data --dir .; then
               echo "Downloaded issue-triage-data on attempt $attempt"
               break
@@ -62,7 +66,13 @@ jobs:
             exit 1
           fi
           echo "number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
-          echo "Triaging issue #${ISSUE_NUM}"
+          ATTEMPT=$(cat attempt.txt 2>/dev/null || echo 1)
+          if ! [[ "$ATTEMPT" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid attempt in artifact: '$ATTEMPT'"
+            exit 1
+          fi
+          echo "attempt=$ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "Triaging issue #${ISSUE_NUM} (attempt ${ATTEMPT})"
 
       - uses: actions/checkout@v4
         with:
@@ -109,6 +119,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Run Issue Triage
+        id: triage
         timeout-minutes: 5
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         env:
@@ -144,7 +155,7 @@ jobs:
 
       # The agent's success flag is not evidence of triage: #195701 finished
       # green after every tool call failed. Classify from the issue's live state
-      # and fail the job when nothing happened.
+      # and fail the job when nothing happened so the recover job can retry.
       - name: Check triage outcome
         id: outcome
         if: always() && steps.issue.outputs.number != ''
@@ -208,3 +219,26 @@ jobs:
           path: /tmp/triage-out/issue_number.txt
           retention-days: 1
           if-no-files-found: error
+
+  recover:
+    needs: triage
+    if: |
+      always() &&
+      needs.triage.outputs.outcome == 'no_action' &&
+      needs.triage.outputs.attempt == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      # One automatic retry via a fresh Stage 1 dispatch (workflow_dispatch is
+      # one of the events GITHUB_TOKEN may trigger). Only no_action outcomes
+      # get here, so a retry cannot double-comment or re-label a triaged issue.
+      - name: Re-dispatch triage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ needs.triage.outputs.issue_number }}
+        run: |
+          echo "Triage of #${ISSUE_NUM} took no action; re-dispatching once"
+          gh workflow run claude-issue-triage.yml --repo "${{ github.repository }}" \
+            -f "issue_number=${ISSUE_NUM}" -f attempt=2
