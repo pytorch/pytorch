@@ -331,11 +331,12 @@ class _DynamoCodeCacheEntry:
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
       10. Whether the entry currently has nothing installable: every compile of
-         it was bypassed (its guards could not be serialized), or a backend was
-         missing at load. install() then leaves the frame to be traced fresh
-         rather than skipping it as trivial. Cleared once a compile records a
-         guarded code. (The load-time writer still flags the whole entry and
-         keeps the stale guarded codes; see PrecompileCacheEntry.from_cache_entry.)
+         it was bypassed (its guards could not be serialized), or a backend
+         artifact was missing when the package was saved. install() then leaves
+         the frame to be traced fresh rather than skipping it as trivial.
+         Cleared once a compile records a guarded code. (The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
+         keeps the stale guarded codes.)
     """
 
     python_code: SerializedCode
