@@ -331,6 +331,10 @@ class CUDAGraph(_CUDAGraph):
     # before the first remap. Lets a re-instantiate (which produces a fresh exec
     # id) rekey annotations from the previous exec id to the new one.
     _remapped_exec_id: int | None
+    # Key space the recorded annotations stay in: "exec" rekeys them to each exec
+    # graph, "source" leaves them on the capture graph for consumers reading CUPTI's
+    # sourceGraphNodeId. Stamped from annotation_config at capture_begin.
+    _annotation_key_by: str
     # Exec graph ids a consumer has recorded per-graph state under (one per
     # instantiate). Handed to the graph-destroy hooks on destruction so consumers
     # can purge that state and their maps do not grow across the run.
@@ -362,6 +366,7 @@ class CUDAGraph(_CUDAGraph):
         instance._tracker = None
         instance._capture_graph_id = None
         instance._remapped_exec_id = None
+        instance._annotation_key_by = "exec"
         instance._recorded_exec_ids = set()
         instance._keep_graph = keep_graph
         # OrderedDict (not dict): RemovableHandle weak-references the mapping.
@@ -554,6 +559,13 @@ class CUDAGraph(_CUDAGraph):
         # rekeys the annotations; remap_to_exec_graph self-skips when the exec id
         # is unchanged.
         if self._capture_graph_id is None:
+            return
+        if self._annotation_key_by == "source":
+            # Annotations stay keyed to the capture graph: the consumer reads CUPTI's
+            # sourceGraphNodeId, which reports the node each exec node came from, so no
+            # exec id ever has to be tracked. The capture id still goes to the destroy
+            # hooks, which is what purges these entries when the graph dies.
+            self._recorded_exec_ids.add(self._capture_graph_id)
             return
         from torch.cuda._graph_annotations import remap_to_exec_graph
 
@@ -818,6 +830,7 @@ class CUDAGraph(_CUDAGraph):
                         "kernel_name": str or None,
                         "grid_dim": tuple(int, int, int) or None,
                         "block_dim": tuple(int, int, int) or None,
+                        "shared_mem_bytes": int or None,
                         "event_ptr": int,
                         "host_fn_addr": int,
                         "host_fn_name": str or None,
@@ -851,8 +864,9 @@ class CUDAGraph(_CUDAGraph):
 
         ``grid_dim`` / ``block_dim`` are the kernel launch dimensions
         ``(x, y, z)`` read from the kernel node's params, populated for kernel
-        nodes (``None`` when the params query fails). They are ``None`` for
-        other node types.
+        nodes (``None`` when the params query fails). ``shared_mem_bytes`` is
+        that launch's *dynamic* shared memory, read from the same params. All
+        three are ``None`` for other node types.
 
         Each node's ``graph_id`` is remapped to the exec graph id so that
         ``tools_id`` values match those reported by CUPTI-based profilers.
@@ -948,6 +962,7 @@ class CUDAGraph(_CUDAGraph):
             kernel_name = None
             grid_dim = None
             block_dim = None
+            shared_mem_bytes = None
             if ntype == node_types.CU_GRAPH_NODE_TYPE_KERNEL:
                 err, params = _cuda_driver.cuGraphKernelNodeGetParams(node)
                 if err == _cuda_driver.CUresult.CUDA_SUCCESS:
@@ -961,6 +976,7 @@ class CUDAGraph(_CUDAGraph):
                         int(params.blockDimY),
                         int(params.blockDimZ),
                     )
+                    shared_mem_bytes = int(params.sharedMemBytes)
                     if params.func:
                         err, name = _cuda_driver.cuFuncGetName(params.func)
                         if err == _cuda_driver.CUresult.CUDA_SUCCESS:
@@ -1009,6 +1025,7 @@ class CUDAGraph(_CUDAGraph):
                     "kernel_name": kernel_name,
                     "grid_dim": grid_dim,
                     "block_dim": block_dim,
+                    "shared_mem_bytes": shared_mem_bytes,
                     "event_ptr": event_ptr,
                     "host_fn_addr": host_fn_addr,
                     "host_fn_name": host_fn_name,
@@ -1144,6 +1161,7 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
 # Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
 _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
     "backend": ("auto", ("auto", "cupti", "edge_walk")),
+    "key_by": ("exec", ("exec", "source")),
 }
 
 
@@ -1208,6 +1226,12 @@ class graph:
             :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
             the walk, which cannot see nodes created while the current stream was not yet
             capturing.
+            Also supports ``"key_by"``, which selects the graph the annotations stay keyed
+            to: ``"exec"`` (default) rekeys them to the executable graph at each
+            ``instantiate()``, matching the graph node id CUPTI reports for replayed work;
+            ``"source"`` leaves them on the capture graph, for a consumer that reads CUPTI's
+            ``sourceGraphNodeId`` instead (needs CUPTI >= 13.4 and a CUDA driver >= 13.4,
+            else the capture raises).
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1313,6 +1337,23 @@ class graph:
                     "Cuspy able to subscribe; use 'auto' to fall back to the "
                     "dependent-edge walk instead."
                 )
+
+        # Which key space this graph's annotations stay in (see
+        # CUDAGraph._maybe_remap_annotations). Rejected up front rather than at instantiate,
+        # so an unsupported driver surfaces before any annotation is recorded against a key
+        # nothing will ever look up.
+        key_by = self._annotation_config["key_by"]
+        if self._enable_annotations and key_by == "source":
+            from torch.cuda._graph_annotations import source_node_ids_available
+
+            if not source_node_ids_available():
+                raise RuntimeError(
+                    "annotation_config={'key_by': 'source'} keeps annotations keyed to the "
+                    "capture graph, which needs a consumer reading CUPTI's sourceGraphNodeId "
+                    "(CUPTI >= 13.4) and a CUDA driver >= 13.4 or an equivalent cuda-compat. "
+                    "Use 'exec' to have them rekeyed to the exec graph instead."
+                )
+        self.cuda_graph._annotation_key_by = key_by
 
         # Scope annotation recording to this capture: the capture-root stamp and
         # mark_kernels both gate on this flag, and __exit__ always clears it. It has to be
