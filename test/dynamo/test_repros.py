@@ -1035,6 +1035,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_filled = torch.compile(original_filled, backend="eager")
         self.assertEqual(bool(original_filled), bool(compiled_filled))
         self.assertTrue(bool(compiled_filled))
+        # Test with a plain nn.Module that is not Sized: bool() must not fall
+        # back to __len__ and raise (https://github.com/pytorch/pytorch/issues/196253)
+        original_plain = nn.Linear(10, 5)
+        compiled_plain = torch.compile(original_plain, backend="eager")
+        self.assertEqual(bool(original_plain), bool(compiled_plain))
+        self.assertTrue(bool(compiled_plain))
 
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
