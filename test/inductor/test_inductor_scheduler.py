@@ -22,19 +22,32 @@ from torch._inductor.codegen.simd import (
 from torch._inductor.codegen.simd_kernel_features import (
     DisableReduction,
     EnableReduction,
+    MemoryEstimator,
+    SIMDKernelFeatures,
 )
-from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
+from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import (
+    Dep,
+    index_vars_squeeze,
+    MemoryDep,
+    ReadWrites,
+    StarDep,
+    WeakDep,
+)
 from torch._inductor.ir import GraphPartitionSignature
-from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.loop_body import LoopBody, MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
+    BaseScheduling,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    FusedSchedulerNode,
     MemoryDepMatch,
     NestedReduction,
     OrderedParentNodes,
+    refresh_group_node_dependencies,
     Scheduler,
     SchedulerNode,
     SubParentAccessRelation,
@@ -44,7 +57,7 @@ from torch._inductor.scheduler import (
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -126,6 +139,7 @@ class TestScheduler(TestCase):
         node.used_buffer_names.return_value = OrderedSet()
         node.is_template.return_value = False
         node.is_reduction.return_value = False
+        node.has_reduction_result.return_value = False
         return node
 
     def _extern_snode_for_op(self, op_overload, python_kernel_name):
@@ -165,6 +179,7 @@ class TestScheduler(TestCase):
             node.__class__ = SchedulerNode
             node.node = Mock(spec=ir.ComputedBuffer)
             node.node.data = Mock()
+            node._body.memory_usage = {MemoryUsageType.STORE_REDUCTION: []}
 
         def make_dep(dep_name):
             return MemoryDep(dep_name, sympy.S.Zero, (), ())
@@ -208,7 +223,7 @@ class TestScheduler(TestCase):
         )
 
         self.assertEqual(
-            schedule, [first, second, DisableReduction, EnableReduction, final]
+            schedule, [first, second, DisableReduction(), EnableReduction(), final]
         )
 
     def test_generate_node_schedule_required_boundary_reuses_enable_marker(self):
@@ -221,7 +236,7 @@ class TestScheduler(TestCase):
         )
 
         self.assertEqual(
-            schedule, [first, DisableReduction, outside, EnableReduction, final]
+            schedule, [first, DisableReduction(), outside, EnableReduction(), final]
         )
 
     def test_generate_node_schedule_required_boundary_reuses_final_loop(self):
@@ -240,7 +255,7 @@ class TestScheduler(TestCase):
 
         self.assertEqual(
             schedule,
-            [reduction, DisableReduction, EnableReduction, post_reduction, final],
+            [reduction, DisableReduction(), EnableReduction(), post_reduction, final],
         )
 
     def test_generate_node_schedule_rejects_invalid_required_boundary(self):
@@ -266,6 +281,163 @@ class TestScheduler(TestCase):
                 8,
                 16,
                 required_post_reduction_index=1,
+            )
+
+    @parametrize("result_size", [1, 3])
+    def test_memory_estimator_reduction_output_domain(self, result_size):
+        graph = Mock(sizevars=SizeVarAllocator())
+        graph.scheduler.can_buffer_be_removed_through_fusion.return_value = False
+
+        def make_node(name, width):
+            def fn(index, reduction):
+                row, rank = index
+                offset = width * row + rank
+                ops.store(f"{name}_out", offset, ops.load(name, offset))
+
+            args, ranges = index_vars_squeeze([2, width], [])
+            node = Mock(spec=SchedulerNode)
+            node._body = LoopBody(fn, args, ranges, *args)
+            node.get_ranges.return_value = node._body.sizes
+            node.get_name.return_value = name
+            return node
+
+        with V.set_graph_handler(graph):
+            before = make_node("before", 33)
+            output = make_node("output", result_size)
+            after = make_node("after", 33)
+            schedule = [
+                before,
+                DisableReduction(result_size),
+                output,
+                EnableReduction(),
+                after,
+            ]
+            features = SIMDKernelFeatures(schedule, sympy.Integer(2), sympy.Integer(33))
+            estimate = MemoryEstimator(features, (sympy.Integer(2), sympy.Integer(33)))
+
+            self.assertEqual(list(features.scheduler_nodes()), [before, output, after])
+            self.assertEqual(list(EnableReduction.filter(schedule)), [before, after])
+            self.assertEqual(set(estimate.outside_loop.reads), {"output"})
+            (output_read,) = estimate.outside_loop.reads["output"]
+            self.assertEqual(output_read.get_numel(), 2 * result_size)
+            self.assertEqual(
+                [set(loop.reads) for loop in estimate.loops], [{"before"}, {"after"}]
+            )
+            for loop in estimate.loops:
+                (read,) = next(iter(loop.reads.values()))
+                self.assertEqual(read.get_numel(), 66)
+
+    def _reduction_result_node(self, name, result_size, *, outer_ranges=(2,)):
+        def fn(index, reduction):
+            row = sympy.S.Zero
+            for idx, size in zip(index, outer_ranges):
+                row = row * size + idx
+            (rank,) = reduction
+            value = ops.load("input", 33 * row + rank)
+            reduced = ops.reduction(torch.float32, torch.float32, "sum", value)
+            ops.store_reduction(
+                name,
+                row if result_size is None else result_size * row + rank,
+                reduced,
+                result_range=None if result_size is None else (rank, result_size),
+            )
+            ops.store_reduction(f"{name}_scalar", row, reduced)
+            ops.store(f"{name}_full", 33 * row + rank, value)
+
+        args, ranges = index_vars_squeeze(outer_ranges, [33], prefix="q")
+        node = object.__new__(SchedulerNode)
+        node.node = Mock(spec=ir.ComputedBuffer)
+        node.node.get_name.return_value = name
+        node.node.get_operation_name.return_value = name
+        node.node.get_reduction_type.return_value = "sum"
+        node.node.data = Mock()
+        node.scheduler = Mock(available_buffer_names=OrderedSet())
+        node.outputs = []
+        node.mutation_renames = {}
+        node.group = (None, (sympy.prod(outer_ranges), sympy.Integer(33)))
+        node._loop_state_gen = 0
+        node._body = LoopBody(fn, args, ranges, *args)
+        node._sizes = node._body.sizes
+        node.read_writes = ReadWrites(OrderedSet(), OrderedSet(), OrderedSet())
+        node.unmet_dependencies = OrderedSet()
+        node.refresh_dependencies(normalize=False, need_clear_tiling_cache=False)
+        return node
+
+    @parametrize("ranked", [False, True])
+    def test_reduction_result_cache_refresh_and_restore(self, ranked):
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            node = self._reduction_result_node("output", 3 if ranked else None)
+            group = object.__new__(FusedSchedulerNode)
+            group.scheduler = node.scheduler
+            group.snodes = [node]
+            with (
+                patch.object(node, "get_nodes", wraps=node.get_nodes) as leaf_nodes,
+                patch.object(group, "get_nodes", wraps=group.get_nodes) as group_nodes,
+            ):
+                for _ in range(2):
+                    self.assertEqual(node.has_reduction_result(), ranked)
+                    self.assertEqual(group.has_reduction_result(), ranked)
+                leaf_nodes.assert_called_once()
+                group_nodes.assert_called_once()
+
+            state = node.snapshot_loop_state()
+            replacement = self._reduction_result_node("output", None if ranked else 3)
+            node._body = replacement._body
+            node.refresh_dependencies(normalize=False, need_clear_tiling_cache=False)
+            refresh_group_node_dependencies(group)
+            self.assertEqual(node.has_reduction_result(), not ranked)
+            self.assertEqual(group.has_reduction_result(), not ranked)
+
+            node.restore_loop_state(state)
+            refresh_group_node_dependencies(group)
+            self.assertEqual(node.has_reduction_result(), ranked)
+            self.assertEqual(group.has_reduction_result(), ranked)
+
+    @parametrize("result_sizes", [(1, 1), (3, 3), (1, 3), (2, 3)])
+    def test_reduction_result_size_requires_common_size(self, result_sizes):
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            nodes = [
+                self._reduction_result_node(f"output{i}", size)
+                for i, size in enumerate(result_sizes)
+            ]
+            scalar = self._reduction_result_node("scalar", None)
+            common_size = (
+                result_sizes[0] if result_sizes[0] == result_sizes[1] else None
+            )
+            self.assertEqual(SIMDScheduling._reduction_result_size([scalar]), 1)
+            self.assertEqual(
+                SIMDScheduling._reduction_result_size([*nodes, scalar]), common_size
+            )
+            if common_size is None:
+                self.assertFalse(TritonScheduling(None).can_fuse_reduction_pair(*nodes))
+
+    @parametrize("result_size", [1, 3])
+    @parametrize("reverse", [False, True])
+    def test_nested_planners_reject_reduction_results(self, result_size, reverse):
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            inductor_config.patch({"triton.nested_reduction": True}),
+            patch(
+                "torch._inductor.scheduler._is_gpu_triton_backend", return_value=True
+            ),
+        ):
+            ranked = self._reduction_result_node("ranked", result_size)
+            scalar = self._reduction_result_node("scalar", None)
+            nodes = (scalar, ranked) if reverse else (ranked, scalar)
+            self.assertTrue(NestedReduction._is_enabled_for(scalar, scalar))
+            self.assertFalse(NestedReduction._is_enabled_for(*nodes))
+            self.assertFalse(NestedReduction.is_candidate(*nodes))
+            self.assertIsNone(NestedReduction.plan(*nodes))
+            self.assertIsNone(NestedReduction.sub_parent_epilogue_plan(nodes, 2, 33))
+            self.assertIsNone(
+                NestedReduction._get_grouped_reduction_and_size(
+                    ranked, sympy.Integer(33)
+                )
+            )
+            self.assertIsNone(
+                NestedReduction.plan_from_topology(
+                    *nodes, scalar, sympy.Integer(33), NestedReduction.GroupedAxis.R
+                )
             )
 
     def test_get_benchmarkable_extern_fn_uses_op_overload(self):
@@ -1249,6 +1421,199 @@ class TestScheduler(TestCase):
         scheduler.shared_data_after_inverting_indexing.assert_not_called()
         scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
 
+    @parametrize("ranked", [False, True])
+    def test_reduction_contract_requires_backend_support(self, ranked):
+        producer = self._mock_base_snode("producer")
+        consumer = self._mock_base_snode("consumer")
+        producer.has_reduction_result.return_value = ranked
+        self.assertEqual(
+            BaseScheduling(None).can_fuse_reduction_pair(producer, consumer),
+            not ranked,
+        )
+
+    def test_reduction_result_rejects_split_scan(self):
+        ranked = self._mock_schedule_node("ranked", is_reduction=True)
+        scan = self._mock_schedule_node("scan", is_reduction=True)
+        ranked.has_reduction_result.return_value = True
+        ranked._body.memory_usage[MemoryUsageType.STORE_REDUCTION] = [
+            MemoryEntry("store", "ranked", None, ("rank", 3))
+        ]
+        ranked.is_split_scan.return_value = False
+        scan.is_split_scan.return_value = True
+        self.assertFalse(TritonScheduling(None).can_fuse_reduction_pair(ranked, scan))
+
+    @parametrize("reverse", [False, True])
+    def test_reduction_result_rejects_template_output(self, reverse):
+        scheduler = object.__new__(Scheduler)
+        scheduler.available_buffer_names = OrderedSet()
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        backend = TritonScheduling(scheduler)
+        scheduler.get_backend = Mock(return_value=backend)
+
+        template = Mock(spec=ir.TemplateBuffer)
+        template.get_name.return_value = "template"
+        template.is_multi_outputs_template.return_value = True
+        output = object.__new__(ir.MultiOutput)
+        output.name = output.operation_name = "template_output"
+        output.origins = OrderedSet()
+        output.layout = ir.FixedLayout(
+            torch.device("cuda"), torch.float32, [4, 33], [33, 1]
+        )
+        output.inputs = [template]
+        output.mutation_outputs = []
+
+        ranked = self._mock_schedule_node(
+            "ranked", writes=["selected"], group=(4, 33), is_reduction=True
+        )
+        ranked.has_reduction_result.return_value = True
+        ranked.is_split_scan.return_value = False
+        ranked.is_native_matmul.return_value = False
+        ranked._body.memory_usage[MemoryUsageType.STORE_REDUCTION] = [
+            MemoryEntry("store", "selected", None, ("rank", 3))
+        ]
+
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            producer = scheduler.create_scheduler_node(output)
+            self.assertIsInstance(producer, ExternKernelSchedulerNode)
+            self.assertFalse(scheduler.unfusable_node(producer))
+            pair = (ranked, producer) if reverse else (producer, ranked)
+            self.assertFalse(scheduler._can_fuse(*pair))
+
+    @parametrize("vertical_fusion_legal", [False, True])
+    def test_reduction_result_allows_loop_reordering_only(self, vertical_fusion_legal):
+        producer = self._mock_base_snode("producer", torch.device("cpu"))
+        consumer = self._mock_base_snode("consumer", torch.device("cpu"))
+        producer.has_reduction_result.return_value = True
+        producer.has_strict_reduction.return_value = False
+        consumer.has_strict_reduction.return_value = False
+        producer.ancestors = OrderedSet()
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        consumer.get_operation_names.return_value = OrderedSet(["consumer"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        scheduler._prove_staged_fusion_dependencies = Mock(
+            side_effect=AssertionError("ranked results must not plan staged fusion")
+        )
+        scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=0)
+        scheduler.shared_data_after_reordering_loop = Mock(return_value=8)
+        scheduler.get_expand_dim_for_pointwise_nodes = Mock(
+            side_effect=AssertionError("ranked results must prevent expansion")
+        )
+        scheduler.shared_data_after_inverting_indexing = Mock(
+            side_effect=AssertionError("ranked results must prevent inversion")
+        )
+        scheduler.can_fuse_vertical = Mock(return_value=vertical_fusion_legal)
+        scheduler._try_reindex_pointwise_for_reduction = Mock(
+            side_effect=AssertionError("ranked results must prevent reindexing")
+        )
+        backend = Mock()
+        backend.can_fuse_vertical.return_value = True
+        scheduler.get_backend = Mock(return_value=backend)
+        graph = Mock(no_fuse_buffer_names=OrderedSet())
+        choices = Mock()
+        choices.can_fuse.return_value = True
+        choices.can_fuse_vertical.return_value = True
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_choices_handler(choices),
+            inductor_config.patch(
+                {
+                    "expand_dimension_for_pointwise_nodes": True,
+                    "loop_ordering_after_fusion": True,
+                    "loop_reindexing_after_fusion": True,
+                    "loop_index_inversion_in_fusion": True,
+                }
+            ),
+        ):
+            self.assertEqual(
+                scheduler._can_fuse(producer, consumer, can_reorder=True),
+                vertical_fusion_legal,
+            )
+
+        scheduler.shared_data_after_reordering_loop.assert_called_once()
+        scheduler.can_fuse_vertical.assert_called_once()
+        scheduler.get_expand_dim_for_pointwise_nodes.assert_not_called()
+        scheduler.shared_data_after_inverting_indexing.assert_not_called()
+        scheduler._try_reindex_pointwise_for_reduction.assert_not_called()
+
+    @parametrize("compact", [False, True])
+    def test_reduction_result_reindex_fallback_preserves_domain(self, compact):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.available_buffer_names = OrderedSet()
+        scheduler.get_backend = Mock(return_value=SIMDScheduling(None))
+        scheduler._selected_tiling_memory = Mock(return_value=None)
+        scheduler.score_fusion_memory = Mock(return_value=8)
+        gpu = torch.device("cuda")
+
+        def make_node(name, source, ranked=False):
+            def fn(index, reduction):
+                if ranked:
+                    (row,), (rank,) = index, reduction
+                    value = ops.load(source, 33 * row + rank)
+                    ops.store_reduction(
+                        name, 3 * row + rank, value, result_range=(rank, 3)
+                    )
+                else:
+                    (offset,) = index
+                    ops.store(name, offset, ops.load(source, offset))
+
+            sizes = ([2], [33]) if ranked else ([6 if compact else 66], [])
+            args, ranges = index_vars_squeeze(*sizes, prefix="q")
+            node = object.__new__(SchedulerNode)
+            node.node = Mock(spec=ir.ComputedBuffer)
+            node.node.get_reduction_type.return_value = "sort" if ranked else None
+            node.node.get_device.return_value = gpu
+            node.node.get_device_or_error.return_value = gpu
+            node.scheduler = scheduler
+            node.outputs = []
+            node.mutation_renames = {}
+            node._loop_mutation_listener = None
+            node._loop_state_gen = 0
+            node._body = LoopBody(fn, args, ranges, *args)
+            node._sizes = node._body.sizes
+            node.group = (gpu, scheduler.get_backend(gpu).group_fn(node._sizes))
+            node.read_writes = ReadWrites(OrderedSet(), OrderedSet(), OrderedSet())
+            node.refresh_dependencies(normalize=False, need_clear_tiling_cache=False)
+            return node
+
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            inductor_config.patch(
+                loop_ordering_after_fusion=False, loop_reindexing_after_fusion=True
+            ),
+        ):
+            ranked = make_node("ranked", "input", ranked=True)
+            pointwise = make_node("pointwise", "ranked" if compact else "input")
+            before = pointwise.snapshot_loop_state()
+            ranked_state = ranked.snapshot_loop_state()
+            self.assertTrue(ranked.has_reduction_result())
+            with patch.object(
+                pointwise,
+                "apply_loop_reindexing",
+                wraps=pointwise.apply_loop_reindexing,
+            ) as reindex:
+                score = scheduler.shared_data_after_reordering_loop(ranked, pointwise)
+
+            self.assertEqual(ranked.snapshot_loop_state(), ranked_state)
+            if compact:
+                self.assertEqual(score, -1)
+                reindex.assert_not_called()
+                self.assertEqual(pointwise.snapshot_loop_state(), before)
+            else:
+                self.assertEqual(score, 8)
+                reindex.assert_called_once_with([2, 33])
+                self.assertEqual(
+                    [list(s) for s in pointwise.get_ranges()], [[2, 33], []]
+                )
+                after = pointwise.read_writes.reads_and_writes()
+                self.assertEqual(
+                    {dep.normalize() for dep in after},
+                    {dep.normalize() for dep in before[3].reads_and_writes()},
+                )
+
     def test_vertical_fusion_retries_after_reindexing(self):
         producer = self._mock_base_snode("producer", torch.device("cuda"))
         consumer = self._mock_base_snode("consumer", torch.device("cuda"))
@@ -1878,6 +2243,8 @@ class TestScheduler(TestCase):
             prologue_node.is_template.return_value = False
             template_node.is_template.return_value = True
             prologue_node.is_reduction.return_value = False
+            prologue_node.has_reduction_result.return_value = False
+            template_node.has_reduction_result.return_value = False
             prologue_node.ancestors = OrderedSet()
             template_node.ancestors = OrderedSet(["prologue"])
             prologue_node.get_operation_names.return_value = OrderedSet(["prologue"])
