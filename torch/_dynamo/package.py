@@ -166,13 +166,12 @@ class FunctionPicklerBase(pickle.Pickler):
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
         fn = types.FunctionType(code, f_globals, name, None, closure)
-        # FunctionType derives __module__ from f_globals["__name__"], so any
-        # scope that is not the real module dict leaves it None and a guard
-        # rooted at fn.__module__ rebuilds against that. Leave that None in
-        # place rather than assigning it back (which the stub rejects). Any
-        # other value is restored as is: __module__ need not be a str.
-        if module is not None:
-            fn.__module__ = module
+        # FunctionType derives __module__ from f_globals["__name__"], which is
+        # not what the live function had (functools.wraps copied it, a decorator
+        # set it, or it is None), so restore the recorded value unconditionally
+        # rather than relying on the scope. Only the stub objects to a non-str;
+        # the runtime setter accepts any object.
+        fn.__module__ = module  # type: ignore[assignment]
         fn.__qualname__ = qualname
         return fn
 
