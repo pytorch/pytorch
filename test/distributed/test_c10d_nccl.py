@@ -61,7 +61,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
-    skip_if_rocm_arch_multiprocess,
     skip_if_rocm_ver_atleast_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
@@ -70,14 +69,15 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MI350_ARCH,
     IS_LINUX,
     IS_SANDCASTLE,
+    MI350_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -4684,7 +4684,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     # hangs; passes on gfx950 outside those runners and on the mi300 runners
     # with the same image. Skipped on that arch until the runner P2P path is
     # understood.
-    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
+    @skipIfRocmArch(MI350_ARCH)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(
