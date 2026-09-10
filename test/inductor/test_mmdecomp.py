@@ -417,6 +417,22 @@ class TestDecomp(NNTestCase):
             init_tensor([[[1], [2], [3], [4]]] * bs, dtype=dtype, device=device),
         )
 
+    # Shapes hit each addmm decomp branch: CPU dot, CPU small mat2, non-CPU k == 1.
+    @parametrize("m,k,n", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    @parametrize("beta,alpha", [(0, 1), (1, 0), (0, 0)])
+    def test_addmm_zero_scalar_ignores_operand(self, device, m, k, n, beta, alpha):
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, beta=beta, alpha=alpha)
+
+        x = torch.randn(n, device=device)
+        a = torch.randn(m, k, device=device)
+        b = torch.randn(k, n, device=device)
+        if beta == 0:
+            x.fill_(float("nan"))
+        if alpha == 0:
+            a.fill_(float("nan"))
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, b), fn(x, a, b))
+
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dynamic_shape_mm(self, device, dtype):
         # Test that the mm decomp does not evaluate expressions for dynamic shapes
