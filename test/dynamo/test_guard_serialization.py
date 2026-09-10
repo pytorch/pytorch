@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import io
 import itertools
 import pickle
 import sys
@@ -20,7 +21,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
-from torch._dynamo.guards import CheckFunctionManager, CompileId
+from torch._dynamo.guards import CheckFunctionManager, CompileId, GuardsStatePickler
 from torch._dynamo.package import CompilePackage
 from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
@@ -1758,6 +1759,30 @@ class TestGuardSerialization(TestGuardSerializationBase):
             "TENSOR_MATCH", foo, Inputs(x, weakref.ref(x))
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
+
+    def test_dead_weakref_reduce(self):
+        # Restored weakref must be dead, not a live-looking _Missing.
+        x = torch.randn(3)
+        ref = weakref.ref(x)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(ref)
+        buf.seek(0)
+        restored = pickle.load(buf)
+
+        self.assertIs(type(restored), weakref.ref)
+        self.assertIsNone(restored())
+
+    def test_dead_weakref_distinct_hashes(self):
+        # Restored refs must hash distinctly, or unpickling goes quadratic.
+        tensors = [torch.randn(3) for _ in range(2000)]
+        d = {weakref.ref(t): i for i, t in enumerate(tensors)}
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(d)
+        buf.seek(0)
+        restored = pickle.load(buf)
+
+        self.assertEqual(len(restored), len(d))
+        self.assertEqual(len({hash(k) for k in restored}), len(d))
 
     def test_unused_stream(self):
         if not torch.accelerator.is_available():
