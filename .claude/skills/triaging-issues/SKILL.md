@@ -11,6 +11,10 @@ hooks:
       hooks:
         - type: command
           command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_labels.py"
+    - matcher: "mcp__github__get_issue|mcp__github__get_issue_comments|mcp__github__add_issue_comment"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/coerce_tool_input.py"
   PostToolUse:
     - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
       hooks:
@@ -57,6 +61,8 @@ Use these GitHub MCP tools for triage:
 | `mcp__github__update_issue` | Apply labels or close issues |
 | `mcp__github__add_issue_comment` | Add comment (only for redirecting questions) |
 | `mcp__github__search_issues` | Find similar issues for context |
+
+Pass `issue_number` as a JSON number, not a string; the server rejects `"195701"`.
 
 ---
 
