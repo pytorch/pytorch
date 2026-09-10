@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 
+import sympy
+
 import torch
+from torch._inductor import dependencies
 from torch._inductor.codegen.cpp_utils import CppCSEVariable
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
@@ -12,14 +15,20 @@ from torch._inductor.ir import (
     Pointwise,
     ShapeAsConstantBuffer,
 )
+from torch._inductor.loop_body import LoopBody
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
+@instantiate_parametrized_tests
 class TestDependencies(InductorTestCase):
     def _create_buffer(self, name, shape, dtype=torch.float32):
         return Buffer(
@@ -143,6 +152,79 @@ class TestDependencies(InductorTestCase):
         )
         self.assertEqual(dep1.get_offset(), 0)
         self.assertEqual(dep2.get_offset(), 1024)
+
+    @parametrize("normalize", [False, True])
+    @parametrize("transform", ["clone", "merge", "reorder", "reindex"])
+    @parametrize("result_size", [1, 3])
+    def test_reduction_result_domain(self, normalize, transform, result_size):
+        def fn(index, reduction):
+            row = 3 * index[0] + index[1]
+            (rank,) = reduction
+            value = ops.load("input", 33 * row + rank)
+            values = ops.constant(1, torch.float32)
+            ops.store_reduction(
+                "output",
+                result_size * row + rank,
+                values,
+                result_range=(rank, result_size),
+            )
+            reduced = ops.reduction(torch.float32, torch.float32, "sum", value)
+            ops.store_reduction("sum", row, reduced)
+            ops.store("full", 33 * row + rank, value)
+
+        args, ranges = dependencies.index_vars_squeeze([2, 3], [33], prefix="q")
+        body = LoopBody(fn, args, ranges, *args)
+        if transform == "clone":
+            body = LoopBody(body, args, ranges, *args, allow_same_symbol_in_index=True)
+        elif transform == "merge":
+            body = body.merge_loops()
+        elif transform == "reorder":
+            body = body.reorder_iter_loops([1, 0])
+        else:
+            body = body.reindex_iter_loops([6])
+
+        fast = dependencies.extract_read_writes(body, *body.sizes, normalize=normalize)
+        traced = dependencies.extract_read_writes(
+            lambda *args: body(*args), *body.sizes, normalize=normalize
+        )
+        self.assertEqual(fast.reads, traced.reads)
+        self.assertEqual(fast.writes, traced.writes)
+        self.assertEqual(fast.index_exprs, traced.index_exprs)
+
+        t0 = sympy_index_symbol("t0")
+        for dep in (*fast.reads, *fast.writes):
+            numel = {"output": 6 * result_size, "sum": 6}.get(dep.name, 198)
+            self.assertEqual(
+                dep.normalize_with_stride_order(),
+                MemoryDep(dep.name, t0, (t0,), (sympy.Integer(numel),)),
+            )
+        self.assertEqual(len(body.get_write_exprs()), 3)
+        self.assertEqual(
+            body.get_write_expr("output"), body.get_all_write_expr("output")[0]
+        )
+
+    @parametrize("normalize", [False, True])
+    def test_reduction_result_projected_domain(self, normalize):
+        def fn(index, reduction):
+            (row,) = index
+            (rank,) = reduction
+            value = ops.load("input", 33 * row + rank)
+            ops.store_reduction("output", 3 * row + rank, value, result_range=(rank, 3))
+
+        args, ranges = dependencies.index_vars_squeeze([6], [33], prefix="q")
+        body = LoopBody(fn, args, ranges, *args)
+        fast = dependencies.extract_read_writes(
+            body, [6], hidden_args=[[sympy.S.Zero]], normalize=normalize
+        )
+        traced = dependencies.extract_read_writes(
+            fn, [6], hidden_args=[[sympy.S.Zero]], normalize=normalize
+        )
+        self.assertEqual(fast.reads, traced.reads)
+        self.assertEqual(fast.writes, traced.writes)
+        self.assertEqual(fast.index_exprs, traced.index_exprs)
+        (write,) = fast.writes
+        self.assertEqual(write.size, (6,))
+        self.assertEqual(write.index, 3 * write.var_names[0])
 
     def test_cpp_cse_value_expr_tracks_dependent_itervars(self):
         x = sympy_index_symbol("x")

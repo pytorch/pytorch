@@ -3264,15 +3264,14 @@ class Sort(Loops):
             self.dtypes, values, self.stable, self.descending, top_k=self.top_k
         )
         value = result[self.output_index]
-        if self.top_k is not None:
-            # The selection lives in the first top_k lanes of the full sort
-            # range: predicate the store on the lane and keep the dependency
-            # index inside the compact output.
+        if self.top_k is not None and self.top_k != self.sort_ranges[0]:
             (rank,) = reduction_vars
-            lane = ops.index_expr(rank, torch.int64)
-            in_range = ops.lt(lane, ops.constant(self.top_k, torch.int64))
-            value = ops.set_store_mask(value, in_range)
-            idx = self.reindex(vars, [ModularIndexing(rank, 1, self.top_k)])
+            return ops.store_reduction(
+                output_name or "unnamed",
+                indexer(idx),
+                value,
+                result_range=(rank, self.top_k),
+            )
         return ops.store(output_name or "unnamed", indexer(idx), value)
 
     def get_reduction_type(self) -> str | None:

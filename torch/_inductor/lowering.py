@@ -986,6 +986,23 @@ def to_dtype(
 
 register_pointwise_op("to_dtype")
 
+# Reached through custom lowerings or codegen itself rather than
+# register_pointwise; they commute with broadcasting all the same.
+for _pointwise_name in (
+    "where",
+    "pow",
+    "floor",
+    "round",
+    "trunc",
+    "fmod",
+    "remainder",
+    "identity",
+    "isnan",
+    "isinf",
+    "signbit",
+):
+    register_pointwise_op(_pointwise_name)
+
 
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
@@ -8511,10 +8528,14 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
             if result is not None:
                 return result
         elif largest:
-            # Like topk, max.dim ranks NaN above everything (min.dim would
-            # return NaN where topk(largest=False) skips it), and it stores
-            # one value per row, which the compact sort store cannot.
-            return reduce_max(self, dim, keepdim=True)
+            if self.get_dtype() == torch.float32:
+                return reduce_max(self, dim, keepdim=True)
+            # Low precision max can change NaN payloads. Gather the selected
+            # input and preserve dtype rounding.
+            indices = reduce_argmax(self, axis=dim, keepdims=True)
+            values = to_dtype(gather(self, dim, indices), torch.float32)
+            values = to_dtype(values, self.get_dtype(), use_compute_types=False)
+            return values, indices
     if not config.triton.decompose_sort_ops:
         return topk_fallback(self, k, dim, largest, sorted)
     sorted_vals, sorted_idxs = sort_stable(
