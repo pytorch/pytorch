@@ -9,13 +9,13 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
 )
-from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
 
@@ -63,7 +63,7 @@ def normalize_c(
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmEpiModLocalReducePlan:
+class FlexGemmRuntimeLocalReducePlan:
     """QuACK EpiOp configuration for one analyzed grouped local reduction."""
 
     geometry: FlexGemmLocalReduceGeometry
@@ -76,7 +76,7 @@ class FlexGemmEpiModLocalReducePlan:
     prepass: Callable[..., Any] | None = None
     prepass_combine: str | None = None
     prepass_finalize: Callable[..., Any] | str | None = None
-    output_layout: FlexGemmOutputLayout | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
 
     def __post_init__(self) -> None:
         if self.out is None and not self.feeds_main:
@@ -84,9 +84,11 @@ class FlexGemmEpiModLocalReducePlan:
         if self.combine is None:
             raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
         if self.output_layout is not None and not isinstance(
-            self.output_layout, FlexGemmOutputLayout
+            self.output_layout, FlexGemmOutputStorageLayout
         ):
-            raise TypeError("local-reduce output_layout must be a FlexGemmOutputLayout")
+            raise TypeError(
+                "local-reduce output_layout must be a FlexGemmOutputStorageLayout"
+            )
         if (self.prepass is None) != (self.prepass_combine is None):
             raise RuntimeError(
                 "FlexGEMM EpiMod prepasses require both a callable and combine"
@@ -133,8 +135,8 @@ def flex_gemm_epimod(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
-    local_reduce: FlexGemmEpiModLocalReducePlan | None,
-    main_transform: FlexGemmGroupedMainOutputTransform | None,
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    output_contraction: FlexGemmOutputContraction | None,
 ):
     """Build and cache a QuACK TensorSSA EpiMod from generated FlexGEMM metadata."""
     epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
@@ -144,7 +146,7 @@ def flex_gemm_epimod(
         epilogue_arg_dtypes,
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
-        main_transform,
+        output_contraction,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
@@ -169,12 +171,12 @@ def flex_gemm_epimod(
             if kind == "scalar"
             else op_types[kind](name, dtype=dtype)
         )
-    if main_transform is not None:
+    if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
         )
 
-        outputs = (GroupedMainStore("main", main_transform.group),)
+        outputs = (GroupedMainStore("main", output_contraction.group),)
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
@@ -272,7 +274,7 @@ def flex_gemm_epimod(
     return epimod
 
 
-def gemm_epimod(
+def gemm_epilogue(
     a: torch.Tensor,
     b: torch.Tensor,
     epilogue_fn,
@@ -284,14 +286,18 @@ def gemm_epimod(
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
-    local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
-    main_transform: FlexGemmGroupedMainOutputTransform | None = None,
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
+    output_contraction: FlexGemmOutputContraction | None = None,
     tuned: bool = False,
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
     """Run a dense FlexGEMM call through the vendored QuACK EpiMod."""
-    if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
+    if (
+        output_contraction is not None
+        and output_contraction.chunked
+        and b.stride(-1) == 1
+    ):
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
         )
@@ -302,7 +308,7 @@ def gemm_epimod(
         epilogue_arg_kinds,
         len(aux_outs),
         local_reduce,
-        main_transform,
+        output_contraction,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
     operands: dict[str, Any] = {}
@@ -349,7 +355,7 @@ def gemm_epimod(
 
     output_buffers = (
         {"main": quack_epilogue_arg(out)}
-        if main_transform is not None
+        if output_contraction is not None
         else {
             "D": quack_epilogue_arg(out),
             **dict(
@@ -376,13 +382,13 @@ def gemm_epimod(
             C=effective_C,
             out=output_buffers,
             out_dtype=out.dtype,
-            store_d=main_transform is None,
+            store_d=output_contraction is None,
             config=None,
             config_constraints=config_constraints,
             tuned=tuned,
             concat_layout=(
-                None if main_transform is None else main_transform.concat_layout
+                None if output_contraction is None else output_contraction.concat_layout
             ),
             **operands,
         )
-    return result["main" if main_transform is not None else "D"]
+    return result["main" if output_contraction is not None else "D"]
