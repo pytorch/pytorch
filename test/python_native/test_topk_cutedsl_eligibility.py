@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestCuTeDSLTopKEligibility(TestCase):
-    def test_pre_sm100_devices_are_ineligible(self) -> None:
+    def test_pre_sm90_devices_are_ineligible(self) -> None:
         from torch._native.ops.topk import cutedsl_impl
 
         x = mock.Mock(
@@ -16,6 +16,8 @@ class TestCuTeDSLTopKEligibility(TestCase):
             device=torch.device("cuda:0"),
             shape=(256, 256),
             ndim=2,
+            data_ptr=mock.Mock(return_value=0),
+            element_size=mock.Mock(return_value=4),
         )
         with (
             mock.patch.object(cutedsl_impl, "any_cow", return_value=False),
@@ -25,11 +27,11 @@ class TestCuTeDSLTopKEligibility(TestCase):
         ):
             for capability, expected in (
                 ((8, 0), False),
-                ((9, 0), False),
+                ((9, 0), True),
                 ((10, 0), True),
             ):
                 with self.subTest(capability=capability):
-                    cutedsl_impl._sm100_or_above.cache_clear()
+                    cutedsl_impl._device_major.cache_clear()
                     get_capability.reset_mock()
                     get_capability.return_value = capability
                     for _ in range(2):

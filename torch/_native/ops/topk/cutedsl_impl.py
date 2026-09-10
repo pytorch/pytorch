@@ -1,6 +1,6 @@
 """CuTeDSL override registrations for ``aten::topk``.
 
-Two kernels, picked by (K, N) - see ``cutedsl_kernels.py``:
+Two kernels, picked by dtype, capability, K, and N - see ``aot.py``:
 
   * Register-resident (small K, small N): K in {16, 32}, N a power of 2
     in a per-K range (see ``_REGISTER_N_RANGE``). Each warp sorts one
@@ -19,15 +19,15 @@ Two kernels, picked by (K, N) - see ``cutedsl_kernels.py``:
         Faster (~5-10%); indices may differ across runs on threshold ties.
 
 Common eligibility (see ``_cond``):
-  - fp32 input, CUDA on SM100 or newer, not COW
+  - fp32/bf16 input, CUDA on SM90 or newer
   - ``largest=True``, ``sorted=True``
   - reducing over the last axis, ``self`` contiguous (2D flatten is a view)
   - row count at least one full wave of SMs (perf gate)
 
 Per-kernel additional eligibility:
-  - register: K in {16, 32}, N pow2 in supported range above
-  - radix: K in {64, 128, 256, 512, 1024}, ``N >= MIN_N_MULT[k] * k``,
-    ``N % 4 == 0`` (128-bit vector loads)
+  - register: fp32, K in {16, 32}, N in the measured exact-N set
+  - radix: fp32/bf16, K in {64, 128, 256, 512, 1024}, N above the
+    dtype/capability threshold, and ``N % 4 == 0`` (128-bit vector loads)
 
 Anything else falls through to aten.
 """
@@ -44,57 +44,28 @@ from ._common import (
     last_dim_row_major_ok,
     unflatten_last_dim,
 )
+from .aot import _kernel_for, _RADIX_KS as _AOT_RADIX_KS, _RADIX_MIN_N, _REGISTER_NS
 
 
-_RADIX_KS: frozenset[int] = frozenset({64, 128, 256, 512, 1024})
-_REGISTER_KS: frozenset[int] = frozenset({16, 32})
+_RADIX_KS: frozenset[int] = frozenset(_AOT_RADIX_KS)
+_REGISTER_KS: frozenset[int] = frozenset(_REGISTER_NS)
 _SUPPORTED_KS: frozenset[int] = _RADIX_KS | _REGISTER_KS
-
-# Per-K minimum N for the radix kernel below which aten wins on B200.
-# At low N the radix sweep (4 passes + gather) has too many passes over
-# too little data to beat aten's launch-bound multi-pass kernel.
-# K=512 needs ~8*K, K=1024 needs ~32*K because their smem footprint
-# drops occupancy.
-_RADIX_MIN_N_MULTIPLIER: dict[int, int] = {
-    64: 2,
-    128: 2,
-    256: 2,
-    512: 8,
-    1024: 32,
-}
-
-# Register kernel per-K (min, max) N range, both bounds powers of 2.
-# Below the min, VEC = N/32 is too small (most lanes idle, bitonic
-# overhead dominates) and aten wins at large M. Above the max, radix
-# (K=32) or aten (K=16 N>2048) takes over.
-# Tuned on B200: K=16 wins down to N=64 across all M; K=32 only beats
-# both aten and radix at exactly N=256.
 _REGISTER_N_RANGE: dict[int, tuple[int, int]] = {
-    16: (64, 2048),
-    32: (256, 256),
+    k: (min(ns), max(ns)) for k, ns in _REGISTER_NS.items()
 }
-
-
-def _is_pow2(x: int) -> bool:
-    return x > 0 and (x & (x - 1)) == 0
-
-
-def _kernel_for(k: int, n: int) -> str | None:
-    """Pick the kernel for (K, N): "register", "radix", or None (aten)."""
-    if k in _REGISTER_KS:
-        n_min, n_max = _REGISTER_N_RANGE[k]
-        if _is_pow2(n) and n_min <= n <= n_max:
-            return "register"
-    if k in _RADIX_KS:
-        if n >= _RADIX_MIN_N_MULTIPLIER[k] * k and (n % 4) == 0:
-            return "radix"
-    return None
+# Kept as a public test/tuning aid for the original SM100 fp32 policy.
+_RADIX_MIN_N_MULTIPLIER: dict[int, int] = {
+    k: n // k for k, n in _RADIX_MIN_N["float32"][10].items()
+}
+_DTYPE_NAMES = {
+    torch.float32: "float32",
+    torch.bfloat16: "bfloat16",
+}
 
 
 @functools.cache
-def _sm100_or_above(device: int) -> bool:
-    major, _ = torch.cuda.get_device_capability(device)
-    return major >= 10
+def _device_major(device: int) -> int:
+    return torch.cuda.get_device_capability(device)[0]
 
 
 @functools.cache
@@ -108,24 +79,26 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
-    if not self.is_cuda or self.dtype != torch.float32:
+    if not self.is_cuda or self.dtype not in _DTYPE_NAMES:
         return False
-    if not _sm100_or_above(self.device.index or 0):
-        return False
-    if any_cow(self):
+    device = self.device.index or 0
+    major = _device_major(device)
+    if major < 9:
         return False
     if not largest or not sorted_:
         return False
     if not last_dim_row_major_ok(self, dim):
         return False
+    if self.data_ptr() % (4 * self.element_size()):
+        return False
     N = self.shape[-1] if self.ndim >= 1 else 0
-    if _kernel_for(k, N) is None:
+    if _kernel_for(_DTYPE_NAMES[self.dtype], N, k, major) is None:
         return False
     # Performance gate: reject shapes where aten is faster. One CTA per
     # row (radix) or one warp per row (register) - either way row_count
     # below SM_count leaves the GPU underutilised.
     M = math.prod(self.shape[:-1]) if self.ndim >= 1 else 0
-    if M < _min_rows_for_full_wave(self.device.index or 0):
+    if M < _min_rows_for_full_wave(device):
         return False
     return True
 
@@ -157,7 +130,7 @@ def _out_cond(
     if any_cow(values, indices):
         return False
     expected_shape = self.shape[:-1] + (k,)
-    if values.dtype != torch.float32 or values.shape != expected_shape:
+    if values.dtype != self.dtype or values.shape != expected_shape:
         return False
     if indices.dtype != torch.int64 or indices.shape != expected_shape:
         return False
@@ -169,7 +142,8 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
 
     self_2d = flatten_last_dim(self)
     N = self_2d.shape[-1]
-    kernel = _kernel_for(k, N)
+    major = _device_major(self.device.index or 0)
+    kernel = _kernel_for(_DTYPE_NAMES[self.dtype], N, k, major)
 
     def _launch() -> tuple[torch.Tensor, torch.Tensor]:
         if kernel == "register":

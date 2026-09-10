@@ -688,26 +688,60 @@ def build(spec: dict) -> dict:
     """AOT builder: one manifest spec point -> compile inputs + sidecar.
 
     ``spec`` carries scalar values (one point of the manifest grid):
-    {"dtype": "float32"|"bfloat16", "N": int, "K": int,
-     "deterministic": bool}. Returns {"prefix", "fn", "fake_args",
-    "tensor_args"}; the export tool runs ``cute.compile(fn, *fake_args)``
-    and ``export_to_c`` under ``prefix``, then writes ``tensor_args`` to
-    the marshalling sidecar.
+    {"kernel": "register"|"radix", ...}. Returns {"prefix", "fn",
+    "fake_args", "tensor_args"}; the export tool runs
+    ``cute.compile(fn, *fake_args)`` and ``export_to_c`` under ``prefix``,
+    then writes ``tensor_args`` to the marshalling sidecar.
     """
     dtype = _DTYPES[spec["dtype"]]
-    N, K = int(spec["N"]), int(spec["K"])
-    deterministic = bool(spec.get("deterministic", False))
-    from .aot import _specialization
-
-    scalar_tail_iters, fixed_vec_iters = _specialization(N, K, deterministic)
+    K = int(spec["K"])
     batch_sym = cute.sym_int()
-    div_n = math.gcd(4, N)
     div_k = math.gcd(4, K)
-    x_fake = _make_fake_tensor(dtype, (batch_sym, N), div_n)
     v_fake = _make_fake_tensor(dtype, (batch_sym, K), div_k)
     i_fake = _make_fake_tensor(Int64, (batch_sym, K), div_k)
+    if spec["kernel"] == "register":
+        NS = tuple(int(n) for n in spec["N_rung"].split("_"))
+        if len(NS) == 1:
+            n_shape = NS[0]
+            div_n = math.gcd(4, NS[0])
+            dynamic_sizes = [0]
+        else:
+            n_shape = cute.sym_int(divisibility=4)
+            div_n = 4
+            dynamic_sizes = [0, 1]
+        return {
+            "prefix": f"topk_register_f32_n{spec['N_rung']}_k{K}",
+            "fn": _RegisterTopK(NS, K),
+            "fake_args": [
+                _make_fake_tensor(dtype, (batch_sym, n_shape), div_n),
+                v_fake,
+                i_fake,
+                cute.runtime.make_fake_stream(),
+            ],
+            "tensor_args": [
+                {
+                    "name": "mX",
+                    "dynamic_sizes": dynamic_sizes,
+                    "dynamic_strides": [0],
+                    "read_only": True,
+                },
+                {"name": "mValues", "dynamic_sizes": [0], "dynamic_strides": [0]},
+                {"name": "mIndices", "dynamic_sizes": [0], "dynamic_strides": [0]},
+            ],
+        }
+
+    deterministic = bool(spec.get("deterministic", False))
+    scalar_tail_iters = spec.get("scalar_tail_iters")
+    fixed_vec_iters = spec.get("fixed_vec_iters")
+    n_sym = cute.sym_int(divisibility=4)
+    x_fake = _make_fake_tensor(dtype, (batch_sym, n_sym), 4)
     det_tag = "det" if deterministic else "nondet"
-    prefix = f"topk_radix_{_DTYPE_SHORT[spec['dtype']]}_n{N}_k{K}_{det_tag}"
+    tail_tag = "dyn" if scalar_tail_iters is None else str(scalar_tail_iters)
+    vec_tag = "dyn" if fixed_vec_iters is None else str(fixed_vec_iters)
+    prefix = (
+        f"topk_radix_{_DTYPE_SHORT[spec['dtype']]}_k{K}_{det_tag}"
+        f"_v{vec_tag}_t{tail_tag}"
+    )
     return {
         "prefix": prefix,
         "fn": _RadixSelectTopK(
@@ -730,7 +764,7 @@ def build(spec: dict) -> dict:
         "tensor_args": [
             {
                 "name": "mX",
-                "dynamic_sizes": [0],
+                "dynamic_sizes": [0, 1],
                 "dynamic_strides": [0],
                 "read_only": True,
             },
