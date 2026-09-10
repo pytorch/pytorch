@@ -1,3 +1,2 @@
-# Shared CuteDSL-layer pieces that belong to no single op family. Deliberately empty: every
-# module here imports cutlass at module scope, so importing the PACKAGE must not import them
-# (see test_no_dsl_imports_after_import_torch).
+# Shared CuteDSL components outside any op family. Keep this package empty because its
+# modules import cutlass, while importing the package must remain DSL-free.
