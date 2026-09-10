@@ -3382,13 +3382,13 @@ class TestBase:
                 else:
                     raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
-        # Lazily-drawn args (inputs, constructor args, targets). The cache keeps
-        # draws consistent WITHIN one test invocation; it must not leak across
-        # the generated test variants that share this instance, or the RNG
-        # position at module-construction time (and thus the parameter draw)
-        # depends on which sibling test ran first and the in-suite
-        # configuration silently diverges from the standalone repro command.
-        # Every public entry point clears it.
+        # Lazily drawn args (input, target, constructor args), cached so repeated
+        # reads within one test agree. The instance is shared by every generated
+        # test_nn variant, so ModuleTest/CriterionTest clear this on entry to
+        # __call__ and test_cuda: a sibling's leftover entry skips a draw and shifts
+        # the RNG position of every later draw (the input in __call__, the
+        # parameters in test_cuda), so the in-suite configuration would differ from
+        # the standalone repro. Subclasses with their own entry points do not clear.
         self._arg_cache = {}
 
     def get_name(self):
