@@ -268,16 +268,19 @@ def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
+        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            torch.ops.load_library(str(lib_file_path))
+
         # Checking for mutable operations while tracing is feature flagged
-        # Enable it in testing but not by default
+        # Enable it in testing but not by default. check_mutable_operations is
+        # process-global and is only restored in tearDown, which unittest skips
+        # when setUp raises -- so this must stay the last statement of setUp, or
+        # a failure above would leak it into every later test in the process.
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
         )
         torch.fx.proxy.TracerBase.check_mutable_operations = True
-
-        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         super().tearDown()
