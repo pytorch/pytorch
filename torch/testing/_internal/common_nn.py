@@ -3560,7 +3560,10 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                # Parameter grads can differ by a few ulps between runs when the backward
+                # accumulates atomically (e.g. embedding_dense_backward's fused path since
+                # #172454); use the same bound as the grad-input compare above.
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0)
 
     def test_cuda(self, test_case):
         self._arg_cache.clear()
