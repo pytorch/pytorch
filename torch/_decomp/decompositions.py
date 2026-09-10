@@ -6113,9 +6113,6 @@ def max_pool2d_with_indices_backward(
     Returns:
         Gradient w.r.t. input [B, C, H_in, W_in]
     """
-    # Use native kernel in deterministic mode
-    if torch.are_deterministic_algorithms_enabled():
-        return NotImplemented
 
     if not stride:
         stride = kernel_size
@@ -6163,6 +6160,9 @@ def max_pool2d_with_indices_backward(
             0,
         )
         return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
+    # Use native kernel in deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return NotImplemented
 
     if grad_output.is_xpu:
         return NotImplemented
