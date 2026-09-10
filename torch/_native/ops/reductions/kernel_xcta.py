@@ -1,8 +1,8 @@
 # Two-stage cross-CTA row reduction for few rows with large N, mirroring ATen Reduce.cuh.
 # Stage 1 reshapes (M, N) to (M*C, N/C) and emits raw accumulators; stage 2 combines C
-# partials and projects with true N, preserving mean/variance. C depends only on N because
-# it is part of the plan. Reshaping obscures global indices, so index traits use the
-# general kernel's ragged split. Measured 1.13-1.66x of ATen.
+# partials and projects with true N, preserving mean/variance. C depends only on N, so plans
+# reuse across M. Reshaping obscures global indices, so index traits use the general kernel's
+# ragged split. Measured 1.13-1.66x of ATen.
 
 import math
 from typing import NamedTuple

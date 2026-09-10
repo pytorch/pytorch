@@ -33,8 +33,8 @@ class TestNativeUtils(TestCase):
             else sys.modules.pop(name, None)
         )
         mod = LazyModule(name)
-        self.assertNotIn(name, sys.modules)  # constructing the proxy imports nothing
-        self.assertTrue(callable(mod.open))  # first attr access triggers the import
+        self.assertNotIn(name, sys.modules)
+        self.assertTrue(callable(mod.open))
         self.assertIn(name, sys.modules)
 
     def test_is_traced_exact_tensor_branch(self):
@@ -51,9 +51,7 @@ class TestNativeUtils(TestCase):
 
         with FakeTensorMode() as mode:
             wrapped = torch._to_functional_tensor(mode.from_tensor(torch.empty(2)))
-            self.assertIs(
-                type(wrapped), torch.Tensor
-            )  # the premise the fast path relied on
+            self.assertIs(type(wrapped), torch.Tensor)
             self.assertTrue(is_fake(wrapped))
             self.assertTrue(cap.is_traced(wrapped))
 
@@ -102,7 +100,6 @@ class TestNativeUtils(TestCase):
     @unittest.skipUnless(TEST_CUDA, "needs a CUDA device to populate the arch cache")
     @skipIfRocm
     def test_device_ok_memoizes_per_device(self):
-        # Test memoization behavior: immutable device capability must be queried only once.
         from unittest.mock import patch
 
         from torch._native.utils import capability as cap
