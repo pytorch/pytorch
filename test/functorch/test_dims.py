@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 import gc
 import unittest
-from unittest import skip, skipIf
+from unittest import skip
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
@@ -14,13 +14,16 @@ from attn_positional import BertSelfAttention as BertSelfAttentionB
 import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TestCase,
@@ -63,9 +66,9 @@ def triu(A):
     return torch.where(i <= j, a, zero).order(i, j)
 
 
-def gpu_time(lmb, name, r=100):
-    b = torch.cuda.Event(enable_timing=True)
-    e = torch.cuda.Event(enable_timing=True)
+def gpu_time(lmb, name, r=100, device_type=None):
+    b = torch.get_device_module(device_type).Event(enable_timing=True)
+    e = torch.get_device_module(device_type).Event(enable_timing=True)
     # with magic_trace(name + ".fxt"):
     for _ in range(r):
         lmb()
@@ -131,6 +134,8 @@ class _TestMinBase(TestCase):
         device=None,
         time=False,
     ):
+        device_type = None if device is None else device.type
+
         def maybe_to(x):
             return x if device is None else x.to(device)
 
@@ -158,8 +163,12 @@ class _TestMinBase(TestCase):
         )  # why does a simple matmul not do the right thing?
 
         if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
+            gpu_time(
+                lambda: B(hidden_state), "positional", r=3, device_type=device_type
+            )
+            gpu_time(
+                lambda: A(hidden_state), "first_class", r=3, device_type=device_type
+            )
 
         for approach in ("relative_key", "relative_key_query"):
             A = maybe_to(
@@ -191,8 +200,12 @@ class _TestMinBase(TestCase):
             torch.testing.assert_close(a_out, b_out)
 
             if time:
-                gpu_time(lambda: B(hidden_state), "positional", r=3)
-                gpu_time(lambda: A(hidden_state), "first_class", r=3)
+                gpu_time(
+                    lambda: B(hidden_state), "positional", r=3, device_type=device_type
+                )
+                gpu_time(
+                    lambda: A(hidden_state), "first_class", r=3, device_type=device_type
+                )
 
         A = maybe_to(
             BertSelfAttentionA(
@@ -240,8 +253,12 @@ class _TestMinBase(TestCase):
         torch.testing.assert_close(a_out, b_out)
 
         if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
+            gpu_time(
+                lambda: B(hidden_state), "positional", r=3, device_type=device_type
+            )
+            gpu_time(
+                lambda: A(hidden_state), "first_class", r=3, device_type=device_type
+            )
 
 
 @skipIfTorchDynamo("Bad interaction")
@@ -672,10 +689,10 @@ class TestMinDevice(_TestMinBase):
 
     def setUp(self):
         super().setUp()
-        self.mem_allocated = torch.cuda.memory_allocated()
+        self.mem_allocated = torch.accelerator.memory_allocated()
 
     def tearDown(self):
-        extra_memory = torch.cuda.memory_allocated() - self.mem_allocated
+        extra_memory = torch.accelerator.memory_allocated() - self.mem_allocated
         if extra_memory != 0:
             import refcycle
 
@@ -691,18 +708,21 @@ class TestMinDevice(_TestMinBase):
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/86710",
     )
-    @skipIf(not TEST_CUDA, "no CUDA")
-    def test_attn_cuda(self):
+    @onlyAccelerator
+    def test_attn(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
         self.attn(
             batch_size=256,
             hidden_size=768,
             sequence_length=128,
             num_attention_heads=12,
-            device="cuda",
+            device=device,
             time=measure_perf,
             linear=torch.nn.Linear,
         )
+
+
+instantiate_device_type_tests(TestMinDevice, globals())
 
 
 skip_functorch_only = ["test_time_mm_fuse"]
