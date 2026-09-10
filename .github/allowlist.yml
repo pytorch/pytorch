@@ -39,11 +39,11 @@
 L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
-  - NVIDIA/pytorch-windows-ci
   - google-pytorch/torch_tpu
   - Isalia20/pytorch-mps-ci
 
 L2:
+  - NVIDIA/pytorch-windows-ci
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
   - torch-spyre/torch-spyre
