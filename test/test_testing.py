@@ -564,73 +564,69 @@ class TestFusedAttentionCapability(TestCase):
 
     def test_builtin_device_registrations(self):
         capability = common_device_type.Capability.attention.fused_attention
-        flash_attention = common_device_type.Capability.attention.flash_attention
-        mem_efficient_attention = (
-            common_device_type.Capability.attention.mem_efficient_attention
-        )
+        expected = {
+            common_device_type.CPUTestBase: True,
+            common_device_type.CUDATestBase: bool(PLATFORM_SUPPORTS_FUSED_ATTENTION),
+            common_device_type.MPSTestBase: False,
+            common_device_type.XPUTestBase: True,
+            common_device_type.HPUTestBase: False,
+            common_device_type.LazyTestBase: False,
+        }
 
-        for test_base in (
-            common_device_type.CPUTestBase,
-            common_device_type.MPSTestBase,
-            common_device_type.XPUTestBase,
-        ):
+        for test_base, expected_value in expected.items():
             with self.subTest(device_type=test_base.device_type):
-                capabilities = test_base._capabilities()
                 self.assertEqual(
-                    bool(capabilities[capability]()),
-                    bool(capabilities[flash_attention]())
-                    or bool(capabilities[mem_efficient_attention]()),
+                    test_base.get_capabilities()[capability],
+                    expected_value,
                 )
 
-        cuda_capabilities = common_device_type.CUDATestBase._capabilities()
-        self.assertEqual(
-            bool(cuda_capabilities[capability]()),
-            bool(PLATFORM_SUPPORTS_FUSED_ATTENTION),
+        self.assertNotIn(
+            capability, common_device_type.PrivateUse1TestBase.get_capabilities()
         )
 
-        hpu_capabilities = common_device_type.HPUTestBase._capabilities()
-        self.assertFalse(hpu_capabilities[capability]())
 
-        privateuse1_capabilities = (
-            common_device_type.PrivateUse1TestBase._capabilities()
-        )
-        self.assertNotIn(capability, privateuse1_capabilities)
+class TestCapabilityGating(TestCase):
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.flash_attention
+    )
+    def test_supported(self, device):
+        self.assertEqual(torch.device(device).type, self.device_type)
 
-    def test_gate_supported_unsupported_and_missing(self):
-        capability = common_device_type.Capability.attention.fused_attention
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.mem_efficient_attention
+    )
+    def test_unsupported(self, device):
+        self.fail("mem_efficient_attention should be skipped on CPU")
 
-        class Supported(common_device_type.DeviceTypeTestBase):
-            device_type = "supported"
+    def test_missing(self, device):
+        missing = "attention.missing"
 
-            @classmethod
-            def _capabilities(cls):
-                return {capability: lambda: True}
-
-        class Unsupported(common_device_type.DeviceTypeTestBase):
-            device_type = "unsupported"
-
-            @classmethod
-            def _capabilities(cls):
-                return {capability: lambda: False}
-
-        class Missing(common_device_type.DeviceTypeTestBase):
-            device_type = "missing"
-
-        @common_device_type.requires_capabilities(capability)
+        @common_device_type.requires_capabilities(missing)
         def gated_test(_):
-            return "executed"
+            self.fail("missing capabilities should fail before the test runs")
 
-        self.assertEqual(gated_test(Supported()), "executed")
-        with self.assertRaisesRegex(
-            unittest.SkipTest,
-            r"unsupported capabilities: attention\.fused_attention",
-        ):
-            gated_test(Unsupported())
         with self.assertRaisesRegex(
             AssertionError,
-            r"has not declared capabilities: attention\.fused_attention",
+            r"has not declared capabilities: attention\.missing",
         ):
-            gated_test(Missing())
+            gated_test(self)
+
+
+instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="cpu")
+
+
+class TestFusedAttentionCapabilityDevice(TestCase):
+    @common_device_type.requires_capabilities(
+        common_device_type.Capability.attention.fused_attention
+    )
+    def test_fused_attention_supported(self, device):
+        self.assertEqual(torch.device(device).type, self.device_type)
+
+instantiate_device_type_tests(
+    TestFusedAttentionCapabilityDevice,
+    globals(),
+    only_for=("cpu", "cuda"),
+)
 
 
 class TestFrameworkUtils(TestCase):
