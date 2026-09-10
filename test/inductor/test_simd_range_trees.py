@@ -234,6 +234,9 @@ class TestSIMDRangeTrees(TestCase):
                 index_before,
             )
 
+            # A range-tree expression still uses dynamic_size, deliberately
+            # preventing removal of its scalar argument and making the
+            # replacement unprofitable.
             kernel.range_tree_nodes[sympy.Symbol("__test_range")] = SimpleNamespace(
                 expr=dynamic_size
             )
