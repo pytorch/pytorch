@@ -16,8 +16,8 @@ class FlyDSLGemmConfig:
     TILE_N: int = 128
     TILE_K: int = 64
     STAGES: int = 2
-    BLOCK_M_WARPS: int = 4
-    BLOCK_N_WARPS: int = 4
+    M_WAVES: int = 4
+    N_WAVES: int = 4
     GROUP_M: int = 0
     USE_HALF_TILE_INTERLEAVED: bool = False
 
@@ -27,8 +27,8 @@ class FlyDSLGemmConfigDict(TypedDict):
     TILE_N: int
     TILE_K: int
     STAGES: int
-    BLOCK_M_WARPS: int
-    BLOCK_N_WARPS: int
+    M_WAVES: int
+    N_WAVES: int
     GROUP_M: int
     USE_HALF_TILE_INTERLEAVED: bool
 
@@ -44,16 +44,19 @@ def _make_gemm_param(gemm_config: dict[str, int | bool]):
     )
 
     return make_gemm_gfx950_param(
-        block_m=int(gemm_config["TILE_M"]),
-        block_n=int(gemm_config["TILE_N"]),
-        block_k=int(gemm_config["TILE_K"]),
+        tile_m=int(gemm_config["TILE_M"]),
+        tile_n=int(gemm_config["TILE_N"]),
+        tile_k=int(gemm_config["TILE_K"]),
         stages=int(gemm_config["STAGES"]),
-        m_waves=int(gemm_config["BLOCK_M_WARPS"]),
-        n_waves=int(gemm_config["BLOCK_N_WARPS"]),
+        m_waves=int(gemm_config["M_WAVES"]),
+        n_waves=int(gemm_config["N_WAVES"]),
         group_m=int(gemm_config["GROUP_M"]),
         use_half_tile_interleaved=bool(
             gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
         ),
+        # Tile validation is layout-independent; runtime callers pass the layout.
+        a_is_transposed=False,
+        b_is_transposed=False,
     )
 
 
@@ -63,6 +66,9 @@ def is_gemm_config_valid_for_shape(
     k: int,
     dtype_id: int,
     gemm_config: dict[str, int | bool],
+    *,
+    a_is_transposed: bool,
+    b_is_transposed: bool,
 ) -> bool:
     """Return whether a FlyDSL config supports this concrete GEMM shape."""
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -70,14 +76,14 @@ def is_gemm_config_valid_for_shape(
         make_gemm_param_and_validate,
     )
 
-    block_k = int(gemm_config["TILE_K"])
+    tile_k = int(gemm_config["TILE_K"])
     stages = int(gemm_config["STAGES"])
     use_half_tile_interleaved = bool(
         gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
     )
-    has_k_tail = infer_has_k_tail(k, block_k, stages)
+    has_k_tail = infer_has_k_tail(k, tile_k, stages)
     if use_half_tile_interleaved:
-        k_tiles = (k + block_k - 1) // block_k
+        k_tiles = (k + tile_k - 1) // tile_k
         has_k_tail = has_k_tail or (k_tiles % 2 != 0)
 
     return (
@@ -87,14 +93,16 @@ def is_gemm_config_valid_for_shape(
             k,
             {
                 "dtype_id": dtype_id,
-                "block_m": int(gemm_config["TILE_M"]),
-                "block_n": int(gemm_config["TILE_N"]),
-                "block_k": block_k,
+                "tile_m": int(gemm_config["TILE_M"]),
+                "tile_n": int(gemm_config["TILE_N"]),
+                "tile_k": tile_k,
                 "stages": stages,
-                "m_waves": int(gemm_config["BLOCK_M_WARPS"]),
-                "n_waves": int(gemm_config["BLOCK_N_WARPS"]),
+                "m_waves": int(gemm_config["M_WAVES"]),
+                "n_waves": int(gemm_config["N_WAVES"]),
                 "group_m": int(gemm_config["GROUP_M"]),
                 "use_half_tile_interleaved": use_half_tile_interleaved,
+                "a_is_transposed": a_is_transposed,
+                "b_is_transposed": b_is_transposed,
                 "has_bias": False,
                 "has_k_tail": has_k_tail,
             },
@@ -113,8 +121,8 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
         "TILE_N": [16, 32, 64, 80, 96, 128, 256],
         "TILE_K": [64, 128, 256],
         "STAGES": list(range(2, 10)),
-        "BLOCK_M_WARPS": [1, 2, 4],
-        "BLOCK_N_WARPS": [1, 2, 4],
+        "M_WAVES": [1, 2, 4],
+        "N_WAVES": [1, 2, 4],
         "GROUP_M": [0, 4],
         "USE_HALF_TILE_INTERLEAVED": [False, True],
     }
@@ -124,8 +132,8 @@ def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     valid_configs: list[FlyDSLGemmConfig] = []
     for gemm_config in configs:
         if not gemm_config["USE_HALF_TILE_INTERLEAVED"]:
-            mma_m_iters = gemm_config["TILE_M"] // gemm_config["BLOCK_M_WARPS"] // 16
-            mma_n_iters = gemm_config["TILE_N"] // gemm_config["BLOCK_N_WARPS"] // 16
+            mma_m_iters = gemm_config["TILE_M"] // gemm_config["M_WAVES"] // 16
+            mma_n_iters = gemm_config["TILE_N"] // gemm_config["N_WAVES"] // 16
             if mma_m_iters > 4 or mma_n_iters > 4:
                 continue
         try:
@@ -218,3 +226,157 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
         log.warning("No valid FlyDSL GEMM configuration is available")
         return []
     return [asdict(gemm_config) for gemm_config in configs]
+
+
+def _get_exhaustive_gfx950_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return exhaustive configs for the gfx950 FlyDSL grouped GEMM kernel."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        is_grouped_gemm_gfx950_layout_valid,
+    )
+
+    return [
+        gemm_config
+        for gemm_config in get_exhaustive_gemm_configs()
+        if is_grouped_gemm_gfx950_layout_valid(
+            gemm_config.TILE_M,
+            gemm_config.TILE_N,
+            gemm_config.M_WAVES,
+            gemm_config.N_WAVES,
+            gemm_config.USE_HALF_TILE_INTERLEAVED,
+        )
+    ]
+
+
+@functools.cache
+def get_exhaustive_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return exhaustive configs for the active FlyDSL grouped GEMM backend."""
+    return _get_exhaustive_gfx950_grouped_gemm_configs()
+
+
+# Baseline used when FlyDSL autotuning is disabled. The dataclass defaults
+# describe the dense kernel, whose 4x4 wave split does not apply here, so the
+# grouped baseline is named explicitly; it must stay in the candidate list below.
+DEFAULT_GROUPED_GEMM_CONFIG = FlyDSLGemmConfig(128, 128, 64, 2, 1, 4, 0)
+
+
+def _get_default_gfx950_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return default configs for the gfx950 grouped B-LDS transpose kernel."""
+    config_tuples: list[FlyDSLGemmConfigArgs] = [
+        # Small-M grouped/decode configs.  These reduce wasted work when each
+        # group has far fewer than 32 rows.
+        (16, 64, 64, 2, 1, 2, 0),
+        (16, 128, 64, 2, 1, 2, 0),
+        (32, 64, 64, 2, 1, 2, 0),
+        (32, 256, 64, 2, 1, 4, 0),
+        (32, 128, 64, 2, 1, 4, 0),
+        (64, 128, 64, 2, 1, 4, 0),
+        (64, 256, 64, 2, 1, 4, 0),
+        (128, 128, 64, 2, 1, 4, 0),
+        (128, 256, 64, 2, 1, 4, 0),
+        # Deeper pipelines, autotuned for the multi-stage overlap.
+        (64, 128, 64, 3, 1, 4, 0),
+        (128, 128, 64, 3, 1, 4, 0),
+        (128, 256, 64, 3, 1, 4, 0),
+        # Swizzled group-M variant remaps sufficiently large per-group tile grids.
+        (128, 128, 64, 2, 1, 4, 4),
+    ]
+    hti_config_tuples: list[FlyDSLHTIGemmConfigArgs] = [
+        # 2x2 half-tile-interleaved variant (stages=2 only): four half-block
+        # accumulators + per-quadrant cshuffle store for better register tiling
+        # and MMA scheduling. Requires m_waves=2, n_waves>=2 and even tiles.
+        (64, 128, 64, 2, 2, 2, 0, True),
+        (128, 128, 64, 2, 2, 2, 0, True),
+        (128, 128, 64, 2, 2, 2, 4, True),
+        (128, 256, 64, 2, 2, 4, 0, True),
+        (256, 128, 64, 2, 2, 2, 0, True),
+        (256, 256, 64, 2, 2, 4, 0, True),
+    ]
+    # Tuple order must match the FlyDSLGemmConfig field declaration order.
+    candidates = [FlyDSLGemmConfig(*args) for args in config_tuples]
+    candidates.extend(FlyDSLGemmConfig(*args) for args in hti_config_tuples)
+    valid_configs: list[FlyDSLGemmConfig] = []
+    for gemm_config in candidates:
+        try:
+            _make_gemm_param(asdict(gemm_config))
+            valid_configs.append(gemm_config)
+        except Exception as e:
+            log.debug(
+                "Skipping invalid default FlyDSL grouped config %s: %s",
+                gemm_config,
+                e,
+            )
+    return valid_configs
+
+
+@functools.cache
+def get_default_grouped_gemm_configs() -> list[FlyDSLGemmConfig]:
+    """Return default configs for the active FlyDSL grouped GEMM backend."""
+    return _get_default_gfx950_grouped_gemm_configs()
+
+
+def is_grouped_gemm_config_valid_for_shape(
+    m: int,
+    n: int,
+    k: int,
+    dtype_id: int,
+    gemm_config: dict[str, int | bool],
+) -> bool:
+    """Return whether a FlyDSL config supports this grouped GEMM shape."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        is_grouped_gemm_gfx950_layout_valid,
+    )
+
+    tile_m = int(gemm_config["TILE_M"])
+    tile_n = int(gemm_config["TILE_N"])
+    tile_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    m_waves = int(gemm_config["M_WAVES"])
+    n_waves = int(gemm_config["N_WAVES"])
+    use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
+    k_tiles = (k + tile_k - 1) // tile_k
+    # The staged kernel prefetches stages-1 K tiles before the main loop.
+    has_enough_k = use_half_tile_interleaved or k_tiles >= stages - 1
+    # B uses a max-size buffer descriptor, so partial N tiles can issue
+    # unguarded vector loads past the allocation. Predicated C stores do not
+    # make those reads safe.
+    return (
+        tile_m <= max(128, m)
+        and n >= tile_n
+        and n % tile_n == 0
+        and has_enough_k
+        and is_grouped_gemm_gfx950_layout_valid(
+            tile_m, tile_n, m_waves, n_waves, use_half_tile_interleaved
+        )
+        # Grouped GEMM only accepts row-major A [M, K] and B [G, K, N].
+        and is_gemm_config_valid_for_shape(
+            m,
+            n,
+            k,
+            dtype_id,
+            gemm_config,
+            a_is_transposed=False,
+            b_is_transposed=False,
+        )
+    )
+
+
+def get_grouped_gemm_configs() -> list[dict[str, int | bool]]:
+    """Return configs for the persistent multi-stage grouped kernel.
+
+    Shape compatibility is checked in the lowering before this function is called.
+    By default, autotuning is disabled and we return only a single baseline config.
+    """
+    if (
+        config.flydsl_enable_autotuning
+        and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+    ):
+        candidates = get_exhaustive_grouped_gemm_configs()
+    else:
+        candidates = get_default_grouped_gemm_configs()
+        if not config.flydsl_enable_autotuning:
+            candidates = [c for c in candidates if c == DEFAULT_GROUPED_GEMM_CONFIG]
+
+    if not candidates:
+        log.warning("No valid FlyDSL grouped GEMM configuration is available")
+        return []
+    return [asdict(gemm_config) for gemm_config in candidates]
