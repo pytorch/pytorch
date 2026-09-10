@@ -56,8 +56,10 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
         capture_root_graph_id,
         current_annotation,
         node_type_has_source_id,
+        note_body_graph_id,
         note_sourceless_node,
         record_node_annotation,
+        source_keyed,
     )
     from torch.cuda._utils import _check_cuda_bindings
 
@@ -76,15 +78,20 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
     # returned above -- an error here is genuinely unexpected, and Cuspy's switchboard
     # logs it rather than letting it reach CUPTI's C dispatch.
     tools_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(graph_data.node))
-    # Nodes reported for any other graph belong to a child-graph or conditional body, whose
-    # work a profiler cannot attribute back to the id recorded here -- so recording them
-    # would produce keys matching nothing. Holds under annotation_config["key_by"] ==
-    # "source" too (see _graph_annotations._NESTED_GRAPH_TYPES for why the source node id
-    # does not rescue either body kind). disarm() warns about the total.
-    if tools_id >> 32 != capture_root_graph_id():
-        global _dropped_body_nodes
-        _dropped_body_nodes += 1
-        return
+    # Nodes reported for any other graph belong to a child-graph or conditional body. Their
+    # ids are in that body graph's own space, which remap_to_exec_graph does not rekey, so
+    # they are only worth recording when the annotations stay on the capture graph: under
+    # key_by="source" CUPTI reports the body work with a sourceGraphNodeId in exactly that
+    # space, and the entry resolves. Otherwise the key would match nothing -- drop it, and
+    # let disarm() warn about the total.
+    body_graph_id = tools_id >> 32
+    if body_graph_id != capture_root_graph_id():
+        if not source_keyed():
+            global _dropped_body_nodes
+            _dropped_body_nodes += 1
+            return
+        # Neither the capture nor the exec graph's id, so the destroy purge needs telling.
+        note_body_graph_id(body_graph_id)
     # The node type is only in hand here, and the registry needs it to know which entries
     # a source-keyed capture must still alias into exec space (see
     # _graph_annotations.note_sourceless_node).
@@ -193,8 +200,8 @@ def disarm() -> None:
         warnings.warn(
             f"mark_kernels: {_dropped_body_nodes} node(s) created inside a CUDA graph "
             "child-graph or conditional-node body (torch.cond / torch.while_loop) were "
-            "not annotated -- such a body is captured into a separate cudaGraph_t that a "
-            "profiler does not report against the ids recorded here, so an annotation "
-            "there would match nothing in a trace",
+            "not annotated -- such a body is captured into a separate cudaGraph_t whose "
+            "node ids are not remapped to the exec graph, so an annotation there would "
+            "match nothing in a trace",
             stacklevel=2,
         )

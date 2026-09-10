@@ -1341,8 +1341,10 @@ class TestMarkKernels(TestCase):
         """A scope containing a nested graph node warns; the rest is annotated.
 
         The dependent-edge walk stops at such a node, so the work in its body is
-        left unannotated (and its ids, being in the body graph's id space, would
-        never be rekeyed by remap_to_exec_graph). What is recorded stays correct.
+        left unannotated: its ids are in the body graph's id space, which
+        remap_to_exec_graph does not rekey. (The CUPTI backend can annotate that
+        work under key_by="source", where nothing is rekeyed.) What is recorded
+        stays correct.
         """
         from cuda.bindings import runtime as cuda_runtime
 
@@ -2291,6 +2293,48 @@ class TestCuptiAnnotationBackend(TestCase):
         exec_graph_id = g.get_graph_data()["exec_graph_id"]
         for tools_id in annotations:
             self.assertEqual(tools_id >> 32, exec_graph_id)
+
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_conditional_body_annotated_under_source_keying(self):
+        # Body nodes are dropped only because their ids cannot be rekeyed to the exec
+        # graph. Under key_by="source" nothing is rekeyed and CUPTI reports the body work
+        # with a sourceGraphNodeId equal to the body node as built, so the handler keeps
+        # them -- silently, and with the body graph id carried to the destroy hooks, which
+        # would otherwise never see an id that is neither the capture nor an exec graph's.
+        import warnings as _warnings
+
+        from torch._higher_order_ops.cudagraph_conditional_nodes import _if_body
+
+        x = torch.ones([2048], device="cuda")
+        pred = torch.tensor(True, device="cuda")
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            with torch.cuda.graph(
+                g,
+                enable_annotations=True,
+                annotation_config={"backend": "cupti", "key_by": "source"},
+            ):
+                with mark_kernels("region"):
+                    z = x + 1
+                    with _if_body(pred):
+                        _ = torch.sqrt(z)
+        self.assertEqual(
+            [w for w in caught if "were not annotated" in str(w.message)], []
+        )
+
+        capture_id = g._capture_graph_id
+        graph_ids = {tools_id >> 32 for tools_id in self._annotations()}
+        self.assertIn(capture_id, graph_ids)
+        body_ids = graph_ids - {capture_id}
+        self.assertTrue(body_ids, "the conditional body's nodes were not annotated")
+        self.assertEqual(g._annotated_body_graph_ids, body_ids)
+
+        g.instantiate()
+        self.assertTrue(body_ids <= g._recorded_exec_ids)
 
     def test_no_warning_without_body_work(self):
         # The counter must not leak across captures: a plain capture right after one that
