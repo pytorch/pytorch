@@ -83,6 +83,7 @@ from .runtime_utils import (
     validate_triton_config,
 )
 from .static_triton_launcher import (
+    MissingTritonKernelError,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -3124,8 +3125,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 # We saved the raw cubin, so write it to he appropriate location
                 self.kernel.reload_cubin_from_raw(cubin_location)
             else:
-                raise RuntimeError(
-                    "Cubin file saved by TritonBundler not found at %s", cubin_location
+                raise MissingTritonKernelError(
+                    f"Cubin file saved by TritonBundler not found at {cubin_location}"
                 )
         self.kernel.cubin_path = cubin_location
 
@@ -3134,7 +3135,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path:
+        if not self.kernel.cubin_path or not os.path.exists(self.kernel.cubin_path):
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
@@ -3143,7 +3144,15 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self.compile_meta.get("device"),
             self.compile_meta.get("device_type", "cuda"),
         )
-        self.kernel.load_kernel(device)
+        cubin_path = self.kernel.cubin_path
+        try:
+            self.kernel.load_kernel(device)
+        except RuntimeError as e:
+            if cubin_path is not None and not os.path.exists(cubin_path):
+                raise MissingTritonKernelError(
+                    f"Triton kernel binary disappeared while loading {cubin_path}"
+                ) from e
+            raise
         scope = {
             "runner": self.kernel.run,
         }
