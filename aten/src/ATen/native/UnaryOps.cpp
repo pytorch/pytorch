@@ -709,7 +709,7 @@ namespace {
 
 inline Tensor calc_ndtr(const Tensor& self) {
   auto x_sqrt_2 = self * M_SQRT1_2;
-  return (1 + at::erf(x_sqrt_2)) * 0.5;
+  return 0.5 * at::erfc(-x_sqrt_2);
 }
 
 } // namespace

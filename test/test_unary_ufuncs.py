@@ -1494,6 +1494,34 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t)
 
+    @dtypes(torch.float64)
+    def test_special_ndtr_lower_tail(self, device, dtype):
+        x = torch.tensor(
+            [-9.0, -10.0, -12.0, -15.0, -20.0, -30.0],
+            dtype=dtype,
+            device=device,
+        )
+        expected = torch.tensor(
+            [
+                1.1285884059538405e-19,
+                7.619853024160525e-24,
+                1.776482112077679e-33,
+                3.670966199312751e-51,
+                2.7536241186062337e-89,
+                4.906713927148187e-198,
+            ],
+            dtype=dtype,
+            device=device,
+        )
+        actual = torch.special.ndtr(x)
+        self.assertFalse(bool((actual == 0).all()))
+        self.assertEqual(actual, expected, atol=0, rtol=1e-13)
+
+        sanity_x = torch.tensor([0.0, 9.0], dtype=dtype, device=device)
+        sanity_actual = torch.special.ndtr(sanity_x)
+        self.assertEqual(sanity_actual[0], 0.5, atol=0, rtol=0)
+        self.assertEqual(sanity_actual[1], 1.0, atol=0, rtol=1e-15)
+
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_log_ndtr_vs_scipy(self, device, dtype):
