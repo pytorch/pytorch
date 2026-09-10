@@ -1,7 +1,5 @@
-# The ORDERED sum/prod kernels in the shape the inner-tree override expects, writing rows of a
-# canonical (M, N) input into a 1-D output. Eligibility, canonicalisation, keepdim and out=
-# stay in cutedsl_impl, which makes this a drop-in kernel swap. The bit pattern is asserted
-# rather than assumed: test_inner_tree_order pins 112 golden hashes against the reference DAG.
+# Ordered sum/prod adapter for canonical (M, N) -> 1-D; cutedsl_impl retains eligibility,
+# canonicalisation, keepdim, and out=. 112 hashes pin the reference DAG's bits.
 # Measured 1.08-3.00x of that reference on fp32 sum at a fixed 256 MiB footprint.
 
 import cutlass
@@ -13,16 +11,13 @@ from . import kernel_rowtile as rt
 
 
 def _acc(dtype):
-    # The accumulator is PART OF THE BIT PATTERN, not a performance knob: fp64 accumulates in
-    # fp64 and every other supported dtype in fp32, matching the reference kernel.
+    # Accumulator affects bits: fp64 uses fp64; all other supported dtypes use fp32.
     return cutlass.Float64 if dtype is torch.float64 else cutlass.Float32
 
 
 def _layout_ok(out, src):
-    # This order's wrap declares a COMPACT input and a unit-stride output, so a gapped outer stride
-    # or a strided output keeps the reference kernel -- same order, same bits. ALIGNMENT is not
-    # gated: a compact input at a non-zero storage offset drops to the unstaged form of the same
-    # plan, which is bit-neutral, rather than falling back.
+    # Require compact input and unit-stride output; otherwise use the same-bit reference.
+    # Misalignment selects a bit-neutral unstaged plan rather than falling back.
     return src.stride(0) == src.shape[1] and out.stride(0) == 1
 
 

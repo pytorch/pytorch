@@ -305,13 +305,8 @@ class TestSumCuteDSLOverride(TestCase):
 
     @skipIfRocm
     def test_entry_point_bits_at_every_plan_shape(self):
-        # The kernel picks a different shape per N and the entry point must carry the same bits for
-        # all of them, so this asserts through `x.sum` rather than the kernel -- a launch-shape
-        # preference quietly serving some N another way is invisible to a tolerance compare.
-        #
-        # The BITS ALONE cannot carry the claim, because the reference they are compared against is
-        # also the fallback: with the new kernel declining every call this file still passed, in 0.5s
-        # instead of 84s. So assert the ROUTE too.
+        # Cover each N-selected shape through x.sum. Bits catch wrong-order routing but not
+        # total fallback to the same reference (0.5s versus 84s), so spy on the route too.
         from torch._native.ops.reductions import (
             inner_tree_kernel as ref,
             kernel_rowtile as rt,
@@ -348,10 +343,8 @@ class TestSumCuteDSLOverride(TestCase):
 
     @skipIfRocm
     def test_misaligned_input_is_served_by_the_order(self):
-        # A compact input at a non-zero storage offset has fine strides and a base pointer four bytes
-        # off, which raised "not aligned to 16 bytes" through torch.sum at every shape. It must be
-        # SERVED, not declined -- the reference kernel is going away -- so assert both halves: the
-        # order took the call, and the bits are the reference's.
+        # A compact view offset by four bytes previously failed 16-byte alignment. Verify the
+        # unstaged same-order plan serves it with reference bits instead of falling back.
         from torch._native.ops.reductions import (
             inner_tree_kernel as ref,
             kernel_rowtile as rt,
@@ -361,7 +354,7 @@ class TestSumCuteDSLOverride(TestCase):
             (64, 128),
             (128, 1024),
             (8, 40000),
-        ]:  # (128, 1024) is a STAGED shape
+        ]:  # (128, 1024) is staged
             for op in ("sum", "prod"):
                 raw = torch.randn(m * n + 1, device="cuda")
                 if op == "prod":
@@ -381,8 +374,7 @@ class TestSumCuteDSLOverride(TestCase):
                     with mock.patch.object(rt, "reduce_row_itree", spy):
                         got = getattr(x, op)(dim=1)
                     torch.cuda.synchronize()
-                    # [True] == called once AND accepted; [] is a decline by _layout_ok and
-                    # [False] a decline by the kernel, both of which would fall back.
+                    # [True] means called and accepted; [] or [False] would fall back.
                     self.assertEqual(
                         served, [True], "the order did not serve this call"
                     )

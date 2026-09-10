@@ -151,10 +151,8 @@
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
-# CuTeDSL: the smoke configs are the only CI jobs with CuTeDSL installed, so these are
-# unreachable pre-merge without the label. DLPack is the tensor handover into
-# CuTeDSL (tvm-ffi) kernels. The test/ glob matters on its own: a change touching only
-# these suites picks up no other label here, so it would otherwise never run them.
+# Only smoke jobs install CuTeDSL, so these paths need the label for pre-merge coverage.
+# DLPack feeds tvm-ffi kernels; the test glob labels otherwise-unmatched test-only changes.
 - aten/src/ATen/DLConvertor.*
 - aten/src/ATen/dlpack.h
 - torch/utils/dlpack.py
@@ -187,8 +185,7 @@
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
-# CuTeDSL native ops, same list the b200 config runs: the kernels are gated at sm_90+, so a
-# Hopper regression would not show up on Blackwell coverage alone.
+# Run sm_90+ native ops on Hopper too; Blackwell alone misses Hopper regressions.
 - test/python_native/**
 - torch/_native/**
 - torch/backends/python_native/**

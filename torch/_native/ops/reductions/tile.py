@@ -1,6 +1,6 @@
-# The shared reduction kernel (TileReduce, at the bottom) and its datapath: load width,
-# alignment, thread mapping and the folds that walk them. The kernel_* modules are drivers.
-# Folds are ROLLED -- one kernel per vec class -- except under a fixed-DAG order.
+# Shared reduction datapath; drivers own launch/cache policy. Tiles map vec
+# elements/load across tpr threads/row. Rolled folds share vector-class kernels;
+# fixed DAGs preserve order. Reuse avoids prior 3.7x unwidened and 3x alignment losses.
 
 import math
 from typing import Any
@@ -13,30 +13,23 @@ from cutlass.cute.nvgpu import cpasync
 
 WARP = 32
 
-# SAFETY bound on the per-thread unroll, enforced in TileMap: a static trip count is emitted
-# at trace time, so compile time scales with it and turns superlinear past ~1300 ops.
+# Static unroll compiles superlinearly past ~1300 operations.
 MAX_UNROLL = 512
 
 
 def vec_size(N: int, itemsize: int) -> int:
-    """Elements per load instruction. gcd, not `16 // itemsize`, so vec DIVIDES N: no ragged
-    tail in a chunk, and every chunk base carries the base pointer's alignment.
-    """
+    """Elements/load; gcd makes vec divide N and preserves alignment at every chunk."""
     return math.gcd(N, max(1, 16 // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
-    """Alignment to DECLARE on the input wrap. Not optional: from_dlpack otherwise assumes the
-    element width and silently emits narrow loads, measured 3x on the multirow shape.
-    """
+    """Input alignment declaration; omitting it emits narrow loads and costs 3x."""
     return vec_size(N, itemsize) * itemsize
 
 
 def _decode_offset(linear, divs, strides, npairs):
-    # Mixed-radix decode of a linear index to a flat element offset; only the pair COUNT is baked,
-    # so one kernel serves every geometry sharing it. The div/mod stays INT32 -- `linear` spans
-    # count or num_o, both asserted < 2**31 -- and only the offset product needs Int64. npairs >= 1:
-    # the caller drops the decode for an empty KEPT list.
+    # Mixed-radix flat offset with only pair count compiled. linear < 2**31 keeps
+    # div/mod Int32; stride products use Int64. Callers omit empty decodes.
     rem = Int32(linear)
     if npairs == 1:
         return cutlass.Int64(rem) * strides[0]
@@ -49,8 +42,7 @@ def _decode_offset(linear, divs, strides, npairs):
 
 
 def _ilog2(n: int) -> int:
-    # No clamp: both callers pass >= 2 by construction, and clamping to 1 would make this return
-    # the wrong answer for n == 1 rather than protect anything.
+    # Both callers pass >= 2; clamping would make n=1 wrong.
     return n.bit_length() - 1
 
 
@@ -60,9 +52,7 @@ def _off(base, i: int):
 
 
 class TileMap:
-    """How one row is spread over threads and loads. tpr == 1 means one thread owns a whole row,
-    with no lane merge.
-    """
+    """Map row elements to threads and loads; tpr=1 needs no lane merge."""
 
     def __init__(
         self,
@@ -74,8 +64,7 @@ class TileMap:
         vec: int | None = None,
         exact: bool | None = None,
     ):
-        # The warp COUNT must be a power of two, not just a multiple of 32: the cross-warp
-        # butterfly spans tpr // WARP groups only then, and silently drops a partial otherwise.
+        # Cross-warp butterflies require a power-of-two warp count or drop partials.
         nw = tpr // WARP
         if tpr != 1 and (tpr % WARP or nw & (nw - 1)):
             raise ValueError(
@@ -89,18 +78,15 @@ class TileMap:
                 f"Got N={N} tpr={tpr} loads={loads}."
             )
         self.N = N
-        # `vec` is normally derived, but a fixed-DAG order defines its own from the itemsize alone
-        # regardless of N, so that caller passes it -- the derived gcd form would move the bits.
+        # Fixed DAGs pass an N-independent vec; deriving it from N would change bits.
         self.vec = vec_size(N, itemsize) if vec is None else vec
         self.tpr = tpr
         self.loads = loads
         self.warp_major = warp_major
         self.nw = 1 if tpr == 1 else tpr // WARP
-        # Exact when the tile covers the row with nothing over: every load is then unconditionally in
-        # range and no predication is emitted. A BATCHED tile covers only its batch, so not exact.
+        # Exact full-row tiles need no load predicates; batched tiles are never exact.
         self.exact = (self.vec * self.loads * self.tpr == N) if exact is None else exact
-        # A wide load needs vec to divide N, which is what makes every row start and chunk base carry
-        # the base pointer's alignment. Otherwise the load falls back to per-element reads.
+        # vec must divide N to align every row and chunk; otherwise load by element.
         self.wide_ok = N % self.vec == 0
 
     @property
@@ -160,19 +146,17 @@ def fold_decoded(
     chunk_base,
     gidx: cutlass.Constexpr = "r",
 ):
-    """Grid-stride fold of ONE output's reduced run, addressed by mixed-radix DECODE.
+    """Grid-stride one output using mixed-radix addressing.
 
-    The arbitrary-layout arm: a transposed or expanded input is a different decode, not a
-    different kernel. All `nt` threads cooperate on one output and the caller merges them.
-    `gidx` picks what an index trait is told the position is.
+    Runtime decodes cover arbitrary layouts; nt threads cooperate and gidx selects
+    the index reported to traits.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     n_full = rb // nt
     base_r = tidx
     for _ in cutlass.range(n_full):
-        # Inline the offset: an intermediate name would be treated as loop-carried. acc and
-        # base_r are the only carried values, both initialized above.
+        # Inline offsets to avoid a spurious loop-carried value.
         if const_expr(gidx == "flat"):
             acc = reduce_fn(
                 acc,
@@ -195,8 +179,7 @@ def fold_decoded(
                 True,
             )
         base_r = base_r + nt
-    # Invalid lanes read in_base (always in range): obase itself can be past the end for an
-    # overhanging chunk, whose rb clamps to 0.
+    # Invalid lanes read in_base because overhanging chunks may put obase out of range.
     valid = base_r < rb
     off = obase + _decode_offset(base_r, rdivs, rstrides, npairs)
     off_s = off if valid else in_base
@@ -210,8 +193,8 @@ def fold_decoded(
 
 @cute.jit
 def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_base):
-    """COMBINE one output's pre-reduced accumulator tuples, grid-strided by `nt`. The stage-2
-    reader for every per-output split; the loop is dynamic because the count reaches ~1e5.
+    """Grid-stride one output's partial tuples for stage 2.
+    The loop stays dynamic because partial counts reach about 1e5.
     """
     combine_fn = trait.combine
     fdtypes = trait.fdtypes
@@ -221,8 +204,7 @@ def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_ba
     r = tidx
     for _ in cutlass.range(n_full):
         rr = obase + cutlass.Int64(r)
-        # A bare-range comprehension unrolls at trace time, leaving no `trait` attribute
-        # access inside the dynamic loop (which would trip the IR flattener).
+        # Bare range unrolls and keeps trait attribute access outside the dynamic loop.
         acc = combine_fn(acc, tuple(fdtypes[f](mIns[f][rr]) for f in range(nf)))
         r = r + nt
     valid = r < rb
@@ -234,11 +216,7 @@ def fold_partials_run(trait, mIns, obase, rb, nt: cutlass.Constexpr, tidx, in_ba
 
 @cute.jit
 def merge_lanes(trait, acc, tpr: cutlass.Constexpr, asc: cutlass.Constexpr = False):
-    """Reduce across the `tpr` lanes covering one row; a no-op at tpr == 1.
-
-    `asc` selects the ASCENDING butterfly, which the folds' column order depends on and an
-    index trait's ties depend on.
-    """
+    """Merge row lanes; `asc` controls numeric association and index ties. No-op at tpr=1."""
     if const_expr(tpr == 1):
         return acc
     from .._cutedsl.traits import warp_reduce
@@ -247,8 +225,7 @@ def merge_lanes(trait, acc, tpr: cutlass.Constexpr, asc: cutlass.Constexpr = Fal
 
 
 def leaf_op(trait):
-    # The combiner comes FROM THE TRAIT, so any trait shares these orders: accumulators are
-    # nfields-tuples throughout, which is what lets an index or Welford trait use a tree fold.
+    # Trait-owned tuple combiners let index and Welford accumulators share tree folds.
     return trait.combine
 
 
@@ -264,7 +241,7 @@ def _linear_reduce(vals, op):
 
 
 def _inner_tree_reduce(vals, op):
-    # Stride-doubling pairwise tree: stride 1, 2, 4, ... folding v[i] += v[i + stride].
+    # Stride-doubling tree: v[i] += v[i + stride] for strides 1, 2, 4, ...
     v = list(vals)
     n = len(v)
     stride = 1
@@ -282,9 +259,8 @@ def _reduce_vec(vals, vec, op):
 
 
 def _streaming_push(tree, val, load: int, max_depth: int, op) -> None:
-    # ATen's streaming_inner_tree_step: the merge count is the trailing-zero count of (load + 1),
-    # capped at max_depth, and the existing accumulator stays on the LEFT. Both are load-bearing
-    # for bitwise equality.
+    # Match ATen: merge trailing_zeros(load + 1), capped at max_depth, with
+    # the existing accumulator on the left.
     trailing_zeros = ((load + 1) & -(load + 1)).bit_length() - 1
     carry = val
     for _ in range(min(trailing_zeros, max_depth)):
@@ -305,21 +281,15 @@ def fold_groups(
     exact: cutlass.Constexpr = False,
     vec_linear: cutlass.Constexpr = False,
 ):
-    """THE inner-tree fold. One body for every shape of the order; the caller supplies the layout.
-
-    Interface is `frag`, a (vec, ngroups) register tile, plus each group's true first column, so
-    a strided per-chunk read and a contiguous smem run both land here. A slot past the row's
-    end folds the IDENTITY -- that padding is part of the DAG.
-    """
+    """Fold strided or contiguous groups; out-of-row slots add identity to the DAG."""
     op, ident = leaf_op(trait), identity(trait)
     nf = const_expr(trait.nfields)
     tree: list = []
     for i in cutlass.range_constexpr(len(cols)):
         vals = []
         for j in cutlass.range_constexpr(vec):
-            # The trait call is hoisted OUT of the predicate and the mask is a per-field select: a trait
-            # reference inside a dynamic `if` leaks the python object into the IR flattener. Reading an
-            # unwritten frag slot is harmless -- the select discards it.
+            # Hoist trait.leaf and select per field: trait access in a dynamic branch
+            # leaks the Python object into IR. Unwritten slots are discarded.
             col = _off(cols[i], j)
             x = trait.leaf(frag[j, i], col)
             if const_expr(exact):
@@ -327,8 +297,7 @@ def fold_groups(
             else:
                 ok = col < hi
                 vals.append(tuple(x[f] if ok else ident[f] for f in range(nf)))
-        # `vec_linear` folds the run as ONE CHAIN rather than the stride-doubling tree. A different
-        # association, so it leaves ATen's bit pattern; the knob exists to price it (at nothing).
+        # Linear vec folding changes ATen's association; retained to price its zero benefit.
         inner = (
             _linear_reduce(vals, op)
             if const_expr(vec_linear)
@@ -371,8 +340,7 @@ def fold_itree_warp(
     )
 
 
-# Buffers in the staged fold's pipeline (see _fold_itree_smem). ONE: this fold feels the smem
-# footprint's effect on occupancy more than it feels transfer latency.
+# One buffer: smem occupancy matters more than transfer latency.
 _ITREE_STAGE_DEPTH = 1
 
 _ROLL_UNROLL = 4
@@ -389,11 +357,7 @@ def fold_row_rolled(
     nwaves,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
-    """Fold row `r` across `tm.tpr` lanes with a RUNTIME chunk loop. Returns an acc tuple.
-
-    A wave past the row's last chunk CLAMPS its index and passes valid=False rather than
-    branching, which the DSL rejects for a dynamic bind.
-    """
+    """Fold row `r` with a runtime loop, clamping and masking tail waves to avoid DSL branches."""
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     vec = const_expr(tm.vec)
@@ -433,8 +397,7 @@ def fold_linear_rolled(
 
 @cute.jit
 def _wide(rowv, base, vec: cutlass.Constexpr, frag_l):
-    # `vec` elements (up to 128 bits) in ONE instruction. The (vec,) view is built by
-    # pointer offset so `base` may be dynamic; frag_l is this load's slice of the fragment.
+    # Load up to 128 bits; pointer offset permits a dynamic base.
     src = cute.make_tensor(rowv.iterator + base, cute.make_layout(vec))
     cute.autovec_copy(src, frag_l)
 
@@ -451,28 +414,24 @@ def load(
     bound=None,
     warp_stride=None,
 ):
-    """Fill `frag` ((vec, loads) rmem) with this thread's slice of row `r`.
+    """Fill this thread's (vec, loads) fragment.
 
-    ONE wide load per (thread, load) when the tile is exact. Otherwise only a RAGGED group
-    falls back to per-element reads, leaving out-of-row elements UNTOUCHED for the caller.
+    Use one wide load when possible; ragged groups use predicated scalar reads.
     """
     hi = Int32(const_expr(tm.N)) if bound is None else bound
-    # `tm.exact` only says a tile at column 0 covers its whole row. A narrower bound or a shifted
-    # base column each invalidate the unpredicated load, so require them absent, not assume it.
+    # Exact covers a full row from column 0; bounds and shifted bases require predication.
     whole_row = const_expr(
         tm.exact and bound is None and isinstance(base_col, int) and base_col == 0
     )
     rowv = mX[Int64(r), None]
     for l in cutlass.range_constexpr(tm.loads):
-        # base_col may be a python int or a DYNAMIC value, so a plain add keeps a static base static
-        # and promotes only when it has to.
+        # Plain addition preserves a static base and promotes a dynamic one.
         base = tm.col_base(lane, w, l, warp_stride) + base_col
         if const_expr(whole_row and tm.wide_ok):
             _wide(rowv, base, tm.vec, frag[None, l])
         elif const_expr(not tm.wide_ok):
             for i in cutlass.range_constexpr(tm.vec):
-                # Inlined rather than bound to a name: binding a DYNAMIC value inside a dynamic `if` is
-                # rejected. The compiler CSEs the repeated expression.
+                # Inline because the DSL rejects binding a dynamic value in a dynamic branch.
                 if _off(base, i) < hi:
                     frag[i, l] = rowv[_off(base, i)]
         else:
@@ -489,21 +448,18 @@ def make_fragment(mX, tm) -> cute.Tensor:
 
 
 def smem_box_layout(N: int, threads: int):
-    """Smem destination for a (threads, N) TMA box of whole rows: plain row-major.
+    """Plain row-major smem for a (threads, N) TMA box.
 
-    The bank conflict is dealt with in the ACCESS PATTERN instead (see fold_smem_rotated):
-    TMA accepts only the GEMM swizzles, which do not de-conflict a whole-row read.
+    TMA's GEMM swizzles do not fix whole-row bank conflicts; fold_smem_rotated does.
     """
     return cute.make_ordered_layout((threads, N), order=(1, 0))
 
 
 @cute.jit
 def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
-    """Fold row `rb` of a staged (threads, N) smem tile. One thread per row, no lane merge.
+    """Fold one staged row per thread, rotating reads by row to avoid 32-way bank conflicts.
 
-    Indexed logically so the true column reaches the trait, and ROTATED by row index: thread t
-    reads row t, so an unrotated read puts every lane in one bank -- a 32-way conflict costing
-    more than TMA's coalescing buys. N is a power of two, so the modulo is a mask.
+    Pass logical columns to the trait; power-of-two N makes rotation a mask.
     """
     acc = trait.init()
     mask = const_expr(N - 1)
@@ -523,37 +479,27 @@ def fold_cols_rolled(
     vec: cutlass.Constexpr,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
-    """Accumulate DOWN the rows, keeping `vec` independent accumulators. For columns.
-
-    The transpose of every other fold here: vectorized along the KEPT axis, so a thread owns
-    adjacent columns with one accumulator each and never merges across lanes.
-    """
+    """Fold rows into vec kept-axis accumulators without lane merging."""
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for r in cutlass.range(nrows, unroll=unroll):
-        # row0 offsets this thread's slice of the REDUCED axis, which is what lets the driver
-        # split that axis P ways and hand each block its own chunk of rows.
+        # row0 selects this block's reduced-axis chunk.
         rr = row0 + Int32(r)
         cute.autovec_copy(
             cute.flat_divide(mX[Int64(rr), None], (vec,))[None, col], frag
         )
-        # Plain `range`: a comprehension is not visited by the DSL AST preprocessor, so
-        # range_constexpr raises there -- and vec is compile-time, so this unrolls the same way.
+        # The DSL does not preprocess comprehensions; plain range still unrolls constexpr vec.
         accs = tuple(reduce_fn(accs[i], acc_dt(frag[i]), rr, True) for i in range(vec))
     return accs
 
 
 class TileReduce:
-    """The tile reduction KERNEL: one body, parameterized by which axis is reduced.
+    """Reduction kernel parameterized by reduced axis.
 
-    Row: the reduced axis is CONTIGUOUS, `tpr` threads share a row and then merge (tpr == 1
-    merges nothing). Col: the reduced axis is STRIDED, each thread owns `vec` adjacent columns
-    and folds down the rows, so nothing merges across lanes and the y-grid splits the reduced
-    axis instead.
-
-    One body and not two because only the FOLD is axis-specific: the dead-thread clamp, the
-    projection and the store are shared, and both axes write nslots x nouts results.
+    Row uses tpr threads per contiguous row and merges lanes. Column gives each thread
+    vec adjacent outputs and splits strided rows on grid y. Only folding is axis-specific;
+    dead-thread handling, projection, and nslots-by-nouts stores are shared.
     """
 
     def __init__(
@@ -577,8 +523,7 @@ class TileReduce:
         flat_tail=False,
         ragged_chunk=False,
         order="linear",
-        # Duck-typed like `trait`: the plan's type belongs to the DRIVER above this module, so naming
-        # it here would invert the dependency.
+        # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
     ):
         if axis not in ("row", "col", "general"):
@@ -590,21 +535,18 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order is a row-axis option and needs a plan"
                 )
-            # Its thread map IS its plan: `wpr` chunks per row (0 for the one-thread-per-row
-            # shapes) folded by `wpr // kchunk` warps, and `rows_per_block` rows per block.
+            # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             tpr = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 tpr = WARP
             nt = tpr * itree.rows_per_block
         if axis == "general":
-            # Every thread of the block folds the one output, so the tail is the row axis's
-            # at tpr == nt.
+            # Every block thread folds one output, equivalent to row tpr=nt.
             tpr = nt
             nwg = nt // WARP
             if nt % WARP or nwg & (nwg - 1):
-                # _block_merge derives warps_per_row from nt, so a block that is not a whole POWER-OF-TWO
-                # number of warps leaves a partial warp OUT of the merge -- a silently wrong reduction,
-                # measured 12-62% low. `block` is caller-settable, so the row axis's check is not enough.
+                # Non-power-of-two warp counts omit partials in _block_merge, measuring
+                # 12-62% low; caller-set block requires validation here.
                 raise ValueError(
                     f"a general-axis block must be a power-of-two warp count, got {nt=}"
                 )
@@ -622,9 +564,8 @@ class TileReduce:
                 f"TMA stages whole rows: needs row at tpr 1, {axis=} {tpr=}"
             )
         if use_tma and N & (N - 1):
-            # The rotation is `& (N - 1)`, a rotation only at a power-of-two N: at any other N it
-            # duplicates some columns and skips others, returning a plausible number. tma_ok declines
-            # those, but use_tma is caller-settable and bypasses it.
+            # The rotation mask duplicates and skips columns unless N is a power of two;
+            # caller-set use_tma can bypass tma_ok.
             raise ValueError(f"TMA staging needs a power-of-two row length, got {N=}")
         self.trait = trait
         self.dtype = dtype
@@ -638,7 +579,7 @@ class TileReduce:
         self.use_tma = use_tma
         self.combine = combine
         self.pc = pc  # partial layout: (P, C) when True, else (C, P)
-        # general-axis addressing policy, all compile-time (see fold_decoded)
+        # Compile-time fold_decoded policy.
         self.npairs_red = npairs_red
         self.npairs_kept = npairs_kept
         self.gidx_from = gidx_from
@@ -647,10 +588,8 @@ class TileReduce:
         self.order = order
         self.itree = itree
         itemsize = dtype.width // 8 if dtype is not None else 0
-        # The row folds take their tile from TileMap with loads=1 because they are ROLLED, so the
-        # static count is unused and the unroll bound is trivially met. The TMA fold walks a staged
-        # row with a compile-time trip count, so it declares its real depth. The col axis needs no
-        # tile (its vec is a driver choice), and the fixed-DAG order carries one per batch.
+        # Runtime row folds map one load; TMA declares static staged depth. Column and
+        # general axes choose no tile.
         self.tm = (
             TileMap(N, itemsize, tpr, N // vec_size(N, itemsize) if use_tma else 1)
             if axis == "row" and order == "linear"
@@ -659,17 +598,14 @@ class TileReduce:
         if axis == "row":
             self.vec = self.tilemap.vec if order == "linear" else itree.vec
         elif axis == "general":
-            # the general axis loads one element at a time (an arbitrary stride pattern has no
-            # width to exploit), so it has no tile and no vector
+            # Arbitrary strides offer no vector width.
             self.vec = 1
         elif vec is None:
-            # The col axis takes `vec` from its DRIVER (accumulators per thread, not a load
-            # width), so there is nothing here to derive it from.
+            # Column vec cannot be inferred from load width.
             raise ValueError("the col axis needs an explicit vec")
         else:
             self.vec = vec
-        # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
-        # columns, each with its own accumulator, on the col axis
+        # Columns keep vec slots; merged row and general axes keep one.
         self.nslots = self.vec if axis == "col" else 1
         self.rows_per_block = nt // tpr
         self.warps_per_row = tpr // WARP  # 0 at tpr == 1: nothing to merge
@@ -677,16 +613,14 @@ class TileReduce:
 
     @property
     def tilemap(self):
-        # Only a LINEAR row fold carries one tile: the inner-tree order keeps a tile per batch
-        # in its plan, and the col/general axes have none at all.
+        # Only linear row folds own one tile; inner-tree plans own one per batch.
         if self.tm is None:
             raise AssertionError(f"no tile on the {self.axis} axis")
         return self.tm
 
     @property
     def cache_sig(self):
-        # N is ABSENT except for the TMA variant, whose box shape is compile-time: every other
-        # path takes its extents at runtime, so one compiled kernel serves a whole vec class.
+        # Only TMA keys N because its box is static; runtime paths share a vector class.
         return (
             self.axis,
             self.vec,
@@ -706,15 +640,13 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.order,
-            # A fixed DAG is a compile-time object, so unlike every other arm this one keys on N. That is
-            # the cost of a reproducible bit pattern: one kernel per shape, not per vec class.
+            # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
         )
 
     @cute.jit
     def _fold_tma(self, mX, tma_atom, bx, tx):
-        # Stage this block's box of WHOLE rows into smem with one descriptor-driven transfer, then
-        # fold out of smem. See _TMA_MIN_STRIDE for why, and fold_smem_rotated for the rotation.
+        # Transfer whole rows to smem once, then fold with rotated reads.
         smem = cutlass.utils.SmemAllocator()
         sX = smem.allocate_tensor(
             self.dtype, smem_box_layout(self.N, self.nt), byte_alignment=16
@@ -739,9 +671,8 @@ class TileReduce:
             cute.group_modes(sX, 0, 2),
             cute.group_modes(gX, 0, 2),
         )
-        # Warp 0 issues the transfer; narrowing it to a single THREAD deadlocks, because the pipeline
-        # signals per warp-lane-0 and syncs the warp internally, so a whole warp must enter the
-        # producer region. Rows past M are zero-filled and discarded at the guarded store.
+        # All of warp 0 must enter: the pipeline signals on lane 0 and synchronizes the warp.
+        # One producer thread deadlocks. Rows past M are zero-filled and discarded.
         if cute.arch.warp_idx() == 0:
             pipe.producer_acquire(pstate)
             cute.copy(
@@ -755,8 +686,7 @@ class TileReduce:
 
     @cute.jit
     def _block_merge(self, acc):
-        # Merge one output's per-warp accumulators through smem. A no-op unless the output spans more
-        # than one warp, which is every general-axis launch of >= 64 threads.
+        # Merge one output's warps through smem; one warp is a no-op.
         if const_expr(self.warps_per_row <= 1):
             return acc
         from .._cutedsl.traits import block_reduce
@@ -781,12 +711,10 @@ class TileReduce:
 
     @cute.jit
     def _fold_itree(self, mX, r, lane_w, warp_id, row_in_block, batch_idx=None):
-        """The inner-tree fold: a static fragment per batch, tree-folded, carried linearly.
+        """Fold static batch fragments by streaming tree, then batches linearly.
 
-        The row is covered in compile-time BATCHES, each tree-folded with a streaming carry, whose
-        per-warp results meet in smem for one ASCENDING butterfly; batches then accumulate
-        LINEARLY, outside the tree. Every one of those is part of the DAG. The SPLIT shape has one
-        batch per BLOCK instead, selected at runtime rather than baked.
+        Per-warp results meet in smem via ascending butterfly. Split selects one runtime
+        batch per block; all other batch structure is compiled into the DAG.
         """
         trait = self.trait
         it = self.itree
@@ -794,8 +722,7 @@ class TileReduce:
         op, ident = leaf_op(trait), identity(trait)
         warp_writes = []  # empty when one warp covers the row: nothing to stage
         if const_expr(it.wpr // max(it.kchunk, 1) > 1):
-            # One staging buffer PER FIELD: an index trait's position and a Welford count are
-            # different dtypes, so they cannot share a tensor.
+            # Stage each field separately because their dtypes may differ.
             smem = cutlass.utils.SmemAllocator()
             warp_writes = [
                 smem.allocate_tensor(
@@ -807,15 +734,13 @@ class TileReduce:
                 )
                 for f in range(nf)
             ]
-        # Only the looped shape SEEDS the cross-batch accumulator with the identity, as upstream does.
-        # The single-batch shapes return their own accumulator, which differs: `0.0 + -0.0` is `+0.0`.
+        # Only looped seeds with identity, matching upstream signed-zero behavior.
         final = None
         kc = const_expr(it.kchunk)  # ADJACENT CHUNKS this thread group folds
         groups = const_expr(it.wpr // it.kchunk) if it.wpr else 0
         for b in cutlass.range_constexpr(len(it.tms)):
             tm = it.tms[b]
-            # Issue EVERY chunk's loads before folding any: a chunk is only `loads` deep, so folding chunk
-            # by chunk would leave one load in flight and stall on latency.
+            # Load every chunk first; folding each immediately leaves one load in flight.
             frags, bases, bounds, wstrides = [], [], [], []
             for c in cutlass.range_constexpr(kc):
                 cid = warp_id * Int32(kc) + Int32(c) if const_expr(kc > 1) else warp_id
@@ -828,8 +753,8 @@ class TileReduce:
                     warp_off = rem if warp_off > rem else warp_off  # noqa: FURB136 -- no min
                     base = batch_idx * Int32(bte) + warp_off
                     tail = rem - warp_off
-                    # The chunk's own end, so a chunk shorter than the baked load count cannot read the next one's
-                    # elements. ATen zeroes whole loads past its share; a bound here is the same masking.
+                    # Bound each chunk so a short one cannot consume the next; this matches
+                    # ATen zeroing whole loads beyond its share.
                     bound = base + (chunk if chunk < tail else tail)  # noqa: FURB136 -- no min
                     wstride = Int32(0)  # the chunk offset is already in `base`
                 elif const_expr(kc > 1):
@@ -847,9 +772,8 @@ class TileReduce:
                 bases.append(base)
                 bounds.append(bound)
                 wstrides.append(wstride)
-            # Each chunk's own tree, then a balanced tree over this thread's k ADJACENT chunks -- bit-
-            # exactly what the cross-chunk merge would have done, so fusing chunks moves work off
-            # shuffles without moving the DAG. Unlike fusing VECTORS it keeps every load coalesced.
+            # Fold each chunk, then its adjacent chunks as the cross-chunk tree would.
+            # This replaces shuffles without changing the DAG or load coalescing.
             accs = [
                 fold_itree_warp(
                     trait,
@@ -872,8 +796,7 @@ class TileReduce:
                     for f in cutlass.range_constexpr(nf):
                         warp_writes[f][slot + warp_id] = warp_acc[f]
                 cute.arch.barrier()
-                # Read every field unconditionally and mask with a select, but CLAMP the slot: a warp has 32
-                # lanes and the buffer holds fewer, so an unclamped read runs off the end.
+                # Clamp inactive lanes because the buffer may hold fewer than 32 entries.
                 live = lane_w < Int32(groups)
                 idx = slot + (lane_w if live else Int32(0))
                 got = tuple(warp_writes[f][idx] for f in range(nf))
@@ -891,19 +814,14 @@ class TileReduce:
 
     @cute.jit
     def _fold_itree_smem(self, mX, r, lane, row_in_block):
-        """Stage through smem in TILES, so one warp folds a batch with span/T butterflies while smem
-        stays at T columns per row however wide the batch is.
+        """Stage coalesced tiles in smem for contiguous per-lane folds and one butterfly each.
 
-        A coalesced load leaves a lane owning only `vec` adjacent columns while in-register tree
-        levels need a contiguous run; staging breaks the tie and the DAG is unchanged. ONE BUFFER,
-        stage-then-fold: the refill must not move ahead of the fold, which is a write-after-read
-        race invisible until M is large. The lane stride is padded by `vec` so 32 lanes hit
-        distinct bank groups.
+        One buffer keeps smem fixed; refill follows folding to avoid a large-M write-after-read
+        race. Padding each lane by vec separates bank groups. The DAG is unchanged.
         """
         trait = self.trait
         it = self.itree
-        # The leaf/mask/vec-tree work lives in fold_groups now; this body only needs the combiner
-        # for the cross-tile carry and the identity for the seed.
+        # fold_groups owns leaf/mask/tree work; this body carries tiles and seeds identity.
         op, ident = leaf_op(trait), identity(trait)
         Es = const_expr(it.stage_e)  # columns per lane PER TILE
         vec = const_expr(it.vec)
@@ -934,9 +852,8 @@ class TileReduce:
             cute.make_layout((vec, const_expr(Es // vec))), mX.element_type
         )
 
-        # cp.async goes GLOBAL -> SMEM directly, so the data never lands in registers. The atom needs
-        # a statically 16-byte-aligned source AND destination, which a raw iterator offset lacks and
-        # a flat_divide view inherits from the wrap.
+        # cp.async bypasses registers and needs aligned source and destination; flat_divide
+        # preserves the wrap's static 16-byte alignment.
         for pre in cutlass.range_constexpr(depth):
             for i in cutlass.range_constexpr(tile_cols // wle):
                 off = const_expr(pre * tile_cols + i * wle)
@@ -955,16 +872,14 @@ class TileReduce:
 
         tree: list = []
         for t in cutlass.range_constexpr(ntiles):
-            # Only THIS tile's transfer has to have landed; the ones for tiles t+1..t+depth-1 stay
-            # in flight, which is where the overlap comes from.
+            # Wait only for this tile; later transfers may remain in flight.
             cute.arch.cp_async_wait_group(const_expr(min(depth - 1, ntiles - 1 - t)))
             cute.arch.sync_warp()
 
-            # FOLD this lane's own contiguous run of the tile, then ONE butterfly for the tile.
+            # Fold each lane's contiguous run, then one butterfly.
             run = base + Int32(const_expr((t % depth) * stride)) + lane * Int32(pitch)
             col0 = Int32(const_expr(t * tile_cols)) + lane * Int32(Es)
-            # Read the whole run into registers first, so the SHARED fold body applies: the same
-            # (fragment, columns) interface as the per-chunk arm, with the lane merge once at the end.
+            # Materialize the run for fold_groups, merging lanes only at the end.
             for i in cutlass.range_constexpr(Es // vec):
                 cute.autovec_copy(
                     cute.make_tensor(
@@ -990,9 +905,7 @@ class TileReduce:
                 op,
             )
             if const_expr(t + depth < ntiles):
-                # Refill this buffer for the tile `depth` ahead, and only AFTER the fold: issuing it earlier
-                # is a write-after-read race that shows up as wrong results once M is large enough for the
-                # transfer to land mid-fold.
+                # Refill only after folding; earlier issue races the read once M is large.
                 cute.arch.sync_warp()
                 nxt = const_expr(t + depth)
                 for i in cutlass.range_constexpr(tile_cols // wle):
@@ -1009,19 +922,13 @@ class TileReduce:
                     )
                     cute.copy(g2s, gv[None, ks], sv[None, dst // Int32(vec)])
                 cute.arch.cp_async_commit_group()
-        # SEED with the identity as the looped shape does: this path serves a single batch, and
-        # `ident + x` is NOT a no-op for a signed zero -- dropping it returns -0.0 for ATen's +0.0.
+        # Match looped identity seeding; omitting it changes ATen's +0.0 to -0.0.
         return op(ident, tree[0])
 
     @cute.jit
     def _fold_itree_combine(self, mIns, row):
-        """Stage 2 of the split shape: fold one row's partials LINEARLY, ascending.
-
-        Starts at partial 0 rather than the identity, and takes its trip count as a RUNTIME loop,
-        since the batch count grows with N. One buffer per trait field.
-        """
-        # Bind the trait's methods to locals: attribute access on it inside a dynamic loop trips
-        # the IR flattener ("encountered a user-defined Python object").
+        """Fold each field's split partials linearly from 0 with a runtime count."""
+        # Local binding avoids trait attribute access inside the dynamic loop.
         combine_fn, fdtypes = self.trait.combine, self.trait.fdtypes
         nf = const_expr(self.trait.nfields)
         nbatch = const_expr(self.itree.split[0])
@@ -1034,9 +941,8 @@ class TileReduce:
 
     @cute.jit
     def _fold_partials(self, mIns, unit, nchunks, npar):
-        # COMBINE pass (col axis stage 2): fold this thread's column's partials, which the split left
-        # as one matrix per field. Bind the trait's methods to locals -- attribute access on it inside
-        # a dynamic loop trips the IR flattener.
+        # Fold one column's stage-2 partials. Local method bindings avoid dynamic-loop
+        # attribute access, which trips the IR flattener.
         trait = self.trait
         combine_fn = trait.combine
         fdtypes = trait.fdtypes
@@ -1065,8 +971,7 @@ class TileReduce:
         limit,
         stream,
     ):
-        # The TMA atom is built here (host-compile time, inside the jit region) and baked into
-        # the kernel; the input is replaced by the descriptor tensor for the load.
+        # Build and bake the TMA atom at host compile time, replacing the input with its descriptor.
         if const_expr(self.use_tma):
             tma_atom, mTma = cpasync.make_tiled_tma_atom(
                 cpasync.CopyBulkTensorTileG2SOp(),
@@ -1078,12 +983,11 @@ class TileReduce:
         else:
             tma_atom = None
         if const_expr(self.axis == "general"):
-            # one block per output, read live so one compile serves any output count
+            # Read one-block-per-output grid live to serve any output count.
             gx = mOuts[0].shape[0]
             gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Count OUTPUTS under the inner-tree order: its split shape writes one partial per
-            # (row, batch), so the input's row count is not the block count.
+            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
             nout = (
                 mOuts[0].shape[0]
                 if const_expr(self.order == "inner_tree")
@@ -1093,10 +997,9 @@ class TileReduce:
             gy = Int32(1)
         else:
             gx = cute.ceil_div(nchunks, const_expr(self.nt))
-            # the y-grid splits the REDUCED axis in stage 1; combine has already consumed it
+            # Grid y splits stage 1's reduced axis; combine has consumed it.
             gy = Int32(1) if const_expr(self.combine) else npar
-        # The divisors need an MLIR context, so they are built here rather than by the caller. V2
-        # rather than V1 so `.divisor` stays readable across the kernel boundary.
+        # Build V2 divisors in the MLIR context so .divisor crosses the kernel boundary.
         rdivs = (
             [cute.FastDivmodDivisorV2(e) for e in rexts] if rexts is not None else None
         )
@@ -1138,45 +1041,38 @@ class TileReduce:
         in_base,
         limit,
     ):
-        # RUNTIME args, so one compiled kernel serves every extent sharing a structure. An arg a
-        # variant does not use is passed as None, not a dummy: one unused Int32 param measured 1.27x
-        # on the column fold (8.2 -> 10.4us at (65536, 256)).
+        # Runtime geometry shares kernels across extents. Pass None for unused arguments;
+        # one extra Int32 slowed column fold 1.27x (8.2 to 10.4us at (65536, 256)).
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
         trait = self.trait
         chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
         batch_idx = None  # split shape only: which batch of the row this block folds
-        # inner-tree order only: its (lane, warp) thread map, set from the plan below
+        # Inner-tree thread map, set from its plan.
         lane_w = warp_id = row_in_block = None
         if const_expr(self.order == "inner_tree"):
-            # (lane, warp) rather than (lane, row): `wpr` warps cooperate on one row, and
-            # `rows_per_block` such groups share the block.
+            # wpr warps cooperate per row; rows_per_block groups share the block.
             wpr = const_expr(self.itree.wpr)
             if const_expr(wpr == 0):
-                # One thread per row (the multirow fold and the split's combine): no lane to
-                # merge with, so every thread holds its own total and stores it.
+                # One thread owns and stores each row without merging.
                 lane_w, warp_id, row_in_block, lane = (Int32(0),) * 4
             elif const_expr(self.itree.stage_e):
-                # SMEM-STAGED: exactly one warp per row, so there is no chunk index and no
-                # cross-warp merge -- the whole batch lands in one butterfly.
+                # One staged warp per row needs no chunk index or cross-warp merge.
                 lane_w = Int32(tx % WARP)
                 lane = lane_w
                 warp_id = Int32(0)
                 row_in_block = Int32(tx // WARP)
             else:
-                # `warp_id` is the thread group, i.e. which BLOCK of kchunk adjacent chunks
-                # this warp folds -- the fold multiplies it up to real chunk indices.
+                # warp_id selects this warp's group of kchunk adjacent chunks.
                 groups = const_expr(wpr // self.itree.kchunk)
                 lane_w = Int32(tx % WARP)
                 warp = Int32(tx // WARP)
                 row_in_block = warp // Int32(groups)
                 warp_id = warp % Int32(groups)
-                # 0 for exactly the one thread per row that holds the merged total, which is
-                # what the shared store's `lane == 0` guard wants.
+                # Shared store uses lane 0 for the merged total.
                 lane = Int32(tx % const_expr(WARP * groups))
             if const_expr(self.itree.shape == "split"):
-                # The grid pairs every row with every batch, so the block index carries both --
-                # and the partial this block writes is at that same index.
+                # Grid and output index pair each row with each batch.
                 nb = const_expr(self.itree.split[0])
                 raw = Int32(bx) // Int32(nb)
                 batch_idx = Int32(bx) % Int32(nb)
@@ -1188,7 +1084,7 @@ class TileReduce:
                 raw = Int32(bx) * const_expr(self.itree.rows_per_block) + row_in_block
                 alive = raw < Int32(mOuts[0].shape[0])
         elif const_expr(self.axis == "general"):
-            # One block per output: the block index IS the output, and every thread folds it.
+            # One block per output, folded by every thread.
             raw = Int32(bx)
             lane = Int32(tx)
             alive = True
@@ -1202,11 +1098,9 @@ class TileReduce:
             raw = Int32(bx) * const_expr(self.nt) + Int32(tx)
             lane = Int32(0)  # the col mapping gives every output group its own thread
             alive = raw < nchunks
-        # Dead threads clamp onto unit 0 so every load stays in range; their accumulator is discarded
-        # at the guarded store. Cheaper than predicating every load, and a fold has no side effects.
+        # Clamp dead threads to unit 0 and discard them at store, avoiding predicated loads.
         unit = raw if alive else Int32(0)
 
-        # THE FOLD: the one axis-specific step. Everything after it is shared.
         if const_expr(self.order == "inner_tree"):
             if const_expr(self.itree.shape == "combine"):
                 accs = (self._fold_itree_combine(mIns, unit),)
@@ -1219,8 +1113,7 @@ class TileReduce:
                     ),
                 )
         elif const_expr(self.axis == "general"):
-            # Base flat offset of this output (decode the block index against the kept dims;
-            # zero kept pairs -- a full reduction -- leaves just in_base), then the fold bound.
+            # Decode this output's base; reduce-all with no kept pairs uses in_base.
             obase = in_base
             if const_expr(self.npairs_kept > 0):
                 obase = in_base + _decode_offset(
@@ -1228,8 +1121,7 @@ class TileReduce:
                 )
             rb = nchunks
             if const_expr(self.flat_tail):
-                # Reduce-all stage 1: the last chunk overhangs the flat input, so clamp to
-                # what is left before `limit`.
+                # Clamp reduce-all stage 1's overhanging final chunk.
                 left = limit - obase
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
@@ -1237,10 +1129,8 @@ class TileReduce:
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
                 rb = cutlass.Int32(left)
             elif const_expr(self.ragged_chunk):
-                # A split whose chunk need not divide the reduced run: the LAST chunk of every output
-                # is short and must not fold the next one's elements. The chunk pair is the
-                # fastest-varying kept pair, so one divmod per BLOCK yields the chunk index. Counted
-                # in STEPS, so a contiguous row split and a column split both use it unchanged.
+                # Clamp each short final chunk. The fastest kept pair gives its step index
+                # for either row or column splitting.
                 _, cc = divmod(Int32(unit), kdivs[0])
                 c = cutlass.Int64(cc)
                 cnt = cutlass.Int64(nchunks)
@@ -1279,13 +1169,12 @@ class TileReduce:
         elif const_expr(self.combine):
             accs = (self._fold_partials(mIns, unit, nchunks, npar),)
         elif const_expr(self.axis == "col"):
-            # This block's chunk of the REDUCED axis. The last chunk is short whenever q does not divide
-            # the extent -- the same ragged tail the row split has, clamped the same way.
+            # Clamp this block's possibly ragged reduced-axis chunk.
             row0 = Int32(by) * q
             left = project_n - row0
             cnt = left if left < q else q  # noqa: FURB136 -- no DSL builtin min
-            # _split_p caps npar, so the last blocks can be left with nothing. A negative trip count
-            # happens to lower to a zero-trip loop, which is not a guarantee to rest a global load on.
+            # A capped npar may leave blocks empty; clamp explicitly instead of relying on
+            # negative trip counts lowering to zero.
             zero = Int32(0)
             cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
             accs = fold_cols_rolled(
@@ -1300,8 +1189,7 @@ class TileReduce:
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.tpr == 1):
-            # One thread owns the row: no lane to share chunks with, so this is the same fold
-            # with the wave/lane arithmetic (and its predicate) removed.
+            # One thread owns the row, so omit wave/lane arithmetic and its predicate.
             accs = (
                 fold_linear_rolled(
                     trait,
@@ -1326,12 +1214,10 @@ class TileReduce:
             acc = merge_lanes(trait, acc, const_expr(self.tpr))
             accs = (self._block_merge(acc),)
 
-        # Output indexing comes AFTER the fold: computed before it, these values stay live
-        # across the loop and cost registers the fold wants.
+        # Compute output indices after folding to reduce live registers.
         out_base = unit * const_expr(self.nslots)
         if const_expr(self.axis in ("row", "general")):
-            # The general axis pins gy to 1, so the col arm below would come out as this anyway through a
-            # runtime multiply that is always zero.
+            # Split inner-tree writes by block; other row/general paths write by unit.
             part_base = (
                 Int32(bx)
                 if const_expr(
@@ -1350,8 +1236,7 @@ class TileReduce:
             )
             part_stride = Int32(1) if const_expr(self.pc) else npar
 
-        # project OUTSIDE the store branch: binding a dynamic value inside a dynamic `if` is
-        # rejected by the DSL, and touching the trait there leaks it into the IR flattener.
+        # Project before the dynamic store branch; binding there is rejected and leaks the trait.
         if const_expr(self.final):
             res = tuple(trait.project(a, trait.acc(project_n)) for a in accs)
             if lane == 0 and alive:
@@ -1364,7 +1249,7 @@ class TileReduce:
                                 res[s][k]
                             )
         else:
-            # RAW per-field partials, for a second stage to combine.
+            # Emit raw per-field partials for stage 2.
             if lane == 0 and alive:
                 for s in cutlass.range_constexpr(self.nslots):
                     for f in cutlass.range_constexpr(trait.nfields):

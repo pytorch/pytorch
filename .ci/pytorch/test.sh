@@ -465,15 +465,9 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
-# The CuteDSL native-op suites, named ONCE and shared by the H100 and B200 smoke configs so the
-# two cannot drift. They are @skipIfNoCuteDSL and install_flash_attn_cute is the only thing in CI
-# that installs that runtime, so they run in NO job unless a job installs it AND lists them. Several
-# are host-only (no GPU work) but still need the runtime to import.
-#
-# Both architectures on purpose: the kernels are gated at sm_90+ and the fold's bit pattern is fixed
-# by N rather than by the hardware, so Blackwell coverage alone would not show a Hopper regression.
-# Verified by hand on an H100 (sm_90) -- 163 tests, and all 112 pinned hashes reproduce values
-# generated on a B200 -- which is exactly the property that wants a job rather than a one-off.
+# Shared H100/B200 list prevents drift. All suites, including host-only ones, require
+# install_flash_attn_cute through @skipIfNoCuteDSL. Both sm_90+ architectures matter:
+# H100 reproduced all 112 B200-generated hashes across 163 tests.
 PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_cutedsl_smoketest
   python_native/test_sum_cutedsl
@@ -510,7 +504,6 @@ test_python_smoke_b200() {
   # TODO(#189590): Re-enable CUTLASS API after NVGEMM migrates to
   # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
   # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
-  #
   time python test/run_test.py \
     --include \
       test_matmul_cuda \

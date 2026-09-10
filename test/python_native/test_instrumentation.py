@@ -290,9 +290,8 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(len(self.messages), 1)
 
     def test_explicit_compiled_signal_beats_inference(self):
-        # A caller owning its own memo hands the decorator a plain closure it invokes ONLY on a miss.
-        # With no cache_info to read a miss delta from, inference reports a hit -- every real compile
-        # mislabelled -- so `compiled=True` says so directly.
+        # External memos invoke a plain closure only on misses, so cache_info inference would
+        # mislabel every compile as a hit; compiled=True records the known outcome.
         def plain(n):
             return "ok"
 
@@ -306,8 +305,7 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertNotIn("cache_hit", self.messages[-1])
 
     def test_cached_plan_reports_a_compile(self):
-        # The wiring end to end: the FIRST call for a key builds and must report `compiled`; the
-        # second is served from the dict and emits nothing, since only the miss arm is wrapped.
+        # The first call compiles; the memo serves the second without emitting an event.
         from torch._native.ops._cutedsl.plan_cache import cached_plan
 
         cache, built = {}, []
@@ -742,18 +740,15 @@ def _scan_for_missing_instrumentation(source, label):
 
 _CACHED_COMPILE_CALL = "cute.compile"
 _CACHE_DECORATORS = ("jit_cache", "instrumented_cutedsl_cache")
-# Paths here are POSIX-separated, because on Windows a backslash label would miss the suffix
-# match and silently drop the allowance. Keep the shared-helper list at ONE entry: a second
-# means the factoring drifted, and the runtime test covers only the first.
+# Paths are POSIX-normalized so Windows labels match. Keep one shared helper: the runtime
+# test covers only it, and another indicates factoring drift.
 _SHARED_COMPILE_HELPERS = (("_cutedsl/launch.py", "compile_kernel"),)
 
 
 def _scan_for_raw_cute_compile(source, label):
-    """Return (violations, n_calls) for one Python source string.
-
-    A violation is a ``cute.compile`` call whose nearest enclosing function carries neither
-    ``@jit_cache`` nor ``@instrumented_cutedsl_cache`` (or that sits at module level), and which
-    is not one of ``_SHARED_COMPILE_HELPERS``. ``n_calls`` counts compile calls seen.
+    """Return violations and call count for one source string. A violation is an
+    unapproved cute.compile call outside a function decorated by jit_cache or
+    instrumented_cutedsl_cache.
     """
     tree = ast.parse(source, filename=label)
     # Map each node to its parent so we can climb to the nearest FunctionDef.
@@ -795,27 +790,12 @@ def _scan_for_raw_cute_compile(source, label):
 
 
 class TestInstrumentationCoverage(TestCase):
-    """CI guard: every DSL compile site must carry its instrumentation.
+    """CI guard requiring instrumentation on known DSL compile sites.
 
-    Static AST scan of ``torch/_native/ops`` -- adding a kernel for a known
-    DSL (per :data:`_DSL_INSTRUMENTATION_RULES`) without the matching
-    instrumentation decorator turns this test (and thus CI) red.
-
-    Extending to a new DSL: add a row to ``_DSL_INSTRUMENTATION_RULES``.
-
-    For CuTeDSL this enforces the full chain from two directions, which are
-    complementary rather than alternatives: statically, every ``cute.compile()``
-    sits in a cached function or the one shared helper
-    (``test_no_raw_cute_compile_calls``, which sees every call site in the tree)
-    and every ``@jit_cache`` is instrumented; at runtime, a compile driven
-    through the shared helper really does land in an instrumented frame
-    (``test_every_cute_compile_hits_instrumented_frame``, which proves the part
-    a scan cannot see but only for the path it drives).
-
-    Out of scope by construction: ops that wrap *vendored* compile fns at the
-    call site (e.g. norm's rmsnorm, which has no local ``@jit_cache`` or
-    ``cute.compile``) aren't decorator/call sites here -- they have their own
-    tests.
+    Add new DSLs to _DSL_INSTRUMENTATION_RULES. For CuteDSL, static checks cover
+    every cute.compile call and jit_cache decorator; the runtime test verifies
+    that the shared helper reaches an instrumented frame. Vendored compile
+    functions without local decorators or calls are covered by their own tests.
     """
 
     def _ops_files(self):
@@ -911,9 +891,8 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
-        # Caching is compulsory: every cute.compile() must sit inside a decorated function or be the
-        # one shared helper, or it is uncached and invisible to instrumentation. This walks EVERY file
-        # under ops/, which is coverage the runtime test cannot give.
+        # Every cute.compile() must be decorated or use the shared helper to be cached and
+        # instrumented. Unlike the runtime test, this scans every file under ops/.
         bad = []
         seen = 0
         for path in self._ops_files():
@@ -928,8 +907,7 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(bad, [], "uncached cute.compile() calls:\n" + "\n".join(bad))
 
     def test_scan_flags_raw_cute_compile(self):
-        # Meta-test: prove the requirement fires, that both decorator forms satisfy it, and that the
-        # allowance is keyed on the file AND the function name.
+        # Verify both decorators satisfy the guard and helper allowances key on file and function.
         raw = "def f():\n    return cute.compile(k)\n"
         raw_v, raw_n = _scan_for_raw_cute_compile(raw, "<raw>")
         self.assertEqual(raw_n, 1, "scan didn't see the cute.compile call")
@@ -957,8 +935,7 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(
             len(v), 1, "the allowance ignored the file and exempted the name anywhere"
         )
-        # The callers normalize os.sep away, so a backslash label must never reach the matcher.
-        # Asserted here so a future caller that forgets it fails here, not only on the Windows shards.
+        # Reject unnormalized backslashes here rather than only on Windows shards.
         win = f"torch\\_native\\ops\\{helper_file}".replace("/", "\\")
         v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
         self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
@@ -966,9 +943,8 @@ class TestInstrumentationCoverage(TestCase):
     @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
     @skipIfNoCuteDSL
     def test_every_cute_compile_hits_instrumented_frame(self):
-        # RUNTIME coverage: patch cute.compile and assert every call has an instrumentation frame on
-        # its stack. That holds however an op is factored, while still catching a genuinely
-        # uninstrumented compile -- which the negative control below proves.
+        # Runtime coverage finds an instrumentation frame regardless of op factoring; the
+        # negative control proves uninstrumented compiles are still detected.
         import cutlass
         import cutlass.cute as cute
 
@@ -979,8 +955,7 @@ class TestInstrumentationCoverage(TestCase):
         def _noop(x: cutlass.Int32):
             return x
 
-        # An instrumented frame is identified by the CODE it runs, not by a value the wrapper stores:
-        # a magic local would be matched by name, and renaming it would make this pass vacuously.
+        # Identify instrumentation by frame code, not a rename-sensitive magic local.
         def stack_has_instrumented_frame():
             f = sys._getframe(1)
             while f is not None:
@@ -1003,8 +978,7 @@ class TestInstrumentationCoverage(TestCase):
 
         cute.compile = watched_compile
         try:
-            # The factoring this stack uses: the memo instruments the build, the build
-            # compiles through the shared helper.
+            # The memo instruments the build, which compiles through the shared helper.
             cached_plan(
                 {},
                 ("guard", 0),
@@ -1018,10 +992,8 @@ class TestInstrumentationCoverage(TestCase):
                 "cute.compile fired without an instrumentation frame on the stack:\n"
                 + "\n".join(uninstrumented),
             )
-            # Negative control: the same compile with the op= wiring dropped MUST be flagged,
-            # or this test would pass however the code is wired. Assert the DELTA rather than
-            # the total -- a total of 1 also reads as "pass" when the positive phase already
-            # flagged one and this compile never fired at all, which points at the wrong thing.
+            # Dropping op= must add one violation. Check the delta so an earlier positive-phase
+            # violation cannot make the negative control pass vacuously.
             before = len(uninstrumented)
             compiles_before = len(seen)
             cached_plan(
