@@ -348,7 +348,13 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
-    def store_reduction(name: str, index, value: DTypeArg) -> None:
+    def store_reduction(
+        name: str,
+        index,
+        value: DTypeArg,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         return None
 
     @staticmethod

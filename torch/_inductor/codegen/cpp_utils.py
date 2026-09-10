@@ -354,7 +354,9 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
             V.kernel.store_buffer_names.discard(local_buffer_name)
         return res
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name, index, value, *, result_range=None):
+        if result_range is not None:
+            raise NotImplementedError("localized reductions require scalar results")
         # pyrefly: ignore [bad-argument-count]
         return self._inner.store_reduction(*self.localize(name, index), value)
 

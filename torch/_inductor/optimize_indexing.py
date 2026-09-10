@@ -241,7 +241,12 @@ class _ValueUseRules:
         )
 
     def store_reduction(
-        self, name: str, index: sympy.Expr, value: object
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: object,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(
             value_sinks=(value,),
