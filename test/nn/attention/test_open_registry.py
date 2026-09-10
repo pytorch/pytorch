@@ -1,5 +1,8 @@
 # Owner(s): ["module: sdpa"]
 
+from unittest import mock
+
+import torch
 import torch.nn.attention as attention
 from torch.nn.attention import _cudnn, _registry
 from torch.testing._internal.common_utils import (
@@ -74,6 +77,68 @@ class TestFlashAttentionRegistry(TestCase):
         # types is always importable and registers nothing.
         with self.assertRaisesRegex(RuntimeError, "did not register"):
             _cudnn.register_cudnn_attention("types")
+
+    def test_cudnn_python_coexists_with_flash_impl(self):
+        """The backends.cuda switch and the flash registry are independent
+        axes: they override disjoint operators, so turning on the Python cuDNN
+        implementation must not disturb the active flash implementation."""
+        installed = set()
+
+        def _make(tag):
+            class _H:
+                def remove(self):
+                    installed.discard(tag)
+
+            def _register():
+                installed.add(tag)
+                return _H()
+
+            return _register
+
+        attention.register_flash_attention_impl("FA_FAKE", register_fn=_make("flash"))
+        attention.activate_flash_attention_impl("FA_FAKE")
+
+        self.addCleanup(_cudnn.disable)
+        with mock.patch.object(_cudnn, "_PROVIDER_REGISTER_FN", _make("cudnn")):
+            torch.backends.cuda.enable_cudnn_sdp_python(True)
+            self.assertEqual({"flash", "cudnn"}, installed)
+            self.assertEqual("FA_FAKE", attention.current_flash_attention_impl())
+            self.assertTrue(torch.backends.cuda.cudnn_sdp_python_enabled())
+
+            torch.backends.cuda.enable_cudnn_sdp_python(False)
+            self.assertEqual({"flash"}, installed)
+            self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+            self.assertEqual("FA_FAKE", attention.current_flash_attention_impl())
+
+    def test_cudnn_python_enable_is_idempotent(self):
+        """Both entry points share one handle, so enabling twice installs once
+        and either route can turn it off."""
+        calls = []
+
+        def _register():
+            calls.append(1)
+
+            class _H:
+                def remove(self):
+                    calls.clear()
+
+            return _H()
+
+        self.addCleanup(_cudnn.disable)
+        with mock.patch.object(_cudnn, "_PROVIDER_REGISTER_FN", _register):
+            torch.backends.cuda.enable_cudnn_sdp_python(True)
+            handle = _cudnn._ACTIVE_HANDLE
+            torch.backends.cuda.enable_cudnn_sdp_python(True)
+            self.assertIs(handle, _cudnn._ACTIVE_HANDLE)
+            self.assertEqual(1, len(calls))
+
+            # restoring through the registry clears the backends view too
+            attention.register_flash_attention_impl(
+                "CUDNN", register_fn=_cudnn.register_cudnn_attention
+            )
+            attention.activate_flash_attention_impl("CUDNN")
+            attention.restore_flash_attention_impl()
+            self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
 
 
 if __name__ == "__main__":
