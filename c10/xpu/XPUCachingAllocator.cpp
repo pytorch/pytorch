@@ -2032,6 +2032,7 @@ class DeviceCachingAllocator {
     freeBlocksAllocatedToPool(private_pool, rr);
 
     std::unordered_map<void*, Block*> ptrs_to_blocks;
+
     for (Block* block : private_pool->small_blocks.blocks) {
       ptrs_to_blocks[block->ptr] = block;
     }
