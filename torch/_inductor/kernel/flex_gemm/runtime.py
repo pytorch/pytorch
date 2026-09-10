@@ -168,6 +168,7 @@ class FlexGemmEpiModLocalReducePlan:
     feeds_main: bool = False
     combine: Callable[..., Any] | str | None = None
     finalize: Callable[..., Any] | str | None = None
+    finalize_operands: tuple[str, ...] = ()
     reduce_planes: int = 1
     fragment_reduced: bool = False
     store_finalize: Callable[..., Any] | str | None = None
@@ -191,6 +192,12 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
+        if self.finalize_operands and not callable(
+            self.store_finalize or self.finalize
+        ):
+            raise RuntimeError(
+                "FlexGEMM EpiMod finalize operands require a generated finalizer"
+            )
 
     @property
     def group(self) -> int:
@@ -207,6 +214,7 @@ class FlexGemmEpiModLocalReducePlan:
             self.feeds_main,
             self.combine,
             self.finalize,
+            self.finalize_operands,
             self.reduce_planes,
             self.fragment_reduced,
             self.store_finalize,
@@ -245,14 +253,9 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    from torch._inductor.kernel.flex_gemm.quack_ops import epi_math
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
-    # Generated callbacks reference epi_math without importing QuACK into the
-    # generated source. Inject it only into the original function's globals;
-    # decorated wrappers may belong to third-party modules.
-    inspect.unwrap(epilogue_fn).__globals__["epi_math"] = epi_math
     op_types = {
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
@@ -332,10 +335,13 @@ def flex_gemm_epimod(
             )
             prepass_outs = (LOCAL_REDUCE_FEED_MAIN_ARG_NAME,)
             if local_reduce.out is not None:
-                if (
-                    callable(store_finalize)
-                    and len(inspect.signature(store_finalize).parameters) == 2
-                ):
+                finalize_arity = (
+                    len(inspect.signature(store_finalize).parameters)
+                    - len(local_reduce.finalize_operands)
+                    if callable(store_finalize)
+                    else 1
+                )
+                if finalize_arity == 2:
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -346,6 +352,7 @@ def flex_gemm_epimod(
                         group=local_reduce.group,
                         combine=local_reduce.combine,
                         finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
                     )
                 else:
                     sink = grouped_reduce.GroupedLocalReduce(
@@ -354,6 +361,7 @@ def flex_gemm_epimod(
                         group=local_reduce.group,
                         combine=local_reduce.combine,
                         finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
                         output_layout=output_layout,
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
@@ -378,6 +386,7 @@ def flex_gemm_epimod(
                     group=local_reduce.group,
                     combine=local_reduce.combine,
                     finalize=finalize,
+                    finalize_operands=local_reduce.finalize_operands,
                     output_layout=output_layout,
                     reduce_planes=local_reduce.reduce_planes,
                     fragment_reduced=local_reduce.fragment_reduced,
