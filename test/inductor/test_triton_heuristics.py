@@ -603,6 +603,37 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
+    @parametrize("hip", [True, False])
+    def test_template_forwards_rocm_backend_options(self, hip):
+        """The ROCm knobs reach the compiler through Config.kwargs, not triton_meta.
+
+        _create_compile_meta turns every Config kwarg that is not a kernel argument
+        into a triton.compile ``options`` entry, so a template kernel built with an
+        empty kwargs dict reaches the backend with none of them however carefully
+        the caller set them.
+        """
+        triton_meta = {
+            "device": MagicMock(),
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 3,
+            "kpack": 1,
+        }
+        expected = (
+            {"matrix_instr_nonkdim": 16, "waves_per_eu": 3, "kpack": 1} if hip else {}
+        )
+
+        with (
+            patch.object(torch.version, "hip", "7.2" if hip else None),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.cached_autotune"
+            ) as mock_cached_autotune,
+        ):
+            template(num_stages=1, num_warps=4, triton_meta=triton_meta)
+
+        mock_cached_autotune.assert_called_once()
+        configs = mock_cached_autotune.call_args[0][1]
+        self.assertEqual(configs[0].kwargs, expected)
+
     @runOnRocm
     def test_amd_special_config_args(self):
         """
