@@ -524,13 +524,14 @@ class NestedReduction:
     may re-read the outer reduction's large input, consume its full-resolution
     output, or both.
 
-    This is deliberately limited to same-total-numel pairs:
-    both reductions must traverse the same number of logical elements.
-    General output-size-reducing nested reductions, including split reductions,
-    need different grid ownership and are rejected here.
+    This is deliberately limited to same-total-numel pairs, plus native matmuls
+    whose complete static output-column tile is consumed by the grouped
+    reduction. General output-size-reducing nested reductions, including split
+    reductions, need different grid ownership and are rejected here.
 
     Example:
     - layernorm + block amax: amax over groups of G after layer_norm
+    - native matmul + output reduction: sum over the complete static N tile
     """
 
     MAX_INNER_R_GROUP_SIZE = 512
@@ -589,6 +590,7 @@ class NestedReduction:
     class GroupedAxis(enum.Enum):
         R = enum.auto()
         X = enum.auto()
+        NATIVE_FULL_X = enum.auto()
 
     @dataclasses.dataclass(frozen=True)
     class PointwiseDomainContext:
@@ -811,6 +813,8 @@ class NestedReduction:
 
         if not isinstance(outer_node, (SchedulerNode, FusedSchedulerNode)):
             return True
+        if grouped_axis is cls.GroupedAxis.NATIVE_FULL_X:
+            return group_size > cls.MAX_NON_INNER_GROUP_SIZE
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if config.triton.coalesce_tiling_analysis
@@ -903,7 +907,14 @@ class NestedReduction:
         # TODO: teach sizevars to infer Mod(s, G)==0 from Mod(s, s//G)==0
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
-        if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
+        native_matmul_output_reduction = (
+            outer_node.is_native_matmul()
+            and V.graph.sizevars.statically_known_equals(outer_numel, grouped_total)
+        )
+        if not (
+            V.graph.sizevars.statically_known_equals(outer_total, grouped_total)
+            or native_matmul_output_reduction
+        ):
             return False
 
         grouped_reduction, group_size = grouped_reduction_info
@@ -917,22 +928,25 @@ class NestedReduction:
         )
         if grouped_axis is None:
             return False
-        parent_grouped_axis = (
-            outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
-        )
         iter_ranges, _ = grouped_reduction.get_ranges()
-        if len(iter_ranges) == 2:
-            grouped_axis_groups = (
-                iter_ranges[1] if grouped_axis is cls.GroupedAxis.R else iter_ranges[0]
+        if grouped_axis is not cls.GroupedAxis.NATIVE_FULL_X:
+            parent_grouped_axis = (
+                outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
             )
-            if not V.graph.sizevars.statically_known_equals(
-                FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+            if len(iter_ranges) == 2:
+                grouped_axis_groups = (
+                    iter_ranges[1]
+                    if grouped_axis is cls.GroupedAxis.R
+                    else iter_ranges[0]
+                )
+                if not V.graph.sizevars.statically_known_equals(
+                    FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+                ):
+                    return False
+            elif not V.graph.sizevars.statically_known_equals(
+                sympy.Mod(parent_grouped_axis, group_size), 0
             ):
                 return False
-        elif not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(parent_grouped_axis, group_size), 0
-        ):
-            return False
         group_size_int = int(group_size)
         if not (1 <= group_size_int and is_power_of_2(group_size_int)):
             return False
@@ -974,6 +988,12 @@ class NestedReduction:
         """Return which parent axis is split by the grouped local reduction."""
         sizevars = V.graph.sizevars
         iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        if outer_node is not None and outer_node.is_native_matmul():
+            if cls._is_native_full_x_reduction(
+                outer_node, grouped_reduction, group_size
+            ):
+                return cls.GroupedAxis.NATIVE_FULL_X
+            return None
         if len(iter_ranges) != 2 or len(reduce_ranges) != 1:
             if len(iter_ranges) == 1 and len(reduce_ranges) == 1:
                 if not sizevars.statically_known_equals(reduce_ranges[0], group_size):
@@ -1012,6 +1032,61 @@ class NestedReduction:
         if outer_node is not None:
             return cls._get_grouped_axis_from_loop_body(outer_node, grouped_reduction)
         return None
+
+    @classmethod
+    def _is_native_full_x_reduction(
+        cls,
+        outer_node: BaseSchedulerNode,
+        grouped_reduction: SchedulerNode,
+        group_size: sympy.Expr,
+    ) -> bool:
+        """Check that the grouped reduction consumes complete native X rows."""
+        from torch._inductor.loop_body import MemoryUsageType
+
+        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
+        if len(outer_reductions) != 1 or not isinstance(
+            outer_reductions[0], SchedulerNode
+        ):
+            return False
+        outer_iter_ranges, _ = outer_reductions[0].get_ranges()
+        iter_ranges, reduce_ranges = grouped_reduction.get_ranges()
+        body = grouped_reduction._body
+        if not (
+            len(outer_iter_ranges) == 2
+            and len(iter_ranges) == 1
+            and len(reduce_ranges) == 1
+            and len(body.iter_vars) == 1
+            and len(body.reduce_vars) == 1
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[0], iter_ranges[0]
+            )
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[1], reduce_ranges[0]
+            )
+            and V.graph.sizevars.statically_known_equals(
+                outer_iter_ranges[1], group_size
+            )
+        ):
+            return False
+
+        row, column = body.iter_vars[0], body.reduce_vars[0]
+        expected_index = row * group_size + column
+        outer_numel = V.graph.sizevars.simplify(sympy_product(outer_iter_ranges))
+        full_size_reads: list[sympy.Expr] = []
+        for entry in body.memory_usage[MemoryUsageType.LOAD]:
+            if entry.buffer_name is None:
+                continue
+            buffer = V.graph.get_buffer(entry.buffer_name)
+            if not V.graph.sizevars.statically_known_equals(
+                sympy_product(buffer.get_size()), outer_numel
+            ):
+                continue
+            full_size_reads.append(body.indexing_exprs[entry.index_name])
+
+        return bool(full_size_reads) and all(
+            V.graph.sizevars.statically_known_equals(index, expected_index)
+            for index in full_size_reads
+        )
 
     @classmethod
     def _get_grouped_axis_from_loop_body(
