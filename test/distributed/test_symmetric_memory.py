@@ -707,7 +707,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(3)
     def test_rendezvous_after_strict_subgroup(self) -> None:
         """Rendezvous on a subgroup that leaves a rank out, then on the world.
 
@@ -715,15 +715,19 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         exactly one subgroup and any per-process sequencing stays in step. Here
         the last rank sits out, which is what exposes a store key that depends
         on how many rendezvous a process happens to have performed rather than
-        on the group being rendezvoused.
+        on the group being rendezvoused. That needs a subgroup of at least two
+        ranks: on a 2-GPU world, "every rank but the last" is a single rank,
+        which rendezvous() never actually calls into a store for.
         """
         self._init_process()
 
         world = dist.group.WORLD
+        world.use_pg_for_symm_mem_rendezvous = False
         subgroup = dist.new_group(list(range(world.size() - 1)))
 
         t0 = symm_mem.empty(64, device="cuda")
         if world.rank() < world.size() - 1:
+            subgroup.use_pg_for_symm_mem_rendezvous = False
             symm_mem.rendezvous(t0, group=subgroup)
 
         t1 = symm_mem.empty(64, device="cuda")
@@ -757,10 +761,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         t_a = symm_mem.empty(64, device="cuda")
         if rank in ranks[0:2]:
+            group_a.use_pg_for_symm_mem_rendezvous = False
             symm_mem.rendezvous(t_a, group=group_a)
 
         t_b = symm_mem.empty(64, device="cuda")
         if rank in ranks[1:3]:
+            group_b.use_pg_for_symm_mem_rendezvous = False
             t_b.fill_(rank)
             hdl = symm_mem.rendezvous(t_b, group=group_b)
             hdl.barrier()
@@ -1416,6 +1422,57 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 
         symm_mem_hdl = _SymmetricMemory.rendezvous(t)
         self._verify_symmetric_memory(symm_mem_hdl)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(3)
+    def test_rendezvous_after_group_name_recycled(self) -> None:
+        """A subgroup name freed by destroy_process_group() can be reused.
+
+        Numeric group names come from _world.group_count, which
+        destroy_process_group() resets to 0 for the whole world, so the first
+        new_group() call after a fresh init is named "1" again -- same as the
+        first subgroup created before teardown, but with different
+        membership. With a per-process counter that survived teardown, rank 1
+        (a member of both incarnations of "1") would still hold that
+        counter's value from before teardown, 1, while rank 2 (new to "1")
+        started at 0: the two members of the new "1" disagreed on the store
+        key and the rendezvous hung. With the sequence number taken from the
+        store instead, the fresh store's counter starts at zero for every
+        member, so both incarnations of "1" agree independently of what any
+        process did before.
+        """
+        self._init_process(set_device=True)
+
+        sub = dist.new_group([0, 1])
+        if self.rank in (0, 1):
+            sub.use_pg_for_symm_mem_rendezvous = False
+            t = symm_mem.empty(64, device="cuda")
+            symm_mem.rendezvous(t, group=sub)
+
+        dist.barrier()
+        dist.destroy_process_group()
+
+        # A fresh store: reusing the old one would let the second incarnation
+        # of "1" read keys the first incarnation already wrote, which is the
+        # store being stale rather than the counter being stale.
+        store = dist.FileStore(self.file_name + ".reinit", self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        sub2 = dist.new_group([1, 2])
+        if self.rank in (1, 2):
+            sub2.use_pg_for_symm_mem_rendezvous = False
+            t2 = symm_mem.empty(64, device="cuda")
+            symm_mem.rendezvous(t2, group=sub2)
+
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 # This Test class is used to test the error handling of SymmetricMemory APIs.

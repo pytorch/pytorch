@@ -3189,6 +3189,10 @@ def destroy_process_group(
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
+        #
+        # Unregister before resetting: consumers key per-group state by these
+        # names and drop it on unregister, so a name reused here must already
+        # have been released.
         _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
@@ -3310,6 +3314,10 @@ def _abort_process_group(
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
+        #
+        # Unregister before resetting: consumers key per-group state by these
+        # names and drop it on unregister, so a name reused here must already
+        # have been released.
         _world.group_count = 0
     else:
         pg.abort()

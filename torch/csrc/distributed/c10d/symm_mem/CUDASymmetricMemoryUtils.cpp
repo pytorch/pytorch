@@ -1,5 +1,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <unistd.h>
 
 #include <c10/util/error.h>
