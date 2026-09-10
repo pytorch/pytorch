@@ -397,7 +397,9 @@ class Matmul(torch.autograd.Function):
     def forward(ctx, input: torch.Tensor, weight: torch.Tensor, sleep_ms: int):
         ctx.save_for_backward(input, weight)
         ctx.sleep_ms = sleep_ms
-        torch.get_device_module(device_type)._sleep(int(sleep_ms * get_cycles_per_ms(device_type.type)))
+        torch.get_device_module(device_type)._sleep(
+            int(sleep_ms * get_cycles_per_ms(device_type.type))
+        )
         return input @ weight
 
     @staticmethod
@@ -473,7 +475,9 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             ds = delay_streams[reduce_scatter_group]
             ds.wait_event(rs_event)
             with device_module.stream(ds):
-                device_module._sleep(int(sleep_ms * get_cycles_per_ms(device_type.type)))
+                device_module._sleep(
+                    int(sleep_ms * get_cycles_per_ms(device_type.type))
+                )
                 delayed_event = ds.record_event()
             return (rs_input, delayed_event, post_reduce_stream, *rest)
 
