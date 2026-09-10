@@ -1,8 +1,8 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
 # use leaf/combine, so leaf must include every element transform. Other names mirror
-# SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar selects lower only
-# in cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them explicitly.
+# SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
+# only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
 
 import cutlass
 import cutlass.cute as cute

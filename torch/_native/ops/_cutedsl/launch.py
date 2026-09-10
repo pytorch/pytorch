@@ -18,8 +18,8 @@ def sym(divisibility: int = 1):
 
 
 def fake_compact(dtype, shape, *, order=None, align=None):
-    """Describe a compact operand at compile time. order is fastest-varying last;
-    callers must ensure the pointer meets align or the launch can fault.
+    """Describe a compact compile-time operand. `order` follows Tensor.dim_order
+    (0 is stride-1); the pointer must satisfy `align`.
     """
     return cute.runtime.make_fake_compact_tensor(
         dtype, tuple(shape), stride_order=order, assumed_align=align

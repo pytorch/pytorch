@@ -1,7 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Inner-tree order promises upstream's exact bits, not closeness. Uncovered shapes keep
-# the default order rather than falling back to ATen, and the feature stays off by default.
+# Inner-tree order promises upstream's exact bits, not closeness. Unsupported configurations
+# keep the default order, and the feature stays off by default.
 
 import os
 import unittest
@@ -38,119 +38,119 @@ def _order_on():
 # changed order.
 _GOLDEN = {
     # --- sum ---
-    ("sum", "float16", 8, 4): "7069267eff54930e",  # multirow
-    ("sum", "float16", 8, 16): "5c61a5395d0691bb",  # multirow
-    ("sum", "float16", 8, 27): "57a3f67d5fd8f69d",  # multirow
-    ("sum", "float16", 8, 33): "d171b9e87e8a49d3",  # multirow
-    ("sum", "float16", 8, 128): "1f93a9cc8df29f25",  # looped
-    ("sum", "float16", 8, 1024): "78a863f321707ebf",  # looped
-    ("sum", "float16", 8, 4096): "d49189e15dae81ae",  # looped
-    ("sum", "float16", 8, 4097): "0532ce6becb24fef",  # looped
-    ("sum", "float16", 8, 6143): "b997bb02a103b199",  # looped
-    ("sum", "float16", 8, 8192): "20deb1a11722efb0",  # looped
-    ("sum", "float16", 8, 20000): "d4d2445c85161924",  # looped
-    ("sum", "float16", 8, 40000): "efb4882aafbd3e01",  # split
-    ("sum", "float16", 8, 100003): "7ca7afe152551d32",  # split
-    ("sum", "float16", 3, 262144): "bb9d19cc8683c407",  # split
-    ("sum", "bfloat16", 8, 4): "e164d1c48f05e7ec",  # multirow
-    ("sum", "bfloat16", 8, 16): "83b0ea3d6efe1c17",  # multirow
-    ("sum", "bfloat16", 8, 27): "6b35fadfb1131edf",  # multirow
-    ("sum", "bfloat16", 8, 33): "91f77421caea42c2",  # multirow
-    ("sum", "bfloat16", 8, 128): "b88d7c67be9a0a92",  # looped
-    ("sum", "bfloat16", 8, 1024): "e8368cc6128dc8ea",  # looped
-    ("sum", "bfloat16", 8, 4096): "38e1201cfc69c4a8",  # looped
-    ("sum", "bfloat16", 8, 4097): "d82d5a0eec1a9342",  # looped
-    ("sum", "bfloat16", 8, 6143): "9a8d12f94bf3b42e",  # looped
-    ("sum", "bfloat16", 8, 8192): "d5c3f2d40762d1ef",  # looped
-    ("sum", "bfloat16", 8, 20000): "766b771d69e39c78",  # looped
-    ("sum", "bfloat16", 8, 40000): "131d9a1b238a2ec3",  # split
-    ("sum", "bfloat16", 8, 100003): "dd0d994c351ef3d0",  # split
-    ("sum", "bfloat16", 3, 262144): "9cb55f6fe7d7a1d3",  # split
-    ("sum", "float32", 8, 4): "73ad01782c9262c4",  # multirow
-    ("sum", "float32", 8, 16): "88f7e0f77961255e",  # multirow
-    ("sum", "float32", 8, 27): "56b42ce6ec0dd5a2",  # multirow
-    ("sum", "float32", 8, 33): "2a38ee077ed8f5eb",  # looped
-    ("sum", "float32", 8, 128): "1008f735a4f08798",  # looped
-    ("sum", "float32", 8, 1024): "a648cd0f3c75779a",  # looped
-    ("sum", "float32", 8, 4096): "c21308629158fe30",  # looped
-    ("sum", "float32", 8, 4097): "61219bb1c29abdf9",  # looped
-    ("sum", "float32", 8, 6143): "c0695c71817953b3",  # looped
-    ("sum", "float32", 8, 8192): "8928a0edee31a8e6",  # looped
-    ("sum", "float32", 8, 20000): "dd3c69b9b0dd6d1e",  # looped
-    ("sum", "float32", 8, 40000): "00f118660d7a6ecf",  # split
-    ("sum", "float32", 8, 100003): "7c81ed5e86748261",  # split
-    ("sum", "float32", 3, 262144): "43932e982470bb77",  # split
-    ("sum", "float64", 8, 4): "449faee9ab9f0ec5",  # multirow
-    ("sum", "float64", 8, 16): "3cdb33c229796052",  # multirow
-    ("sum", "float64", 8, 27): "684f413c34ebd347",  # looped
-    ("sum", "float64", 8, 33): "6d2f637976c42052",  # looped
-    ("sum", "float64", 8, 128): "4ffced4af7693992",  # looped
-    ("sum", "float64", 8, 1024): "f6d308aea49a3796",  # looped
-    ("sum", "float64", 8, 4096): "4e3500a9305f2e4c",  # looped
-    ("sum", "float64", 8, 4097): "986dedef9c2f194b",  # looped
-    ("sum", "float64", 8, 6143): "f377c8777d302c6a",  # looped
-    ("sum", "float64", 8, 8192): "f09708f4bcc607ad",  # looped
-    ("sum", "float64", 8, 20000): "d3a29d2973b31c7f",  # looped
-    ("sum", "float64", 8, 40000): "5ef3b8011926a87d",  # split
-    ("sum", "float64", 8, 100003): "93bc7250f8575381",  # split
-    ("sum", "float64", 3, 262144): "55d3197971df287a",  # split
+    ("sum", "float16", 8, 4): "7069267eff54930e",
+    ("sum", "float16", 8, 16): "5c61a5395d0691bb",
+    ("sum", "float16", 8, 27): "57a3f67d5fd8f69d",
+    ("sum", "float16", 8, 33): "d171b9e87e8a49d3",
+    ("sum", "float16", 8, 128): "1f93a9cc8df29f25",
+    ("sum", "float16", 8, 1024): "78a863f321707ebf",
+    ("sum", "float16", 8, 4096): "d49189e15dae81ae",
+    ("sum", "float16", 8, 4097): "0532ce6becb24fef",
+    ("sum", "float16", 8, 6143): "b997bb02a103b199",
+    ("sum", "float16", 8, 8192): "20deb1a11722efb0",
+    ("sum", "float16", 8, 20000): "d4d2445c85161924",
+    ("sum", "float16", 8, 40000): "efb4882aafbd3e01",
+    ("sum", "float16", 8, 100003): "7ca7afe152551d32",
+    ("sum", "float16", 3, 262144): "bb9d19cc8683c407",
+    ("sum", "bfloat16", 8, 4): "e164d1c48f05e7ec",
+    ("sum", "bfloat16", 8, 16): "83b0ea3d6efe1c17",
+    ("sum", "bfloat16", 8, 27): "6b35fadfb1131edf",
+    ("sum", "bfloat16", 8, 33): "91f77421caea42c2",
+    ("sum", "bfloat16", 8, 128): "b88d7c67be9a0a92",
+    ("sum", "bfloat16", 8, 1024): "e8368cc6128dc8ea",
+    ("sum", "bfloat16", 8, 4096): "38e1201cfc69c4a8",
+    ("sum", "bfloat16", 8, 4097): "d82d5a0eec1a9342",
+    ("sum", "bfloat16", 8, 6143): "9a8d12f94bf3b42e",
+    ("sum", "bfloat16", 8, 8192): "d5c3f2d40762d1ef",
+    ("sum", "bfloat16", 8, 20000): "766b771d69e39c78",
+    ("sum", "bfloat16", 8, 40000): "131d9a1b238a2ec3",
+    ("sum", "bfloat16", 8, 100003): "dd0d994c351ef3d0",
+    ("sum", "bfloat16", 3, 262144): "9cb55f6fe7d7a1d3",
+    ("sum", "float32", 8, 4): "73ad01782c9262c4",
+    ("sum", "float32", 8, 16): "88f7e0f77961255e",
+    ("sum", "float32", 8, 27): "56b42ce6ec0dd5a2",
+    ("sum", "float32", 8, 33): "2a38ee077ed8f5eb",
+    ("sum", "float32", 8, 128): "1008f735a4f08798",
+    ("sum", "float32", 8, 1024): "a648cd0f3c75779a",
+    ("sum", "float32", 8, 4096): "c21308629158fe30",
+    ("sum", "float32", 8, 4097): "61219bb1c29abdf9",
+    ("sum", "float32", 8, 6143): "c0695c71817953b3",
+    ("sum", "float32", 8, 8192): "8928a0edee31a8e6",
+    ("sum", "float32", 8, 20000): "dd3c69b9b0dd6d1e",
+    ("sum", "float32", 8, 40000): "00f118660d7a6ecf",
+    ("sum", "float32", 8, 100003): "7c81ed5e86748261",
+    ("sum", "float32", 3, 262144): "43932e982470bb77",
+    ("sum", "float64", 8, 4): "449faee9ab9f0ec5",
+    ("sum", "float64", 8, 16): "3cdb33c229796052",
+    ("sum", "float64", 8, 27): "684f413c34ebd347",
+    ("sum", "float64", 8, 33): "6d2f637976c42052",
+    ("sum", "float64", 8, 128): "4ffced4af7693992",
+    ("sum", "float64", 8, 1024): "f6d308aea49a3796",
+    ("sum", "float64", 8, 4096): "4e3500a9305f2e4c",
+    ("sum", "float64", 8, 4097): "986dedef9c2f194b",
+    ("sum", "float64", 8, 6143): "f377c8777d302c6a",
+    ("sum", "float64", 8, 8192): "f09708f4bcc607ad",
+    ("sum", "float64", 8, 20000): "d3a29d2973b31c7f",
+    ("sum", "float64", 8, 40000): "5ef3b8011926a87d",
+    ("sum", "float64", 8, 100003): "93bc7250f8575381",
+    ("sum", "float64", 3, 262144): "55d3197971df287a",
     # --- prod ---
-    ("prod", "float16", 8, 4): "e9deb19e81484045",  # multirow
-    ("prod", "float16", 8, 16): "3adb69ccc709c602",  # multirow
-    ("prod", "float16", 8, 27): "8e61a4a27e9b9b06",  # multirow
-    ("prod", "float16", 8, 33): "ccbbaccfc0326b14",  # multirow
-    ("prod", "float16", 8, 128): "a3e124a6aa5ffd7c",  # looped
-    ("prod", "float16", 8, 1024): "55502ae564a8df02",  # looped
-    ("prod", "float16", 8, 4096): "7c02b2f7ece60d69",  # looped
-    ("prod", "float16", 8, 4097): "68d56137046f20c2",  # looped
-    ("prod", "float16", 8, 6143): "14da9cdf82d1eff4",  # looped
-    ("prod", "float16", 8, 8192): "b1ae7ed8ec807ba7",  # looped
-    ("prod", "float16", 8, 20000): "897cc9f13b2b6ac1",  # looped
-    ("prod", "float16", 8, 40000): "c508c206b1f7d16f",  # split
-    ("prod", "float16", 8, 100003): "2d52e87b8e56a9c5",  # split
-    ("prod", "float16", 3, 262144): "4e5e130954f943dc",  # split
-    ("prod", "bfloat16", 8, 4): "a2b1b5a6ad32cd81",  # multirow
-    ("prod", "bfloat16", 8, 16): "6e351602c6708f55",  # multirow
-    ("prod", "bfloat16", 8, 27): "1fea08827cc8dd42",  # multirow
-    ("prod", "bfloat16", 8, 33): "402ba8c627529d7a",  # multirow
-    ("prod", "bfloat16", 8, 128): "ed1ac5a5816f7579",  # looped
-    ("prod", "bfloat16", 8, 1024): "04f210cba53a126a",  # looped
-    ("prod", "bfloat16", 8, 4096): "e97e3807c1fe45dd",  # looped
-    ("prod", "bfloat16", 8, 4097): "e5fc6516cb12b36e",  # looped
-    ("prod", "bfloat16", 8, 6143): "f450c3ee36a92d89",  # looped
-    ("prod", "bfloat16", 8, 8192): "0b151fef6d5bb06c",  # looped
-    ("prod", "bfloat16", 8, 20000): "5bd34716574270f5",  # looped
-    ("prod", "bfloat16", 8, 40000): "274312fc1141d249",  # split
-    ("prod", "bfloat16", 8, 100003): "926c2606d521edb0",  # split
-    ("prod", "bfloat16", 3, 262144): "dc6a48767bd84de8",  # split
-    ("prod", "float32", 8, 4): "4569bdcd5fb6469c",  # multirow
-    ("prod", "float32", 8, 16): "6890938d89593965",  # multirow
-    ("prod", "float32", 8, 27): "70745d71c15cadd5",  # multirow
-    ("prod", "float32", 8, 33): "819a2332a8ec961c",  # looped
-    ("prod", "float32", 8, 128): "3337dccee47d5479",  # looped
-    ("prod", "float32", 8, 1024): "77f1b0239bc269fb",  # looped
-    ("prod", "float32", 8, 4096): "052d1f11cfe7b81c",  # looped
-    ("prod", "float32", 8, 4097): "a323b3f23861149f",  # looped
-    ("prod", "float32", 8, 6143): "d2536401b9badc4c",  # looped
-    ("prod", "float32", 8, 8192): "2105242844970646",  # looped
-    ("prod", "float32", 8, 20000): "d04a833d3ef3875b",  # looped
-    ("prod", "float32", 8, 40000): "5e68f115d01cb452",  # split
-    ("prod", "float32", 8, 100003): "4cef96575c26539a",  # split
-    ("prod", "float32", 3, 262144): "e575349d6caa43b3",  # split
-    ("prod", "float64", 8, 4): "1b78d386f0595867",  # multirow
-    ("prod", "float64", 8, 16): "7cd73d01fecb15b7",  # multirow
-    ("prod", "float64", 8, 27): "3cb3863da517795f",  # looped
-    ("prod", "float64", 8, 33): "fb3d42e096254897",  # looped
-    ("prod", "float64", 8, 128): "bddb7b94b0a46a5a",  # looped
-    ("prod", "float64", 8, 1024): "502ad976ac0dbc22",  # looped
-    ("prod", "float64", 8, 4096): "1df5b26dcb0e5e81",  # looped
-    ("prod", "float64", 8, 4097): "35f8e0d3a5f71bdc",  # looped
-    ("prod", "float64", 8, 6143): "d3dfdc2fb1351676",  # looped
-    ("prod", "float64", 8, 8192): "2143eeecee209dbf",  # looped
-    ("prod", "float64", 8, 20000): "b7ce5185b397b4d6",  # looped
-    ("prod", "float64", 8, 40000): "a32dd963aad3d9ae",  # split
-    ("prod", "float64", 8, 100003): "de84b76fd6125a71",  # split
-    ("prod", "float64", 3, 262144): "030ca5e848e497ad",  # split
+    ("prod", "float16", 8, 4): "e9deb19e81484045",
+    ("prod", "float16", 8, 16): "3adb69ccc709c602",
+    ("prod", "float16", 8, 27): "8e61a4a27e9b9b06",
+    ("prod", "float16", 8, 33): "ccbbaccfc0326b14",
+    ("prod", "float16", 8, 128): "a3e124a6aa5ffd7c",
+    ("prod", "float16", 8, 1024): "55502ae564a8df02",
+    ("prod", "float16", 8, 4096): "7c02b2f7ece60d69",
+    ("prod", "float16", 8, 4097): "68d56137046f20c2",
+    ("prod", "float16", 8, 6143): "14da9cdf82d1eff4",
+    ("prod", "float16", 8, 8192): "b1ae7ed8ec807ba7",
+    ("prod", "float16", 8, 20000): "897cc9f13b2b6ac1",
+    ("prod", "float16", 8, 40000): "c508c206b1f7d16f",
+    ("prod", "float16", 8, 100003): "2d52e87b8e56a9c5",
+    ("prod", "float16", 3, 262144): "4e5e130954f943dc",
+    ("prod", "bfloat16", 8, 4): "a2b1b5a6ad32cd81",
+    ("prod", "bfloat16", 8, 16): "6e351602c6708f55",
+    ("prod", "bfloat16", 8, 27): "1fea08827cc8dd42",
+    ("prod", "bfloat16", 8, 33): "402ba8c627529d7a",
+    ("prod", "bfloat16", 8, 128): "ed1ac5a5816f7579",
+    ("prod", "bfloat16", 8, 1024): "04f210cba53a126a",
+    ("prod", "bfloat16", 8, 4096): "e97e3807c1fe45dd",
+    ("prod", "bfloat16", 8, 4097): "e5fc6516cb12b36e",
+    ("prod", "bfloat16", 8, 6143): "f450c3ee36a92d89",
+    ("prod", "bfloat16", 8, 8192): "0b151fef6d5bb06c",
+    ("prod", "bfloat16", 8, 20000): "5bd34716574270f5",
+    ("prod", "bfloat16", 8, 40000): "274312fc1141d249",
+    ("prod", "bfloat16", 8, 100003): "926c2606d521edb0",
+    ("prod", "bfloat16", 3, 262144): "dc6a48767bd84de8",
+    ("prod", "float32", 8, 4): "4569bdcd5fb6469c",
+    ("prod", "float32", 8, 16): "6890938d89593965",
+    ("prod", "float32", 8, 27): "70745d71c15cadd5",
+    ("prod", "float32", 8, 33): "819a2332a8ec961c",
+    ("prod", "float32", 8, 128): "3337dccee47d5479",
+    ("prod", "float32", 8, 1024): "77f1b0239bc269fb",
+    ("prod", "float32", 8, 4096): "052d1f11cfe7b81c",
+    ("prod", "float32", 8, 4097): "a323b3f23861149f",
+    ("prod", "float32", 8, 6143): "d2536401b9badc4c",
+    ("prod", "float32", 8, 8192): "2105242844970646",
+    ("prod", "float32", 8, 20000): "d04a833d3ef3875b",
+    ("prod", "float32", 8, 40000): "5e68f115d01cb452",
+    ("prod", "float32", 8, 100003): "4cef96575c26539a",
+    ("prod", "float32", 3, 262144): "e575349d6caa43b3",
+    ("prod", "float64", 8, 4): "1b78d386f0595867",
+    ("prod", "float64", 8, 16): "7cd73d01fecb15b7",
+    ("prod", "float64", 8, 27): "3cb3863da517795f",
+    ("prod", "float64", 8, 33): "fb3d42e096254897",
+    ("prod", "float64", 8, 128): "bddb7b94b0a46a5a",
+    ("prod", "float64", 8, 1024): "502ad976ac0dbc22",
+    ("prod", "float64", 8, 4096): "1df5b26dcb0e5e81",
+    ("prod", "float64", 8, 4097): "35f8e0d3a5f71bdc",
+    ("prod", "float64", 8, 6143): "d3dfdc2fb1351676",
+    ("prod", "float64", 8, 8192): "2143eeecee209dbf",
+    ("prod", "float64", 8, 20000): "b7ce5185b397b4d6",
+    ("prod", "float64", 8, 40000): "a32dd963aad3d9ae",
+    ("prod", "float64", 8, 100003): "de84b76fd6125a71",
+    ("prod", "float64", 3, 262144): "030ca5e848e497ad",
 }
 
 
@@ -570,7 +570,7 @@ class TestInnerTreeOrder(TestCase):
             for n in range(9216, 65536, 1024)
             if (p := rt.itree_plan(n, 4096, 4)) is not None
             and p.shape == "looped"
-            and len(p.batches) > 1  # one tuple per compile-time batch
+            and len(p.batches) > 1
         )
         self.assertEqual(rt.itree_plan(multi, 4096, 4).stage_e, 0)
 

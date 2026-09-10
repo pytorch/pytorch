@@ -352,9 +352,9 @@ class TestSumCuteDSLOverride(TestCase):
 
         for m, n in [
             (64, 128),
-            (128, 1024),
+            (128, 1024),  # stages when aligned
             (8, 40000),
-        ]:  # (128, 1024) is staged
+        ]:
             for op in ("sum", "prod"):
                 raw = torch.randn(m * n + 1, device="cuda")
                 if op == "prod":

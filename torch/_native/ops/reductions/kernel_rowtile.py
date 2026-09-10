@@ -39,9 +39,9 @@ _MAX_NARROW_N = min(256, tile.MAX_UNROLL)
 # at M=4096, up to 33.7x at M=262144.
 _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 
-# TMA fixes over-fetch when whole-row lane stride makes two lanes share a 128-byte line:
-# direct loads reach only 91-93% peak (7001 GB/s at N=16 versus 4584 at N=32).
-# It gains 1.49-1.86x only with smem rotation, whose mask requires power-of-two fp32 N.
+# Direct tpr=1 loads over-fetch once adjacent rows no longer share a 128-byte line:
+# 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
+# the rotation mask requires power-of-two fp32 N.
 _TMA_MIN_STRIDE = 128
 
 
@@ -250,8 +250,7 @@ def itree_plan(
     )
     k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
     rpb = max(1, min(M, _ITREE_BLOCK_THREADS // max(1, WARP * (wpr // k))))
-    # Smem staging needs one compile-time-bounded batch within the unroll limit. It only pays
-    # when removing butterflies; one butterfly cannot offset the round trip.
+    # Stage one bounded batch only when removing multiple butterflies repays the smem trip.
     span = wpr * prm.effective_loads * WARP * vec
     # Fixed-smem tiles each end in one butterfly over stage_e columns/lane.
     e = min(span // WARP, _ITREE_STAGE_E)
@@ -381,9 +380,7 @@ def _launch_itree(
 
 
 def _declared_align(x, natural: int) -> int:
-    """The alignment the wrap may DECLARE for `x`: what N allows, narrowed to what its base
-    pointer meets. Both are powers of two, so halving terminates at the element width.
-    """
+    """Largest N-allowed alignment satisfied by `x`'s base pointer."""
     # const_data_ptr, so reading the address does not materialize a COW tensor.
     with torch._C.DisableTorchFunctionSubclass():
         ptr = x.const_data_ptr()
@@ -403,7 +400,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1, out=None):
         return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
 
     dt = torch2cute[x.dtype]
-    # Ragged strides and storage offsets may underalign; declare and key the supported width.
+    # Storage offsets may underalign; declare and key the supported width.
     natural = tile.align_bytes(N, x.element_size())
     align = _declared_align(x, natural)
     if align < natural and itree.stage_e:
