@@ -898,6 +898,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         # kwargs might contain a callable that generates kwargs
+        explicit_capture = kwargs.pop("_explicit_capture", False)
         torch._dynamo.reset()
         kwarg_gen_fn = kwargs.get("_gen_fn")
         if kwarg_gen_fn is not None:
@@ -988,6 +989,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
                     save_guards=True,
+                    explicit_capture=explicit_capture,
                 )
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
@@ -2803,6 +2805,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
 
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
+
+    def test_duplicate_input_survives_separate_save_build(self):
+        # An explicit capture builds the serialized guards on a SECOND builder
+        # and prunes values the guard tree does not reach. DuplicateInputs
+        # guard managers -- and the input tensors they name -- are registered
+        # inside compile_check_fn, AFTER that builder is forked, so the merge
+        # that seeds it must run after compile_check_fn or the duplicated
+        # tensor prunes to _Missing and the loaded check misfires.
+        def fn(x, x_):
+            return x + x_
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "DUPLICATE_INPUT", fn, x, x, _explicit_capture=True
+        )
         self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
         self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
