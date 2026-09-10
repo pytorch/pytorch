@@ -203,6 +203,12 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   int64_t n_input = input.size(1);
   TORCH_CHECK(input.numel() != 0, "input tensor must have at least one element, but got input_sizes = ", input.sizes());
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", input.sym_size(1), running_mean.sym_numel());
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", input.sym_size(1), running_var.sym_numel());
+  }
   int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous_in_any_format(input);
