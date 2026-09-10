@@ -344,21 +344,18 @@ class Capability:
         bf16 = "dtype.bf16"
 
     class attention:
-        """Attention backend capabilities."""
+        """Attention backend capabilities.
+
+        ``fused_attention`` is derived from flash and memory-efficient attention
+        when both constituents are declared, except for backends such as CUDA
+        that provide an explicit fused predicate. CUDA's fused predicate may
+        also include cuDNN attention even though no separate cuDNN capability
+        identifier exists.
+        """
 
         flash_attention = "attention.flash_attention"
         fused_attention = "attention.fused_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
-
-
-def _derive_fused_attention_capability(
-    capabilities: dict[str, Callable[[], bool]],
-) -> dict[str, Callable[[], bool]]:
-    capabilities[Capability.attention.fused_attention] = lambda: (
-        capabilities[Capability.attention.flash_attention]()
-        or capabilities[Capability.attention.mem_efficient_attention]()
-    )
-    return capabilities
 
 
 class DeviceTypeTestBase(TestCase):
@@ -434,7 +431,14 @@ class DeviceTypeTestBase(TestCase):
     # declare supported capabilities. This method evaluates the support checks.
     @classmethod
     def get_capabilities(cls) -> dict[str, bool]:
-        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+        capabilities = {k: bool(fn()) for k, fn in cls._capabilities().items()}
+        fused = Capability.attention.fused_attention
+        if fused not in capabilities:
+            flash = Capability.attention.flash_attention
+            mem_efficient = Capability.attention.mem_efficient_attention
+            if flash in capabilities and mem_efficient in capabilities:
+                capabilities[fused] = capabilities[flash] or capabilities[mem_efficient]
+        return capabilities
 
     # Returns a capability map from capability identifier to a callable that
     # determines whether the current device supports it.
@@ -799,7 +803,8 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        return _derive_fused_attention_capability(
+        capabilities = super()._capabilities()
+        capabilities.update(
             {
                 Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: True,
@@ -807,6 +812,7 @@ class CPUTestBase(DeviceTypeTestBase):
                 Capability.attention.mem_efficient_attention: lambda: False,
             }
         )
+        return capabilities
 
 
 class CUDATestBase(DeviceTypeTestBase):
@@ -831,13 +837,17 @@ class CUDATestBase(DeviceTypeTestBase):
             SM80OrLater,
         )
 
-        return {
-            Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-            Capability.dtype.bf16: lambda: SM80OrLater,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            Capability.attention.fused_attention: lambda: PLATFORM_SUPPORTS_FUSED_ATTENTION,
-            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                Capability.dtype.bf16: lambda: SM80OrLater,
+                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                Capability.attention.fused_attention: lambda: PLATFORM_SUPPORTS_FUSED_ATTENTION,
+                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            }
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -878,6 +888,13 @@ lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
     device_type = "lazy"
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.attention.flash_attention: lambda: False,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
     def _should_stop_test_suite(self):
         return False
 
@@ -917,7 +934,8 @@ class MPSTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        return _derive_fused_attention_capability(
+        capabilities = super()._capabilities()
+        capabilities.update(
             {
                 Capability.dtype.fp8: lambda: False,
                 Capability.dtype.bf16: lambda: True,
@@ -925,6 +943,7 @@ class MPSTestBase(DeviceTypeTestBase):
                 Capability.attention.mem_efficient_attention: lambda: False,
             }
         )
+        return capabilities
 
 
 class XPUTestBase(DeviceTypeTestBase):
@@ -937,7 +956,8 @@ class XPUTestBase(DeviceTypeTestBase):
             PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         )
 
-        return _derive_fused_attention_capability(
+        capabilities = super()._capabilities()
+        capabilities.update(
             {
                 Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: True,
@@ -945,6 +965,7 @@ class XPUTestBase(DeviceTypeTestBase):
                 Capability.attention.mem_efficient_attention: lambda: True,
             }
         )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -980,7 +1001,12 @@ class HPUTestBase(DeviceTypeTestBase):
     @classmethod
     def _capabilities(cls):
         capabilities = super()._capabilities()
-        capabilities[Capability.attention.fused_attention] = lambda: False
+        capabilities.update(
+            {
+                Capability.attention.flash_attention: lambda: False,
+                Capability.attention.mem_efficient_attention: lambda: False,
+            }
+        )
         return capabilities
 
     @classmethod
