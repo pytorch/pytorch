@@ -29,6 +29,7 @@ from torch._prims_common import CUDARngStateHelper
 from .functional_utils import gen_alias_from_base
 from .runtime_wrappers import (
     _dealias_marked_returns,
+    _replay_input_mutation,
     _unwrap_tensoralias,
     mark_dynamo_propagated_dynamic_indices,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "gen_alias_from_base",
     "_dealias_marked_returns",
     "_unwrap_tensoralias",
+    "_replay_input_mutation",
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
     "CUDARngStateHelper",
