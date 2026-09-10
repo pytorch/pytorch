@@ -13,7 +13,7 @@ from typing import Any
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmOutputLayout:
+class FlexGemmOutputStorageLayout:
     """Carry one physical output-layout contract across analysis and runtime."""
 
     symbol: str
@@ -134,7 +134,7 @@ def transposed_validate_carrier(tensor: Any) -> None:
         raise ValueError("transposed carrier must be contiguous")
 
 
-BLOCKED_128X4 = FlexGemmOutputLayout(
+BLOCKED_128X4 = FlexGemmOutputStorageLayout(
     symbol="BLOCKED_128X4",
     name="blocked_128x4",
     carrier_shape_fn=blocked_128x4_carrier_shape,
@@ -145,7 +145,7 @@ BLOCKED_128X4 = FlexGemmOutputLayout(
     validate_carrier_fn=blocked_128x4_validate_carrier,
 )
 
-TRANSPOSED = FlexGemmOutputLayout(
+TRANSPOSED = FlexGemmOutputStorageLayout(
     symbol="TRANSPOSED",
     name="transposed",
     carrier_shape_fn=transposed_carrier_shape,
