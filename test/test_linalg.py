@@ -8243,6 +8243,44 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_matrix_exp_small_rotation(self, device, dtype):
+        single = dtype in (torch.float, torch.cfloat)
+        theta = 0.5 if single else 0.04
+        atol = 3e-7 if single else 2e-15
+        a = torch.tensor([[0, -theta], [theta, 0]], device=device, dtype=dtype)
+        # Form the reference in double precision from the represented input.
+        t = a[1, 0].real.cpu().double()
+        c, s = t.cos(), t.sin()
+        expected = torch.stack((torch.stack((c, -s)), torch.stack((s, c))))
+        expected = expected.to(device=device, dtype=dtype)
+        for batch_shape in ((), (1,), (2,), (1, 2)):
+            x = a.expand(*batch_shape, 2, 2).contiguous()
+            self.assertEqual(torch.linalg.matrix_exp(x), expected.expand_as(x),
+                             atol=atol, rtol=0)
+
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_matrix_exp_small_rotation_backward(self, device, dtype):
+        single = dtype in (torch.float, torch.cfloat)
+        theta, scale = (0.5, 0.01) if single else (0.04, 0.001)
+        atol = 3e-9 if single else 2e-17
+        a = torch.tensor([[0, -theta], [theta, 0]], device=device, dtype=dtype)
+        g = scale * torch.eye(2, device=device, dtype=dtype)
+        t = a[1, 0].real.cpu().double()
+        c, s = t.cos(), t.sin()
+        # For G = scale I, L_exp(A^H, G) = scale exp(A^H).
+        expected = g[0, 0].real.cpu().double() * torch.stack(
+            (torch.stack((c, s)), torch.stack((-s, c))))
+        expected = expected.to(device=device, dtype=dtype)
+        for batch_shape in ((), (1,), (2,), (1, 2)):
+            x = a.expand(*batch_shape, 2, 2).contiguous().requires_grad_()
+            (actual,) = torch.autograd.grad(torch.linalg.matrix_exp(x), x, g.expand_as(x))
+            self.assertEqual(actual, expected.expand_as(x), atol=atol, rtol=0)
+
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
+    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_linalg_matrix_exp_batch(self, device, dtype):
 
