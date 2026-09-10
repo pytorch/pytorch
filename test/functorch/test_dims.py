@@ -6,7 +6,6 @@
 # LICENSE file in the root directory of this source tree.
 import gc
 import unittest
-from unittest import skip
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
@@ -726,9 +725,6 @@ class TestMinDevice(_TestMinBase):
 instantiate_device_type_tests(TestMinDevice, globals(), allow_xpu=True)
 
 
-skip_functorch_only = ["test_time_mm_fuse"]
-
-
 class TestMinFunctorchOnly(TestMin):
     hw_classification = HardwareClassification.GENERIC
 
@@ -740,9 +736,10 @@ class TestMinFunctorchOnly(TestMin):
         functorch.dim.POINTWISE_OPTIMIZE = True
         super().tearDown()
 
+    @unittest.skip("skip_functorch_only")
+    def test_time_mm_fuse(self):
+        pass
 
-for n in skip_functorch_only:
-    setattr(TestMinFunctorchOnly, n, skip("skip_functorch_only")(lambda self: None))
 
 if __name__ == "__main__":
     run_tests()
