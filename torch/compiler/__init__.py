@@ -923,7 +923,7 @@ def nested_compile_region(
     max_reuse_entries: int = 8,
     reuse_hash_fn=None,
 ):
-    """
+    r"""
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
     compiled once and safely reused.  ``nested_compile_region`` can also be used
@@ -949,7 +949,10 @@ def nested_compile_region(
 
     Args:
         fn: The function to wrap
-        options: Optional backend to use for compiling the subgraph.
+        options: Optional ``NestedCompileRegionOptions`` for compiling the
+            subgraph. Its ``inductor_config_patches`` and
+            ``bw_inductor_config_patches`` fields accept only the Inductor
+            config keys ``fallback_by_default`` and ``max_autotune``.
             Warning: this is an experimental feature under development and
             not ready for use yet.
         max_reuse_entries: Maximum number of reuse cache entries per function
