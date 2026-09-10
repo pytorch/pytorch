@@ -34,16 +34,21 @@ function install_torchbench() {
 sudo apt-get update
 sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
 
-# Detect CUDA version and use appropriate wheel index
+# The index must match the toolkit: wheels from a different CUDA minor leave
+# component libraries in site-packages that torch preloads ahead of
+# /usr/local/cuda, which breaks symbol resolution. Preview toolkits have no
+# stable index yet, so fall back to nightly.
 # DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
-if [[ "${DESIRED_CUDA}" == 13.* ]]; then
-  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
-  echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu130 wheels"
+if [[ "${DESIRED_CUDA}" =~ ^[0-9]+\.[0-9]+ ]]; then
+  CUDA_SHORT=$(echo "${DESIRED_CUDA}" | cut -f1-2 -d'.' | tr -d '.')
+  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+  if ! curl -fsI "${CUDA_INDEX_URL}/torch/" > /dev/null; then
+    CUDA_INDEX_URL="https://download.pytorch.org/whl/nightly/cu${CUDA_SHORT}"
+  fi
 else
-  # Default to cu128 for CUDA 12.x
   CUDA_INDEX_URL="https://download.pytorch.org/whl/cu128"
-  echo "DESIRED_CUDA=${DESIRED_CUDA}, using cu128 wheels"
 fi
+echo "DESIRED_CUDA=${DESIRED_CUDA}, using ${CUDA_INDEX_URL}"
 
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
