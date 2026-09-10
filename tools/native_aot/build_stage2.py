@@ -20,6 +20,7 @@ and with CONTRIBUTING.md, which states them for users:
   * no toolchain targets this backend (Toolchain.BACKENDS), e.g. ROCm
   * CUDA older than _MIN_CUDA_MAJOR, or a version it cannot determine
   * the interpreter has no published DSL wheel and none is installed
+  * below python 3.12 CI installs no DSL runtime, and a required one is missing
   * a static torch_cuda, which cannot take the version script
   * nothing declares kernels (no torch/_native/ops/*/aot.py)
   * TORCH_CUDA_ARCH_LIST names no exportable arch (export.EXPORTABLE_ARCHES);
@@ -437,6 +438,28 @@ def should_run() -> bool:
                 f"skipped (no DSL wheel for python "
                 f"{sys.version_info.major}.{sys.version_info.minor}"
                 f"{'t' if free_threaded else ''}; installed ones are used if present)"
+            )
+            return False
+
+        # A SEPARATE arm from the one above, and deliberately not folded into it:
+        # below 3.12 the wheels do exist -- nvidia-cutlass-dsl 4.6.2 and each
+        # nvidia-cutlass-dsl-libs-* declare requires-python >=3.10 and publish
+        # cp310 manylinux_2_28 for x86_64 and aarch64 -- so "no published DSL
+        # wheel" would be the wrong reason to print. What is missing is the
+        # INSTALL: install_cutlass_dsl in .ci/pytorch/common_utils.sh returns
+        # early under 3.12, so CI never provides the runtimes and stage 2 would
+        # reach require_runtimes() and fail the build after a full compile.
+        #
+        # Skipping keeps the JIT path for those interpreters, which is what
+        # TORCH_NATIVE_AOT=0 does by hand. Inside the missing_runtimes() guard,
+        # so a 3.10 environment that installed the DSL itself still exports.
+        # Remove this arm once that installer floor is reconciled with the pin.
+        # No free-threaded suffix: 3.10t/3.11t are already gone at the arm above.
+        if ver < (3, 12):
+            _report(
+                f"skipped (below python 3.12 CI installs no DSL runtime, and one "
+                f"required here is missing; this is "
+                f"{sys.version_info.major}.{sys.version_info.minor})"
             )
             return False
 
