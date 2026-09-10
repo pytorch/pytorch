@@ -457,7 +457,8 @@ class GuardedDefaultsTupleModule(torch.nn.Module):
         self.fn = fn
 
     def forward(self, x):
-        # EQUALS_MATCH on the containers themselves, with no per-element source.
+        # A whole-tuple EQUALS_MATCH on __defaults__ and a keys-plus-per-element
+        # guard on __kwdefaults__, both read off a rebuilt local function.
         if self.fn.__defaults__ == (2.0, 1.0) and self.fn.__kwdefaults__ == {"c": 3.0}:
             x = x + 1
         return x + 2
@@ -1069,7 +1070,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(a.__closure__[0], b.__closure__[0])
         buf = io.BytesIO()
         cell = a.__closure__[0]
-        gtv = {id(a): a, id(b): b, id(cell): cell}
+        gtv = {id(a): a, id(b): b, id(cell.cell_contents): cell.cell_contents}
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
@@ -1103,8 +1104,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_snapshot_globals_function_preserves_module(self):
-        # The snapshot variant builds the function with empty globals; see
-        # FunctionPicklerBase._build_function.
+        # The snapshot variant builds the function over the shared snapshot
+        # dict, which has no __name__ of its own; see FunctionPicklerBase.
         def outer():
             def inner():
                 return FQN_MISMATCH_GLOBAL
@@ -1123,6 +1124,24 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
         self.assertEqual(out.__globals__.keys(), g.keys())
+
+    def test_functions_sharing_a_module_dict_share_the_rebuilt_scope(self):
+        # Two module-scope wrappers are items of their own module snapshot, so
+        # one of them is rebuilt while the snapshot is still loading. The scope
+        # is a reduce ARGUMENT shared by both, so the nested one still sees the
+        # complete dict once the load finishes; as pickle STATE it would have
+        # been a copy of the half-loaded dict, empty for the nested function.
+        a, b = MODULE_SCOPE_WRAPPED_A, MODULE_SCOPE_WRAPPED_B
+        g = a.__globals__
+        gtv = {id(a): a, id(b): b, id(g): g}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__globals__, out["b"].__globals__)
+        self.assertEqual(out["a"].__globals__.keys(), g.keys())
+        self.assertEqual(out["b"].__globals__.keys(), g.keys())
+        self.assertIs(out["a"].__globals__["MODULE_SCOPE_WRAPPED_A"], out["a"])
+        self.assertIs(out["b"].__globals__["MODULE_SCOPE_WRAPPED_B"], out["b"])
 
     def test_globals_snapshot_is_built_once_per_module_dict(self):
         # The snapshot prunes a whole module dict. Building one per function
@@ -1701,9 +1720,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             FQN_MISMATCH_GLOBAL = old_value
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
-        # A guard on the container itself registers no per-element source, so
-        # pruning the elements is a silent permanent cache miss, not a load
-        # error; see the Note in guards.py.
+        # A rebuilt local function's __defaults__ and __kwdefaults__ (the latter
+        # never carried before) round-trip and reject a change. This harness
+        # registers every element it compares, so it cannot tell whether a
+        # whole-container guard survives pruning; the full compile path does,
+        # see test_whole_defaults_equals_match_survives_a_called_default.
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)
