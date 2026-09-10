@@ -384,10 +384,45 @@ def fast_kind(
     return None
 
 
+# Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
+_MAX_ROW_BYTES = 192 * 1024
+# Bound loads when odd or prime N collapses vector width. 64 separates measured wins from
+# losses; routing beyond it improved 0.08-0.17x to 1.93-2.41x of ATen.
+_ONESHOT_MAX_LOADS = 64
+
 # General-axis occupancy baselines, not a tuned performance surface.
 _K0_BLOCK = 128
 _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
+
+
+def _oneshot_ok(x: torch.Tensor) -> bool:
+    # Require both the row-size and per-thread-load bounds.
+    N = x.shape[-1]
+    if N * x.element_size() > _MAX_ROW_BYTES:
+        return False
+    from . import kernel_rowtile as rt
+
+    width = x.element_size() * 8
+    vec = math.gcd(N, 128 // width)
+    tpr = max(WARP, rt.row_config(N, width).tpr)
+    return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
+
+
+def _try_fast_row(
+    trait, trait_key: str, x: torch.Tensor, out_dtypes: list, nouts: int
+) -> tuple | None:
+    # Fast contiguous 2D last-dimension path. It needs no index remap, so index traits work.
+    if x.dim() != 2 or x.stride(-1) != 1:
+        return None
+    N = x.shape[-1]
+    if N < 1:
+        return None
+    if nouts not in (1, 2) or not _oneshot_ok(x):
+        return None
+    from . import kernel_rowtile as rt
+
+    return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
 
 
 def _as_shape(out: torch.Tensor, out_shape: Sequence[int]) -> torch.Tensor:
@@ -416,6 +451,19 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
         out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
         return (_as_shape(out, out_shape),)
+
+    # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
+    # the fallback for direct calls and declines.
+    if len(out_shape) > 0 and x.is_contiguous():
+        red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+        has_index = getattr(trait, "has_index", False)
+        kind = fast_kind(red_pairs, kept_pairs, nouts, has_index)
+        red_n = x.numel() // max(1, math.prod(out_shape))
+        if kind == "row":
+            x2 = x.reshape(math.prod(out_shape), red_n)
+            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
+            if fast is not None:
+                return tuple(o.reshape(out_shape) for o in fast)
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     num_o = max(1, math.prod(out_shape))  # blocks (kept coordinates)
@@ -453,14 +501,21 @@ def _grid_size(L: int, block: int, sm_count: int, grid_mult: int = 4) -> int:
 def reduce_all(
     trait, trait_key, x, out_dtype, block=_K0_ALL_BLOCK, grid_mult=_K0_ALL_GRID_MULT
 ):
-    # Reduce all in two stages: G flat chunks, then one fold and projection. This mirrors
-    # ATen's ctas_per_output, handles any size without reshape, and supports flat indices.
+    # One-tile reductions use a widened row CTA; otherwise split without reshaping.
     if not (x.is_cuda and x.is_contiguous()):
         raise AssertionError(
             f"reduce-all needs a contiguous CUDA input, got {x.device} {x.stride()}"
         )
     L = x.numel()
     xf = x.reshape(-1)
+    x2 = xf.view(1, -1)
+    if _oneshot_ok(x2):
+        from . import kernel_rowtile as rt
+
+        cfg = rt.single_row_config(L, x.element_size() * 8)
+        kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
+        (out,) = rt.reduce_row_tile(trait, trait_key, x2, [out_dtype], **kw)
+        return _as_shape(out, ())
     sm = torch.cuda.get_device_properties(x.device).multi_processor_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
