@@ -659,7 +659,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GetattrProxy.probed.clear()
         GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        self.assertEqual(GetattrProxy.probed, [])
+        # pickle itself may look protocol names up on the instance (3.10 probes
+        # __getstate__), so pin only that the METHOD name was never probed.
+        self.assertNotIn("global_add", GetattrProxy.probed)
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
@@ -858,6 +860,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         class LocalModule(torch.nn.Module):
             def forward(self, x: torch.Tensor):
                 return x + 1
+
+        m = LocalModule()
+
+        def fn(m, x):
+            return m(x)
+
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+
+    def test_type_match_on_a_local_class_whose_repr_raises(self):
+        # The local-scope check runs outside the mapped dump, so the message
+        # must not touch the object: a __repr__ that raises is user code.
+        class LocalModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+            def __repr__(self):
+                raise RuntimeError("repr broken")
 
         m = LocalModule()
 

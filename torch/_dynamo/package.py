@@ -116,8 +116,9 @@ class FunctionPicklerBase(pickle.Pickler):
     closure cells, python modules, and bound methods.
 
     GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
-    own copies of these reducers and is moved onto this base separately, so
-    that a fix to how an object is rebuilt cannot be missed in one pickler.
+    own copies of these reducers until it is moved onto this base separately;
+    once both share it, a fix to how an object is rebuilt cannot be missed in
+    one pickler.
     """
 
     # The reducers stay classmethods: pickle reduces a bound classmethod to
@@ -183,11 +184,12 @@ class FunctionPicklerBase(pickle.Pickler):
         # __slots__ member descriptor. A type receiver (classmethod) is exempt:
         # its namespace is restored with the class.
         explicit = (type(self)._unpickle_bound_method, (func, receiver))
-        if not isinstance(receiver, type) and hasattr(cls, "__getattr__"):
-            return explicit
+        is_type = isinstance(receiver, type)
         try:
+            if not is_type and hasattr(cls, "__getattr__"):
+                return explicit
             self_dict = getattr(receiver, "__dict__", None)
-            if not isinstance(receiver, type) and (
+            if not is_type and (
                 (isinstance(self_dict, dict) and name in self_dict)
                 or (
                     name is not None
@@ -201,8 +203,9 @@ class FunctionPicklerBase(pickle.Pickler):
             inner = getattr(receiver, name, None) if name is not None else None
         except Exception:
             # A probe that raises anything -- a __getattribute__ override, a
-            # metaclass __getattr__, a property -- falls back to the explicit
-            # reduce, which is always correct.
+            # metaclass __getattr__ (which hasattr(cls, ...) also reaches), a
+            # property -- falls back to the explicit reduce, which is always
+            # correct.
             return explicit
         # Only a method BOUND to this receiver over this function proves the
         # class MRO resolves back to it. getattr can also hand back the raw
@@ -748,8 +751,9 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        # Backend ids the compile inside the current code_context registered,
-        # so a bypass can drop exactly those.
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
