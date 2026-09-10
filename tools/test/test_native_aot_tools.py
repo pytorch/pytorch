@@ -32,7 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
 # them or the skip check treats them as built by a different compiler.
 _RUNTIMES = export.runtime_versions("cutedsl")
 
-SIDECAR = {
+SIDECAR: dict[str, Any] = {
     "prefix": "fakeop_f32_n1024_k8",
     # Generation reads arch and kind rather than defaulting either, so a fixture
     # missing them is not a sidecar export could have written.
@@ -2143,7 +2143,7 @@ class TestToolchainRegistry(unittest.TestCase):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
 
 
-CUBIN_SIDECAR = {
+CUBIN_SIDECAR: dict[str, Any] = {
     "prefix": "fakemm_f32",
     "arch": "sm_100a",
     "kind": "triton",
