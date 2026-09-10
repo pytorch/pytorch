@@ -1,9 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# The reproducible-DAG fold order. Its claim is a BIT PATTERN, so that is what is asserted:
-# integer equality with upstream's kernel, not allclose. It must also not narrow coverage --
-# a shape it does not cover keeps the default order, never falls back to aten -- and must
-# stay off by default.
+# Inner-tree order promises upstream's exact bits, not closeness. Uncovered shapes keep
+# the default order rather than falling back to ATen, and the feature stays off by default.
 
 import os
 import unittest
@@ -35,10 +33,9 @@ def _order_on():
             os.environ[rt._INNER_TREE_ENV] = prev
 
 
-# GOLDEN BIT PATTERNS, pinned so the contract outlives its reference kernel, which is meant
-# to be deleted -- and a differential test cannot. There is no ATen kernel to regenerate
-# against. Hardware-independent by construction, since the DAG is fixed by N alone and IEEE
-# add is exact. A changed hash means the ORDER changed.
+# Pinned bits outlive the temporary reference kernel; ATen cannot regenerate them. The
+# N-only DAG and IEEE addition make them hardware-independent. A changed hash means a
+# changed order.
 _GOLDEN = {
     # --- sum ---
     ("sum", "float16", 8, 4): "7069267eff54930e",  # multirow
@@ -158,20 +155,17 @@ _GOLDEN = {
 
 
 def _golden_input(m, n, dtype, prod):
-    """The input the table was generated from, reproduced exactly. Values must ROUND, be
-    APERIODIC over the largest row, and be RNG-free, or the table pins nothing.
-    """
+    """Reproduce the table input: rounded, RNG-free, and aperiodic through the largest row."""
     v = torch.arange(m * n, device="cuda", dtype=torch.float64).reshape(m, n)
     vals = ((v % 29) - 14) / 29 + ((v % 7) - 3) / 13 + ((v % 4093) - 2046) / 4093 / 4
     if prod:
-        # Keep a length-n product bounded so it neither overflows nor flushes to zero, while
-        # leaving the factors far enough from 1.0 to survive the narrow dtypes' rounding.
+        # Bound the product without rounding narrow factors to 1.
         vals = 1.0 + vals / max(8.0, n**0.5)
     return vals.to(dtype).contiguous()
 
 
 def _sha(t):
-    # RAW BYTES: numpy has no bfloat16, and the bit pattern is the point anyway.
+    # Hash raw bytes because NumPy lacks bfloat16 and bits are the contract.
     import hashlib
 
     b = t.cpu().contiguous().flatten().view(torch.uint8).numpy().tobytes()
@@ -181,9 +175,7 @@ def _sha(t):
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestInnerTreeOrder(TestCase):
-    # One shape per SHAPE the plan can pick, since each is a different DAG: a row inside one
-    # thread's fragment, warps cooperating over baked batches, and a partials pass plus a
-    # combine. Plus ragged N in each, where the tail folds identities.
+    # Cover each plan shape/DAG (multirow, looped, split) and ragged identity tails.
     SHAPES = [
         (65536, 4),
         (65536, 16),
@@ -218,9 +210,8 @@ class TestInnerTreeOrder(TestCase):
         self.assertFalse(rt.inner_tree_order_enabled())
 
     def test_plan_covers_every_n(self):
-        # Coverage has to be TOTAL: a shape with no plan would silently keep the launch-shape order,
-        # which is the property this order exists to remove. The unroll ceiling is asserted too --
-        # over it TileMap raises, so a missing bound is a crash rather than a fallback.
+        # Every N needs a plan or silently keeps launch order. Enforce MAX_UNROLL because
+        # TileMap raises above it.
         from torch._native.ops.reductions import kernel_rowtile as rt, tile
 
         for itemsize in (2, 4, 8):
@@ -234,8 +225,7 @@ class TestInnerTreeOrder(TestCase):
 
     @parametrize("op", ["sum", "prod"])
     def test_bitwise_equal_to_upstream(self, op):
-        # The whole point of the order: the same DAG upstream's kernel implements, so the
-        # results must agree BIT FOR BIT, not merely closely.
+        # The matching DAG must reproduce upstream bit for bit.
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as up,
@@ -250,8 +240,7 @@ class TestInnerTreeOrder(TestCase):
             with self.subTest(shape=(m, n)):
                 x = torch.randn(m, n, device="cuda")
                 if prod:
-                    # Keep the magnitudes near 1 so a long row neither overflows nor flushes to
-                    # zero -- a row of inf or 0 would compare equal whatever the order.
+                    # Avoid order-insensitive overflow or underflow.
                     x = (x * 0.01 + 1.0).contiguous()
                 got = self._run(trait, f"itree_{op}", x, prod)
                 ref = torch.empty(m, device="cuda")
@@ -264,13 +253,11 @@ class TestInnerTreeOrder(TestCase):
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float64])
     def test_bitwise_equal_to_upstream_dtypes(self, dtype):
-        # vec is 16 bytes' worth of elements, so the dtype sets the tree's WIDTH, and below width 4
-        # the in-vector fold is linear rather than a tree. Every one of those is a different DAG.
+        # Dtype sets the 16-byte vector width; widths below four fold linearly, changing the DAG.
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import inner_tree_kernel as up
 
-        # PROD as well as sum: they differ in their identity and in what a ragged tail pads with, and
-        # prod was previously checked in fp32 only.
+        # Prod has a distinct identity and ragged padding and previously covered only fp32.
         ikind = {2: torch.int16, 4: torch.int32, 8: torch.int64}
         for op in ("sum", "prod"):
             trait = T.ProdOps if op == "prod" else T.SumOps
@@ -286,8 +273,7 @@ class TestInnerTreeOrder(TestCase):
                 with self.subTest(op=op, shape=(m, n)):
                     x = torch.randn(m, n, device="cuda", dtype=dtype)
                     if op == "prod":
-                        # Near 1 so a long row neither overflows nor flushes to zero; a row of inf
-                        # or 0 would compare equal under any order.
+                        # Avoid order-insensitive overflow or underflow.
                         x = (x * 0.01 + 1.0).contiguous()
                     got = self._run(trait, f"itree_{op}_dt", x)
                     ref = torch.empty(m, device="cuda", dtype=dtype)
@@ -301,9 +287,8 @@ class TestInnerTreeOrder(TestCase):
                     )
 
     def test_signed_zero_matches_upstream_per_shape(self):
-        # The case that catches a stray identity: `0.0 + -0.0` is `+0.0`, so seeding a cross-batch
-        # accumulator changes the RESULT BITS for an all -0.0 row. Upstream seeds in one shape and
-        # not the others, so they genuinely disagree and matching closely would hide it.
+        # A stray identity changes all -0.0 rows because 0.0 + -0.0 is +0.0. Upstream seeds
+        # only some shapes, and close comparison hides the resulting disagreement.
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import (
             inner_tree_kernel as up,
@@ -323,8 +308,7 @@ class TestInnerTreeOrder(TestCase):
                 )
 
     def test_order_is_reproducible_across_batch(self):
-        # The reason to want this order: its DAG comes from N alone, so a row's result does not depend
-        # on how many rows were reduced with it. The default order carries no such guarantee.
+        # An N-only DAG makes each row independent of batch size, unlike the default order.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -350,8 +334,7 @@ class TestInnerTreeOrder(TestCase):
 
     @parametrize("op", ["sum", "prod"])
     def test_golden_bit_pattern(self, op):
-        # The claim is a BIT PATTERN, so assert the pattern rather than agreement with a reference
-        # that is about to be deleted. Covers all three plan shapes, ragged N in each, 4 dtypes.
+        # Pin bits across all plan shapes, ragged Ns, and four dtypes.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -387,11 +370,8 @@ class TestInnerTreeOrder(TestCase):
         self.assertEqual(checked, len(_GOLDEN) // 2)
 
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
-        # `tm.exact` only says the tile covers its own N from column 0, so a narrower bound or a
-        # shifted base column invalidate the unpredicated load. This is the other half of that guard:
-        # it is free only because no plan pairs them, and nothing else says so. A plan change that
-        # broke the pairing would just read the wrong columns, and the fold being bit-neutral means
-        # the numbers would still look plausible.
+        # Exact only covers the tile's N from column 0; a bound or offset invalidates its
+        # unpredicated load. No plan may pair them because wrong columns can look plausible.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         checked = paired = 0
@@ -424,10 +404,8 @@ class TestInnerTreeOrder(TestCase):
         )
 
     def test_golden_input_can_detect_a_reorder(self):
-        # The table is worth nothing if its input cannot tell two orders apart, so assert the
-        # discriminating power rather than trusting the generator. fp32/fp64 and N > 4, both
-        # structurally: a narrowing store cannot carry the difference, and at N=4 one thread owns the
-        # whole row so there is nothing to reassociate.
+        # Verify the input distinguishes orders in fp32/fp64 with N > 4; narrowing erases the
+        # difference, and a single thread owns all of N=4.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -459,8 +437,7 @@ class TestInnerTreeOrder(TestCase):
                         )
 
     def test_the_gate_routes_the_dispatcher_through_the_order(self):
-        # What the gate is FOR, asserted through the DISPATCHER rather than the fold: neither failure
-        # mode is visible in the numbers, because both wrong paths compute a correct reduction.
+        # Test dispatcher routing because wrong paths still compute valid reductions.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -491,11 +468,8 @@ class TestInnerTreeOrder(TestCase):
                 )
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
-        # nfields > 1 gives the fold a staging and a partial buffer PER FIELD, and nouts == 2 projects
-        # two results from one accumulator -- machinery the single-field traits never touch. A RAGGED
-        # N too, so the identity padding is exercised. Compared against the same trait under the
-        # launch-shape fold, since what is under test is the per-field plumbing and the two DAGs
-        # associate differently by design.
+        # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
+        # identity padding. Compare only plumbing with launch order because the DAGs differ.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -530,8 +504,7 @@ class TestInnerTreeOrder(TestCase):
                 torch.cuda.synchronize()
                 self.assertEqual(len(tree), nouts)
                 for k, (a, b) in enumerate(zip(tree, launch)):
-                    # An index field must agree EXACTLY: a wrong per-field buffer shows up as the
-                    # wrong argument, which a tolerance would hide.
+                    # Compare indices exactly so tolerance cannot hide a wrong field buffer.
                     if a.dtype in (torch.int32, torch.int64):
                         self.assertEqual(a, b, msg=f"{label} field {k}")
                     else:
@@ -540,10 +513,8 @@ class TestInnerTreeOrder(TestCase):
                         )
 
     def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
-        # THE LAW the trait protocol must satisfy, and the reason `leaf` exists:
-        # combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b). A trait carrying its per-element
-        # transform only in `reduce` folds RAW values under a tree order and returns a plausible
-        # WRONG number, which a protocol test checking only which methods exist cannot see.
+        # Trait law: combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b).
+        # Otherwise tree order can fold raw values into plausible wrong results.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -585,9 +556,7 @@ class TestInnerTreeOrder(TestCase):
                 self.assertEqual(tree, serial, atol=1e-4, rtol=1e-4)
 
     def test_staging_is_actually_used_in_the_mid_band(self):
-        # The hashes prove staging is bit-NEUTRAL, which is exactly why they cannot prove it RAN: if
-        # the gate stopped firing every other test here would still pass. Assert the plan picks it,
-        # and that the two cases it cannot serve keep the register fold.
+        # Bit-neutral hashes cannot prove staging ran. Check its gate and both exclusions.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         for n in (1024, 2048, 4096, 8192):
@@ -595,22 +564,19 @@ class TestInnerTreeOrder(TestCase):
                 self.assertGreater(rt.itree_plan(n, 4096, 4).stage_e, 0)
         # A ragged row cannot declare cp.async's statically 16-byte-aligned source.
         self.assertEqual(rt.itree_plan(4097, 4096, 4).stage_e, 0)
-        # A MULTI-BATCH shape is outside the single-batch tiling. Pick N from the plan rather than by
-        # eye: a shape past the two-kernel threshold never reaches the staging gate at all.
+        # Multi-batch is outside single-batch tiling; derive N from the plan.
         multi = next(
             n
             for n in range(9216, 65536, 1024)
             if (p := rt.itree_plan(n, 4096, 4)) is not None
             and p.shape == "looped"
-            and len(p.batches) > 1  # `batches` is one tuple per COMPILE-TIME batch
+            and len(p.batches) > 1  # one tuple per compile-time batch
         )
         self.assertEqual(rt.itree_plan(multi, 4096, 4).stage_e, 0)
 
     def test_staged_fold_pads_a_short_row_bitwise(self):
-        # Staging needs a single batch, so span > N (identity-padded columns) is reachable and has two
-        # silent pieces: the cp.async source redirect for the out-of-range tail, and the refill. A
-        # padded lane reading live data would still produce a plausible sum, so compare BITWISE at
-        # the widest span, where the padding is largest.
+        # span > N exercises identity padding through cp.async tail redirection and refill.
+        # Compare bits because reading live data for padding can still look plausible.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
