@@ -240,6 +240,7 @@ class _RadixSelectTopK:
             grid=[M, 1, 1],
             block=[self.NUM_THREADS, 1, 1],
             min_blocks_per_mp=self.min_blocks_per_mp,
+            preferred_smem_carveout=0 if self.min_blocks_per_mp > 1 else None,
             stream=stream,
         )
 
