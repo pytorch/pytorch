@@ -1169,7 +1169,8 @@ def _fused_all_gather_matmul_native_rocm(
             src_rank, remote_A_shard.shape, remote_A_shard.dtype
         )
         with backend_stream:
-            A_shards[src_rank].copy_(src_buf)
+            # TODO(rocm): restore copy_ once the ROCr fix lands.
+            torch.mul(src_buf, 1, out=A_shards[src_rank])
             if not torch.cuda.is_current_stream_capturing():
                 # stream_write_value32 issues a system level fence before the write
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
