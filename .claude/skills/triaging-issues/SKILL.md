@@ -58,6 +58,8 @@ Use these GitHub MCP tools for triage:
 | `mcp__github__add_issue_comment` | Add comment (only for redirecting questions) |
 | `mcp__github__search_issues` | Find similar issues for context |
 
+Pass `issue_number` as a JSON number, not a string; the server rejects `"195701"`.
+
 ---
 
 ## Labels You Must NEVER Add
