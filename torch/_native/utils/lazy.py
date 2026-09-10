@@ -1,11 +1,6 @@
-# Lazy module proxy: defers a heavy import to first ATTRIBUTE ACCESS rather than to the
-# binding, which keeps `import torch` free of DSL runtimes while call sites still write
-# `mod.attr`. Pair it with the TYPE_CHECKING-real / else-lazy idiom so static tooling still
-# resolves attributes.
-#
-# torch/onnx/_internal/_lazy_import._LazyModule is the same ten lines, duplicated
-# deliberately: this loads during native-op registration, and reaching into torch.onnx would
-# put an onnx dependency on that path.
+# Defer heavy imports until attribute access so `import torch` stays DSL-free while call
+# sites use `mod.attr`; use a real TYPE_CHECKING import for static tools. This duplicates
+# torch.onnx's proxy to avoid adding an ONNX dependency to native-op registration.
 
 from __future__ import annotations
 

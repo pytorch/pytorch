@@ -25,8 +25,7 @@ log = logging.getLogger(__name__)
 
 
 _CUTEDSL_DSL_NAME = "cutedsl"
-# 4.6.2 is the floor because the reduction decode uses cute.FastDivmodDivisorV2, which 4.5.2 and
-# earlier do not have. Note Version.from_part(release=(4.6.2)) is better but > v26 of packaging.
+# Reductions require FastDivmodDivisorV2 from 4.6.2; Version.from_part needs packaging >26.
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
     Version("4.6.2"),
     Version("4.7.1"),
