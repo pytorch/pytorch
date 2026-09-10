@@ -141,7 +141,7 @@ C10_XPU_API int getPoolUseCount(
 
 C10_XPU_API std::shared_ptr<AllocatorState> getCheckpointState(
     c10::DeviceIndex device,
-      MempoolId_t id);
+    MempoolId_t id);
 
 C10_XPU_API CheckpointDelta setCheckpointPoolState(
     c10::DeviceIndex device,
