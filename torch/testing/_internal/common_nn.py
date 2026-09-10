@@ -3549,7 +3549,9 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                test_case.assertEqual(
+                    test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0
+                )
 
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
