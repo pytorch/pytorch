@@ -1221,6 +1221,35 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
+    def test_privateuse1_tensor_class_without_tensor_classes_registration(self):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class FooBackFloatTensor:
+            def __new__(cls, value):
+                return torch.as_tensor(value, dtype=torch.float32)
+
+        privateuse1_module = types.SimpleNamespace(FloatTensor=FooBackFloatTensor)
+        self.assertNotIn(FooBackFloatTensor, torch._tensor_classes)
+
+        with (
+            unittest.mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="fooback",
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "fooback",
+                privateuse1_module,
+                create=True,
+            ),
+        ):
+            self.assertTrue(
+                UserDefinedClassVariable._is_privateuse1_tensor_class(
+                    FooBackFloatTensor
+                )
+            )
+
     @parametrize(
         "tensor_type_name,dtype",
         [
