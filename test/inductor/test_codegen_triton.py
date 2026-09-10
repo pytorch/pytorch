@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import re
 import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
@@ -32,7 +33,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -54,7 +55,7 @@ from torch.utils._triton import has_triton_package
 
 
 try:
-    from triton_constexpr_configs import (
+    from .triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -66,7 +67,7 @@ try:
         UserDefinedTritonKernelNonInitConfig,
     )
 except ImportError:
-    from test.inductor.triton_constexpr_configs import (
+    from triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -1006,6 +1007,122 @@ def helper(x):
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
 
+    def _skip_unless_annotation_is_literal(self):
+        """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
+
+        Earlier versions carry it as a ``pointer_range_32`` field on a descriptor
+        object, so asserting on the literal string would pass whatever the code did.
+        """
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        if (
+            get_triton_attrs_descriptor_version()
+            != TritonAttrsDescriptorVersion.V4_DICT
+        ):
+            self.skipTest(
+                "tt.pointer_range is only literal with the V4 attrs descriptor"
+            )
+
+    @staticmethod
+    def _flex_inputs(requires_grad=False):
+        return [
+            torch.randn(
+                1,
+                4,
+                256,
+                64,
+                device=GPU_TYPE,
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+            for _ in range(3)
+        ]
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_applied_to_template_kernel(self):
+        """A template kernel without atomics must still be tagged.
+
+        The positive half of the two tests below: without it, a regression that
+        dropped the annotation for every template kernel -- losing buffer ops on
+        every matmul and attention kernel on ROCm -- would leave them all green.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        self.assertTrue(
+            any("tt.pointer_range" in x for x in templates),
+            "template kernel without atomics should carry tt.pointer_range",
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_pointer_range_disabled_for_template_kernels(self):
+        """The config flag must reach template kernels, not just the pointwise path.
+
+        Template kernels build their own triton_meta in
+        TritonTemplateKernel.jit_lines() rather than going through
+        TritonKernel.codegen_kernel(), so the two can disagree.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        for kernel in templates:
+            self.assertNotIn("tt.pointer_range", kernel)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_applied_to_template_kernel_with_atomics(self):
+        """Kernels using atomics must not be tagged, including template kernels.
+
+        A score_mod capturing a tensor that requires grad makes the flex_attention
+        backward accumulate into it with tl.atomic_add. Tagging that kernel lets the
+        backend pick buffer atomics, which are far slower than global atomics when
+        many lanes target the same address.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs(requires_grad=True)
+        bias = torch.randn(4, device=GPU_TYPE, dtype=torch.float16, requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        def fwd_bwd(q, k, v):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, score_mod=score_mod
+            )
+            out.sum().backward()
+            return out
+
+        _, kernels = run_and_get_kernels(fwd_bwd, q, k, v, remove_quote=True)
+        atomic = [x for x in kernels if re.search(r"tl\.atomic_\w+", x)]
+        # the whole point is the *template* kernel, so a pointwise atomic kernel
+        # alone would not exercise this
+        self.assertTrue(
+            any("triton_tem_" in x for x in atomic),
+            "no template kernel using atomics was generated",
+        )
+        for kernel in atomic:
+            self.assertNotIn("tt.pointer_range", kernel)
+
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
         from torch.utils._sympy.functions import FloorDiv, Mod
@@ -1495,6 +1612,29 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    def test_autotune_hints_meta_is_ordered(self):
+        # inductor_meta is rendered into the kernel source, so the hints must
+        # not depend on set iteration order.
+        xnumel, rnumel = sympy.Integer(64), sympy.Integer(8192)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        kernel.autotune_hints.add(AutotuneHint.SCALAR_ACCUMULATORS)
+        kernel.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+        with V.set_kernel_handler(kernel):
+            hints = kernel.inductor_meta_per_kernel()["autotune_hints"]
+        self.assertEqual(
+            hints,
+            (AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS),
+        )
+        self.assertEqual(
+            repr(hints),
+            "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
+        )
 
 
 if __name__ == "__main__":
