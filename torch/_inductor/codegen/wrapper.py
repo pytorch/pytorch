@@ -2537,7 +2537,7 @@ class PythonWrapperCodegen(CodeGen):
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
 
-        if config.trace.provenance_tracking_to_timeline:
+        if config.provenance_tracking_to_profiler_timeline():
             wrapper_name = self.define_extern_kernel_profile_wrapper(
                 kernel_name, self.next_kernel_suffix()
             )
@@ -2584,7 +2584,7 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view or out}")
         with debug_printer_manager:
-            if config.trace.provenance_tracking_to_timeline:
+            if config.provenance_tracking_to_profiler_timeline():
                 wrapper_name = self.define_extern_kernel_profile_wrapper(
                     kernel, self.next_kernel_suffix()
                 )
@@ -2666,7 +2666,7 @@ class PythonWrapperCodegen(CodeGen):
         device,
     ):
         orig_python_kernel_name = python_kernel_name
-        if config.trace.provenance_tracking_to_timeline:
+        if config.provenance_tracking_to_profiler_timeline():
             python_kernel_name = self.define_extern_kernel_profile_wrapper(
                 python_kernel_name, self.next_kernel_suffix()
             )

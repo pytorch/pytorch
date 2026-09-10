@@ -1087,7 +1087,7 @@ def compile_fx_inner(
             compile_region_name=compile_region_name,
             **kwargs,
         )
-        if config.trace.provenance_tracking_to_timeline:
+        if config.provenance_tracking_to_profiler_timeline():
             compile_id = torch._guards.CompileContext.current_compile_id()
             kernel_information_jsons = get_kernel_information_jsons()
             key = str((f"Torch-Compiled Region: {compile_id}", kwargs["is_backward"]))

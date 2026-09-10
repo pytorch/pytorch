@@ -1640,8 +1640,9 @@ class FxGraphHashDetails:
         # so we add this explicitly.
         self.provenance_tracking_level = config.effective_provenance_tracking_level()
         self.provenance_tracking_to_timeline = (
-            config.trace.provenance_tracking_to_timeline
+            config.provenance_tracking_to_profiler_timeline()
         )
+        self.provenance_tracking_fusion = config.trace.provenance_tracking_fusion
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
