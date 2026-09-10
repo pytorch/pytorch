@@ -507,8 +507,7 @@ class RingBuffer {
 
 static char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
-// BlockState, SegmentState, and PrivatePoolState contain the information
-// needed to reconstruct a private pool to a previous state.
+
 struct BlockState {
   c10::DeviceIndex device = 0;
   sycl::queue* queue = nullptr;
@@ -1496,8 +1495,6 @@ class DeviceCachingAllocator {
     }
   }
 
-  // Restores the state of an allocation segment (which may have been split
-  // into multiple blocks) to match a previously checkpointed SegmentState.
   void setSegmentStateToCheckpoint(
       Block* block,
       SegmentState& segment,
@@ -1516,16 +1513,8 @@ class DeviceCachingAllocator {
 
     // Allocate all blocks in the segment.
     for (size_t i = 0; i < segment_len; ++i) {
-      // Note [Last block when restoring checkpoint state]
-      // The last block in an expandable segment is one of:
-      // - case 1: an unmapped tail with remaining virtual address space.
-      // - case 2: segment has grown since checkpoint; after allocating all
-      //      checkpoint blocks, one extra mapped block and an unmapped tail
-      //      remain.
       if (i == segment_len - 1 && curr_block->expandable_segment) {
-        bool valid_structure =
-            /* case 1 */ is_unmapped_tail(curr_block) ||
-            /* case 2 */
+        bool valid_structure = is_unmapped_tail(curr_block) ||
             (curr_block->mapped && !curr_block->allocated && curr_block->next &&
              is_unmapped_tail(curr_block->next));
         TORCH_CHECK(
@@ -1567,10 +1556,7 @@ class DeviceCachingAllocator {
 
     for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
       if (i == segment_len - 1 && curr_block->expandable_segment) {
-        // See Note [Last block when restoring checkpoint state]
-        bool valid_structure =
-            /* case 1 */ is_unmapped_tail(curr_block) ||
-            /* case 2 */
+        bool valid_structure = is_unmapped_tail(curr_block) ||
             (curr_block->mapped && !curr_block->allocated && curr_block->next &&
              is_unmapped_tail(curr_block->next));
         TORCH_CHECK(
@@ -1592,9 +1578,6 @@ class DeviceCachingAllocator {
       TORCH_CHECK(curr_block->ptr == block_state.ptr);
       TORCH_CHECK(curr_block->allocated == block_state.allocated);
 
-      // See Note [Last block when restoring checkpoint state]
-      // The last mapped block (i == segment_len - 2) may merge with extra
-      // mapped memory from segment growth, making it larger than checkpoint.
       bool is_last_mapped =
           (i == segment_len - 2) && curr_block->expandable_segment;
       TORCH_CHECK(
@@ -1895,8 +1878,6 @@ class DeviceCachingAllocator {
       Block* curr = block;
 
       while (curr) {
-        // When we free a block, its pointer should never change
-        // only its adjacent blocks, so free, then look at pointer
         if (curr->allocated) {
           TORCH_CHECK(
               curr->event_count == 0,
@@ -1938,8 +1919,7 @@ class DeviceCachingAllocator {
     freeBlocksAllocatedToPool(private_pool, rr);
 
     std::unordered_map<void*, Block*> ptrs_to_blocks;
-    // at this point, all of the blocks should be free, so they will all be in
-    // the block set
+
     for (Block* block : private_pool->small_blocks.blocks) {
       ptrs_to_blocks[block->ptr] = block;
     }
