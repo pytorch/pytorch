@@ -167,14 +167,21 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        # The bypassed compile's backend was recorded but is referenced by no
+        # entry, so it is not written; both artifacts were recorded, one is saved.
+        info = PrecompileContext.save_to_dynamo_cache()
+        (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
+        self.assertEqual(len(info["backends"]), 2)
         torch._dynamo.reset()
         PrecompileContext.clear()
+        # Wrapping reloads from the on-disk DynamoCache (per-test fresh_cache dir).
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), fn(x))
+        # Deliberate: re-triggers the bypass in the loading process against an
+        # entry that already holds one installed guarded code.
         self.assertEqual(compiled(x, cfg), fn(x, cfg))
 
     @torch._dynamo.config.patch(
