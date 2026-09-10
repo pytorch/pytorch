@@ -3,6 +3,7 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
@@ -36,7 +37,7 @@ if HAS_CPU and TRITON_HAS_CPU:
         }
     )
     class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
-        pass
+        hw_classification = HardwareClassification.CPU
 
     @config.patch(
         {
@@ -46,14 +47,17 @@ if HAS_CPU and TRITON_HAS_CPU:
         }
     )
     class CpuTritonTests(test_torchinductor.TestCase):
-        common = test_torchinductor.check_model
-        device = "cpu"
+        hw_classification = HardwareClassification.CPU
 
-    test_torchinductor.copy_tests(
-        test_torchinductor.CommonTemplate,
+        common = test_torchinductor.check_model
+
+    test_torchinductor.instantiate_device_type_tests_from_templates(
         CpuTritonTests,
-        "cpu",
+        globals(),
+        templates=(test_torchinductor.CommonTemplate,),
         xfail_prop="_expected_failure_triton_cpu",
+        class_name_overrides={"cpu": "CpuTritonTests"},
+        only_for="cpu",
     )
 
     for name in TRITON_CPU_SLOW_TESTS:
