@@ -6183,6 +6183,7 @@ class TestLinalgDevice(TestLinalg):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("k", [64, 256])
     @parametrize("n", [32, 48, 64, 128])
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
@@ -6210,6 +6211,7 @@ class TestLinalgDevice(TestLinalg):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
@@ -6282,6 +6284,7 @@ class TestLinalgDevice(TestLinalg):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
