@@ -28,9 +28,11 @@ from torch.testing._internal.common_utils import (
 
 
 try:
-    from torchvision.models import resnet18
+    from torchvision import models as torchvision_models
+
+    HAS_TORCHVISION = True
 except ImportError:
-    resnet18 = None
+    HAS_TORCHVISION = False
 
 from contextlib import contextmanager
 from time import perf_counter
@@ -501,10 +503,9 @@ class TestMin(TestCase):
         i = dims()
         self.assertEqual(list(A[i].expand(2, 4).order(i).size()), [3, 2, 4])
 
+    @unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
     def test_network(self):
-        if resnet18 is None:
-            self.skipTest("no torchvision")
-        rn = resnet18(
+        rn = torchvision_models.resnet18(
             norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False)
         )
         rn.train()
