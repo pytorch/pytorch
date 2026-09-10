@@ -1841,15 +1841,27 @@ test_distributed_4gpu() {
   # Python suite only; the multi-GPU C++/mpiexec tests already run on the
   # standard `distributed` job.
   echo "Testing distributed python tests that need more than 2 GPUs"
-  local min_gpus
+  local min_gpus log total_kept rc
   min_gpus=$(python - <<'PY'
 from torch.testing._internal.common_distributed import STANDARD_DISTRIBUTED_GPUS
 print(STANDARD_DISTRIBUTED_GPUS + 1)
 PY
 )
+  log=$(mktemp)
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  set +e
+  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose 2>&1 | tee "$log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  total_kept=$(grep 'multigpu-min-gpus=' "$log" | sed -n 's/.*kept \([0-9]*\).*/\1/p' | awk '{s+=$1} END {print s+0}')
+  rm -f "$log"
+  if [[ "$total_kept" -eq 0 ]]; then
+    echo "::error::distributed_4gpu shard selected 0 tests; min-gpus filter may have regressed"
+    exit 1
+  fi
+  echo "distributed_4gpu shard selected $total_kept tests across files"
   assert_git_not_dirty
+  return "$rc"
 }
 
 test_quantization() {
