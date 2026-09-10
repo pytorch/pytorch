@@ -9,6 +9,7 @@ from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
+    ReductionEpilogueFusion,
     Scheduler,
     SchedulerNode,
 )
@@ -152,7 +153,19 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._nv_universal_gemm_scheduling.can_fuse_reduction_epilogue(
                 node1, node2
             )
-        return False
+        return self._triton_scheduling.can_fuse_reduction_epilogue(node1, node2)
+
+    def can_fuse_reduction_epilogue_choice(
+        self,
+        choice: Any,
+        block: tuple[int, int],
+    ) -> bool:
+        return self._triton_scheduling.can_fuse_reduction_epilogue_choice(choice, block)
+
+    def analyze_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> ReductionEpilogueFusion | None:
+        return self._triton_scheduling.analyze_reduction_epilogue(node1, node2)
 
     def group_fn(
         self, sizes: Sequence[Sequence[_IntLike]]
