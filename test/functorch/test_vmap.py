@@ -1151,6 +1151,93 @@ class TestVmapAPI(TestCase):
                 o = torch.vmap(torch.square)(t)
         self.assertEqual(o, torch.square(t))
 
+    def test_restore_vmap_pytree_input_output(self):
+        def f(x, y):
+            output0 = x[0] + x[1]
+            output1 = y
+            return {"a": output0, "b": output1}
+
+        B = 2
+        x0 = torch.randn(B, 3)
+        x1 = torch.randn(B)
+        y = torch.randn(4, B)
+
+        out, out_dims = restore_vmap(f, ((0, 0), 1), B, "error")((x0, x1), y)
+        expected = vmap(f, in_dims=((0, 0), 1), out_dims={"a": 0, "b": 1})((x0, x1), y)
+        self.assertEqual(out, expected)
+        self.assertEqual(out_dims, {"a": 0, "b": 1})
+
+    def test_restore_vmap_no_vmapped_inputs(self):
+        def f(x, y, z):
+            return x, y * z, z
+
+        B = 2
+        # Mix of tensor and non-tensor inputs
+        x = torch.randn(3)
+        y = torch.randn(4)
+        z = 5
+        out, out_dims = restore_vmap(f, (None, None, None), B, "error")(x, y, z)
+        self.assertEqual(out, f(x, y, z))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_restore_vmap_unexpanded_outputs(self):
+        def f(x, y):
+            # Mix of tensor and non-tensor outputs
+            return 3 * y, y.sum(), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = torch.randn(4)
+        out, out_dims = restore_vmap(f, (0, None), B, "error")(x, y)
+        self.assertEqual(out, f(None, y))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_data_attribute(self):
+        def foo(x):
+            y = x.data  # noqa: F841
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "accessing `data` under vmap transform"
+        ):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+        def foo(x):
+            x.data = torch.ones(3, 3)
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "mutating directly with `.data` under vmap"
+        ):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+    def test_vmap_out_dims_negative_one_independent_output(self):
+        t = torch.randn(2, 3)
+        t_scalar = torch.randn([])
+
+        def f_dep(x):
+            return x
+
+        def f_ind(x):
+            return t
+
+        def f_ind_scalar(x):
+            return t_scalar
+
+        res_dep_neg1 = vmap(f_dep, in_dims=0, out_dims=-1)(t)
+        self.assertEqual(res_dep_neg1.shape, torch.Size([3, 2]))
+
+        res_ind_neg1 = vmap(f_ind, in_dims=0, out_dims=-1)(torch.zeros(1))
+        self.assertEqual(res_ind_neg1.shape, torch.Size([2, 3, 1]))
+
+        res_ind_scalar_neg1 = vmap(f_ind_scalar, in_dims=0, out_dims=-1)(torch.zeros(5))
+        self.assertEqual(res_ind_scalar_neg1.shape, torch.Size([5]))
+
+
+@markDynamoStrictTest
+class TestVmapAPIDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_vmap_autocast(self, device):
         if torch.device(device).type == "cpu":
             amp_dtype = torch.bfloat16
@@ -1233,88 +1320,6 @@ class TestVmapAPI(TestCase):
     @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
     def test_vmap_autocast_mps(self):
         self._test_vmap_autocast("mps")
-
-    def test_restore_vmap_pytree_input_output(self):
-        def f(x, y):
-            output0 = x[0] + x[1]
-            output1 = y
-            return {"a": output0, "b": output1}
-
-        B = 2
-        x0 = torch.randn(B, 3)
-        x1 = torch.randn(B)
-        y = torch.randn(4, B)
-
-        out, out_dims = restore_vmap(f, ((0, 0), 1), B, "error")((x0, x1), y)
-        expected = vmap(f, in_dims=((0, 0), 1), out_dims={"a": 0, "b": 1})((x0, x1), y)
-        self.assertEqual(out, expected)
-        self.assertEqual(out_dims, {"a": 0, "b": 1})
-
-    def test_restore_vmap_no_vmapped_inputs(self):
-        def f(x, y, z):
-            return x, y * z, z
-
-        B = 2
-        # Mix of tensor and non-tensor inputs
-        x = torch.randn(3)
-        y = torch.randn(4)
-        z = 5
-        out, out_dims = restore_vmap(f, (None, None, None), B, "error")(x, y, z)
-        self.assertEqual(out, f(x, y, z))
-        self.assertEqual(out_dims, (None, None, None))
-
-    def test_restore_vmap_unexpanded_outputs(self):
-        def f(x, y):
-            # Mix of tensor and non-tensor outputs
-            return 3 * y, y.sum(), None
-
-        B = 2
-        x = torch.randn(B, 3)
-        y = torch.randn(4)
-        out, out_dims = restore_vmap(f, (0, None), B, "error")(x, y)
-        self.assertEqual(out, f(None, y))
-        self.assertEqual(out_dims, (None, None, None))
-
-    def test_data_attribute(self):
-        def foo(x):
-            y = x.data  # noqa: F841
-            return x
-
-        with self.assertRaisesRegex(
-            RuntimeError, "accessing `data` under vmap transform"
-        ):
-            torch.func.vmap(foo)(torch.randn(3, 3))
-
-        def foo(x):
-            x.data = torch.ones(3, 3)
-            return x
-
-        with self.assertRaisesRegex(
-            RuntimeError, "mutating directly with `.data` under vmap"
-        ):
-            torch.func.vmap(foo)(torch.randn(3, 3))
-
-    def test_vmap_out_dims_negative_one_independent_output(self):
-        t = torch.randn(2, 3)
-        t_scalar = torch.randn([])
-
-        def f_dep(x):
-            return x
-
-        def f_ind(x):
-            return t
-
-        def f_ind_scalar(x):
-            return t_scalar
-
-        res_dep_neg1 = vmap(f_dep, in_dims=0, out_dims=-1)(t)
-        self.assertEqual(res_dep_neg1.shape, torch.Size([3, 2]))
-
-        res_ind_neg1 = vmap(f_ind, in_dims=0, out_dims=-1)(torch.zeros(1))
-        self.assertEqual(res_ind_neg1.shape, torch.Size([2, 3, 1]))
-
-        res_ind_scalar_neg1 = vmap(f_ind_scalar, in_dims=0, out_dims=-1)(torch.zeros(5))
-        self.assertEqual(res_ind_scalar_neg1.shape, torch.Size([5]))
 
 
 def slice_inputs(inputs, bdims, i):
