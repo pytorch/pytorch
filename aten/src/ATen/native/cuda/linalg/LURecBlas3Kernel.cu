@@ -44,9 +44,6 @@ constexpr int SWP_WIDTH = 4;
 // Max possible panel width for the register-resident panel LU factozization.
 constexpr int MAX_RECNB = 32;
 
-// Max possible (diagonal) panel for the LDL kernel
-constexpr int MAX_LDL_NB = 32;
-
 // Nb values for the base case in the recursive call,
 // when dispatching to the register-resident panel LU kernel
 struct LURecnbRegisterResidentConfig {
@@ -826,19 +823,68 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
   });
 }
 
+
+namespace ldl {
+
+// Max possible (diagonal) panel for the LDL kernel
+constexpr int MAX_LDL_NB = 32;
+
+// LDL factorization is square-root-free, hence,
+// as in LAPACK, abs(a + ib) = abs(a) + abs(b).
+template <typename scalar_t>
+__device__ __forceinline__
+auto abs(const scalar_t& v) {
+  if constexpr (c10::is_complex<scalar_t>::value) {
+    return std::abs(v.real()) + std::abs(v.imag());
+  } else {
+    return std::abs(v);
+  }
+}
+
+template <typename scalar_t, int BS>
+__device__ __forceinline__
+int find_pivot_row(
+  scalar_t* __restrict__ dA, int lda, int n,
+  int row_offset, int col_offset
+) {
+  using real_t = c10::scalar_value_type<scalar_t>::type;
+
+  constexpr int NWARPS = BS / 32;
+  __shared__ real_t sdata[NWARPS];
+  __shared__ int sidx[NWARPS];
+
+  auto* A = dA + LinOff(row_offset, col_offset, lda);
+  auto tid = threadIdx.x;
+
+  auto my_max = static_cast<real_t>(-1);
+  auto my_idx = -1;
+  for (int i = row_offset + tid; i < n; i += BS) {
+    auto v = ldl::abs(A[LinOff(i, col_offset, lda)]);
+    AGGREGATE_ARGMAX(my_max, my_idx, v, i);
+  }
+
+  auto pivot_row = block_argmax<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
+  return pivot_row;
+}
+
+} // namespace ::ldl
+
+
 template <typename scalar_t, int BS>
 __global__ void __launch_bounds__(BS)
 ldl_diagonal_panel_fused_kernel(
   scalar_t* __restrict__ dLD, int n, int lda,
-  int curr_step, int* dcurr_step,
+  int nb, int curr_step, int* dcurr_step,
   int* dipiv, int* dinfo
 ) {
+  using real_t = c10::scalar_value_type<scalar_t>::type;
+  const real_t ALPHA = (1 + std::sqrt(17)) / 8;
 }
 
 template <typename scalar_t>
 void ldl_diagonal_panel(
   scalar_t* dLD, int n, int lda,
-  int curr_step, int* dcurr_step,
+  int nb, int curr_step, int* dcurr_step,
   int* dipiv, int* dinfo
 ) {
   constexpr int PANEL_THRESHOLD = 512;
@@ -851,13 +897,13 @@ void ldl_diagonal_panel(
   if (problem_dim > PANEL_THRESHOLD) {
     ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS><<<grid, LARGE_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
-      curr_step, dcurr_step,
+      nb, curr_step, dcurr_step,
       dipiv, dinfo
     );
   } else {
     ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS><<<grid, SMALL_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
-      curr_step, dcurr_step,
+      nb, curr_step, dcurr_step,
       dipiv, dinfo
     );
   }
@@ -891,7 +937,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
       // 1. Panel factorization
       ldl_diagonal_panel(
         dLD, n, lda,
-        curr_step, dcurr_step,
+        ldl::MAX_LDL_NB, curr_step, dcurr_step,
         dipiv, dinfo
       );
 
