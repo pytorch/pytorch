@@ -342,6 +342,16 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2.0))
 
+        v = torch.empty_strided((1, 3), (1, 1)).zero_()
+        result = MyFunction.apply(v)
+        self.assertEqual(result.stride(), v.stride())
+
+        v.requires_grad_()
+        result = MyFunction.apply(v)
+        self.assertEqual(result.stride(), v.stride())
+        result.sum().backward()
+        self.assertEqual(v.grad, torch.full_like(v, 2.0))
+
     def test_function_returns_undefined_tensor(self):
         class MyFunction(Function):
             @staticmethod
@@ -10979,9 +10989,8 @@ for shape in [(1,), ()]:
         )
 
         return_lambdas = {
-            # If we return an input as-is in forward, that is treated
-            # as if self.view_as(self) is performed. If jvp returns x.view_as(x),
-            # this is OK.
+            # Returning an input as-is attaches an alias/view to the forward
+            # output. Returning x.view_as(x) from jvp preserves that relation.
             "view_as": lambda x: x.view_as(x),
             # Expect this to raise an error
             "self": lambda x: x,
