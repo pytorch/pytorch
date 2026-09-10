@@ -91,8 +91,8 @@ class TestQuackVendorScript(TestCase):
         self.assertEqual(
             subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode,
             0,
-            "vendor.sh --check reported drift; edit the FlexGEMM patchset, "
-            "not the vendored files",
+            "vendor.sh --check reported drift; edit the FlexGEMM patchset or "
+            "PyTorch vendoring patches, not the vendored files",
         )
 
 

@@ -5,7 +5,10 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Final
 
-from torch._inductor.kernel.gemm_epilogue import GEMM_REDUCTION_FRAGMENT_WIDTH
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
+    GemmReductionGeometry,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known
 from torch._inductor.utils import _IntLike
 from torch.types import IntLikeType
@@ -84,11 +87,17 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 )
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
-FLEX_GEMM_GROUPED_MAIN_COMPOSITION_ERROR = "FlexGEMM grouped main outputs do not yet compose with auxiliary outputs or reductions"
-FLEX_GEMM_GROUPED_MAIN_SHAPE_ERROR = (
+FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
+    "FlexGEMM grouped main outputs do not yet compose with auxiliary outputs or "
+    "reductions"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "FlexGEMM grouped main output shape must contract only the GEMM N dimension"
 )
-FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = "unsupported FlexGEMM epilogue: main output shape must equal the physical GEMM output shape"
+FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: main output shape must equal the physical "
+    "GEMM output shape"
+)
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
@@ -97,8 +106,9 @@ LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_redu
 def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) -> bool:
     """Return whether a symbolic shape value is known divisible without guards.
 
-    Inductor sizes arrive as integers or SymPy expressions, while tensor shapes
-    can contain ``torch.SymInt`` values.
+    ``value`` spans both worlds: inductor sizes reach it as ``int``/``sympy.Expr``,
+    while the local-reduce validators below pass ``torch.Size``-derived dims whose
+    dynamic entries are ``SymInt``.
     """
     return statically_known(value % divisor == 0)
 
@@ -172,11 +182,6 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
-def local_reduce_needs_physical_combine(axis: int, group: int) -> bool:
-    """Return whether QuACK must combine a group outside one logical fragment."""
-    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
-
-
 def local_reduce_compressed_shape(
     shape: Sequence[IntLikeType], group: int, axis: int
 ) -> tuple[IntLikeType, ...]:
@@ -188,7 +193,7 @@ def local_reduce_compressed_shape(
 
 
 @dataclasses.dataclass(frozen=True)
-class FlexGemmGroupedMainOutputTransform:
+class FlexGemmOutputContraction:
     """Describe contraction of adjacent values along the GEMM N dimension."""
 
     group: int
@@ -204,18 +209,4 @@ class FlexGemmGroupedMainOutputTransform:
         return ("B",) if self.chunked else ()
 
 
-@dataclasses.dataclass(frozen=True)
-class FlexGemmLocalReduceGeometry:
-    """Describe the grouped output axis shared by local-reduce consumers.
-
-    Attributes:
-        group: Number of contiguous M or N elements in each local group.
-        axis: GEMM output axis being grouped: 0 for M, 1 for N.
-    """
-
-    group: int
-    axis: int
-
-    def __post_init__(self) -> None:
-        """Reject geometry outside the GEMM tile's M/N grouping model."""
-        validate_local_reduce_group_axis(self.group, self.axis)
+FlexGemmLocalReduceGeometry = GemmReductionGeometry
