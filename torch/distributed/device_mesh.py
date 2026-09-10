@@ -211,10 +211,13 @@ else:
             mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
                 of devices, where the IDs are global IDs of the default process group.
             preserve_rank_order (bool, optional):
-                If True, subgroup ranks are ordered instead of being sorted ascending, and a mesh
-                dim spanning the full world whose ranks are a permutation of [0..N) gets a
-                dedicated group honoring that order instead of silently reusing default_group.
-                Default: False.
+                If True, subgroup rank order is preserved instead of being sorted in
+                ascending order, and a mesh dim spanning the full world whose ranks are a
+                permutation of [0..N) gets a dedicated process group honoring that order
+                instead of silently reusing default_group. This provides flexibility for
+                custom or topology-aware rank ordering. Defaults to False for backward
+                compatibility with existing code that relies on sorted ranks and
+                default_group reuse.
             _rank (int): (experimental/internal)
                 The global rank of the current process. If not provided, it will
                 be inferred from the default process group.
