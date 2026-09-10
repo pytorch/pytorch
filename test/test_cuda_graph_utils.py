@@ -13,6 +13,7 @@ from torch.cuda._graph_annotations import (
     _is_tools_id_unavailable,
     _rekey_annotations,
     _reset_kernel_annotations,
+    _sourceless_nodes,
     mark_stream,
     resolve_and_remap,
     resolve_pending_annotations,
@@ -248,6 +249,65 @@ class TestMarkKernels(TestCase):
             self.assertIsNone(graph._remapped_exec_id)
             self.assertEqual(set(get_kernel_annotations()), keys)
         self.assertIn(capture_id, graph._recorded_exec_ids)
+
+    @unittest.skipIf(
+        not source_node_ids_available(),
+        "annotation_config={'key_by': 'source'} needs a CUDA driver >= 13.4",
+    )
+    def test_key_by_source_aliases_nodes_without_a_source_id(self):
+        """Host and memcpy nodes keep an exec-keyed copy even under source keying.
+
+        CUPTI reports no sourceGraphNodeId for those kinds (a graph memcpy node surfaces
+        as the peer-to-peer MEMCPY2 activity kind when its endpoints are on different
+        devices, and that record has no such field), so the capture key alone would never
+        be looked up for them. Every other node stays capture-keyed only, and a
+        re-instantiate moves the alias to the new exec graph instead of leaving the old
+        one behind."""
+        pinned = torch.ones(1024, pin_memory=True)
+        dst = torch.zeros(1024, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        warm = torch.cuda.Stream()
+        warm.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warm):
+            dst.copy_(pinned, non_blocking=True)
+            dst.mul_(2)
+        torch.cuda.current_stream().wait_stream(warm)
+
+        with torch.cuda.graph(
+            graph, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("phase_a"):
+                dst.copy_(pinned, non_blocking=True)
+                dst.mul_(2)
+
+        capture_id = graph._capture_graph_id
+        captured = set(get_kernel_annotations())
+        # The copy is a memcpy node (the multiply is a kernel), so exactly one entry needs
+        # the alias -- if the capture stops producing one, this test proves nothing.
+        sourceless = {t for t in captured if t in _sourceless_nodes}
+        self.assertEqual(len(sourceless), 1)
+
+        graph.instantiate()
+        first_exec = graph._remapped_exec_id
+        self.assertIsNotNone(first_exec)
+        aliases = {(first_exec << 32) | (t & 0xFFFFFFFF) for t in sourceless}
+        annotations = get_kernel_annotations()
+        self.assertEqual(set(annotations), captured | aliases)
+        # The alias shares the entry, so both keys resolve to the same annotation.
+        for tools_id in sourceless:
+            alias = (first_exec << 32) | (tools_id & 0xFFFFFFFF)
+            self.assertEqual(annotations[alias], annotations[tools_id])
+        self.assertIn(capture_id, graph._recorded_exec_ids)
+        self.assertIn(first_exec, graph._recorded_exec_ids)
+
+        graph.instantiate()
+        second_exec = graph._remapped_exec_id
+        self.assertNotEqual(second_exec, first_exec)
+        keys = set(get_kernel_annotations())
+        self.assertEqual(
+            keys,
+            captured | {(second_exec << 32) | (t & 0xFFFFFFFF) for t in sourceless},
+        )
 
     def test_key_by_exec_is_the_default(self):
         """The default rekeys to the exec graph, which is what a consumer reading CUPTI's

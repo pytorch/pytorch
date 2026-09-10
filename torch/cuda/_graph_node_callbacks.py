@@ -55,6 +55,8 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
         _get_annotatable_type_values,
         capture_root_graph_id,
         current_annotation,
+        node_type_has_source_id,
+        note_sourceless_node,
         record_node_annotation,
     )
     from torch.cuda._utils import _check_cuda_bindings
@@ -83,6 +85,11 @@ def _on_graph_node_created(_domain: int, _cbid: int, cbdata: int) -> None:
         global _dropped_body_nodes
         _dropped_body_nodes += 1
         return
+    # The node type is only in hand here, and the registry needs it to know which entries
+    # a source-keyed capture must still alias into exec space (see
+    # _graph_annotations.note_sourceless_node).
+    if not node_type_has_source_id(graph_data.node_type):
+        note_sourceless_node(tools_id)
     record_node_annotation(tools_id, annotation)
 
 
