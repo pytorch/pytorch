@@ -9,7 +9,9 @@ import keyword
 import math
 import os
 import pickle
+import threading
 import tokenize
+import unicodedata
 import unittest
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -184,8 +186,10 @@ def install_config_module(module: ModuleType) -> None:
         _bypass_keys = {
             "_hash_dirty_var",
             "_hash_cache_var",
+            "_hash_generation_var",
             "_get_dict_dirty_keys_var",
             "_get_dict_cache_var",
+            "_config_lock",
             "__annotations__",
         }
 
@@ -261,6 +265,12 @@ def install_config_module(module: ModuleType) -> None:
     module._get_dict_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._get_dict_cache", default=None
     )  # type: ignore[attr-defined]
+    module._hash_generation_var = ContextVar(  # pyrefly: ignore[missing-attribute]
+        f"{module.__name__}._hash_generation", default=-1
+    )  # type: ignore[attr-defined]
+    # Guards structural changes to _config / _compile_ignored_keys (add_config)
+    # against concurrent readers (_get_dict / get_hash).
+    module._config_lock = threading.Lock()  # type: ignore[attr-defined]
 
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"
@@ -304,7 +314,12 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str
     return assignments
 
 
-_GetDictCacheKey = tuple[tuple[str, ...], tuple[str, ...], bool]
+# The trailing int is len(self._config) at cache time: _config only ever
+# grows in production (__delattr__ hides rather than pops), so any add_config
+# changes it and invalidates every context's cache, not just the one that
+# registered the key (ContextVar.set is context-scoped). Code that shrinks
+# _config (e.g. test helpers that pop) must also clear _get_dict_cache_var.
+_GetDictCacheKey = tuple[tuple[str, ...], tuple[str, ...], bool, int]
 
 
 @dataclass
@@ -392,8 +407,10 @@ class ConfigModule(ModuleType):
     _config: dict[str, _ConfigEntry]
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
+    _config_lock: threading.Lock
     _hash_dirty_var: ContextVar[bool]
     _hash_cache_var: ContextVar[bytes | None]
+    _hash_generation_var: ContextVar[int]
     # Per-thread cache state, backed by ContextVar so each thread/context gets
     # its own dirty set and cache (config values are per-thread via ContextVar).
     # None means fully dirty (initial state or >_GET_DICT_DIRTY_KEYS_CAP keys
@@ -583,6 +600,7 @@ class ConfigModule(ModuleType):
             tuple(ignored_keys) if ignored_keys else (),
             tuple(ignored_prefixes) if ignored_prefixes else (),
             skip_default,
+            len(self._config),
         )
 
         # Try to take a shortcut and only update dirty keys on top of a cached base.
@@ -604,9 +622,11 @@ class ConfigModule(ModuleType):
                 self._get_dict_cache_var.set(cache)
                 self._get_dict_dirty_keys_var.set(set())
 
-        # Recompute everything otherwise.
+        # Recompute everything otherwise. Snapshot under _config_lock so a
+        # concurrent add_config cannot change the dict size mid-iteration.
         if keys_to_update is None:
-            keys_to_update = self._config.keys()
+            with self._config_lock:
+                keys_to_update = list(self._config.keys())
         if config is None:
             config = {}
 
@@ -828,9 +848,18 @@ class ConfigModule(ModuleType):
 
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
-        if self._hash_dirty_var.get() or self._hash_cache_var.get() is None:
+        # The generation check makes add_config visible to contexts OTHER than
+        # the one that registered it: the dirty/cache ContextVars are
+        # context-scoped, but len(self._config) is shared and monotonic.
+        if (
+            self._hash_dirty_var.get()
+            or self._hash_cache_var.get() is None
+            or self._hash_generation_var.get() != len(self._config)
+        ):
+            with self._config_lock:
+                ignored_keys = list(self._compile_ignored_keys)
             dict_to_hash = self._get_dict(
-                ignored_keys=list(self._compile_ignored_keys), readonly_values=True
+                ignored_keys=ignored_keys, readonly_values=True
             )
             string_to_hash = repr(sorted(dict_to_hash.items()))
             self._hash_cache_var.set(
@@ -839,6 +868,7 @@ class ConfigModule(ModuleType):
                 ).digest()
             )
             self._hash_dirty_var.set(False)
+            self._hash_generation_var.set(len(self._config))
         result = self._hash_cache_var.get()
         if result is None:
             raise AssertionError(
@@ -877,6 +907,63 @@ class ConfigModule(ModuleType):
                 from torch._dynamo.utils import warn_once
 
                 warn_once(f"key {k} with value {v} is not understood by this config")
+
+    def add_config(
+        self, name: str, config: "_Config", *, compile_ignored: bool = False
+    ) -> None:
+        """Register a config key post-install.
+
+        For out-of-tree backends to expose custom knobs through an installed
+        ConfigModule. The key flows through the normal __getattr__ /
+        __setattr__ / patch / get_config_copy / save_config / load_config
+        paths.
+
+        ``compile_ignored`` (default ``False``) excludes the key from
+        ``get_hash()`` only; it does not affect the Inductor FX graph cache
+        key (built from ``save_config_portable()``). To keep a knob out of
+        that key, add its prefix to ``_cache_config_ignore_prefix``.
+
+        Registration is thread-safe and visible to all threads/contexts.
+        Calling this at backend import time, before any compilation, is still
+        best practice.
+
+        Raises AssertionError if ``name`` is already registered, shadows an
+        existing attribute on the module, or is not a valid Python identifier
+        (after NFKC normalization).
+        """
+        # Python parses source identifiers as NFKC-normalized, so reject
+        # spellings that normalize to a different name: source access would
+        # compile to the normalized attribute while getattr() reaches the
+        # registered key (e.g. "\u212a" compiles as "K").
+        normalized_name = unicodedata.normalize("NFKC", name)
+        if (
+            normalized_name != name
+            or not name.isidentifier()
+            or keyword.iskeyword(name)
+        ):
+            raise AssertionError(
+                f"invalid config name {name!r}: must be a valid Python identifier"
+            )
+        # Validate-and-publish under _config_lock so concurrent registrations
+        # cannot both pass the checks, and readers cannot hit "dictionary
+        # changed size during iteration".
+        with self._config_lock:
+            if name in self._config:
+                raise AssertionError(f"config {self.__name__}.{name} already exists")
+            # Reject names that already resolve on the module (sub-config proxies
+            # such as inductor's `triton`, ConfigModule methods like `patch`, and
+            # imports left in place by install_config_module): the entry would be
+            # exported by get_config_copy() / save_config_portable() (and thus land
+            # in the FX cache key) yet remain unreachable and unassignable via
+            # attribute access. Placed after the duplicate check because hasattr is
+            # also true for already-registered keys.
+            if hasattr(self, name):
+                raise AssertionError(
+                    f"config name {name!r} shadows an existing {self.__name__} attribute"
+                )
+            self._config[name] = _ConfigEntry(config, name)
+            if compile_ignored:
+                self._compile_ignored_keys.add(name)
 
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()

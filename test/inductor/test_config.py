@@ -198,6 +198,32 @@ class TestInductorConfig(TestCase):
             ),
         )
 
+    def test_compile_api_accepts_added_config(self):
+        # Regression for ConfigModule.add_config: a key registered on
+        # torch._inductor.config must be accepted by apply_options (the
+        # options={...} path) instead of raising "Unexpected optimization
+        # option", and must flow into wrapper.config -- the dict that
+        # compile_fx applies via config.patch(config_patches).
+        from torch import _TorchCompileInductorWrapper
+        from torch.utils._config_module import Config
+
+        self.assertNotIn("ac_e2e", config.get_config_copy())
+        try:
+            config.add_config("ac_e2e", Config(default=False, value_type=bool))
+            wrapper = _TorchCompileInductorWrapper(
+                mode=None, options={"ac_e2e": True}, dynamic=None
+            )
+            self.assertIn("ac_e2e", wrapper.config)
+            self.assertEqual(wrapper.config["ac_e2e"], True)
+        finally:
+            # tearDown's load_config() restores values but does not unregister
+            # keys added to _config, so pop explicitly to keep the fixture clean.
+            config._config.pop("ac_e2e", None)
+            config._compile_ignored_keys.discard("ac_e2e")
+            config._hash_dirty_var.set(True)
+            config._get_dict_dirty_keys_var.set(None)
+            config._get_dict_cache_var.set(None)
+
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
         self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
