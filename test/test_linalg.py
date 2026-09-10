@@ -5586,7 +5586,7 @@ class TestLinalgDevice(TestCase):
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
-        pivots = (True, False) if self.device_type != "cpu" else (True,)
+        pivots = (True, False) if self.device_type not in ("cpu", "xpu") else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             shape = batch + ms
@@ -5608,8 +5608,8 @@ class TestLinalgDevice(TestCase):
         A = torch.ones(5, 3, 3, device=device)
         self.assertTrue((torch.linalg.lu_factor_ex(A, pivot=True).info >= 0).all())
 
-        if self.device_type == 'cpu':
-            # Error checking, no pivoting variant on CPU
+        if self.device_type in ('cpu', 'xpu'):
+            # Error checking, no pivoting variant on CPU/XPU
             fns = [torch.lu, torch.linalg.lu_factor, torch.linalg.lu_factor_ex, torch.linalg.lu]
             for f in fns:
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
