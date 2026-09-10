@@ -13,7 +13,7 @@ jiterator_also_stringify_as(
                        }),
     dot_product_4_string)
 
-    TEST(TestJiteratorMacros, DefinesCode) {
+TEST(TestJiteratorMacros, DefinesCode) {
   const float lhs[] = {1.0f, 2.0f, 3.0f, 4.0f};
   const float rhs[] = {5.0f, 6.0f, 7.0f, 8.0f};
 
