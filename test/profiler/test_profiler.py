@@ -54,7 +54,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -2376,7 +2376,7 @@ class TestProfilerDevice(TestCase):
                 found_gemm = True
             if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
-        if device_type in ("cuda",):
+        if device_type in ("cuda", "xpu"):
             self.assertTrue(found_gemm)
             self.assertTrue(found_memcpy)
         else:
@@ -2917,11 +2917,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -3122,6 +3117,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertEqual(len(p.events()), 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
+    @skipXPUIf(
+        True,
+        "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
+    )
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
@@ -3192,7 +3191,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 @instantiate_parametrized_tests
