@@ -10,11 +10,11 @@ import dataclasses
 from typing import Any
 
 import torch
-from torch._inductor.kernel.flex_gemm.constraints import (
-    local_reduce_needs_physical_combine,
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
 )
-from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
-from torch._inductor.kernel.gemm_epilogue_codegen import gemm_epilogue_cutedsl_op_name
+from torch._inductor.kernel.gemm_epilogue_codegen import _cute_op_name
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch.fx.experimental.symbolic_shapes import (
     guard_int,
@@ -74,25 +74,13 @@ class FlexGemmTensorSSAFact:
 
 
 @dataclasses.dataclass(frozen=True)
-class GroupedTensorSSALayout:
-    """Describe a grouped M/N TensorSSA view inside the generated epilogue.
-
-    Attributes:
-        axis: GEMM output dimension being grouped: 0 for M, 1 for N.
-        group_size: Number of contiguous output elements reduced as one group.
-    """
-
-    axis: int
-    group_size: int
-
-    @property
-    def reduce_dims(self) -> tuple[int, ...]:
-        return (-1, 2) if self.axis == 1 else (-2, 1)
+class GroupedTensorSSALayout(GemmReductionGeometry):
+    """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the grouped extent available in one TensorSSA fragment."""
         return (
-            f"cutlass.const_expr(min({self.group_size}, "
+            f"cutlass.const_expr(min({self.group}, "
             f"cute.size({source}.shape, mode=[0])))"
         )
 
@@ -100,7 +88,7 @@ class GroupedTensorSSALayout:
         """Return the number of grouped runs in one TensorSSA fragment."""
         return (
             f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
-            f"// min({self.group_size}, cute.size({source}.shape, mode=[0])))"
+            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
         )
 
     def tensorssa_shape(self, source: Any) -> str:
@@ -121,15 +109,6 @@ class GroupedTensorSSALayout:
         return (
             "((None, 1, None), 1, 1)" if self.axis == 1 else "((1, None, None), 1, 1)"
         )
-
-    def matches_reduction_dim(self, dim: Any) -> bool:
-        """Return whether an FX reduction selects this layout's grouped dimension."""
-        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
-        return len(dims) == 1 and dims[0] in self.reduce_dims
-
-    @property
-    def needs_physical_combine(self) -> bool:
-        return local_reduce_needs_physical_combine(self.axis, self.group_size)
 
 
 FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
@@ -182,7 +161,7 @@ def is_pointwise_node(node: torch.fx.Node) -> bool:
     return (
         isinstance(node.target, torch._ops.OpOverload)
         and torch.Tag.pointwise in node.target.tags
-    ) or gemm_epilogue_cutedsl_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
+    ) or _cute_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
 
 
 def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
