@@ -327,7 +327,7 @@ class TestAccelerator(TestCase):
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
 
-    def test_accelerator_api_privateuse1_device_guard_hook(self):
+    def test_accelerator_api_privateuse1_device_guard(self):
         from torch.utils.backend_registration import (
             _setup_privateuseone_for_python_backend,
         )
@@ -342,6 +342,8 @@ class TestAccelerator(TestCase):
                 hook_calls.append(("guard.synchronizeDevice", device_index))
 
         _setup_privateuseone_for_python_backend("foo", device_guard=MyDeviceGuard())
+
+        torch.accelerator.synchronize()
 
         self.assertIn(
             "guard.synchronizeDevice",
