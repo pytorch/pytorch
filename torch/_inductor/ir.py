@@ -1994,7 +1994,7 @@ class Reduction(Loops):
 
             # Find the reduction that get split
             split_reduction = None
-            if config.triton.mix_order_reduction and isinstance(out, TensorBox):
+            if isinstance(out, TensorBox):
 
                 def _find_split_reduction(
                     cur_node: TensorBox,
@@ -5543,47 +5543,58 @@ class ComputedBuffer(OperationBuffer):
     _original_ranges: Sequence[_IntLike] | None = None
     _original_reduction_ranges: Sequence[_IntLike] | None = None
 
+    @cache_on_self
+    def get_original_reduction(self) -> Reduction | None:
+        if not isinstance(self.data, Reduction):
+            return None
+        if self._original_inner_fn is None:
+            return self.data
+        if self._original_ranges is None or self._original_reduction_ranges is None:
+            raise AssertionError("incomplete original reduction metadata")
+        return Reduction(
+            device=self.data.device,
+            dtype=self.data.dtype,
+            inner_fn=self._original_inner_fn,
+            ranges=self._original_ranges,
+            reduction_ranges=self._original_reduction_ranges,
+            reduction_type=self.data.reduction_type,
+            src_dtype=self.data.src_dtype,
+            reduction_hint=self.data.reduction_hint,
+            strict_reduction_multirow=self.data.strict_reduction_multirow,
+            strict_reduction_rblock=self.data.strict_reduction_rblock,
+        )
+
+    @cache_on_self
+    def get_original_reduction_read_writes(self) -> dependencies.ReadWrites | None:
+        reduction = self.get_original_reduction()
+        if reduction is None:
+            return None
+        return dependencies.extract_read_writes(
+            reduction.inner_fn,
+            reduction.ranges,
+            reduction.reduction_ranges,
+        )
+
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
-        if self._split_size is None:
-            raise AssertionError("Expected self._split_size is not None")
-        if self._original_inner_fn is None:
-            raise AssertionError("Expected self._original_inner_fn is not None")
-        if self._original_ranges is None:
-            raise AssertionError("Expected self._original_ranges is not None")
-        if self._original_reduction_ranges is None:
-            raise AssertionError("Expected self._original_reduction_ranges is not None")
-
-        if not isinstance(self.data, Reduction):
-            raise AssertionError(f"{type(self.data)}")
+        reduction = self.get_original_reduction()
+        if reduction is None:
+            raise AssertionError(f"expected Reduction, got {type(self.data)}")
         old_data = self.data
         old_layout = self.layout
         try:
-            new_data = Reduction(
-                device=old_data.device,
-                dtype=old_data.dtype,
-                inner_fn=self._original_inner_fn,
-                ranges=self._original_ranges,
-                reduction_ranges=self._original_reduction_ranges,
-                reduction_type=old_data.reduction_type,
-                src_dtype=old_data.src_dtype,
-                reduction_hint=old_data.reduction_hint,
-                strict_reduction_multirow=old_data.strict_reduction_multirow,
-                strict_reduction_rblock=old_data.strict_reduction_rblock,
-            )
-            self.data = new_data
-            # this layout does not matter since we skip tl.store
-            # later
+            self.data = reduction
             self.layout = FixedLayout(
-                old_data.device,
-                old_data.dtype,
-                self._original_ranges,
+                reduction.device,
+                reduction.dtype,
+                reduction.ranges,
             )
             self.get_default_sizes_body.clear_cache(self)
             yield
         finally:
             self.data = old_data
             self.layout = old_layout
+            self.get_default_sizes_body.clear_cache(self)
 
     @staticmethod
     @contextlib.contextmanager
@@ -6247,6 +6258,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        template_local_reduction_tile: tuple[int, int] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6267,6 +6279,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
+        self.template_local_reduction_tile = template_local_reduction_tile
 
         self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
@@ -6388,6 +6401,8 @@ class ChoiceCaller:
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
+    template_local_reduction_tile: tuple[int, int] | None = None
+
     def get_make_kernel_render(self) -> Any:
         raise NotImplementedError
 

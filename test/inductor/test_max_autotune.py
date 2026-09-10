@@ -57,7 +57,13 @@ from torch._inductor.heuristics.template.triton import (
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.ir import (
+    Buffer,
+    ChoiceCaller,
+    FixedLayout,
+    FlexibleLayout,
+    MultiTemplateBuffer,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
@@ -101,6 +107,7 @@ from torch._inductor.utils import (
     fresh_cache,
     get_k_splits,
     run_and_get_code,
+    run_and_get_kernels,
     use_decompose_k_choice,
 )
 from torch._inductor.virtualized import V
@@ -168,6 +175,376 @@ class FailChoiceCaller(ChoiceCaller):
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize(
+        "case", ("template", "pointwise", "reshaped_pointwise", "broadcast_input")
+    )
+    def test_persistent_tma_block_local_reduction_epilogue(self, case):
+        def f(a, b, bias):
+            mm = a @ b
+            if case in ("template", "broadcast_input"):
+                source = mm
+                blocked = source.view(2, 128, 2, 128)
+            elif case == "pointwise":
+                source = mm.relu()
+                blocked = source.view(2, 128, 2, 128)
+            else:
+                source = mm.view(2, 128, 2, 128).relu()
+                blocked = source
+            if case == "broadcast_input":
+                blocked = blocked + bias
+            return source, blocked.amax((1, 3))
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        bias = torch.randn(128, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, bias)
+
+        self.assertEqual(actual, f(a, b, bias))
+        FileCheck().check("block_local_").check_count(
+            "triton_helpers.max2(", 2, exactly=True
+        ).run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize("groups", ((2, 2), (3, 2)))
+    def test_persistent_tma_block_local_reduction_indexed_input(self, groups):
+        groups_m, groups_n = groups
+
+        def f(a, b, weight):
+            weighted = (a @ b) * weight
+            return weighted.view(groups_m, 128, groups_n, 128).sum((1, 3))
+
+        a = torch.randn(groups_m * 128, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, groups_n * 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(
+            groups_m * 128,
+            groups_n * 128,
+            device=GPU_TYPE,
+            dtype=torch.bfloat16,
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, weight)
+
+        self.assertEqual(actual, f(a, b, weight))
+        FileCheck().check("block_local_").check("tl.sum").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_later_consumer(self):
+        def f(a, b):
+            mm = a @ b
+            blocked = mm.view(2, 128, 2, 128)
+            reduced = blocked.amax((1, 3))
+            return blocked - reduced[:, None, :, None]
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_atomic_add_fallback(self):
+        def f(a, b, index, out):
+            reduced = (a @ b).view(2, 128, 2, 128).amax((1, 3))
+            return out.index_add_(0, index, reduced)
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        index = torch.arange(2, device=GPU_TYPE) // 2
+        out = torch.randn(1, 2, device=GPU_TYPE, dtype=torch.bfloat16)
+        patches = {
+            "epilogue_fusion_with_atomic_add": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": "1",
+            "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+        }
+        with config.patch(patches):
+            actual, code = run_and_get_code(torch.compile(f), a, b, index, out.clone())
+
+        self.assertEqual(actual, f(a, b, index, out.clone()))
+        FileCheck().check("block_local_").check("torch.ops.aten.index_add.default").run(
+            code[0]
+        )
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_alternating_epilogues(self):
+        def f(a, b, scale):
+            mm = a @ b
+            reduced = mm.view(2, 128, 2, 128).amax((1, 3))
+            pointwise = reduced.relu()
+            second_reduction = (pointwise.unsqueeze(-1) * scale).sum(-1)
+            return mm, reduced, pointwise, second_reduction
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.randn(2, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, kernels = run_and_get_kernels(torch.compile(f), a, b, scale)
+
+        self.assertEqual(actual, f(a, b, scale))
+        block_local_kernels = [code for code in kernels if "block_local_" in code]
+        self.assertEqual(len(block_local_kernels), 1)
+        FileCheck().check("tl.maximum").run(block_local_kernels[0])
+        self.assertEqual(block_local_kernels[0].count("tl.store("), 4)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_persistent_tma_block_local_reduction_mixed_index_sibling(self):
+        def f(a, b):
+            mm = a @ b
+            transposed = mm.T + 1
+            reduced = mm.view(2, 128, 2, 128).amax((1, 3))
+            return transposed, reduced
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize(
+        "case",
+        (
+            "sum",
+            "min",
+            "nan",
+            "signed_zero",
+            "multiple",
+            "permute",
+            "multiple_index",
+            "relu",
+            "chain",
+            "larger_tile_m",
+            "larger_tile_n",
+            "larger_tile_both",
+            "larger_tile_relu",
+            "unsplit",
+            "nondividing_split",
+            "non_power_of_two_chain",
+            "smaller_tile",
+            "nondivisible_tile",
+            "disabled_epilogue",
+        ),
+    )
+    def test_persistent_tma_block_local_reduction_cases(self, case):
+        if case == "nondivisible_tile":
+            block = 96
+        elif case == "unsplit":
+            block = 64
+        else:
+            block = 128
+        if case == "nondivisible_tile":
+            groups = 4
+        else:
+            groups = 3 if case.startswith("larger_tile") else 2
+        size = groups * block
+
+        def f(a, b):
+            blocked = (a @ b).view(groups, block, groups, block)
+            if case == "sum":
+                return blocked.sum((1, 3))
+            if case == "min":
+                return blocked.amin((1, 3))
+            if case == "signed_zero":
+                zeroed = blocked * 0.0
+                return zeroed.amax((1, 3)), zeroed.amin((1, 3))
+            if case == "multiple":
+                return (
+                    blocked.amax((1, 3)),
+                    blocked.abs().amax((1, 3)),
+                    blocked.square().amax((1, 3)),
+                )
+            if case == "permute":
+                return blocked.permute(2, 1, 0, 3).amax((1, 3))
+            if case == "multiple_index":
+                return (blocked + blocked.flip(-1)).amax((1, 3))
+            if case in ("relu", "larger_tile_relu"):
+                return blocked.relu().amax((1, 3))
+            if case in ("chain", "non_power_of_two_chain"):
+                reduced = blocked.amax((1, 3))
+                extent = 12 if case == "non_power_of_two_chain" else 8
+                return reduced.T.unsqueeze(-1).expand(2, 2, extent).amax(-1)
+            return blocked.amax((1, 3))
+
+        torch.manual_seed(0)
+        a = torch.randn(size, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, size, device=GPU_TYPE, dtype=torch.bfloat16)
+        if case == "nan":
+            a[0, 0] = float("nan")
+        patches = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": "1",
+            "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+        }
+        if case == "disabled_epilogue":
+            patches["epilogue_fusion"] = False
+        stack = contextlib.ExitStack()
+        tile = {
+            "larger_tile_m": (256, 128),
+            "larger_tile_n": (128, 256),
+            "larger_tile_both": (256, 256),
+            "larger_tile_relu": (256, 256),
+            "smaller_tile": (64, 128),
+            "nondivisible_tile": (128, 128),
+        }.get(case)
+        if tile is not None:
+            from torch._inductor.heuristics.registry import get_template_heuristic
+
+            heuristic = get_template_heuristic(
+                "triton::mm_persistent_tma", GPU_TYPE, "mm"
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    heuristic,
+                    "mm_configs",
+                    [GemmConfig(*tile, 64, 3, 8)],
+                )
+            )
+            patches["test_configs.max_mm_configs"] = 1
+        if case == "nondividing_split":
+
+            def reduction_split_factor(
+                self, device, reduction_numel_hint, numel_hint, inner_reduction
+            ):
+                return 3 if reduction_numel_hint == block * block else 1
+
+            stack.enter_context(
+                mock.patch(
+                    "torch._inductor.choices.InductorChoices.reduction_split_factor",
+                    reduction_split_factor,
+                )
+            )
+        with stack, config.patch(patches):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        if case in (
+            "sum",
+            "min",
+            "nan",
+            "signed_zero",
+            "multiple",
+            "relu",
+            "chain",
+            "larger_tile_m",
+            "larger_tile_n",
+            "larger_tile_both",
+            "larger_tile_relu",
+            "unsplit",
+            "non_power_of_two_chain",
+        ):
+            FileCheck().check("block_local_").run(code[0])
+        else:
+            FileCheck().check_not("block_local_").run(code[0])
+        if case == "sum":
+            FileCheck().check("to(tl.float32)").run(code[0])
+            FileCheck().check("tl.sum").run(code[0])
+        elif case == "nan":
+            self.assertEqual(torch.isnan(actual), torch.isnan(f(a, b)))
+        elif case == "signed_zero":
+
+            def reduce(mm):
+                zeroed = mm.view(groups, block, groups, block) * 0.0
+                return zeroed.amax((1, 3)), zeroed.amin((1, 3))
+
+            expected = torch.compile(reduce)(a @ b)
+            self.assertEqual(
+                tuple(torch.signbit(x) for x in actual),
+                tuple(torch.signbit(x) for x in expected),
+            )
+        elif case == "multiple":
+            FileCheck().check_count("block_local_", 3, exactly=False).run(code[0])
+        if case in ("relu", "larger_tile_relu"):
+            FileCheck().check("tl.maximum").check("block_local_").run(code[0])
+        if case.startswith("larger_tile"):
+            FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
+        if case == "non_power_of_two_chain":
+            FileCheck().check_not("tl.arange(0, 12)").run(code[0])
+
     def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
         make_matrix = functools.partial(
             random_matrix_with_scaled_reduction_dim,
@@ -5193,6 +5570,158 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize("use_async_compile", (True, False))
+    def test_template_local_reduction_respects_autotune_winner(self, use_async_compile):
+        def f(a, b):
+            return (a @ b).view(2, 128, 2, 128).amax((1, 3))
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with self.get_common_patches(
+            use_async_compile,
+            True,
+            aten_time=0.001,
+            triton_time=100.0,
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("extern_kernels.mm").run(code[0])
+        FileCheck().check_not("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_template_local_reduction_multi_kernel_hints(self):
+        def f(a, b):
+            return (a @ b).view(2, 128, 2, 128).amax((1, 3))
+
+        def benchmark_choice(choice, _):
+            if isinstance(choice, ExternKernelCaller):
+                return 10.0
+            hint_override = getattr(choice, "hint_override", None)
+            if getattr(choice, "template_local_reduction_tile", None) == (128, 128):
+                return 1.0 if hint_override == 64 else 0.1
+            return 0.1 if hint_override == 64 else 1.0
+
+        selected_callers = {}
+        original_finalize = MultiTemplateBuffer.finalize_as_triton_callers
+
+        def finalize_as_triton_callers(buffer, callers):
+            selected_callers.update(callers)
+            original_finalize(buffer, callers)
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with (
+            self.get_common_patches(False, True),
+            config.patch(multi_kernel_hints=[64]),
+            mock.patch.object(
+                AlgorithmSelectorCache, "benchmark_choice", benchmark_choice
+            ),
+            mock.patch.object(
+                MultiTemplateBuffer,
+                "finalize_as_triton_callers",
+                finalize_as_triton_callers,
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        self.assertEqual(set(selected_callers), {None, 64})
+        for choice in selected_callers.values():
+            self.assertEqual(choice.template_local_reduction_tile, (128, 128))
+        FileCheck().check("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_template_local_reduction_multi_kernel_hints_fallback(self):
+        def f(a, b):
+            return (a @ b).view(2, 128, 2, 128).amax((1, 3))
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with (
+            self.get_common_patches(
+                False,
+                True,
+                aten_time=10.0,
+                triton_time=1.0,
+            ),
+            config.patch(multi_kernel_hints=[64]),
+            mock.patch(
+                "torch._inductor.codegen.cuda_combined_scheduling."
+                "CUDACombinedScheduling.can_fuse_reduction_epilogue_choice",
+                return_value=False,
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check_not("extern_kernels.mm").check_not("block_local_").run(
+            code[0]
+        )
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    def test_template_local_reduction_epilogue_index_dtype(self):
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        def f(a, b, scale):
+            return ((a @ b) * scale).view(2, 128, 2, 128).sum((1, 3))
+
+        original_can_use_32bit = SIMDScheduling.can_use_32bit_indexing
+
+        def can_use_32bit_indexing(numel, buffers):
+            buffers = tuple(buffers)
+            if any(buf.get_dtype() == torch.uint8 for buf in buffers):
+                return False
+            return original_can_use_32bit(numel, buffers)
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        scale = torch.ones(256, 256, device=GPU_TYPE, dtype=torch.uint8)
+        with (
+            self.get_common_patches(
+                False,
+                True,
+                aten_time=10.0,
+                triton_time=1.0,
+            ),
+            mock.patch.object(
+                SIMDScheduling,
+                "can_use_32bit_indexing",
+                can_use_32bit_indexing,
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b, scale)
+
+        self.assertEqual(actual, f(a, b, scale))
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "block_local_"
+        ).run(code[0])
+
     @contextlib.contextmanager
     def get_common_patches(
         self,
@@ -5753,6 +6282,12 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        "test_template_local_reduction_multi_kernel_hints": (
+            "Covers the synchronous hint prepass"
+        ),
+        "test_template_local_reduction_multi_kernel_hints_fallback": (
+            "Covers the synchronous hint prepass"
+        ),
     }
 
     @classmethod

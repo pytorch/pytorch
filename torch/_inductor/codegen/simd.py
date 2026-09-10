@@ -661,6 +661,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         is_reduction: bool,
         numels: dict[str, sympy.Expr],
         no_x_dim: bool,
+        *,
+        persistent_reduction: bool | None = None,
     ) -> list[IterationRangesRoot]:
         active_prefixes = OrderedSet(
             prefix for prefix in all_prefixes if prefix in numels
@@ -688,6 +690,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
 
         range_trees = []
+        persistent_reduction = (
+            self.persistent_reduction
+            if persistent_reduction is None
+            else persistent_reduction
+        )
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
             tensor_dim = tensor_dim_map.get(prefix)
@@ -701,7 +708,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     index,
                     self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
-                    is_loop=is_reduction and not self.persistent_reduction,
+                    is_loop=is_reduction and not persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
                     has_zdim="z" in numels,
@@ -1235,6 +1242,34 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         finally:
             self.range_trees = saved
             self.simplify_indexing.cache_clear()
+
+    @contextlib.contextmanager
+    def use_iteration_ranges(
+        self,
+        range_trees: Sequence[IterationRangesRoot],
+        *,
+        is_reduction: bool,
+    ) -> Iterator[None]:
+        """Codegen in an alternate pointwise or persistent-reduction space."""
+        saved_nodes = self.range_tree_nodes
+        saved_numels = self.numels
+        saved_inside_reduction = self.inside_reduction
+        saved_persistent_reduction = self.persistent_reduction
+        saved_cooperative_reduction = self.cooperative_reduction
+        self.range_tree_nodes = {}
+        self.numels = {tree.prefix: tree.numel for tree in range_trees}
+        self.inside_reduction = is_reduction
+        self.persistent_reduction = is_reduction
+        self.cooperative_reduction = False
+        try:
+            with self.use_range_trees(range_trees):
+                yield
+        finally:
+            self.range_tree_nodes = saved_nodes
+            self.numels = saved_numels
+            self.inside_reduction = saved_inside_reduction
+            self.persistent_reduction = saved_persistent_reduction
+            self.cooperative_reduction = saved_cooperative_reduction
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
@@ -3500,6 +3535,15 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        fused_schedule = [*prologue_nodes, *epilogue_nodes]
+        if fused_schedule:
+            fused_features = SIMDKernelFeatures(
+                fused_schedule,
+                sympy_product(kernel.output_node.get_size()),
+            )
+            if fused_features.select_index_dtype() == torch.int64:
+                kernel._index_dtype_override = "tl.int64"
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
