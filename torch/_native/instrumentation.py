@@ -200,24 +200,13 @@ def _make_wrapper(
     sample: Callable[[], tuple[int | None, int | None]],
     compiled_hint: bool | None = None,
 ) -> Callable[..., R]:
-    """Shared instrumentation core for both DSL entry points.
-
-    ``sample()`` returns a ``(hits, misses)`` snapshot of the relevant cache;
-    a ``misses`` increase across the call means a real compile fired. Timing,
-    error handling, classification, and emission are identical across DSLs --
-    only ``sample`` (and the reported ``dsl``) differ.
-
-    ``compiled_hint`` overrides that inference for a caller that already KNOWS which
-    arm it is in. The miss/hit delta only works when ``fn`` carries ``cache_info``;
-    a caller holding its own memo (plan_cache.cached_plan) wraps a plain closure it
-    invokes only on a miss, and inference would report every real compile as a hit.
+    """Instrument either DSL entry point. sample() returns cache hits and misses;
+    an increased miss count means compilation. compiled_hint overrides inference for
+    external memos whose miss-only closure has no cache_info.
     """
 
-    # THIS frame is the runtime proof of instrumentation: a coverage test walks the stack
-    # from inside a real cute.compile and asserts that some frame running this very code
-    # object encloses it, which holds however the op is factored (a decorator on its own
-    # compile fn, or a shared helper reached through cached_plan(op=...)). Nothing has to be
-    # stored in the frame for that -- the frame's identity is the signal.
+    # Coverage identifies this code object on cute.compile's stack, independent of whether
+    # instrumentation wraps the compile function or a cached_plan helper.
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
         # Fast path: do nothing extra unless a sink is listening. This runs on
@@ -304,27 +293,18 @@ def _instrument_cached_compile(
     key_fn: Callable[..., str] | None = None,
     compiled: bool | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Shared implementation behind the per-DSL compile instrumentation.
+    """Implement per-DSL compile instrumentation.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
-            instead be a callable receiving the wrapped function's arguments
-            and returning the label per call; if that callable raises, the
-            label falls back to ``"<op-label-error>"`` without changing the
-            wrapped function's result or exception.
+        op: Operator symbol, or a callable deriving one from each call. Label
+            errors use ``"<op-label-error>"`` without affecting the wrapped call.
         dsl: DSL name reported in the event, e.g. ``"cutedsl"``.
-        key_fn: Optional callable with the wrapped function's signature
-            returning a short string describing the compile key for logs.
-            Defaults to a repr of the args/kwargs.
-        compiled: Report this outcome instead of inferring it from the cache
-            counters. For a caller that owns its own memo and only invokes the
-            wrapped callable on a miss -- the counters are not readable through
-            a plain closure, and inference then calls every compile a hit.
+        key_fn: Optional callable describing the compile key; defaults to repr.
+        compiled: Explicit outcome for external, miss-only memos whose closure
+            exposes no cache counters.
 
-    Returns a decorator. The decorated function behaves identically to the
-    original (same return value, same caching); it only adds a log line and
-    a tlparse artifact per call. Errors raised by the wrapped compile are
-    timed, reported with ``outcome="error"``, and re-raised unchanged.
+    Returns a behavior-preserving decorator that logs and emits a tlparse artifact.
+    Compile errors are timed, reported as errors, and re-raised unchanged.
     """
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:

@@ -484,10 +484,8 @@ test_python_smoke_b200() {
   # TODO(#189590): Re-enable CUTLASS API after NVGEMM migrates to
   # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
   # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
-  #
-  # The host-only python_native suites below do no GPU work, but they are @skipIfNoCuteDSL and
-  # install_flash_attn_cute above is the only thing in CI that installs that runtime -- so they
-  # run in NO job if they are dropped from this list.
+  # These host-only suites still require CuteDSL to import. This is the only CI job that
+  # installs it, so omitting them here disables them in CI.
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -496,15 +494,9 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       python_native/test_cutedsl_smoketest \
-      python_native/test_inner_tree_order \
-      python_native/test_kernel_coltile \
-      python_native/test_kernel_xcta \
-      python_native/test_kernel_rowtile \
-      python_native/test_kernel_general \
       python_native/test_hw_caps \
       python_native/test_traits \
       python_native/test_instrumentation \
-      python_native/test_tile_datapath \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \

@@ -1,10 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
-#
-# Structural conformance for the reduction trait protocol: a trait implementing only part of
-# it folds the wrong thing silently rather than failing. SHAPE only, with one exception -- the
-# protocol's LAW needs two real fold shapes to compare and is pinned by the inner-tree order's
-# suite; the var/std divisor clamp is asserted here, since a one-thread probe needs no
-# reduction kernel and this is where the clamp is defined.
+# Structural conformance for reduction traits, whose partial implementations can silently
+# misfold. Protocol laws need two real fold shapes; this file also probes the local var/std
+# divisor clamp with one thread.
 import inspect
 import sys
 import unittest
@@ -14,9 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
-# The module imports cutlass at module scope, so the guard must precede the import rather than
-# decorate the class -- otherwise an image without the runtime fails collection for the whole
-# file instead of skipping. sys.exit keeps a direct run a success.
+# Guard before importing the cutlass-dependent module; sys.exit keeps direct runs successful.
 if not TEST_CUTEDSL:
     sys.stderr.write("CuTeDSL not available\n")
     if __name__ == "__main__":
@@ -48,9 +43,7 @@ class TestTraitProtocol(TestCase):
         return trait(**kwargs)
 
     def test_every_trait_implements_the_protocol(self):
-        # THREE value methods, and the split is what lets any trait ride any fold order. A tree calls
-        # leaf then combine, so a trait carrying its per-element transform only in `reduce` folds RAW
-        # values -- a wrong answer, not an error.
+        # Trees use leaf then combine; transforms implemented only in reduce silently fold raw values.
         for name, trait in sorted(self._traits().items()):
             with self.subTest(trait=name):
                 for method in ("init", "leaf", "combine", "reduce", "project"):
@@ -65,8 +58,7 @@ class TestTraitProtocol(TestCase):
                 )
 
     def test_field_count_matches_field_dtypes(self):
-        # nfields sizes every partials buffer and accumulator tuple; fdtypes types them. A
-        # disagreement is a mis-sized gmem allocation, not a type error, so assert it here.
+        # nfields sizes partial buffers and tuples; fdtypes types them, so disagreement misallocates.
         for name, trait in sorted(self._traits().items()):
             with self.subTest(trait=name):
                 t = self._make(trait)
@@ -82,9 +74,8 @@ class TestTraitProtocol(TestCase):
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
     def test_welford_divisor_clamps_at_zero(self):
-        # `correction >= n` must divide by ZERO -- the +inf ATen returns -- never by a negative
-        # number, which returned a NEGATIVE variance. _welford_denom is @cute.jit and rejects
-        # host-side values, but needs no reduction kernel: a one-thread probe evaluates it directly.
+        # correction >= n must divide by zero, yielding ATen's +inf, not negative variance.
+        # A one-thread kernel probes the cute.jit helper directly.
         @cute.kernel
         def probe(dst: cute.Tensor, nf: cutlass.Float32, correction: cutlass.Constexpr):
             tidx, _, _ = cute.arch.thread_idx()
@@ -100,8 +91,7 @@ class TestTraitProtocol(TestCase):
             )
 
         out = torch.zeros(1, device="cuda")
-        # n itself and beyond it: both clamp. The correction < n case proves the clamp is not
-        # swallowing the ordinary divisor.
+        # Test both clamp cases and an ordinary positive divisor.
         for nf, correction, want in (
             (8.0, 1.0, 7.0),
             (8.0, 8.0, 0.0),
@@ -115,8 +105,7 @@ class TestTraitProtocol(TestCase):
                     correction,
                     _L.stream(),
                 )
-                # `correction` is a Constexpr, baked at compile time, so the compiled callable takes
-                # only the real operand, the runtime scalar and the stream.
+                # correction is compile-time; the callable takes only output, n, and stream.
                 fn(out, nf, _L.stream())
                 torch.cuda.synchronize()
                 self.assertEqual(out.item(), want)
