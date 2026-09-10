@@ -1,11 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/TypeCast.h>
+
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -421,6 +424,65 @@ static __global__ void chunk_cat_cuda_kernel(
       num_threads);
 }
 
+template <typename dst_t>
+static __global__ void mixed_dtype_chunk_cat_cuda_kernel(
+    char** src,
+    dst_t* dst,
+    int64_t* block_idx_to_tensor_idx,
+    int64_t* tensor_idx_to_start_tensor_bytes,
+    int64_t* start_block_idx_per_tensor_chunk,
+    int64_t* actual_tensor_numels,
+    int64_t* pad_tensor_chunk_sizes,
+    int64_t* num_blocks_per_tensor_chunk,
+    int64_t* src_dtypes,
+    int64_t slice_size,
+    int64_t chunk_size) {
+  const int64_t slice_idx = blockIdx.z;
+  const int64_t chunk_idx = blockIdx.y;
+  const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
+  const int64_t tile_idx =
+      blockIdx.x - start_block_idx_per_tensor_chunk[tensor_idx];
+  const int64_t num_threads =
+      num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
+  const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
+  const int64_t actual_tensor_numel = actual_tensor_numels[tensor_idx];
+  const int64_t max_chunk_size = pad_tensor_chunk_sizes[tensor_idx];
+  const int64_t pad_tensor_chunk_numel = max_chunk_size / sizeof(dst_t);
+  const int64_t actual_copy_numel = std::min(
+      pad_tensor_chunk_numel,
+      std::max(
+          static_cast<int64_t>(0),
+          actual_tensor_numel - chunk_idx * pad_tensor_chunk_numel));
+  char* dst_addr = reinterpret_cast<char*>(dst) + slice_idx * slice_size +
+      chunk_idx * chunk_size +
+      tensor_idx_to_start_tensor_bytes[tensor_idx];
+
+#define COPY_CHUNK_WITH_SRC_TYPE(scalar_type, src_t)                         \
+  case scalar_type: {                                                       \
+    auto* src_ptr = reinterpret_cast<src_t*>(src[tensor_idx]) +             \
+        slice_idx * actual_tensor_numel +                                   \
+        chunk_idx * pad_tensor_chunk_numel;                                 \
+    copy_chunk_with_pad<dst_t, src_t>(                                      \
+        reinterpret_cast<dst_t*>(dst_addr),                                 \
+        src_ptr,                                                            \
+        max_chunk_size,                                                     \
+        actual_copy_numel * sizeof(src_t),                                  \
+        thread_idx,                                                         \
+        num_threads);                                                       \
+    break;                                                                  \
+  }
+
+  switch (static_cast<ScalarType>(src_dtypes[tensor_idx])) {
+    COPY_CHUNK_WITH_SRC_TYPE(ScalarType::Half, Half)
+    COPY_CHUNK_WITH_SRC_TYPE(ScalarType::BFloat16, BFloat16)
+    COPY_CHUNK_WITH_SRC_TYPE(ScalarType::Float, float)
+    COPY_CHUNK_WITH_SRC_TYPE(ScalarType::Double, double)
+    default:
+      break;
+  }
+#undef COPY_CHUNK_WITH_SRC_TYPE
+}
+
 bool all_contiguous(TensorList tensors) {
   for (const auto& t : tensors) {
     if (!t.is_contiguous()) {
@@ -613,6 +675,74 @@ void _chunk_cat_out_cuda_contiguous(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename dst_t>
+void _mixed_dtype_chunk_cat_out_cuda_contiguous(
+    TensorList tensors,
+    int64_t dim,
+    int64_t num_chunks,
+    Tensor& out) {
+  const auto device = tensors[0].device();
+  auto
+      [chunk_size,
+       leading_dim,
+       num_blocks_per_chunk,
+       slice_size,
+       srcs,
+       block_idx_to_tensor_idx,
+       tensor_idx_to_start_tensor_bytes,
+       start_block_idx_per_tensor_chunk,
+       actual_tensor_numels,
+       pad_tensor_chunk_sizes,
+       num_blocks_per_tensor_chunk] =
+          get_chunk_cat_metadata(
+              tensors,
+              dim,
+              num_chunks,
+              out.element_size(),
+              /*src_elem_size=*/1);
+  std::vector<int64_t> src_dtypes;
+  src_dtypes.reserve(tensors.size());
+  for (const auto& tensor : tensors) {
+    src_dtypes.push_back(static_cast<int64_t>(tensor.scalar_type()));
+  }
+  auto packed = pack_vecs(
+      {&srcs,
+       &block_idx_to_tensor_idx,
+       &tensor_idx_to_start_tensor_bytes,
+       &start_block_idx_per_tensor_chunk,
+       &actual_tensor_numels,
+       &pad_tensor_chunk_sizes,
+       &num_blocks_per_tensor_chunk,
+       &src_dtypes},
+      device);
+  std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
+      tensors[0].sizes(),
+      dim,
+      num_chunks,
+      chunk_size,
+      out.element_size());
+  at::native::resize_output(out, view_sizes);
+  dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
+  dim3 threads(detail::BLOCK_SIZE, 1, 1);
+  detail::mixed_dtype_chunk_cat_cuda_kernel<<<
+      blocks,
+      threads,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      /*srcs=*/reinterpret_cast<char**>(packed.second[0]),
+      out.data_ptr<dst_t>(),
+      /*block_idx_to_tensor_idx=*/packed.second[1],
+      /*tensor_idx_to_start_tensor_bytes=*/packed.second[2],
+      /*start_block_idx_per_tensor_chunk=*/packed.second[3],
+      /*actual_tensor_numels=*/packed.second[4],
+      /*pad_tensor_chunk_sizes=*/packed.second[5],
+      /*num_blocks_per_tensor_chunk=*/packed.second[6],
+      /*src_dtypes=*/packed.second[7],
+      slice_size,
+      chunk_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 } // namespace detail
 
 // See [CUDA fast path for split_with_sizes_copy.out]
@@ -801,13 +931,24 @@ Tensor& _chunk_cat_out_cuda(
     int64_t dim,
     int64_t num_chunks,
     Tensor& out) {
-  dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  dim = at::native::preprocess_chunk_cat_inputs(
+      tensors, dim, num_chunks, /*require_same_dtype=*/false);
   TORCH_CHECK(
       tensors[0].device() == out.device(),
       "_chunk_cat_out_cuda: mismatch between input and out tensor devices");
-  bool both_input_output_contiguous =
-      detail::all_contiguous(tensors) && out.is_non_overlapping_and_dense();
+  const bool all_inputs_contiguous = detail::all_contiguous(tensors);
+  const bool both_input_output_contiguous =
+      all_inputs_contiguous && out.is_non_overlapping_and_dense();
+  const bool all_inputs_same_dtype = std::all_of(
+      tensors.begin(), tensors.end(), [&](const Tensor& tensor) {
+        return tensor.dtype() == tensors[0].dtype();
+      });
+  const auto is_supported_mixed_dtype = [](ScalarType dtype) {
+    return dtype == ScalarType::Half || dtype == ScalarType::BFloat16 ||
+        dtype == ScalarType::Float || dtype == ScalarType::Double;
+  };
   if (both_input_output_contiguous &&
+      all_inputs_same_dtype &&
       (tensors[0].dtype() == at::ScalarType::BFloat16) &&
       (out.dtype() == at::ScalarType::Float)) {
     // _chunk_cat_out_cuda_contiguous should also support other types, thanks to
@@ -821,7 +962,27 @@ Tensor& _chunk_cat_out_cuda(
         out.element_size(),
         tensors[0].element_size());
   } else if (
-      both_input_output_contiguous && tensors[0].dtype() == out.dtype()) {
+      !all_inputs_same_dtype && all_inputs_contiguous && out.is_contiguous() &&
+      is_supported_mixed_dtype(out.scalar_type()) &&
+      std::all_of(tensors.begin(), tensors.end(), [&](const Tensor& tensor) {
+        return is_supported_mixed_dtype(tensor.scalar_type());
+      })) {
+    at::assert_no_internal_overlap(out);
+    for (const Tensor& tensor : tensors) {
+      at::assert_no_overlap(out, tensor);
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        out.scalar_type(),
+        "mixed_dtype_chunk_cat_cuda",
+        [&] {
+          detail::_mixed_dtype_chunk_cat_out_cuda_contiguous<scalar_t>(
+              tensors, dim, num_chunks, out);
+        });
+  } else if (
+      both_input_output_contiguous && all_inputs_same_dtype &&
+      tensors[0].dtype() == out.dtype()) {
     // Type-agnostic copy since out and input tensors have the same type.
     detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors,

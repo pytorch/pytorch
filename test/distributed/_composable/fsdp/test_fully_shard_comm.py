@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -47,6 +47,10 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -71,6 +75,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -2045,6 +2050,114 @@ class TestFullyShardForceSumReduction(FSDPTest):
         # Now we should also have SUM
         self.assertRegex(logs, reduce_scatter_sum_re)
         self.assertRegex(logs, all_reduce_sum_re)
+
+
+class TestForeachReduceValidation(TestCase):
+    def test_uniform_compute_requires_uniform_grad_dtypes(self):
+        fsdp_params = [MagicMock(), MagicMock()]
+        for fsdp_param in fsdp_params:
+            fsdp_param.param_dtype = torch.bfloat16
+            fsdp_param.orig_dtype = torch.float32
+        grads = [
+            torch.empty(1, dtype=torch.bfloat16),
+            torch.empty(1, dtype=torch.float32),
+        ]
+
+        with patch(
+            "torch.distributed.fsdp._fully_shard._fsdp_collectives."
+            "_raise_assert_with_print",
+            side_effect=AssertionError("mixed gradient dtypes"),
+        ):
+            with self.assertRaisesRegex(AssertionError, "mixed gradient dtypes"):
+                foreach_reduce(
+                    fsdp_params,
+                    grads,
+                    reduce_scatter_group=None,
+                    reduce_scatter_stream=MagicMock(),
+                    reduce_scatter_comm=MagicMock(),
+                    orig_dtype=torch.float32,
+                    reduce_dtype=torch.float32,
+                    device=torch.device("cpu"),
+                    gradient_divide_factor=None,
+                    all_reduce_group=None,
+                    all_reduce_stream=MagicMock(),
+                    all_reduce_grads=True,
+                    partial_reduce_output=None,
+                    all_reduce_hook=None,
+                )
+
+
+class TestMixedDtypeChunkCat(TestCase):
+    @parametrize(
+        "input_shapes,dim,input_dtypes",
+        [
+            (((17,), (10,)), 0, (torch.bfloat16, torch.float32)),
+            (((17,), (10,)), 0, (torch.float16, torch.float32)),
+            (
+                ((2, 17, 3), (2, 10, 3), (2, 25, 3)),
+                1,
+                (torch.bfloat16, torch.float16, torch.float32),
+            ),
+        ],
+    )
+    def test_mixed_dtype_chunk_cat(self, device, input_shapes, dim, input_dtypes):
+        num_chunks = 4
+        inputs = [
+            torch.randn(shape, device=device, dtype=dtype)
+            for shape, dtype in zip(input_shapes, input_dtypes)
+        ]
+        fp32_inputs = [tensor.float() for tensor in inputs]
+        expected = torch._chunk_cat(fp32_inputs, dim=dim, num_chunks=num_chunks)
+        actual = torch.empty_like(expected)
+        torch.ops.fsdp.chunk_cat(inputs, dim=dim, num_chunks=num_chunks, out=actual)
+        self.assertEqual(actual, expected)
+
+    def test_mixed_dtype_chunk_cat_functionalization(self, device):
+        inputs = [
+            torch.arange(3, device=device, dtype=torch.bfloat16),
+            torch.arange(4, device=device, dtype=torch.float32),
+        ]
+        expected = torch._chunk_cat(
+            [tensor.float() for tensor in inputs], dim=0, num_chunks=2
+        )
+        out = torch.empty_like(expected)
+
+        def func(tensors, output):
+            torch._chunk_cat(tensors, dim=0, num_chunks=2, out=output)
+            return output
+
+        actual = torch.func.functionalize(func)(inputs, out)
+        self.assertEqual(actual, expected)
+        self.assertEqual(out, expected)
+
+    @onlyCUDA
+    def test_mixed_dtype_chunk_cat_noncontiguous_out(self, device):
+        inputs = [
+            torch.tensor([1, 2], device=device, dtype=torch.bfloat16),
+            torch.tensor([3, 4], device=device, dtype=torch.float32),
+        ]
+        expected = torch.tensor([[1, 3], [2, 4]], device=device, dtype=torch.float32)
+        out = torch.empty((2, 2), device=device).t()
+
+        torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
+
+        self.assertEqual(out, expected)
+
+    @onlyCUDA
+    def test_mixed_dtype_chunk_cat_rejects_overlap(self, device):
+        out = torch.empty((2, 2), device=device)
+        inputs = [
+            torch.tensor([1, 2], device=device, dtype=torch.bfloat16),
+            out.flatten()[:2],
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "single memory location"):
+            torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
+
+
+instantiate_device_type_tests(
+    TestMixedDtypeChunkCat, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 @instantiate_parametrized_tests

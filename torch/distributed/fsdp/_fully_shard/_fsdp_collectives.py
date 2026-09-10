@@ -318,6 +318,8 @@ def chunk_cat(
     num_chunks: int,
     out: torch.Tensor,
 ) -> None:
+    if out.device.type == "xpu" and len({tensor.dtype for tensor in tensors}) > 1:
+        tensors = [tensor.to(out.dtype) for tensor in tensors]
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
@@ -396,6 +398,9 @@ def _get_param_all_gather_inputs(
     foreach_copy_indices: list[int] = []
     foreach_copy_inputs: list[torch.Tensor] = []
     foreach_copy_input_numels: list[int] = []
+    foreach_copy_target_dtypes: list[torch.dtype] = []
+    foreach_copy_dtype_pair: tuple[torch.dtype, torch.dtype] | None = None
+    foreach_copy_dtypes_are_uniform = True
 
     # 1st pass: for foreach-copy parameters, get inputs and metadata for the
     # foreach copy, and for the others, actually get their all-gather inputs
@@ -407,13 +412,22 @@ def _get_param_all_gather_inputs(
                 if fsdp_param.sharded_state == ShardedState.SHARDED
                 else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
             )
+            param_dtype = fsdp_param.param_dtype
+            if param_dtype is None:
+                raise AssertionError("Expected param_dtype to not be None")
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
+            foreach_copy_target_dtypes.append(param_dtype)
+            dtype_pair = (all_gather_input.dtype, param_dtype)
+            if foreach_copy_dtype_pair is None:
+                foreach_copy_dtype_pair = dtype_pair
+            elif dtype_pair != foreach_copy_dtype_pair:
+                foreach_copy_dtypes_are_uniform = False
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
-    if foreach_copy_inputs:
+    if foreach_copy_inputs and foreach_copy_dtypes_are_uniform:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
         param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
         flat_foreach_copy_input = torch.empty(
@@ -423,6 +437,32 @@ def _get_param_all_gather_inputs(
         torch._foreach_copy_(splits, foreach_copy_inputs)
         for i, split in zip(foreach_copy_indices, splits):
             param_all_gather_inputs[i] = [split]
+    elif foreach_copy_inputs:
+        copy_groups: dict[
+            tuple[torch.dtype, torch.dtype],
+            tuple[list[int], list[torch.Tensor]],
+        ] = {}
+        for i, inp, target_dtype in zip(
+            foreach_copy_indices,
+            foreach_copy_inputs,
+            foreach_copy_target_dtypes,
+        ):
+            indices, inputs = copy_groups.setdefault(
+                (inp.dtype, target_dtype), ([], [])
+            )
+            indices.append(i)
+            inputs.append(inp)
+        for (_, target_dtype), (indices, inputs) in copy_groups.items():
+            input_numels = [t.numel() for t in inputs]
+            flat_foreach_copy_input = torch.empty(
+                (sum(input_numels),),
+                device=inputs[0].device,
+                dtype=target_dtype,
+            )
+            splits = torch.split(flat_foreach_copy_input, input_numels)
+            torch._foreach_copy_(splits, inputs)
+            for i, split in zip(indices, splits):
+                param_all_gather_inputs[i] = [split]
 
     return param_all_gather_inputs
 
@@ -522,7 +562,7 @@ def foreach_all_gather_copy_out(
 def foreach_reduce(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_group: dist.ProcessGroup,
+    reduce_scatter_group: dist.ProcessGroup | None,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
     orig_dtype: torch.dtype | None,
@@ -551,11 +591,17 @@ def foreach_reduce(
 
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
-        # Check this at runtime since it could be a real runtime error if e.g.
-        # fp8 weights do not produce the correct higher precision gradients
-        _raise_assert_with_print(
-            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
-        )
+        expected_grad_dtypes = {
+            fsdp_param.param_dtype or fsdp_param.orig_dtype
+            for fsdp_param in fsdp_params
+        }
+        if len(expected_grad_dtypes) <= 1:
+            # Check this at runtime since it could be a real runtime error if e.g.
+            # fp8 weights do not produce the correct higher precision gradients
+            _raise_assert_with_print(
+                "FSDP reduce-scatter expects uniform gradient dtype but got "
+                f"{grad_dtypes}"
+            )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
@@ -615,7 +661,7 @@ def foreach_reduce(
             device=device,
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
+        if reduce_scatter_group is not None and world_size > 1:
             reduce_scatter_comm(
                 output_tensor=reduce_output,
                 input_tensor=reduce_scatter_input,
