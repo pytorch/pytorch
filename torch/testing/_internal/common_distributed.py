@@ -2133,15 +2133,6 @@ class MultiProcContinuousTest(TestCase):
         for process in cls.processes:
             process.join()
 
-        # Assert each worker exited cleanly so a teardown-time crash (e.g. a
-        # SIGSEGV raised from an atexit handler after the tests themselves
-        # passed) surfaces as a failure instead of being silently ignored.
-        for i, process in enumerate(cls.processes):
-            if process.exitcode != 0:
-                raise RuntimeError(
-                    f"Worker {i} exited with code {process.exitcode} during teardown"
-                )
-
         # Clear up the rendezvous file
         try:
             os.remove(cls.rdvz_file)
@@ -2150,6 +2141,44 @@ class MultiProcContinuousTest(TestCase):
 
         logger.info(f"Class {cls.__name__} finished")  # noqa: G004
         super().tearDownClass()
+
+        cls._check_return_codes()
+
+    @classmethod
+    def _check_return_codes(cls) -> None:
+        """
+        Verify every worker exited cleanly after being told to shut down.
+
+        Skips and test failures are handled in-band by ``_worker_loop``: a
+        worker catches ``SkipTest``/``SystemExit``-with-skip-code/exceptions,
+        reports them back over the completion queue, and keeps looping, so none
+        of them affect the process exit code. This check therefore only needs
+        to catch abnormal process termination (e.g. a SIGSEGV from an atexit
+        handler during interpreter shutdown) and deliberately does not try to
+        interpret skip exit codes.
+
+        Report all failing ranks at once (a teardown crash typically hits every
+        rank) and decode signal-induced exits (negative exit codes) so the
+        failure is actionable.
+        """
+        failures = []
+        for i, process in enumerate(cls.processes):
+            exitcode = process.exitcode
+            if exitcode == 0:
+                continue
+            if exitcode is None:
+                failures.append(f"Worker {i} did not exit (still running or killed)")
+            elif exitcode < 0:
+                # multiprocessing reports a process killed by signal N as -N.
+                failures.append(f"Worker {i} was killed by signal {-exitcode}")
+            else:
+                failures.append(f"Worker {i} exited with code {exitcode}")
+
+        if failures:
+            raise RuntimeError(
+                "Worker(s) did not exit cleanly during teardown:\n"
+                + "\n".join(failures)
+            )
 
     def setUp(self) -> None:
         """
