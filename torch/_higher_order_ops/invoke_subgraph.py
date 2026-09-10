@@ -51,6 +51,7 @@ invoke_subgraph_counter = 0
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
         "fallback_by_default",
+        "max_autotune",
     }
 )
 
