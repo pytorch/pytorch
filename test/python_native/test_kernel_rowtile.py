@@ -68,8 +68,7 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(idx, want_i.to(torch.int32))
 
     def test_stage1_partials_are_raw_accumulators(self):
-        # final=False stores raw per-field accumulators for cross-CTA stage 1; Welford's
-        # count must equal row length rather than a projected variance.
+        # final=False stores raw accumulators; Welford's count must equal the row length.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -290,10 +289,10 @@ class TestKernelRowTile(TestCase):
         self.assertFalse(rt.tma_ok(48, 4, 1 << 20))  # not a power of two
         self.assertFalse(
             rt.tma_ok(32, 2, 1 << 20)
-        )  # bf16: the rotation is 4-byte arithmetic
+        )  # bf16 does not map one element per 4-byte bank
 
     def test_narrow_row_scalar_vec(self):
-        # Exercise dispatcher-reachable scalar and short-vector narrow loads.
+        # Exercise scalar and short-vector narrow loads.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         for n in (1, 2, 3, 5, 7):
