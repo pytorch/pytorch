@@ -811,6 +811,46 @@ def add(x, y):
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
     @torch._dynamo.config.patch(caching_precompile=True)
+    def test_held_autocast_object_survives_the_package_round_trip(self):
+        # An ID_MATCH guard on the autocast object was dropped (with a warning)
+        # under caching_precompile, so a differently configured object could
+        # reuse the graph. The value guards serialize, so the entry installs on
+        # reload and still tells configurations apart -- kept in strict mode so
+        # a regression fails loudly instead of bypassing the package silently.
+        def fn(x, ac):
+            with ac:
+                return torch.mm(x, x)
+
+        x = torch.randn(4, 4)
+        warm = torch.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(torch.compile(fn)(x, warm).dtype, torch.bfloat16)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            fresh = torch.autocast("cpu", dtype=torch.bfloat16)
+            self.assertEqual(compiled(x, fresh).dtype, torch.bfloat16)
+            other = torch.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled(x, other)
+            # _cache_enabled is the fourth guarded field; diverging it alone must
+            # also miss, or dropping it from the tuple would go unnoticed.
+            other_cache = torch.autocast(
+                "cpu", dtype=torch.bfloat16, cache_enabled=False
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled(x, other_cache)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
     def test_bound_method_name_guard_survives_func_reached_first(self):
         # Regression: a guard on a bound method's __name__ where the method's
         # __func__ is ALSO reachable (self.other) and inserted first, so the
