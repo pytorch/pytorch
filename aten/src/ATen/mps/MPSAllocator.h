@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <mach/vm_page_size.h>
 #include <cstdio>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <unordered_set>
@@ -87,15 +88,6 @@ struct BufferBlock {
 
   BufferBlock(size_t Size, size_t Offset = 0, HeapBlock* Heap = nullptr) : size(Size), offset(Offset), heap(Heap) {}
 
-  static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
-    if (a->size != b->size) {
-      return a->size < b->size;
-    }
-    if (a->heap != b->heap) {
-      return reinterpret_cast<uintptr_t>(a->heap) < reinterpret_cast<uintptr_t>(b->heap);
-    }
-    return a->offset < b->offset;
-  }
   static size_t alignUp(size_t Size, size_t Alignment) {
     assert(((Alignment - 1) & Alignment) == 0);
     return ((Size + Alignment - 1) & ~(Alignment - 1));
@@ -104,7 +96,18 @@ struct BufferBlock {
     return [buffer retainCount];
   }
 };
-typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
+
+struct BufferComparison {
+  bool operator()(const BufferBlock* a, const BufferBlock* b) const {
+    if (a->size != b->size) {
+      return a->size < b->size;
+    }
+    if (a->heap != b->heap) {
+      return std::less<>{}(a->heap, b->heap);
+    }
+    return a->offset < b->offset;
+  }
+};
 
 struct BufferPool;
 struct AllocParams {
@@ -208,9 +211,6 @@ struct HeapBlock {
     }
     return heapBlock;
   }
-  static bool Comparator(const HeapBlock* a, const HeapBlock* b) {
-    return a->heap_id < b->heap_id;
-  }
   id<MTLBuffer> newMTLBuffer(size_t length, uint32_t usage, size_t offset) {
     id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(usage) offset:offset];
     if (buf) {
@@ -239,7 +239,12 @@ struct HeapBlock {
     return [heap retainCount];
   }
 };
-typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
+
+struct HeapComparison {
+  bool operator()(const HeapBlock* a, const HeapBlock* b) const {
+    return a->heap_id < b->heap_id;
+  }
+};
 
 struct BufferPool {
   enum class Kind {
@@ -252,9 +257,7 @@ struct BufferPool {
       : device(Device),
         usage(Usage),
         alignment([Device heapBufferSizeAndAlignWithLength:1 options:HeapBlock::getOptions(Usage)].align),
-        min_split((Usage & UsageFlags::SMALL) ? alignment : kMaxSmallAlloc),
-        heaps(HeapBlock::Comparator),
-        available_buffers(BufferBlock::Comparator) {}
+        min_split((Usage & UsageFlags::SMALL) ? alignment : kMaxSmallAlloc) {}
 
   const id<MTLDevice> device;
   // usage flags to customize the pool for various purposes (see UsageFlags enum)
