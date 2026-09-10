@@ -4380,7 +4380,6 @@ class TestProfilerEventsParity(TestCase):
                     lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
