@@ -366,7 +366,7 @@ class TestSortAndSelectDevice(TestCase):
                 # binary strings
                 yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
 
-            if self.device_type == "cuda":
+            if self.device_type in ("cuda", "xpu"):
                 return
 
             yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
@@ -388,7 +388,7 @@ class TestSortAndSelectDevice(TestCase):
                 n_fill_vals = 3  # cardinality of (inf, neg_inf, nan)
                 for dim in range(len(sizes)):
                     idxs = (
-                        torch.randint(high=size, size=(size // 10,), device=device)
+                        torch.randint(high=size, size=(size // 10,))
                         for i in range(n_fill_vals)
                     )
                     vals = (inf, neg_inf, nan)
