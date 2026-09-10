@@ -97,7 +97,7 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void synchronizeDevice(c10::DeviceIndex device_index) const override {
-    pybind11::gil_scoped_acquire gil;
+    pybind11::gil_scoped_release no_gil;
     PYBIND11_OVERRIDE_PURE_NAME(
         void,
         c10::impl::DeviceGuardImplInterface,
