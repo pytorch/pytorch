@@ -21,13 +21,14 @@ class FlexGemmOutputStorageLayout:
     carrier_shape_fn: Callable[[Any, Any, Any], tuple[Any, ...]]
     cutedsl_callbacks_fn: Callable[[], tuple[Callable[..., Any], Callable[..., Any]]]
     carrier_ndim: int
-    validate_geometry_fn: Callable[[Any], None]
+    validate_geometry_fn: Callable[[Any], None] | None = None
     supports_config_fn: Callable[[Any, int, int], bool] | None = None
     validate_carrier_fn: Callable[[Any], None] | None = None
 
     def validate_geometry(self, geometry: Any) -> None:
         """Validate layout-specific logical reduction geometry."""
-        self.validate_geometry_fn(geometry)
+        if self.validate_geometry_fn is not None:
+            self.validate_geometry_fn(geometry)
 
     def runtime_view(self, tensor: Any, batch: Any, rows: Any, cols: Any) -> Any:
         """Attach the descriptor's physical carrier shape without moving data."""
@@ -108,10 +109,6 @@ def blocked_128x4_supports_config(config: Any, axis: int, group: int) -> bool:
     )
 
 
-def validate_any_geometry(_geometry: Any) -> None:
-    """Accept any grouped-reduction geometry."""
-
-
 def transposed_cutedsl_callbacks() -> tuple[Callable[..., Any], Callable[..., Any]]:
     """Return transposed-layout tensor and fake-shape callbacks."""
     cutedsl = output_layout_cutedsl()
@@ -151,7 +148,6 @@ TRANSPOSED = FlexGemmOutputStorageLayout(
     carrier_shape_fn=transposed_carrier_shape,
     cutedsl_callbacks_fn=transposed_cutedsl_callbacks,
     carrier_ndim=3,
-    validate_geometry_fn=validate_any_geometry,
     supports_config_fn=transposed_supports_config,
     validate_carrier_fn=transposed_validate_carrier,
 )
