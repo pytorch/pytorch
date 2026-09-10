@@ -15,8 +15,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED,
     onlyAccelerator,
     onlyCPU,
+    skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -147,9 +149,70 @@ class TestLayoutFreezing(TestCase):
             self.assertIs(ir.try_match_insignificant_strides(buf, strides), buf)
         self.assertIsInstance(buf.get_layout(), ir.FlexibleLayout)
 
+    @parametrize("transposed", [False, True])
+    @parametrize("aten_fallback", [False, True])
+    @inductor_config.patch(
+        strict_flexible_layout_strides=True,
+        comprehensive_padding=True,
+        padding_stride_threshold=0,
+        padding_alignment_bytes=64,
+    )
+    def test_tma_orientation_preserves_layout_freedom(self, transposed, aten_fallback):
+        from torch._inductor.heuristics.template import triton as tma_heuristics
+        from torch._inductor.kernel_inputs import MMKernelInputs
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+        from torch._inductor.utils import tma_inner_dim
+
+        buf = ir.ComputedBuffer(
+            name="matrix",
+            layout=self._flexible_buffer((8, 24)).get_layout(),
+            data=ir.Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                ranges=[8, 24],
+                inner_fn=lambda index: ir.ops.constant(0, torch.float32),
+            ),
+        )
+        if transposed:
+            buf.get_layout().stride = [1, 8]
+        weight = ir.InputBuffer(
+            name="weight",
+            layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [24, 8]),
+        )
+        inputs = MMKernelInputs([ir.StorageBox(buf), ir.StorageBox(weight)])
+        graph = Mock(sizevars=SizeVarAllocator(), buffer_layout_constraints={})
+        base = tma_heuristics.MMTemplateConfigMixin
+        heuristic = tma_heuristics.TMATemplateConfigMixin()
+        layout_error = AssertionError("early layout decision")
+        with (
+            V.set_graph_handler(graph),
+            patch.object(buf, "get_fill_order", side_effect=layout_error),
+            patch.object(base, "_get_template_configs_impl", return_value=iter([{}])),
+            patch.object(tma_heuristics, "get_num_sms", return_value=1),
+            patch(
+                "torch._inductor.select_algorithm.use_aten_gemm_kernels",
+                return_value=aten_fallback,
+            ),
+        ):
+            (options,) = heuristic._get_template_configs_impl(inputs, "mm")
+            self.assertIsInstance(buf.get_layout(), ir.FlexibleLayout)
+            kernel = Mock(always_freeze_layout=False)
+            strides = TritonTemplateKernel.get_stride_and_maybe_freeze_layout(
+                kernel, inputs.nodes()[0]
+            )
+            self.assertEqual(options["A_ROW_MAJOR"], tma_inner_dim(strides) == 1)
+            self.assertEqual(strides, [1, 16] if transposed else [32, 1])
+            if aten_fallback:
+                self.assertIsInstance(buf.get_layout(), ir.FlexibleLayout)
+                layout = graph.buffer_layout_constraints[buf.get_name()]
+                self.assertEqual(layout.stride, strides)
+            else:
+                self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
+
 
 class TestLayoutFreezingDevice(TestCase):
     @onlyCPU
+    @skipCPUIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
     @parametrize("input_index", [0, 1, 2])
     def test_flex_attention_strided_last_dim(self, device, input_index):
         from torch.nn.attention.flex_attention import flex_attention
@@ -161,6 +224,7 @@ class TestLayoutFreezingDevice(TestCase):
         self.assertEqual(actual, expected)
 
     @onlyCPU
+    @skipCPUIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
     @parametrize("input_index", [0, 1, 2])
     def test_flex_attention_computed_transpose(self, device, input_index):
         from torch.nn.attention.flex_attention import flex_attention

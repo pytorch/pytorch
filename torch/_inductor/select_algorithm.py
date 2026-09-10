@@ -54,7 +54,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
     use_pipelined_autotuning,
 )
-from .codecache import code_hash, PersistentCache, PyCodeCache
+from .codecache import code_hash, get_matmul_precision_key, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
     IndentedBuffer,
@@ -3913,7 +3913,7 @@ def create_precompile_key(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            get_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
