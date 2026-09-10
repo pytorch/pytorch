@@ -121,15 +121,15 @@ class TestSIMDRangeTrees(TestCase):
     def test_derived_reduction_extent_reuses_r_numel(self):
         graph = self._make_graph()
         with V.set_graph_handler(graph):
-            reduction_numel = graph.sizevars.shape_env.create_symbol(
+            reduction_extent = graph.sizevars.shape_env.create_symbol(
                 512,
                 source=ConstantSource("__test_reduction_numel"),
                 dynamic_dim=DimDynamic.DYNAMIC,
                 constraint_dim=None,
             )
-            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_numel)
+            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_extent)
             kernel = TritonKernel(
-                {"x": sympy.Integer(4), "r0_": reduction_numel},
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
                 features=features,
                 override_persistent_reduction=False,
                 override_cooperative_reduction=False,
@@ -138,23 +138,28 @@ class TestSIMDRangeTrees(TestCase):
             derived = self._make_derived_root(r_tree, group_size=sympy.Integer(2))
             r_numel_symbol = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
 
-            kernel.finalize_indexing([reduction_numel])
+            index_before = reduction_extent
+            expected_index = r_numel_symbol
+            derived_index_before = derived.numel
+            expected_derived_index = FloorDiv(r_numel_symbol, 2)
+
+            kernel.finalize_indexing([index_before])
             self.assertEqual(
                 kernel._r_numel_reuse_replacements,
-                {r_numel_symbol: reduction_numel},
+                {r_numel_symbol: reduction_extent},
             )
             self.assertEqual(
                 kernel._r_numel_reuse_eliminated_symbols,
-                OrderedSet([reduction_numel]),
+                OrderedSet([reduction_extent]),
             )
             with kernel.use_range_trees([x_tree, derived]):
                 self.assertEqual(
-                    kernel._replace_reduction_numel_in_index(reduction_numel),
-                    r_numel_symbol,
+                    kernel._replace_reduction_numel_in_index(index_before),
+                    expected_index,
                 )
                 self.assertEqual(
-                    kernel._replace_reduction_numel_in_index(derived.numel),
-                    FloorDiv(r_numel_symbol, 2),
+                    kernel._replace_reduction_numel_in_index(derived_index_before),
+                    expected_derived_index,
                 )
 
     def test_reduction_numel_reuse_supports_joint_elimination(self):
@@ -166,28 +171,34 @@ class TestSIMDRangeTrees(TestCase):
                 dynamic_dim=DimDynamic.DYNAMIC,
                 constraint_dim=None,
             )
-            r0_numel = CeilDiv(source, 2)
-            r1_numel = CeilDiv(source, 3)
+            r0_extent = CeilDiv(source, 2)
+            r1_extent = CeilDiv(source, 3)
             kernel = TritonKernel(
                 {
                     "x": sympy.Integer(1),
-                    "r0_": r0_numel,
-                    "r1_": r1_numel,
+                    "r0_": r0_extent,
+                    "r1_": r1_extent,
                 },
-                features=SIMDKernelFeatures([], sympy.Integer(1), r0_numel * r1_numel),
+                features=SIMDKernelFeatures(
+                    [], sympy.Integer(1), r0_extent * r1_extent
+                ),
                 override_persistent_reduction=False,
                 override_cooperative_reduction=False,
             )
 
-            kernel.finalize_indexing([r0_numel, r1_numel])
+            index_before = r0_extent + r1_extent
+            expected_index = sympy.Symbol(
+                "r0_numel", integer=True, nonnegative=True
+            ) + sympy.Symbol("r1_numel", integer=True, nonnegative=True)
+
+            kernel.finalize_indexing([r0_extent, r1_extent])
             self.assertEqual(
                 kernel._r_numel_reuse_eliminated_symbols,
                 OrderedSet([source]),
             )
             self.assertEqual(
-                kernel._replace_reduction_numel_in_index(r0_numel + r1_numel),
-                sympy.Symbol("r0_numel", integer=True, nonnegative=True)
-                + sympy.Symbol("r1_numel", integer=True, nonnegative=True),
+                kernel._replace_reduction_numel_in_index(index_before),
+                expected_index,
             )
 
     def test_reduction_numel_reuse_requires_dead_size_argument(self):
@@ -199,35 +210,37 @@ class TestSIMDRangeTrees(TestCase):
                 dynamic_dim=DimDynamic.DYNAMIC,
                 constraint_dim=None,
             )
-            reduction_numel = CeilDiv(dynamic_size, 2)
-            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_numel)
+            reduction_extent = CeilDiv(dynamic_size, 2)
+            features = SIMDKernelFeatures([], sympy.Integer(4), reduction_extent)
             kernel = TritonKernel(
-                {"x": sympy.Integer(4), "r0_": reduction_numel},
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
                 features=features,
                 override_persistent_reduction=False,
                 override_cooperative_reduction=False,
             )
             r_numel_symbol = sympy.Symbol("r0_numel", integer=True, nonnegative=True)
+            index_before = reduction_extent
+            expected_index = r_numel_symbol
 
-            kernel.finalize_indexing([reduction_numel])
+            kernel.finalize_indexing([index_before])
             self.assertEqual(
-                kernel._replace_reduction_numel_in_index(reduction_numel),
-                r_numel_symbol,
+                kernel._replace_reduction_numel_in_index(index_before),
+                expected_index,
             )
 
-            kernel.finalize_indexing([reduction_numel, dynamic_size])
+            kernel.finalize_indexing([index_before, dynamic_size])
             self.assertEqual(
-                kernel._replace_reduction_numel_in_index(reduction_numel),
-                reduction_numel,
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
             )
 
             kernel.range_tree_nodes[sympy.Symbol("__test_range")] = SimpleNamespace(
                 expr=dynamic_size
             )
-            kernel.finalize_indexing([reduction_numel])
+            kernel.finalize_indexing([index_before])
             self.assertEqual(
-                kernel._replace_reduction_numel_in_index(reduction_numel),
-                reduction_numel,
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
             )
 
     def test_reduction_numel_reuse_skips_staged_indexing_schedule(self):
@@ -239,24 +252,26 @@ class TestSIMDRangeTrees(TestCase):
                 dynamic_dim=DimDynamic.DYNAMIC,
                 constraint_dim=None,
             )
-            reduction_numel = CeilDiv(dynamic_size, 2)
+            reduction_extent = CeilDiv(dynamic_size, 2)
             features = SIMDKernelFeatures(
                 [],
                 sympy.Integer(4),
-                reduction_numel,
+                reduction_extent,
                 indexing_node_schedule=[],
             )
             kernel = TritonKernel(
-                {"x": sympy.Integer(4), "r0_": reduction_numel},
+                {"x": sympy.Integer(4), "r0_": reduction_extent},
                 features=features,
                 override_persistent_reduction=False,
                 override_cooperative_reduction=False,
             )
 
-            kernel.finalize_indexing([reduction_numel])
+            index_before = reduction_extent
+
+            kernel.finalize_indexing([index_before])
             self.assertEqual(
-                kernel._replace_reduction_numel_in_index(reduction_numel),
-                reduction_numel,
+                kernel._replace_reduction_numel_in_index(index_before),
+                index_before,
             )
 
     def test_use_range_trees_clears_simplify_indexing_cache(self):
