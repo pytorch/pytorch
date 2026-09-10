@@ -116,8 +116,9 @@ class FunctionPicklerBase(pickle.Pickler):
     closure cells, python modules, and bound methods.
 
     GuardsStatePickler is the one subclass today. AOTCompilePickler keeps its
-    own copies of these reducers and is moved onto this base separately, so
-    that a fix to how an object is rebuilt cannot be missed in one pickler.
+    own copies of these reducers until it is moved onto this base separately;
+    once both share it, a fix to how an object is rebuilt cannot be missed in
+    one pickler.
     """
 
     # The reducers stay classmethods: pickle reduces a bound classmethod to
@@ -694,8 +695,9 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        # Backend ids the compile inside the current code_context registered,
-        # so a bypass can drop exactly those.
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.

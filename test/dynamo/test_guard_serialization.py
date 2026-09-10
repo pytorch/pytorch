@@ -713,6 +713,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
 
+    def test_type_match_on_a_local_class_whose_repr_raises(self):
+        # The local-scope check runs outside the mapped dump, so the message
+        # must not touch the object: a __repr__ that raises is user code.
+        class LocalModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+            def __repr__(self):
+                raise RuntimeError("repr broken")
+
+        m = LocalModule()
+
+        def fn(m, x):
+            return m(x)
+
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+
         m = GlobalModule()
         ref, loaded = self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
         self._test_check_fn(ref, loaded, {"m": m}, True)
