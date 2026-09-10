@@ -403,6 +403,29 @@ def online_softmax_combine(
 
 
 @triton.jit
+def online_softmax_reduce_scalar_combine(
+    lhs_max,
+    lhs_sum,
+    rhs,
+    rhs_mask,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    """
+    Reduce a block of values along `dim` and fold it into a per-row (max, sum)
+    state, so only one max/sum per output row stays live across the loop.
+    """
+    rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
+    rhs_max, rhs_sum = online_softmax_reduce(
+        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
+    )
+    return online_softmax_combine_with_sum(
+        lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
+    )
+
+
+@triton.jit
 def online_softmax_combine_with_sum(
     lhs_max,
     lhs_sum,
@@ -1061,7 +1084,7 @@ def _topk_unpack32(packed, descending: tl.constexpr, key_dtype: tl.constexpr):
     lane = low & 0x7FFF
     if descending:
         lane = 0x7FFF - lane
-    value = h.to(tl.int16).to(key_dtype, bitcast=True).to(tl.float32)
+    value = h.to(tl.int16).to(key_dtype, bitcast=True)
     return value, lane
 
 
@@ -1073,7 +1096,7 @@ def _topk_extract_fp32(
 
     Keys stay 32-bit (sign-adjusted bits, NaN sign cleared so NaN orders above
     +inf); the lane carries the NaN sign in bit 30 so the value is restored
-    bit-identical. Lane r of the result holds rank r % k.
+    bit-identical.
     """
     orig = x.to(tl.int32, bitcast=True)
     is_nan = x != x
@@ -1086,9 +1109,11 @@ def _topk_extract_fp32(
         key = tl.where(idxs < rnumel, key, sentinel)
         if not descending:
             lane = tl.where(idxs < rnumel, lane, 2147483647)
-    slot_id = lane32 % k
-    out_key = key
-    out_lane = lane
+    k2: tl.constexpr = constexpr_next_power_of_2(k)
+    slot_id = tl.arange(0, k2)
+    output_shape: tl.constexpr = x.shape[:dim] + [k2]
+    out_key = tl.full(output_shape, 0, tl.int32)
+    out_lane = tl.full(output_shape, 0, tl.int32)
     for rank in tl.static_range(k):
         if descending:
             best = tl.max(key, axis=dim, keep_dims=True)
@@ -1121,17 +1146,17 @@ def topk_with_index(
     descending: tl.constexpr,
     key_dtype: tl.constexpr,
 ):
-    """Top-k of x with source indices, repeated across the reduction dim.
+    """Top-k values and source indices in a [..., next_power_of_2(k)] block.
 
-    Lane r of the result holds rank r % k, so the first k lanes are the answer.
+    Only the first k lanes are valid.
     key_dtype is the tensor's dtype; 16-bit floats select on 32-bit keys.
     """
     x, idxs = tl.broadcast(x, idxs)
     tl.static_assert(
         dim == len(x.shape) - 1, "only minor dimension is currently supported"
     )
-    tl.static_assert(x.dtype == tl.float32, "topk_with_index expects fp32 values")
     n: tl.constexpr = x.shape[dim]
+    k2: tl.constexpr = constexpr_next_power_of_2(k)
     fp32_keys: tl.constexpr = key_dtype == tl.float32
 
     if n >= 64 * k and fp32_keys:
@@ -1151,29 +1176,23 @@ def topk_with_index(
         # 16-bit keys already share an int32 with the lane, so one reduction
         # per rank finds both.
         sentinel: tl.constexpr = -2147483648 if descending else 2147483647
-        top = packed
+        output_shape: tl.constexpr = x.shape[:dim] + [k2]
+        slot_id = tl.arange(0, k2)
+        top = tl.full(output_shape, 0, packed.dtype)
         for rank in tl.static_range(k):
             if descending:
                 best = tl.max(packed, axis=dim, keep_dims=True)
             else:
                 best = tl.min(packed, axis=dim, keep_dims=True)
-            top = tl.where(idxs % k == rank, best, top)
+            top = tl.where(slot_id == rank, best, top)
             packed = tl.where(packed == best, sentinel, packed)
     else:
-        k2: tl.constexpr = constexpr_next_power_of_2(k)
         top = tl.topk(packed, k2, dim=dim, descending=descending)
-        if n != k2:
-            top = tl.reshape(
-                tl.broadcast_to(
-                    tl.expand_dims(top, dim), x.shape[:dim] + [n // k2, k2]
-                ),
-                x.shape,
-            )
     if fp32_keys:
         values, lanes = _topk_unpack64(top, descending)
     else:
         values, lanes = _topk_unpack32(top, descending, key_dtype)
-    return values, lanes.to(idxs.dtype)
+    return values.to(x.dtype), lanes.to(idxs.dtype)
 
 
 @triton.jit

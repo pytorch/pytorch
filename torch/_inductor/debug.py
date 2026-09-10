@@ -1246,7 +1246,7 @@ def set_kernel_post_grad_provenance_tracing(
         return None
 
     try:
-        from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+        from .codegen.simd_kernel_features import NodeScheduleMarker
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
@@ -1328,7 +1328,7 @@ def set_kernel_post_grad_provenance_tracing(
                 raise AssertionError(f"expected list, got {type(node_schedule)}")
             stack_traces_set: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
-                if snode not in (EnableReduction, DisableReduction):
+                if not isinstance(snode, NodeScheduleMarker):
                     if snode.node is not None:
                         curr_node_info = (
                             _inductor_triton_kernel_to_post_grad_node_info.setdefault(

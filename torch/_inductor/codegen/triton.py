@@ -45,7 +45,7 @@ from torch.utils._triton import (
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, ir, metrics, utils
+from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -119,6 +119,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .simd import (
+    _DerivedIterationFamily,
     constant_repr,
     DerivedIterationRangesRoot,
     IterationRanges,
@@ -3359,6 +3360,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Largest top-k selected in this kernel; drives its launch config in
         # the reduction heuristic.
         self.topk_sort_k: int = 0
+        self.reduction_result_families: dict[int, _DerivedIterationFamily] = {}
         # TensorDescriptorOptions for pointwise/reduction kernels; template
         # kernels set a resolved {block_shape, shape, strides} dict directly
         # (see TritonTemplateKernel.tma_descriptor).
@@ -5418,6 +5420,68 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=tuple(target_shape),
         )
 
+    def use_scalar_online_softmax(
+        self, value: CSEVariable | tuple[CSEVariable, ...]
+    ) -> bool:
+        """
+        Per-row max/sum accumulators for a reduction loop whose only reductions
+        are the two outputs of one online softmax. The reduction size, load and
+        full-size output limits come from the performance sweep of fused
+        softmax kernels.
+        """
+        features = self.features
+        if (
+            # Split-reduction combines pass partial (max, sum) tuples.
+            isinstance(value, tuple)
+            or not config.triton.scalar_online_softmax_accumulators
+            # Which signed zero wins a strict max depends on the reduction
+            # block, so strict mode keeps the single-config vector path.
+            or config.strict_signed_zero
+            or self.is_combo_kernel
+            or self.cooperative_reduction
+            # Nested and sub-parent reductions emit extra nodes into the grid.
+            or features.indexing_node_schedule is not features.node_schedule
+            or self.num_reduction_dims != 1
+            or torch.version.hip is not None
+            or V.graph.get_current_device_or_throw().type != "cuda"
+            or features.get_reduction_hint(self.tiling_scores) != ReductionHint.INNER
+            or V.graph.sizevars.optimization_hint(features.reduction_numel) <= 4096
+        ):
+            return False
+
+        # Each output of the online softmax is its own scheduler node.
+        reduction_nodes = features.reduction_nodes()
+        if len(reduction_nodes) not in (1, 2) or any(
+            not isinstance(node.node, ir.ComputedBuffer)
+            or node.node.get_reduction_type() != "online_softmax_reduce"
+            for node in reduction_nodes
+        ):
+            return False
+
+        nodes = OrderedSet(features.scheduler_nodes())
+        produced = OrderedSet(
+            buf.get_name() for node in nodes for buf in node.get_outputs()
+        )
+        loads = OrderedSet(
+            dep
+            for node in nodes
+            for dep in node.read_writes.reads
+            if isinstance(dep, dependencies.MemoryDep) and dep.name not in produced
+        )
+        if len(loads) > 3:
+            return False
+        sizevars = V.graph.sizevars
+        full_numel = sizevars.optimization_hint(
+            features.numel * features.reduction_numel
+        )
+        full_size_outputs = sum(
+            any(user.node not in nodes for user in buf.users)
+            and sizevars.optimization_hint(buf.node.get_numel()) >= full_numel
+            for node in nodes
+            for buf in node.get_outputs()
+        )
+        return full_size_outputs <= 1
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -5892,6 +5956,39 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
                 )
+            elif (
+                reduction_type == "online_softmax_reduce"
+                and self.use_scalar_online_softmax(value)
+            ):
+                # Per-row accumulators: each block is reduced along the
+                # reduction dim before it is folded into the running state.
+                self.autotune_hints.add(AutotuneHint.SCALAR_ONLINE_SOFTMAX)
+                accumulator_max = f"_{result_var}_max"
+                accumulator_sum = f"_{result_var}_sum"
+                acc_size = f"[{', '.join(self.dense_size_list()[:dim])}]"
+                self.body.writeline(
+                    f"{accumulator_max} = tl.full({acc_size}, float('-inf'), {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_sum} = tl.full({acc_size}, 0.0, {acc_type})"
+                )
+                self.compute.splice(
+                    f"""
+                    {accumulator_max}, {accumulator_sum} = triton_helpers.online_softmax_reduce_scalar_combine(
+                        {accumulator_max}, {accumulator_sum}, {value}, {cond or True}, {dim},
+                        {config.use_fast_math}, {config.strict_signed_zero}
+                    )
+                    """
+                )
+                result_max = cast(CSEVariable, result_var)
+                result_sum = self.cse.newvar(dtype=dtype, shape=result_max.shape)
+                self.post_loop_combine.splice(
+                    f"""
+                    {result_max} = {self.reduction_resize(accumulator_max)}
+                    {result_sum} = {self.reduction_resize(accumulator_sum)}
+                    """
+                )
+                result_var = result_max, result_sum
             elif reduction_type == "online_softmax_reduce":
                 accumulator_max = f"_{result_var}_max"
                 accumulator_sum = f"_{result_var}_sum"
@@ -6337,7 +6434,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         name: str,
         index: sympy.Expr,
         value: CSEVariable,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
     ):
+        if result_range is not None:
+            rank, rank_size = result_range
+            family = self.reduction_result_family(rank_size)
+            output_rank = family.range_trees[-1].full_range().symbol()
+            result_index = index.subs(rank, output_rank)
+            if output_rank not in result_index.free_symbols:
+                raise AssertionError(
+                    f"expected result rank {rank} in store index {index}"
+                )
+            with family.ensure_active(self):
+                self.store(name, result_index, value)
+            return
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
         self.inside_reduction = False
@@ -6734,6 +6845,33 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         return tuple(result_vars)
 
+    @contextlib.contextmanager
+    def disable_reduction(self, result_size: int = 1):
+        if result_size == 1:
+            with super().disable_reduction():
+                yield
+        else:
+            self.codegen_body()
+            with self.reduction_result_family(result_size).activate(self):
+                yield
+                self.codegen_body()
+
+    def reduction_result_family(self, rank_size: int) -> _DerivedIterationFamily:
+        if rank_size not in self.reduction_result_families:
+            if not self.persistent_reduction or self.num_reduction_dims != 1:
+                raise AssertionError("reduction results require one persistent axis")
+            rank_tree = DerivedIterationRangesRoot(
+                self.range_trees[-1],
+                numel=sympy.Integer(rank_size),
+                block_size=sympy.Integer(next_power_of_2(rank_size)),
+                block_offset=sympy.S.Zero,
+                name_suffix=f"result{rank_size}",
+            )
+            self.reduction_result_families[rank_size] = _DerivedIterationFamily(
+                range_trees=(*self.range_trees[:-1], rank_tree),
+            )
+        return self.reduction_result_families[rank_size]
+
     def sort(
         self,
         dtypes: tuple[torch.dtype, ...],
@@ -6771,6 +6909,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             for i, value in enumerate(values)
         ]
+        result_shape = tuple(self.dense_size_list())
+        result_family = None
+        if top_k is not None and not V.graph.sizevars.statically_known_equals(
+            top_k, self.range_trees[-1].numel
+        ):
+            result_family = self.reduction_result_family(top_k)
+            result_shape = (*result_shape[:-1], str(next_power_of_2(top_k)))
 
         def csv(values):
             return " ".join(f"{value}," for value in values)
@@ -6781,8 +6926,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
             result_vars = [
-                self.cse.newvar(dtype=dtype, shape=value.shape)
-                for dtype, value in zip(dtypes, broadcasted_values)
+                self.cse.newvar(dtype=dtype, shape=result_shape) for dtype in dtypes
             ]  # type: ignore[attr-defined]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
@@ -6818,6 +6962,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for result_var, input_var in zip(result_vars, values):
             result_var.mask_vars = masks  # type: ignore[attr-defined]
             result_var.bounds = input_var.bounds
+
+        if result_family is not None:
+            result_family.set_value_masks(self, result_vars)
 
         return tuple(result_vars)
 
@@ -7313,8 +7460,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_load": self.num_load,
             "num_store": self.num_store,
             "num_reduction": self.num_reduction,
-            # Triton will not accept an OrderedSet for autotune_hints
-            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
+            # Sorted so the generated source does not depend on set ordering.
+            "autotune_hints": tuple(
+                sorted(self.autotune_hints, key=lambda hint: hint.value)
+            ),
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
@@ -7457,6 +7606,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 return True
         return False
+
+    def pointer_range_override(self) -> tuple[int, ...] | None:
+        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+
+        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
+        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
+        ``config_of`` decide, which is also where the config flag is applied. Only
+        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        """
+        if torch.version.hip is not None and self.atomic_add_found:
+            return ()
+        return None
 
     def codegen_kernel(self, name=None) -> str:
         """
@@ -7655,24 +7816,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Compute configs after codegen_body() so we know if the kernel
-        # uses atomic ops. On HIP, buffer ops don't support atomics, so
-        # we must not tag any args with pointer_range_32 in that case.
-        # Also disable pointer_range_32 when the config flag is off.
-        if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
-        ):
-            triton_meta["configs"] = [
-                config_of(
-                    signature,
-                    pointer_range_override=(),
-                    skip_cpp_wrapper_input_tensor_alignment=True,
-                )
-            ]
-        else:
-            triton_meta["configs"] = [
-                config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
-            ]
+        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        triton_meta["configs"] = [
+            config_of(
+                signature,
+                skip_cpp_wrapper_input_tensor_alignment=True,
+                pointer_range_override=self.pointer_range_override(),
+            )
+        ]
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -8385,6 +8536,7 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     supports_sub_parent_epilogue = True
+    supports_reduction_result = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [
@@ -8690,15 +8842,12 @@ class TritonScheduling(SIMDScheduling):
             # TODO(jansel): scan does not yet work with cooperative reductions
             kernel_kwargs["override_cooperative_reduction"] = False
 
-        disable_multi_kernel = kernel_kwargs.pop("disable_multi_kernel", False)
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        if disable_multi_kernel:
-            return [kernel]
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
     def add_multi_kernel_choices(

@@ -291,10 +291,21 @@ class OpsHandler(Generic[T]):
     # TODO: in practice, this seems to actually return None, but not returning
     # a T makes common __getattr__ idioms not type correctly.  Figure out if
     # this should be returning something.
-    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> None:
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: T,
+        *,
+        result_range: tuple[sympy.Expr, int] | None = None,
+    ) -> None:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
+
+        With ``result_range=(rank, size)``, the value is stored once per rank
+        in ``[0, size)`` instead of once per row; only this store uses that
+        result domain, and input loads keep the full reduction extent.
         """
         raise NotImplementedError
 
