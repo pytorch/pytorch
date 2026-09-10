@@ -554,7 +554,6 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn()
 
-    @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
         # CPython issue #30537: islice can accept integer-like objects as arguments.
         class IntLike:
@@ -581,6 +580,23 @@ partial_fn = functools.partial(fn, scale=2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn()
+
+    def test_slice_index_object(self):
+        # A slice bound implementing __index__ must be coerced, like eager does,
+        # so it can be used to index a tensor (https://github.com/pytorch/pytorch/issues/196172).
+        class StaticIndex:
+            def __init__(self, index):
+                self.index = index
+
+            def __index__(self):
+                return self.index
+
+        def fn(x):
+            return x[StaticIndex(1) : StaticIndex(4) : StaticIndex(2)]
+
+        x = torch.arange(8)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_bin_oct_hex_index(self):
         # bin/oct/hex dispatch through __index__ (CPython PyNumber_ToBase).
