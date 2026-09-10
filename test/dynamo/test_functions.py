@@ -5459,6 +5459,45 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
 
+    def test_method_vt_reconstruct_pycode(self):
+        """A bound method live across a graph break must be codegen-able."""
+
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            bound = obj.m
+            torch._dynamo.graph_break()
+            return bound(x)
+
+        x = torch.randn(3)
+        with torch._dynamo.config.patch(generate_pycode=True):
+            res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(res, fn(x))
+
+    def test_method_vt_identity_and_dunder_dict(self):
+        """A bound method is not its function, but proxies __dict__ to it."""
+
+        class Counter:
+            def m(self, x):
+                return x + 1
+
+        obj = Counter()
+
+        def fn(x):
+            return (obj.m is Counter.m), (obj.m.__dict__ == Counter.m.__dict__), x + 1
+
+        x = torch.randn(3)
+        is_same, dict_eq, _ = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(is_same)
+        self.assertTrue(dict_eq)
+
     def test_method_still_inlines_after_vt_split(self):
         """Method calls, attribute access and reconstruction survive the split."""
 

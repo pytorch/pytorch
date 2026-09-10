@@ -987,6 +987,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     ],
                 )
 
+            if isinstance(fn_var, UserMethodVariable):
+                # Trace the *bound* method, so the receiver is captured rather
+                # than passed as an argument. That matches what decorating a
+                # bound method outside the region already does: the wrapper
+                # closes over `self` and nonstrict_trace only ever sees the
+                # explicit arguments, which is what its input-type restriction
+                # expects.
+                return variables.TorchInGraphFunctionVariable(
+                    fn_var.guard_as_python_constant(),
+                    kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE,
+                )
+
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
                 msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."
@@ -1876,6 +1888,24 @@ class UserMethodVariable(BaseUserFunctionVariable):
     def get_source(self) -> Source | None:
         return self.im_func.get_source()
 
+    def reconstruct_pycode(self, codegen):
+        # `source` denotes the bound method itself, which is the expression
+        # that regenerates it. im_func's source is the plain function and
+        # would drop the binding.
+        if self.source:
+            return self.source.reconstruct_pycode(codegen)
+        raise NotImplementedError(
+            "Python codegen not implemented for sourceless UserMethodVariable"
+        )
+
+    def guard_as_python_constant(self) -> Any:
+        # A bound method is rebuilt on every attribute access, so it has no
+        # stable identity and as_python_constant() declines. Call sites that
+        # need a real callable (comptime, checkpoint's context_fn) can still
+        # have one by binding the guarded receiver, which is what the
+        # equivalent functools.partial(func, obj) already does here.
+        return self.get_function().__get__(self.im_self.guard_as_python_constant())
+
     def python_type(self) -> type[types.MethodType]:
         return types.MethodType
 
@@ -1970,9 +2000,6 @@ class UserMethodVariable(BaseUserFunctionVariable):
         "__self__": Member(lambda s, _: s.im_self, readonly_setter),
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
-
-    def get_real_python_backed_value(self) -> Any:
-        return self.get_function()
 
 
 class WrappedUserMethodVariable(UserMethodVariable):

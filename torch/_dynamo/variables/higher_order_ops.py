@@ -4457,7 +4457,11 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
             elif isinstance(
-                ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
+                ctx,
+                (
+                    torch._dynamo.variables.UserMethodVariable,
+                    torch._dynamo.variables.functions.FunctoolsPartialVariable,
+                ),
             ):
                 context_fn = ctx.guard_as_python_constant()
             else:
@@ -4517,6 +4521,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
+        elif isinstance(func_var, torch._dynamo.variables.UserMethodVariable):
+            func = func_var.guard_as_python_constant()
         elif isinstance(
             func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
         ):
