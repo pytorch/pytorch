@@ -208,6 +208,7 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
+    ValueAndAttributeMutationExisting,
     ValueMutationNew,
     VariableTracker,
     VariableTrackerMeta,
@@ -2209,10 +2210,9 @@ class VariableBuilder:
                 else UserDefinedDictVariable
             )
             result = udf_cls(value, items=kv_items, source=self.source)
-            # Force this to reconstruct on mutation to keep the reconstruction
-            # bytecode simple
-            result.should_reconstruct_all = True
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2253,7 +2253,9 @@ class VariableBuilder:
                 items=output,  # type: ignore[arg-type]
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif isinstance(value, collections.deque):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2278,7 +2280,9 @@ class VariableBuilder:
                 maxlen=ConstantVariable.create(value.maxlen),
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -2300,7 +2304,9 @@ class VariableBuilder:
                 result = UserDefinedFrozensetVariable(
                     value, items=output, source=self.source
                 )
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.tx.output.side_effects.track_object_existing(
+                value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+            )
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = MutableMappingVariable(value, source=self.source)

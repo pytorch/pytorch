@@ -279,6 +279,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(sd1, x), opt_fn(sd2, x))
         self.assertTrue(sd1 == sd2)
 
+    def test_dict_subclass_input_key_removal(self):
+        # Removals cannot be replayed by dict.update alone, so the replay has
+        # to clear the original dict first.
+        def fn(sd, x):
+            sd.pop(2)
+            del sd[4]
+            sd[9] = 3
+            return x * len(sd)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        sd1 = SimpleDict({2: 5, 4: 10, 6: 15})
+        sd2 = SimpleDict({2: 5, 4: 10, 6: 15})
+
+        self.assertEqual(fn(sd1, x), opt_fn(sd2, x))
+        self.assertEqual(sd1, sd2)
+        self.assertEqual(dict(sd2), {6: 15, 9: 3})
+
     def test_dict_subclass_setitem(self):
         class SetItemDict(dict):
             def __setitem__(self, key, value):
