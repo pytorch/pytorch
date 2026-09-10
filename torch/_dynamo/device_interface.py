@@ -217,6 +217,10 @@ class DeviceInterface:
         """
         return cls.Stream is not DeviceInterface.Stream
 
+    @staticmethod
+    def allow_tf32(*, size_threshold: bool = True) -> bool:
+        return False
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -367,6 +371,12 @@ class CudaInterface(DeviceInterface):
         return (
             torch.version.hip is not None
             or CudaInterface.Worker.get_device_properties(device).major >= 7
+        )
+
+    @staticmethod
+    def allow_tf32(*, size_threshold: bool = True) -> bool:
+        return (
+            torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
         )
 
     @staticmethod
@@ -585,6 +595,10 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32(*, size_threshold: bool = True) -> bool:
+        return torch.backends.mkldnn.allow_tf32
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
