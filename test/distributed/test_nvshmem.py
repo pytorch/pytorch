@@ -576,6 +576,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         symm_mem.rendezvous(inp, group=group_name)
         symm_mem.rendezvous(out, group=group_name)
+
+        dist.barrier()
         torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
 
         expected = torch.cat(
