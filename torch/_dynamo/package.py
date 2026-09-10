@@ -121,12 +121,12 @@ class FunctionPicklerBase(pickle.Pickler):
     keeps its own copies of these reducers and is moved onto this base
     separately, so that a fix here cannot be missed in one pickler.
 
-    Defaults, kwdefaults, __doc__, __dict__, __annotations__, __type_params__
-    and the globals snapshot travel as pickle STATE, applied after memoization,
-    so `wrapper.me = wrapper` and module-scope cycles end. A closure cell is a
-    reduce ARGUMENT: a function closing over itself is reduced twice, and
-    save_reduce's recursive-object fallback (present in both the C and the
-    pure-Python pickler) drops the outer copy.
+    Defaults, kwdefaults, __doc__, __dict__, __annotations__ and __type_params__
+    travel as pickle STATE, applied after memoization, so `wrapper.me = wrapper`
+    cycles end. A closure cell and the globals snapshot are reduce ARGUMENTS: a
+    function closing over itself, or stored in its own module snapshot, is
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
     """
 
     # The reducers stay classmethods: pickle reduces a bound classmethod to
@@ -160,7 +160,7 @@ class FunctionPicklerBase(pickle.Pickler):
     def _build_function(
         cls,
         f_globals: dict[str, Any],
-        module: str | None,
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -170,7 +170,8 @@ class FunctionPicklerBase(pickle.Pickler):
         # FunctionType derives __module__ from f_globals["__name__"], so any
         # scope that is not the real module dict leaves it None and a guard
         # rooted at fn.__module__ rebuilds against that. Leave that None in
-        # place rather than assigning it back (which the stub rejects).
+        # place rather than assigning it back (which the stub rejects). Any
+        # other value is restored as is: __module__ need not be a str.
         if module is not None:
             fn.__module__ = module
         fn.__qualname__ = qualname
@@ -179,7 +180,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_module(
         cls,
-        module: str | None,
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -212,34 +213,30 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_snapshot(
         cls,
-        module: str | None,
+        scope: dict[str, Any],
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
         closure: tuple[types.CellType, ...] | None,
     ) -> types.FunctionType:
-        # The scope arrives as pickle STATE, through _apply_function_state. The
-        # {} is fresh per call, so two functions that shared one module dict at
-        # save get distinct __globals__ after load; deliberate and unobservable,
-        # since no serialized guard reads __globals__ identity.
-        return cls._build_function({}, module, code, qualname, name, closure)
+        # The scope is a reduce ARGUMENT: every function rebuilt against one
+        # module dict shares this one object, which pickle fills in as its items
+        # load, so a function reached while the dict is still loading (a
+        # module-scope wrapper is itself an item of its own snapshot) still sees
+        # the complete scope once the load finishes. Applied as pickle STATE it
+        # would have been a copy of whatever had loaded by then.
+        return cls._build_function(scope, module, code, qualname, name, closure)
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
-        (
-            defaults,
-            kwdefaults,
-            attributes,
-            globals_snapshot,
-            doc,
-            annotations,
-            type_params,
-        ) = state
+        defaults, kwdefaults, attributes, doc, annotations, type_params = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
-        # FunctionType took __doc__/__annotations__/__type_params__ from the code
-        # object; functools.wraps overwrote them on the live function and a guard
-        # rooted there rebakes, so restore what the reducer captured.
+        # FunctionType() takes __doc__ from the code object and leaves
+        # __annotations__/__type_params__ empty (they are MAKE_FUNCTION operands);
+        # functools.wraps overwrote them on the live function and a guard rooted
+        # there rebakes, so restore what the reducer captured.
         fn.__doc__ = doc
         fn.__annotations__ = annotations
         # On Python < 3.12 there is no __type_params__ slot, so both a live
@@ -249,20 +246,15 @@ class FunctionPicklerBase(pickle.Pickler):
         fn.__dict__ = attributes
         if type_params is not None:
             fn.__type_params__ = type_params
-        if globals_snapshot is not None:
-            if fn.__globals__:
-                raise AssertionError(
-                    "a globals snapshot needs the fresh scope of _unpickle_fn_from_snapshot"
-                )
-            fn.__globals__.update(globals_snapshot)
 
     @staticmethod
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
-        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Take the
-        # unevaluated FORWARDREF shape instead; a ForwardRef proxy carries its
-        # owner and may not pickle (it does not for a local function), so the
-        # caller prunes any it does not need.
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
+        # FORWARDREF format instead: it evaluates what it can and falls back to
+        # proxies only for names that do not resolve, returning a COPY either
+        # way. A ForwardRef proxy carries its owner and may not pickle (it does
+        # not for a local function), so the caller prunes any it does not need.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -363,15 +355,8 @@ class FunctionPicklerBase(pickle.Pickler):
             unpickle = type(self)._unpickle_fn_from_module
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
-        state = (
-            defaults,
-            kwdefaults,
-            attributes,
-            globals_snapshot,
-            doc,
-            annotations,
-            type_params,
-        )
+            args = (globals_snapshot, *args)
+        state = (defaults, kwdefaults, attributes, doc, annotations, type_params)
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
@@ -489,11 +474,12 @@ class _DynamoCodeCacheEntry:
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
       10. Whether the entry currently has nothing installable: every compile of
-         it was bypassed (its guards could not be serialized), or a backend was
-         missing at load. install() then leaves the frame to be traced fresh
-         rather than skipping it as trivial. Cleared once a compile records a
-         guarded code. (The load-time writer still flags the whole entry and
-         keeps the stale guarded codes; see PrecompileCacheEntry.from_cache_entry.)
+         it was bypassed (its guards could not be serialized), or a backend
+         artifact was missing when the package was saved. install() then leaves
+         the frame to be traced fresh rather than skipping it as trivial.
+         Cleared once a compile records a guarded code. (The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
+         keeps the stale guarded codes.)
     """
 
     python_code: SerializedCode
