@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: mobile"]
 
 import io
+import os
 import tempfile
 import unittest
 
@@ -12,6 +13,10 @@ from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 class TestShowPickle(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Can't re-open temp file on Windows")
     def test_scripted_model(self):
+        # TEST-ONLY: exercise soft-fail handling in the TD holdout workflow.
+        if os.environ.get("GITHUB_WORKFLOW") == "td-holdout-unstable":
+            self.fail("TEST-ONLY: exercise soft-fail handling")
+
         class MyCoolModule(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
