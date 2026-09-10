@@ -12,6 +12,7 @@ import unittest
 import zipfile
 from collections import namedtuple
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
@@ -64,6 +65,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    run_concurrently,
     run_tests,
     TemporaryFileName,
     TestCase,
@@ -2559,6 +2561,36 @@ class TestSaveLoad(TestCase):
                         self.assertEqual(
                             node_source_orig.to_dict(), node_source_loaded.to_dict()
                         )
+
+    def test_concurrent_load(self) -> None:
+        # Deserialization state is passed to the pickle __reduce__ path out of
+        # band, so it must not be shared between concurrently loading threads.
+        class M(torch.nn.Module):
+            def __init__(self, dim, act):
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+                self.act = act
+
+            def forward(self, x):
+                return self.act(self.linear(x))
+
+        def pack(mod, inp):
+            buffer = io.BytesIO()
+            save(torch.export.export(mod, (inp,)), buffer)
+            return buffer.getvalue(), inp, mod(inp)
+
+        # Distinct shapes so a deserializer leaking across threads is detected.
+        cases = [
+            pack(M(8, torch.relu), torch.randn(4, 8)),
+            pack(M(16, torch.tanh), torch.randn(4, 16)),
+        ]
+
+        def worker(case):
+            data, inp, expected = case
+            loaded = load(io.BytesIO(data))
+            self.assertEqual(loaded.module()(inp), expected)
+
+        run_concurrently([partial(worker, cases[i % len(cases)]) for i in range(8)])
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
