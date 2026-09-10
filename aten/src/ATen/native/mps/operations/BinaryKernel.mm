@@ -198,22 +198,31 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
     return lerp_scalar_mps_kernel(iter, weight);
   }
 
-  // The kernels below read every buffer as `common_dtype` and have no cast variants, so the
-  // remaining promotions are rejected rather than silently reinterpreting the bits.
-  TORCH_CHECK(tensors_match && iter.dtype(3) == common_dtype,
-              "lerp: MPS only supports a `weight` whose dtype differs from `self` when it is a CPU scalar, got self=",
-              iter.dtype(1),
-              ", end=",
-              iter.dtype(2),
-              ", weight=",
-              iter.dtype(3),
-              ", out=",
-              iter.dtype(0),
-              "; cast the operands to a common dtype first");
-
   auto type_str = scalarToMetalTypeString(common_dtype);
   auto numel = static_cast<uint32_t>(iter.numel());
   auto ndim = static_cast<uint32_t>(iter.ndim());
+
+  // Anything still disagreeing goes through the runtime-cast kernel, which loads and stores
+  // through each operand's own dtype rather than reinterpreting it as `common_dtype`.
+  if (!tensors_match || iter.dtype(3) != common_dtype) {
+    std::array<int, 4> ndim_and_types = {
+        iter.ndim(), static_cast<int>(iter.dtype(1)), static_cast<int>(iter.dtype(3)), static_cast<int>(iter.dtype(0))};
+    auto pso = lib.getPipelineStateForFunc("lerp_tensor_strided_cast_" + type_str);
+    dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+      auto computeEncoder = getCurrentMPSStream()->commandEncoder();
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      mtl_setArgs<4>(computeEncoder,
+                     iter.shape(),
+                     iter.strides(0),
+                     iter.strides(1),
+                     iter.strides(2),
+                     iter.strides(3),
+                     ndim_and_types);
+      mtl_dispatch1DJob(computeEncoder, pso, numel);
+    });
+    return;
+  }
 
   // simple elementwise kernel for dense tensors
   if (iter.is_contiguous()) {

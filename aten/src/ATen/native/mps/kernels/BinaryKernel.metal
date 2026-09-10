@@ -856,6 +856,42 @@ kernel void lerp_tensor_strided(
       val_at_offs<T>(weight_ptr, weight_off));
 }
 
+// Runtime-cast variant, mirroring `binary_strided_cast`: operands are loaded
+// and stored through their own dtypes rather than reinterpreted as T. `self`
+// and `end` always share a dtype (the meta function enforces it), so ndim and
+// the three distinct dtypes fit a uint4.
+template <typename T>
+kernel void lerp_tensor_strided_cast(
+    device void* out_ptr [[buffer(0)]],
+    constant void* self_ptr [[buffer(1)]],
+    constant void* end_ptr [[buffer(2)]],
+    constant void* weight_ptr [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* out_strides [[buffer(5)]],
+    constant long* self_strides [[buffer(6)]],
+    constant long* end_strides [[buffer(7)]],
+    constant long* weight_strides [[buffer(8)]],
+    constant uint4& ndim_types [[buffer(9)]],
+    uint tid [[thread_position_in_grid]]) {
+  const auto ndim = ndim_types.x;
+  const auto in_type = static_cast<c10::metal::ScalarType>(ndim_types.y);
+  int pos[max_ndim];
+  pos_from_thread_index(int(tid), pos, sizes, ndim);
+  const auto s = val_at_offs<T>(
+      self_ptr, offset_from_coord(pos, self_strides, ndim), in_type);
+  const auto e = val_at_offs<T>(
+      end_ptr, offset_from_coord(pos, end_strides, ndim), in_type);
+  const auto w = val_at_offs<T>(
+      weight_ptr,
+      offset_from_coord(pos, weight_strides, ndim),
+      static_cast<c10::metal::ScalarType>(ndim_types.z));
+  store_at_offs(
+      out_ptr,
+      offset_from_coord(pos, out_strides, ndim),
+      static_cast<c10::metal::ScalarType>(ndim_types.w),
+      lerp_op(s, e, w));
+}
+
 #define INSTANTIATE_LERP(DTYPE)                                           \
   template [[host_name("lerp_tensor_dense_" #DTYPE)]] kernel void         \
   lerp_tensor_dense<DTYPE>(                                               \
@@ -893,6 +929,19 @@ kernel void lerp_tensor_strided(
       constant long* end_strides [[buffer(6)]],                           \
       constant long* weight_strides [[buffer(7)]],                        \
       uint3 tid [[thread_position_in_grid]]);                             \
+  template [[host_name("lerp_tensor_strided_cast_" #DTYPE)]] kernel void  \
+  lerp_tensor_strided_cast<DTYPE>(                                        \
+      device void* out_ptr [[buffer(0)]],                                 \
+      constant void* self_ptr [[buffer(1)]],                              \
+      constant void* end_ptr [[buffer(2)]],                               \
+      constant void* weight_ptr [[buffer(3)]],                            \
+      constant long* sizes [[buffer(4)]],                                 \
+      constant long* out_strides [[buffer(5)]],                           \
+      constant long* self_strides [[buffer(6)]],                          \
+      constant long* end_strides [[buffer(7)]],                           \
+      constant long* weight_strides [[buffer(8)]],                        \
+      constant uint4& ndim_types [[buffer(9)]],                           \
+      uint tid [[thread_position_in_grid]]);                              \
   template [[host_name("lerp_tensor_strided_" #DTYPE)]] kernel void       \
   lerp_tensor_strided<DTYPE>(                                             \
       device void* out_ptr [[buffer(0)]],                                 \

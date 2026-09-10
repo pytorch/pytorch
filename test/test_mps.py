@@ -3730,11 +3730,9 @@ class TestMPS(TestCaseMPS):
         cpu_x = torch.arange(6).reshape(2, 3).to(dtype)
         cpu_w = torch.tensor(0.1, dtype=wdtype)
         x = cpu_x.to("mps")
-        self.assertEqual(torch.lerp(cpu_x, cpu_x + 2, cpu_w), torch.lerp(x, x + 2, cpu_w))
-        self.assertEqual(cpu_x.clone().lerp_(cpu_x + 2, cpu_w), x.clone().lerp_(x + 2, cpu_w))
-        # a device-resident weight has to match: the kernels have no cast variants
-        with self.assertRaisesRegex(RuntimeError, "only supports a `weight`"):
-            torch.lerp(x, x + 2, cpu_w.to("mps"))
+        for w in (cpu_w, cpu_w.to("mps")):
+            self.assertEqual(torch.lerp(cpu_x, cpu_x + 2, cpu_w), torch.lerp(x, x + 2, w))
+            self.assertEqual(cpu_x.clone().lerp_(cpu_x + 2, cpu_w), x.clone().lerp_(x + 2, w))
 
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
