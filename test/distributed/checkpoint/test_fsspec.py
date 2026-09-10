@@ -14,8 +14,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint._fsspec_filesystem import (
-    FileSystem,
+from torch.distributed.checkpoint.fsspec_filesystem import (
+    _FileSystem,
     FsspecReader,
     FsspecWriter,
 )
@@ -192,7 +192,7 @@ class TestFSSpec(ShardedTensorTestBase):
 class TestFileSystem(TestCase):
     @with_temp_dir
     def test_remove_on_fail(self):
-        fs = FileSystem()
+        fs = _FileSystem()
         path = fs.init_path(self.temp_dir)
 
         write_file = fs.concat_path(path, "writeable")
@@ -254,6 +254,35 @@ class TestFileSystem(TestCase):
 
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
+
+    def test_fsspec_async_save(self):
+        from concurrent.futures import Future
+
+        checkpoint_dir = "memory://test_checkpoint_async"
+        state_dict = {"tensor": torch.randn(10)}
+
+        # Save using FsspecWriter with async_save
+        future = dcp.async_save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+        self.assertIsInstance(future, Future)
+
+        # Wait for the async save to complete
+        future.result()
+
+        # Verify it saved properly and can be loaded
+        load_dict = {"tensor": torch.zeros(10)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+            no_dist=True,
+        )
+
+        self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
 
 
 if __name__ == "__main__":
