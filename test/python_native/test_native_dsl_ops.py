@@ -1,13 +1,17 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import base64
 import contextlib
+import hashlib
 import importlib.util
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import uuid
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 from unittest.mock import patch
 
 from torch._native import common_utils as native_common_utils, triton_utils
@@ -31,23 +35,13 @@ def _subprocess_lastline(script, env=None):
     return result.rsplit("\n", 1)[-1]
 
 
-# Read from the lookup rather than repeated here, so that a name added there is
-# covered rather than silently untested. `triton` is excluded: it is the one
-# name the lookup resolved before the rest were handled.
 _WHEEL_DISTRIBUTIONS = tuple(
     name for name in triton_utils._TRITON_DISTRIBUTIONS if name != "triton"
 )
-
-# Where the importable `triton` resolves to, for the tests that care which
-# distribution installed it.
 _MODULE_ORIGIN = "/site-packages/triton/__init__.py"
 
 
 def _triton_installed(versions):
-    """Patch the per-distribution version lookup with `versions`.
-
-    A distribution absent from the mapping is not installed.
-    """
     return patch.object(
         triton_utils,
         "_available_version",
@@ -58,12 +52,6 @@ def _triton_installed(versions):
 
 
 def _triton_provided_by(*distributions, raises=False):
-    """Patch the sys.path scan to report `distributions` for the module.
-
-    With no distributions the module is absent from the mapping entirely, as it
-    is from the real scan: that only ever creates a key by appending to it, so
-    it cannot report a module with an empty provider list.
-    """
     kwargs = (
         {"side_effect": RuntimeError("unreadable metadata")}
         if raises
@@ -72,9 +60,20 @@ def _triton_provided_by(*distributions, raises=False):
     return patch.object(triton_utils, "_packages_distributions", **kwargs)
 
 
+class _FileHash:
+    def __init__(self, mode, value):
+        self.mode = mode
+        self.value = value
+
+
 class _InstalledFile:
-    def __init__(self, path):
+    def __init__(self, path, contents=None):
         self._path = path
+        self.hash = None
+        if contents is not None:
+            digest = hashlib.sha256(contents).digest()
+            value = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            self.hash = _FileHash("sha256", value)
 
     def locate(self):
         return self._path
@@ -82,39 +81,26 @@ class _InstalledFile:
 
 class _InstalledDistribution:
     def __init__(self, paths):
-        # None is a distribution with no RECORD, which reports no files at all.
-        self.files = None if paths is None else [_InstalledFile(p) for p in paths]
+        self.files = (
+            None
+            if paths is None
+            else [
+                p if isinstance(p, _InstalledFile) else _InstalledFile(p) for p in paths
+            ]
+        )
 
 
 def _triton_module_at(origin):
-    """Patch the resolved location of the importable module."""
     return patch.object(triton_utils, "_module_origin", return_value=origin)
 
 
 def _triton_records(files_by_distribution):
-    """Patch distribution metadata with the files each one installed.
-
-    A distribution absent from the mapping is not installed; one mapped to None
-    installed no RECORD, so what it owns cannot be decided.
-    """
-
     def lookup(name):
         if name not in files_by_distribution:
             raise PackageNotFoundError(name)
         return _InstalledDistribution(files_by_distribution[name])
 
     return patch.object(triton_utils, "_distribution", side_effect=lookup)
-
-
-def _rejects_a_nameless_distribution(distribution):
-    """Stand in for the version lookup, which rejects a `None` name.
-
-    A dist-info whose METADATA carries no `Name` is reported by the scan as a
-    `None` provider, and `importlib.metadata.version(None)` raises.
-    """
-    if distribution is None:
-        raise ValueError("A distribution name is required.")
-    return None
 
 
 def _import_module_directly(module_name, file_name):
@@ -710,48 +696,39 @@ class TestNativeDSLOps(TestCase):
 
 
 class TestTritonDistributionDiscovery(TestCase):
-    """Which distribution answers for the importable `triton` module.
-
-    A name this lookup cannot resolve reports no version, and no version fails
-    the gate below -- so a working Triton install stops registering ops, with
-    nothing in the output naming the wheel as the reason.
-    """
-
     def setUp(self):
         super().setUp()
-        # Answer the ownership question the same way everywhere by default, so
-        # that only the cases below decide it, rather than this machine's own
-        # Triton install.
         for default in (_triton_module_at(_MODULE_ORIGIN), _triton_records({})):
             default.start()
             self.addCleanup(default.stop)
 
-    def test_distribution_named_after_the_module_answers_directly(self):
-        with _triton_installed({"triton": "3.7.1"}), _triton_provided_by() as scan:
+    def test_named_distribution_uses_fast_path(self):
+        with (
+            _triton_installed({"triton": "3.7.1"}),
+            _triton_provided_by() as scan,
+            _triton_module_at(_MODULE_ORIGIN) as origin,
+        ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
-        # Not merely an optimization: the scan reads the metadata of every
-        # distribution on sys.path, on the import path of every torch process.
+
         scan.assert_not_called()
+        origin.assert_not_called()
 
     @parametrize("distribution", _WHEEL_DISTRIBUTIONS)
-    def test_wheel_distribution_names_are_resolved(self, distribution):
+    def test_known_distribution_names(self, distribution):
         with (
             _triton_installed({distribution: "3.7.1"}),
             _triton_provided_by(distribution),
         ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
-    def test_provider_without_a_version_falls_through_to_the_next(self):
+    def test_missing_version_falls_through(self):
         with (
             _triton_installed({"pytorch-triton-rocm": "3.7.1"}),
             _triton_provided_by("fbtriton", "pytorch-triton-rocm"),
         ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
-    def test_module_owned_by_no_distribution_reports_no_version(self):
-        # A source checkout on PYTHONPATH: importable, with no dist-info at all,
-        # so nothing reports a version. An editable install is a different case
-        # -- it has metadata and reports a version -- and is covered below.
+    def test_source_checkout_reports_no_version(self):
         with (
             _triton_installed({}),
             _triton_provided_by(),
@@ -761,9 +738,7 @@ class TestTritonDistributionDiscovery(TestCase):
 
         self.assertIn("no installed distribution", "\n".join(logs.output))
 
-    def test_provider_that_reports_no_version_exhausts_the_candidates(self):
-        # A wheel owns the module but its metadata carries no parseable
-        # version, so every candidate the scan named is tried and rejected.
+    def test_scanned_provider_without_version(self):
         with (
             _triton_installed({}),
             _triton_provided_by("pytorch-triton-rocm"),
@@ -773,9 +748,7 @@ class TestTritonDistributionDiscovery(TestCase):
 
         self.assertIn("no installed distribution", "\n".join(logs.output))
 
-    def test_unreadable_metadata_declines_instead_of_raising(self):
-        # This runs while the overrides register, during `import torch`, where
-        # an exception would take the process down.
+    def test_unreadable_scan_is_caught(self):
         with (
             _triton_installed({}),
             _triton_provided_by(raises=True) as scan,
@@ -786,25 +759,64 @@ class TestTritonDistributionDiscovery(TestCase):
         scan.assert_called_once()
         self.assertIn("will not register", "\n".join(logs.output))
 
-    def test_stale_distribution_loses_to_the_one_that_owns_the_module(self):
-        # `triton` was installed, then overwritten by another provider whose
-        # uninstall left the dist-info behind. It still reports a version, and
-        # answering with it disables the ops against a working 3.7.1 install.
-        with (
-            _triton_installed({"triton": "3.2.0", "pytorch-triton-rocm": "3.7.1"}),
-            _triton_records(
-                {
-                    "triton": ["/site-packages/triton/removed.py"],
-                    "pytorch-triton-rocm": [_MODULE_ORIGIN],
-                }
-            ),
-            _triton_provided_by("triton", "pytorch-triton-rocm"),
-        ):
-            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+    def test_record_hash_selects_live_distribution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
 
-    def test_distribution_published_under_an_unlisted_name_is_scanned_for(self):
-        # The list is an optimization, not the set of answers: a name it does
-        # not carry still resolves, through the scan.
+            with (
+                _triton_installed({"triton": "3.2.0", "pytorch-triton-rocm": "3.7.1"}),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin, b'__version__ = "3.2.0"\n')],
+                        "pytorch-triton-rocm": [_InstalledFile(origin, contents)],
+                    }
+                ),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_not_called()
+
+    def test_unresolved_known_collision_scans_unlisted_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+
+            with (
+                _triton_installed(
+                    {
+                        "triton": "3.2.0",
+                        "triton-rocm": "3.3.0",
+                        "triton-nightly": "3.7.1",
+                    }
+                ),
+                _triton_records(
+                    {
+                        "triton": [_InstalledFile(origin)],
+                        "triton-rocm": [
+                            _InstalledFile(origin, b'__version__ = "3.3.0"\n')
+                        ],
+                        "triton-nightly": [_InstalledFile(origin, contents)],
+                    }
+                ),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "triton-rocm", "triton-nightly") as scan,
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+            scan.assert_called_once()
+
+    def test_unlisted_distribution_is_scanned(self):
         with (
             _triton_installed({"triton-nightly": "3.7.1"}),
             _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
@@ -814,12 +826,7 @@ class TestTritonDistributionDiscovery(TestCase):
 
         scan.assert_called_once()
 
-    def test_editable_install_keeps_the_version_it_reports(self):
-        # A PEP 660 editable install records the `.pth` and finder that put the
-        # module on sys.path and its own metadata, never the module -- which
-        # stays in the source tree, where the resolved origin points. Rejecting
-        # it would disable the ops on an install where `import triton` works,
-        # and where the plain name lookup used to answer fine.
+    def test_single_editable_install_skips_ownership(self):
         with (
             _triton_installed({"triton": "3.7.1"}),
             _triton_records(
@@ -832,31 +839,30 @@ class TestTritonDistributionDiscovery(TestCase):
                         "/site-packages/triton-3.7.1.dist-info/top_level.txt",
                     ]
                 }
-            ),
-            _triton_module_at("/home/dev/triton/python/triton/__init__.py"),
+            ) as distribution,
+            _triton_module_at("/src/triton/__init__.py") as origin,
             _triton_provided_by("triton"),
         ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
-    def test_unreadable_provider_does_not_abandon_the_ones_after_it(self):
-        # The scan lists providers in sys.path order, so a dist-info with no
-        # `Name` must not decide the answer for the ones behind it.
+        distribution.assert_not_called()
+        origin.assert_not_called()
+
+    def test_unreadable_provider_is_skipped(self):
         def version_of(distribution):
-            if distribution is None:
-                raise ValueError("A distribution name is required.")
+            if distribution == "broken-triton":
+                raise ValueError("broken metadata")
             return Version("3.7.1") if distribution == "triton-nightly" else None
 
         with (
             patch.object(triton_utils, "_available_version", side_effect=version_of),
             _triton_records({"triton-nightly": [_MODULE_ORIGIN]}),
-            _triton_provided_by(None, "triton-nightly"),
+            _triton_provided_by("broken-triton", "triton-nightly"),
             self.assertLogs("torch._native.triton_utils", level="WARNING"),
         ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
-    def test_provider_already_tried_under_another_spelling_is_not_retried(self):
-        # Metadata lookups normalize names, so `triton_rocm` from the scan is the
-        # `triton-rocm` already tried; re-checking it cannot change the answer.
+    def test_normalized_provider_is_not_retried(self):
         with (
             _triton_installed({}) as version_lookup,
             _triton_provided_by("triton_rocm"),
@@ -868,36 +874,71 @@ class TestTritonDistributionDiscovery(TestCase):
             [call.args[0] for call in version_lookup.call_args_list],
         )
 
-    def test_distribution_without_a_record_is_taken_at_its_word(self):
-        # Nothing was learned about what it owns, so it keeps the answer it
-        # would have given before the question was asked.
-        with (
-            _triton_installed({"triton": "3.7.1"}),
-            _triton_records({"triton": None}),
-            _triton_provided_by() as scan,
+    def test_missing_record_is_undecidable(self):
+        with _triton_records({"triton": None}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_missing_record_hash_is_undecidable(self):
+        with _triton_records({"triton": [_MODULE_ORIGIN]}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_unsupported_record_hash_is_undecidable(self):
+        record = _InstalledFile(_MODULE_ORIGIN)
+        record.hash = _FileHash("unsupported", "")
+        with _triton_records({"triton": [record]}):
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
+            )
+
+    def test_empty_record_does_not_match(self):
+        with _triton_records({"triton": []}):
+            self.assertIs(
+                triton_utils._distribution_matches("triton", _MODULE_ORIGIN),
+                False,
+            )
+
+    def test_editable_record_is_undecidable(self):
+        with _triton_records(
+            {
+                "triton": [
+                    "/site-packages/__editable__.triton-3.7.1.pth",
+                    "/site-packages/__editable___triton_3_7_1_finder.py",
+                    "/site-packages/triton-3.7.1.dist-info/RECORD",
+                ]
+            }
         ):
-            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
+            self.assertIsNone(
+                triton_utils._distribution_matches("triton", "/src/triton/__init__.py")
+            )
 
-        scan.assert_not_called()
+    def test_hash_tie_uses_fast_path_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b'__version__ = "3.7.1"\n'
+            origin.write_bytes(contents)
+            record = _InstalledFile(origin, contents)
 
-    def test_unresolvable_module_is_not_held_against_a_distribution(self):
+            with (
+                _triton_installed(
+                    {"triton": "3.7.1", "pytorch-triton-rocm": "3.7.1+rocm"}
+                ),
+                _triton_records({"triton": [record], "pytorch-triton-rocm": [record]}),
+                _triton_module_at(str(origin)),
+                _triton_provided_by("triton", "pytorch-triton-rocm"),
+                self.assertLogs("torch._native.triton_utils", level="WARNING"),
+            ):
+                self.assertEqual(
+                    triton_utils._available_triton_version(), Version("3.7.1")
+                )
+
+    def test_nameless_provider_is_skipped(self):
         with (
-            _triton_installed({"triton": "3.7.1"}),
-            _triton_module_at(None),
-            _triton_records({"triton": ["/site-packages/somewhere/else.py"]}),
-            _triton_provided_by(),
-        ):
-            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
-
-    def test_nameless_distribution_declines_instead_of_raising(self):
-        # The scan reports a dist-info with no `Name` as a `None` provider, and
-        # the version lookup raises on it -- during `import torch`.
-        with (
-            patch.object(
-                triton_utils,
-                "_available_version",
-                side_effect=_rejects_a_nameless_distribution,
-            ),
+            _triton_installed({}),
             _triton_provided_by(None),
             self.assertLogs("torch._native.triton_utils", level="WARNING"),
         ):
@@ -905,32 +946,17 @@ class TestTritonDistributionDiscovery(TestCase):
 
 
 class TestTritonModuleOrigin(TestCase):
-    """Locating a module without importing it."""
-
     def test_absent_module_has_no_origin(self):
         self.assertIsNone(triton_utils._module_origin("_no_such_native_dsl_module"))
 
     def test_broken_parent_package_declines_instead_of_raising(self):
-        # find_spec imports the parent package to search it, so anything the
-        # parent raises arrives here, during `import torch`.
         with patch.object(triton_utils, "_find_spec", side_effect=ImportError("boom")):
             self.assertIsNone(triton_utils._module_origin("triton"))
 
 
 class TestTritonVersionGate(TestCase):
-    """The gate that decides whether the Triton overrides register at all.
-
-    Both verdicts are `functools.cache`d, so every case has to clear them twice:
-    otherwise this machine's own install decides the first case and a stale
-    verdict decides the next one.
-    """
-
     def setUp(self):
         super().setUp()
-        # The escape hatch is cached too, and the tests above leave it set: a
-        # verdict of "skip the version check" would pass every case here. It is
-        # cleared on common_utils, where it is defined; triton_utils only
-        # re-exports the same object.
         for verdict in (
             triton_utils._check_runtime_available,
             triton_utils._version_is_sufficient,
@@ -965,18 +991,12 @@ class TestTritonVersionGate(TestCase):
             self.assertIsNone(triton_utils.runtime_version())
             self.assertFalse(triton_utils._version_is_sufficient())
 
-    # 3.6.0 is the boundary; 3.42.0 is a minor far past it, since the check
-    # compares the minor rather than the release.
     @parametrize("version", ("3.6.0", "3.42.0"))
     def test_supported_versions_pass_the_gate(self, version):
         with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
             self.assertTrue(triton_utils._version_is_sufficient())
 
-    # One case per way of failing: 3.5.9 is the minor below the boundary, and
-    # 2.9.0 and 4.6.0 are rejected on the major alone -- both clear the minor,
-    # so nothing else here would notice the major check being loosened to an
-    # inequality, which would accept a 4.x Triton the overrides are not built
-    # against.
+    # The off-major cases clear the minor threshold.
     @parametrize("version", ("3.5.9", "2.9.0", "4.6.0"))
     def test_unsupported_versions_fail_the_gate(self, version):
         with self._installed_triton({"triton-rocm": version}, "triton-rocm"):
@@ -990,8 +1010,6 @@ class TestTritonVersionGate(TestCase):
             self.assertTrue(triton_utils._version_is_sufficient())
 
     def test_version_skip_does_not_rescue_an_unreported_version(self):
-        # The escape hatch overrides a version that is too old, not the absence
-        # of one: there is nothing to run the ops against.
         with (
             self._installed_triton({}),
             patch.object(triton_utils, "check_native_version_skip", return_value=True),
