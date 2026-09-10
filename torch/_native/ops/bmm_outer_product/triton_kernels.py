@@ -41,7 +41,13 @@ def _bmm_outer_product_kernel(
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
-    pid = tl.program_id(0)
+    # The program id is promoted to int64 once, so every index derived from it
+    # (batch, tile, row and column offsets) is 64-bit. Program ids and the
+    # int32-range strides are i32, and both pid_b * stride_ob (once
+    # (batch - 1) * M * N > INT32_MAX, e.g. (512, 8209, 512)) and
+    # pid_m * BLOCK_M (once M > INT32_MAX) used to wrap and write the tail
+    # of the output gigabytes before its buffer.
+    pid = tl.program_id(0).to(tl.int64)
 
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
