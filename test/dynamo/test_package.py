@@ -21,7 +21,10 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._C._dynamo.eval_frame import (
+    _debug_get_precompile_entries,
+    get_code_exec_strategy,
+)
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
@@ -38,6 +41,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.types import FrameAction
 from torch._dynamo.utils import CleanupManager, counters
 from torch._functorch import config as functorch_config
 from torch._inductor import cpu_vec_isa
@@ -718,17 +722,14 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
 
-        # A stale capture-time hook on __compiled_fn does not strip the fresh
-        # binding: _install_global calls CleanupHook.disown for every name it
-        # writes, dropping the old hook's ownership so its __call__ returns
-        # early instead of popping the name. It is an ownership handoff, not a
-        # rename -- install() binds backend_id verbatim.
-        #
-        # Observe the names install() actually placed in the live module dict,
-        # not its own bookkeeping: the stale hooks below run against the
-        # module, so the module is what must survive them.
-        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
+        # The bindings install() is responsible for: its per-install names plus
+        # the builtins dict. The capture-time __compiled_fn global is not among
+        # them (install binds a renamed twin), so its hook popping it is fine.
+        installed = {
+            g.name for g in package._installed_globals[sys.modules[fn.__module__]]
+        }
         self.assertTrue(installed)
+        self.assertTrue(installed - preexisting)
 
         del pinned
         gc.collect()
@@ -1107,11 +1108,14 @@ def add(x, y):
         pkg.uninstall()
 
     def test_failed_install_is_torn_down_when_the_package_dies(self):
-        # install() registers its teardown finalizer BEFORE binding any global,
-        # so a mid-install failure leaves nothing behind: whatever it bound is
-        # gone once the package dies, even though install() raised and handed
-        # the caller no handle to undo it. Force the failure by handing
-        # install() a backends dict missing a required backend.
+        # install() hands the caller no handle to undo a partial install, so
+        # when it fails partway it unwinds its own work before re-raising:
+        # whatever global it bound and entry it installed are gone the moment
+        # install() returns, without waiting for the package to die. The
+        # finalizer stays a backstop for a SUCCESSFUL install dropped without
+        # uninstall() (see test_abandoned_package_uninstalls_on_gc). Force the
+        # failure by handing install() a backends dict missing a required
+        # backend.
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1135,18 +1139,20 @@ def add(x, y):
         del backends[resume_entry.backend_ids[0]]
         with self.assertRaisesRegex(RuntimeError, "is not found in the given backends"):
             pkg.install(backends)
-        # Reaching that error means install() bound the resume global and an
-        # entry before it raised: a genuinely partial install to tear down.
-        # Pin that, so a future ordering change that raised before binding
-        # anything cannot leave this test trivially passing over an empty
-        # teardown.
-        self.assertTrue(set(module_dict) - before)
-        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        # install() bound the resume global and installed the earlier entry,
+        # then hit the missing backend and unwound both: the state is already
+        # clean here, before the package dies. A full install of this artifact
+        # binds a resume global and an entry (test_abandoned_package_uninstalls_on_gc
+        # pins counts[0] > 0), so this teardown is over a real partial install,
+        # not a vacuous empty one. Only the shared builtins dict, left in place
+        # by design, may remain.
+        leaked = set(module_dict) - before
+        self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
         del pkg, backends
         gc.collect()
-        # Nothing partial survives -- only the shared builtins dict, left in
-        # place by design, may remain -- and no entries are left.
+        # Death changes nothing install() had not already cleaned up.
         leaked = set(module_dict) - before
         self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
@@ -1496,7 +1502,9 @@ def add(x, y):
         # object, deferred-refcounted there) may not have popped the previous
         # compile's name yet, so a diff can be empty.
         (name,) = [
-            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
+            g.name
+            for g in pkg._installed_globals[module]
+            if g.name.startswith("__compiled_fn")
         ]
         sentinel = object()
         module_dict[name] = sentinel
@@ -1530,7 +1538,9 @@ def add(x, y):
         # free-threading the capture-time CleanupHook pops the previous name
         # late, so the install rebinds a key already present and a diff is empty.
         (name,) = [
-            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
+            g.name
+            for g in pkg._installed_globals[module]
+            if g.name.startswith("__compiled_fn")
         ]
         sentinel = object()
         module_dict[name] = sentinel
@@ -1710,6 +1720,32 @@ def add(x, y):
                 sys.modules.pop("_package_stale_hit", None)
                 sys.modules.pop("_package_stale_hit_renamed", None)
                 _MODULE_KEY_BY_FILE.pop(path, None)
+
+    def test_abandoned_package_restores_skipped_frames_on_gc(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        # A frame with no guarded code is what install() skip_code()s.
+        entry = package.cache_entry().codes[0]
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        package.cached_backends.clear()
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        del package
+        gc.collect()
+
+        code = fn.__code__
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        del pkg, backends
+        gc.collect()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
         # The serialization filter and the capture mode are independent: a

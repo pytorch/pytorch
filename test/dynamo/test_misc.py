@@ -10179,11 +10179,41 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         try:
             with torch.compiler.set_stance("fail_on_recompile"):
                 with self.assertRaisesRegex(
-                    RuntimeError, "Failed on the following precompiled guards:"
-                ):
+                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
+                ) as ctx:
                     compiled_fn(*args)
+            # One line for the entry, naming the guard that rejected the call --
+            # not the whole guard tree, which for a multi-variant artifact ran
+            # to megabytes.
+            self.assertIn("isinstance(L['x'], bool)", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
+
+    def test_fail_on_recompile_override_is_thread_local_and_drops_skip_guard_eval(
+        self,
+    ):
+        from torch._dynamo import eval_frame
+        from torch._dynamo.exc import RecompileError
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        compiled_fn(torch.randn(3))
+        with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+            eval_frame._enter_fail_on_recompile_override()
+            try:
+                self.assertEqual(
+                    eval_frame._get_effective_stance().stance, "fail_on_recompile"
+                )
+                self.assertFalse(eval_frame._is_skip_guard_eval_unsafe_stance())
+                with self.assertRaises(RecompileError):
+                    compiled_fn(torch.randn(3, 3))
+            finally:
+                eval_frame._exit_fail_on_recompile_override()
+            self.assertTrue(eval_frame._is_skip_guard_eval_unsafe_stance())
+        with self.assertRaisesRegex(AssertionError, "not active"):
+            eval_frame._exit_fail_on_recompile_override()
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
