@@ -35,12 +35,12 @@ from torch.distributed.elastic.multiprocessing.api import (
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
@@ -51,6 +51,8 @@ from torch.testing._internal.common_utils import (
 
 
 class RunProcResultsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -94,6 +96,8 @@ class RunProcResultsTest(TestCase):
 
 
 class StdTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_from_value(self):
         self.assertEqual(Std.NONE, Std.from_str("0"))
         self.assertEqual(Std.OUT, Std.from_str("1"))
@@ -231,6 +235,8 @@ def start_processes_zombie_test(
 
 
 class _StartProcessesTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -424,9 +430,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @skip_but_pass_in_sandcastle_if(
-            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
-        )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -686,6 +689,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
         ########################################
         # start_processes as binary tests
         ########################################
+
         def test_binary(self):
             for redirs in redirects_oss_test():
                 with self.subTest(redirs=redirs):
@@ -1041,6 +1045,8 @@ class BoundedCloseTest(TestCase):
     Linux D-state worker, which SIGKILL cannot reap).
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_multiprocess_context(self) -> MultiprocessContext:
         log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
         self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
@@ -1076,7 +1082,8 @@ class BoundedCloseTest(TestCase):
         self.assertTrue(join_calls, "expected proc.join() to be called")
         for t in join_calls:
             self.assertIsNotNone(t, "proc.join() must be called with a bounded timeout")
-            assert t is not None  # noqa: S101  # for type narrowing
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
             self.assertGreater(t, 0)
 
     def test_subprocess_context_close_bounded_when_unkillable(self):
@@ -1117,7 +1124,8 @@ class BoundedCloseTest(TestCase):
         self.assertTrue(wait_calls, "expected proc.wait() to be called")
         for t in wait_calls:
             self.assertIsNotNone(t, "proc.wait() must be called with a bounded timeout")
-            assert t is not None  # noqa: S101  # for type narrowing
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
             self.assertGreater(t, 0)
 
 

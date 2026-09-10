@@ -52,6 +52,7 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
+from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
@@ -1487,6 +1488,35 @@ class TestFX(JitTestCase):
             raise AssertionError(
                 f"Expected 2 occurrences of '_torch__ops_aten_aten_relu_', got {count}"
             )
+
+    def test_print_readable_with_sparse_meta_val(self):
+        # The compressed sparse layouts have no strides; annotating a node
+        # whose meta["val"] carries one used to raise from Tensor.stride().
+        for layout in (
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ):
+            with self.subTest(layout=layout):
+                dense = torch.eye(4)
+                kwargs = (
+                    {"blocksize": (2, 2)}
+                    if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                    else {}
+                )
+                sparse = dense.to_sparse(layout=layout, **kwargs)
+
+                graph = torch.fx.Graph()
+                node = graph.create_node("placeholder", "x")
+                node.meta["val"] = sparse
+                graph.output(node)
+                gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+                text = gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                self.assertIn("x", text)
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
@@ -4144,6 +4174,37 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
     def test_graph_module_init_buffer_param_copied_mod_init(self):
         self._test_graph_module_init_buffer_param_copied(use_dict_init=False)
 
+    def test_graph_module_init_preserves_non_persistent_buffers(self):
+        class Child(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("nested", torch.ones(1), persistent=False)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("top_level", torch.ones(1), persistent=False)
+                self.child = Child()
+
+            def forward(self, x):
+                return x + self.top_level + self.child.nested
+
+        module = MyModule()
+        graph_module = GraphModule(module, symbolic_trace(module).graph)
+
+        self.assertEqual(torch.full((1,), 2.0), graph_module(torch.zeros(1)))
+        self.assertEqual(
+            {"top_level", "child.nested"},
+            {name for name, _ in graph_module.named_buffers()},
+        )
+        self.assertEqual(
+            {"top_level"}, graph_module._non_persistent_buffers_set
+        )
+        self.assertEqual(
+            {"nested"}, graph_module.child._non_persistent_buffers_set
+        )
+        self.assertEqual({}, graph_module.state_dict())
+
     def test_annotations_with_no_forward_references(self):
         class A:
             def __call__(self, x: torch.Tensor):
@@ -5298,6 +5359,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         None: "None",
         typing.Iterator: "Iterator",
         collections.abc.Iterator: "Iterator",
+        types.ModuleType: "types.ModuleType",
     }
 
     _UNBOUND_TYPES = {
@@ -5629,6 +5691,7 @@ class TestFunctionalTracing(JitTestCase):
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
+        "scaled_addmm_": MUTABLE,
         "scaled_dot_product_attention": BUILT_IN_FUNC,
         "softplus": BUILT_IN_FUNC,
         "softshrink": BUILT_IN_FUNC,

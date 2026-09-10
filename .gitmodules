@@ -132,6 +132,3 @@
 [submodule "third_party/mslk"]
 	path = third_party/mslk
 	url = https://github.com/meta-pytorch/MSLK.git
-[submodule "triton-xpu"]
-	path = triton-xpu
-	url = https://github.com/intel/intel-xpu-backend-for-triton.git

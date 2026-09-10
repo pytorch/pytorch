@@ -164,7 +164,7 @@ def populate_stream_timeline(
 # we then try and use these timestamps to estimate when to deallocate tensors used in side streams
 # See https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
 # for details on the problem being addressed. Rather than using the automatic memory management approach of record_stream
-# we attempt to find the point which to deallocate based on the estimated timestamps.
+# we attempt to find the point at which to deallocate based on the estimated timestamps.
 def handle_synced_deallocation(
     graph: Graph,
     stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]],
@@ -188,7 +188,7 @@ def handle_synced_deallocation(
     if not torch.accelerator.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
-            graph.call_function(
+            rs = graph.call_function(
                 torch.ops.streams.record_stream.default,
                 (
                     node,
@@ -196,7 +196,7 @@ def handle_synced_deallocation(
                 ),
                 {},
             )
-        node.meta["partitioner_tag"] = "must_be_in_backward"
+        rs.meta["partitioner_tag"] = "must_be_in_backward"
 
     allocating_stream_trace = populate_stream_timeline(
         stream_to_exec_trace, graph, allocating_stream
@@ -223,12 +223,12 @@ def handle_synced_deallocation(
     wait_event = new_event()
     record_node = insert_record_event_after_node(graph, last_usage, wait_event)
     with graph.inserting_after(max(alloc_ptr, record_node)):
-        graph.call_function(
+        sd = graph.call_function(
             torch.ops.streams.sync_dealloc.default,
             (wait_event, get_stream_or_current_stream(alloc_ptr), node),
             {},
         )
-        node.meta["partitioner_tag"] = "must_be_in_backward"
+        sd.meta["partitioner_tag"] = "must_be_in_backward"
 
 
 def insert_sync(
@@ -520,6 +520,13 @@ def _wrap_sync_node(
     visited.add(control_deps_node)
 
     # The output is (sync_result, *deps_with_uses_after_sync)
+    # Reuse the val the subgraph output already carries: the min-cut
+    # partitioner's _size_of() raises on any node without `val`, and its escape
+    # hatch covers only get_attr and zero-return OpOverloads, not a schema-less
+    # HOP.  The subgraph output is unwrapped when it has no pass-through deps.
+    sg_val = subgraph_module.graph.output_node().meta.get("val")
+    control_deps_node.meta["val"] = sg_val if isinstance(sg_val, tuple) else (sg_val,)
+
     # Create getitem nodes only for dependencies that have uses after sync
     replacements: dict[Node, Node] = {}
     with graph.inserting_after(control_deps_node):
@@ -606,6 +613,15 @@ def _collect_sync_forward_deps(
         node_locations.add((partition, stream))
 
     for node in reversed(graph.nodes):
+        # Reaching a node's definition ends its liveness. A sync's control_deps is
+        # inserted at the sync, so a dep whose definition site is below that point
+        # would be referenced before it has been defined. Applies to every node
+        # kind, not just call_function: get_attr tensor constants are materialized
+        # next to their first user, which can be after the sync.
+        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
+        for partition, stream in inherited_locations:
+            live_inputs[partition][stream].discard(node)
+
         if node.op == "call_function" and node.target in full_barriers:
             deps = OrderedSet(
                 dep
@@ -637,9 +653,6 @@ def _collect_sync_forward_deps(
         if node.op != "call_function" or node.target in _SYNC_OPS:
             continue
 
-        inherited_locations = locations.pop(node, _EMPTY_LOCATIONS)
-        for partition, stream in inherited_locations:
-            live_inputs[partition][stream].discard(node)
         execution_stream = get_stream(node)
         if execution_stream is None:
             execution_stream = 0

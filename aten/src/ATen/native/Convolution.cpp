@@ -69,7 +69,6 @@
 #include <ATen/ops/cudnn_convolution.h>
 #include <ATen/ops/cudnn_convolution_transpose.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/miopen_convolution.h>
 #include <ATen/ops/miopen_convolution_transpose.h>
@@ -596,10 +595,11 @@ struct ConvParams {
     // These checks need to be expanded. Currently we have very limited set of
     // checks for MPS.
 #ifdef USE_MPS
-    if (needs_64bit_indexing_no_split(input, weight)) {
+    if (!input.is_mps()) {
       return false;
     }
-    if (!input.is_mps()) {
+    // conv3d forward handles 64-bit shapes (long-indexed Metal kernel variant)
+    if (needs_64bit_indexing_no_split(input, weight) && !(input.ndimension() == 5 && !transposed)) {
       return false;
     }
     return true;

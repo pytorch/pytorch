@@ -1,4 +1,5 @@
 import logging
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import ParamSpec, TypeVar
@@ -23,6 +24,33 @@ R = TypeVar("R")
 
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
+
+
+def _unconditional_is_masked() -> bool:
+    """Whether unconditional overrides are currently masked.
+
+    The flag itself lives on the C++ Context, where the generated AOT gates read it,
+    so overrides and AOT kernels cannot disagree about whether the exemption is
+    lifted. A getter, so a caller can read it before mutating anything and restore it
+    even if a later step of its setup raises. Flipped only by
+    torch._native._unconditional_masked(), for reference computations.
+    """
+    return torch._C._get_native_aot_unconditional_masked()
+
+
+def _set_mask_unconditional(masked: bool) -> bool:
+    """Set the mask and rebuild every router, returning the previous value, which the
+    caller must restore.
+
+    The rebuild is required because check_enabled runs at graph registration, not per
+    call: flipping the flag alone leaves the installed routers untouched."""
+    previous = _unconditional_is_masked()
+    torch._C._set_native_aot_unconditional_masked(masked)
+    for (op_symbol, dispatch_key), graph in _graphs.items():
+        _cleanup_and_reregister_graph(
+            op_symbol, dispatch_key, graph, filter_state=_filter_state
+        )
+    return previous
 
 
 @dataclass
@@ -63,7 +91,17 @@ class _FilterState:
 
         Returns:
             bool: True if the node should be enabled, False if filtered out
+
+        An unconditional override is exempt from every filter: its impl is
+        the op's implementation, not an accelerated route to the same
+        answer, so disabling by DSL name / op / dispatch key must not
+        silently change what the op computes. The private mask read by
+        _unconditional_is_masked() is the sole exception, and exists only so
+        tests can obtain stock aten reference values.
         """
+        if node.unconditional_override and not _unconditional_is_masked():
+            return True
+
         if node.dsl_name in self._dsl_names:
             return False
 
@@ -162,6 +200,12 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 # Keeping the table registry-local means `import torch._native` stays cheap
 # and consumers control exactly when and where overrides take effect.
 _native_decomp_overrides: dict[object, Callable] = {}
+
+
+# Re-entrancy guard for the Dynamo shortcut in `eager_router` (see the
+# comment at its use site). Thread-local because compile sessions on one
+# thread must not mask the shortcut on another.
+_router_active = threading.local()
 
 
 def _has_cow_tensor(*args, **kwargs) -> bool:
@@ -610,10 +654,14 @@ def register_op_override(
             be None if `unconditional_override=True`.
         impl: Implementation function for the override
         allow_multiple_override: Allow overriding an existing override
-        unconditional_override: Implementation doesn't have a fallback and
+        unconditional_override: This impl IS the op's implementation, not a
+            faster route to the same answer. It doesn't have a fallback and
             doesn't require torch.DispatchKeySet as the first argument. When
             True, a trivially-True predicate is supplied for the router if
-            `cond` is None.
+            `cond` is None, AND the override becomes exempt from the
+            user-facing filters -- deregister_op_overrides() and
+            python_native.<dsl>.disabled() leave it installed, because
+            masking it would change results rather than just performance.
 
     Raises:
         ValueError: If lib_symbol is not "aten", if dispatch_key is in
@@ -923,7 +971,18 @@ def _register_overrides_from_graph(
     # Inductor reuses the default lowering rather than recursing.
     _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
 
+    # Calls served by an AOT kernel embedded in the aten implementation must decline
+    # the JIT route, because the router's no-match fallback lands in that kernel.
+    # Checked here, once per call, rather than per cond; applies to unconditional
+    # overrides too. None when the op has no AOT declaration, so those pay nothing.
+    from . import aot_manifest
+
+    coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
+
     def _dispatch(args, kwargs, swallow_cond_exceptions: bool):
+        # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
+        if coverage is not None and coverage.covers(args, kwargs):
+            return _NO_MATCH
         for cond, impl_name in cond_impl:
             try:
                 matched = cond(*args, **kwargs)
@@ -938,20 +997,44 @@ def _register_overrides_from_graph(
     def eager_router(
         keyset, *args, _fallback=fallback_kernel, _aten_overload=overload, **kwargs
     ):
-        # This branch is only safe while Dynamo is actively tracing this Python
-        # router. The broader compile-session flag can be true when this router
-        # executes eagerly; redispatching to aten there would re-enter us.
-        #
-        # COW state is guarded by Dynamo's _is_cow_tensor handler but is not
-        # modeled in the compiled graph. If a COW input reaches this router,
-        # keep the existing eager path so COW-preserving fallback semantics are
-        # maintained instead of compiling through aten and materializing it.
+        """Boxed eager kernel: divert to aten while Dynamo traces, else dispatch.
+
+        The aten shortcut is only safe while Dynamo is actively tracing this
+        Python router. The broader compile-session flag can be true when this
+        router executes eagerly; redispatching to aten there would re-enter us.
+
+        `is_dynamo_compiling()` cannot tell those apart on its own: it is not a
+        runtime flag but `return False`, which Dynamo folds to a True constant
+        at trace time (tracing_state_functions in _dynamo/variables/torch.py).
+        A frame carrying that folded constant can still execute eagerly -- then
+        `_aten_overload(...)` re-enters the dispatcher from the top, lands back
+        in this router, and recurses until RecursionError. Reproduced by OpInfo
+        test_out_warning_scatter_add under PYTORCH_TEST_WITH_INDUCTOR once a
+        native override is installed for the op.
+
+        `_router_active` breaks that cycle: the outer call takes the shortcut
+        (so real tracing still records the plain aten op and avoids the graph
+        breaks of #186354), and a re-entrant call falls through to normal eager
+        dispatch below. Deliberately narrow -- the trace-time behavior the flag
+        exists for is unchanged, since under tracing the overload call does not
+        come back here.
+
+        COW state is guarded by Dynamo's _is_cow_tensor handler but is not
+        modeled in the compiled graph. If a COW input reaches this router, keep
+        the existing eager path so COW-preserving fallback semantics are
+        maintained instead of compiling through aten and materializing it.
+        """
         if (
             torch.compiler.is_dynamo_compiling()
             and _aten_overload is not None
+            and not getattr(_router_active, "on", False)
             and not _has_cow_tensor(*args, **kwargs)
         ):
-            return _aten_overload(*args, **kwargs)
+            _router_active.on = True
+            try:
+                return _aten_overload(*args, **kwargs)
+            finally:
+                _router_active.on = False
 
         result = _dispatch(args, kwargs, swallow_cond_exceptions=False)
         if result is _NO_MATCH:

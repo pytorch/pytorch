@@ -1537,6 +1537,17 @@ class TestIndexing(TestCase):
         r[...] = 9.9
         self.assertEqual(9.9, r)
 
+    # https://github.com/pytorch/pytorch/issues/191458
+    @onlyNativeDeviceTypes
+    def test_setitem_uint64_above_int64_max(self, device):
+        x = torch.zeros((1,), dtype=torch.uint64, device=device)
+        x[0] = 1 << 63
+        self.assertEqual(x[0].item(), 1 << 63)
+        x[0] = (1 << 64) - 1
+        self.assertEqual(x[0].item(), (1 << 64) - 1)
+        x[0] = (1 << 63) - 1
+        self.assertEqual(x[0].item(), (1 << 63) - 1)
+
     def test_basic_advanced_combined(self, device):
         # From the NumPy indexing example
         x = torch.arange(0, 12, device=device).view(4, 3)

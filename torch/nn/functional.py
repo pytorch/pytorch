@@ -3735,10 +3735,10 @@ def linear_cross_entropy(
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities.
             With ``options != None``, class probabilities use the chunked
-            path for ``reduction`` ``'mean'`` / ``'sum'`` when the target
-            dtype matches the ``input`` dtype and the target does not
-            require grad; other probability-target configurations fall
-            back to the reference implementation with a warning
+            path when the target dtype matches the ``input`` dtype and the
+            target does not require grad; other probability-target
+            configurations fall back to the reference implementation with a
+            warning
             (gradients w.r.t. the target are only available on the
             reference path).
         linear_bias (Tensor, optional): bias added to the linear
@@ -3747,7 +3747,8 @@ def linear_cross_entropy(
             With ``options != None``, K-dimensional bias
             (``out_features != ()``) falls back to the reference
             implementation with a warning; the chunked path supports
-            only ``(C,)``-shaped bias. Default: ``None``.
+            ``(C,)``-shaped bias with both class-index and probability
+            targets. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3890,12 +3891,10 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # Probability targets chunk on the scalar reductions only; the chunked
-    # op has no gradient slot for the target, so a target requiring grad
-    # falls back to the reference path.
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
     chunkable_prob_target = (
         target_contains_probabilities
-        and reduction in {"mean", "sum"}
         and target.dtype == input.dtype
         and not (target.requires_grad and torch.is_grad_enabled())
     )
@@ -3911,9 +3910,8 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with reduction in {'mean','sum'},"
-            " dtype matching input, and requires_grad == False), out_features"
-            " == (). Got "
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
@@ -5309,6 +5307,20 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -7249,6 +7261,133 @@ def scaled_mm(
     )
 
     return out
+
+
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""Compute a scaled matrix product and add it to ``input``.
+
+    The result is
+
+    .. math::
+        \mathrm{out} = \beta\,\mathrm{input} +
+        \alpha\,\mathrm{scaled\_mm}(\mathrm{mat1}, \mathrm{mat2}).
+
+    The scaling recipes and swizzles have the same meaning as in
+    :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
+    matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
+    ``float32``. The result has the dtype of ``input``; there is no separate
+    output dtype. CUDA recipes are supported when their selected implementation
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+
+    Args:
+        input: Matrix accumulated into the scaled matrix product.
+        mat1: Left matrix operand.
+        mat2: Right matrix operand.
+        scale_a: Tensor containing decoding scaling factors for ``mat1``.
+        scale_recipe_a: Scaling recipe for ``mat1``.
+        scale_b: Tensor containing decoding scaling factors for ``mat2``.
+        scale_recipe_b: Scaling recipe for ``mat2``.
+        swizzle_a: Swizzling pattern, if any, for ``scale_a``.
+        swizzle_b: Swizzling pattern, if any, for ``scale_b``.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
+        beta: Multiplier for ``input``.
+        alpha: Multiplier for the scaled matrix product.
+
+    .. note::
+        Fusing the addition removes an intermediate output rounding step, so
+        the result need not be bitwise equal to a separate scaled matrix
+        multiply followed by an addition.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""In-place version of :func:`scaled_addmm`.
+
+    This function accumulates in ``input.dtype`` (``float16``, ``bfloat16``, or
+    ``float32``), preserves the storage of ``input``, and returns ``input``. A
+    serialized WGRAD loop can create the first contribution with
+    :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
+
+    .. warning::
+        In-place accumulation is not safe for concurrent writers. Callers must
+        serialize writes or provide external coordination.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm_(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
 
 
 def scaled_grouped_mm(
