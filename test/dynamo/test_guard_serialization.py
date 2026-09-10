@@ -148,6 +148,18 @@ def keep_module_name(func):
     return wrapper
 
 
+def keep_none_module(func):
+    func.__module__ = None
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__module__ is None:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
 def keep_renamed_name(func):
     # __name__ differs from co_name, so a co_name fallback reads "forward".
     func.__name__ = "renamed_forward"
@@ -248,6 +260,12 @@ class DecoratedQualnameForwardModule(torch.nn.Module):
 
 class DecoratedModuleNameForwardModule(torch.nn.Module):
     @keep_module_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedNoneModuleForwardModule(torch.nn.Module):
+    @keep_none_module
     def forward(self, x):
         return x * 2
 
@@ -642,6 +660,10 @@ FQN_MISMATCH_CASES = [
         name="renamed_name",
     ),
     subtest(
+        ("CONSTANT_MATCH", DecoratedNoneModuleForwardModule, ("__module__", "other")),
+        name="none_module",
+    ),
+    subtest(
         ("EQUALS_MATCH", DecoratedQualnameForwardModule, ("__qualname__", "other")),
         name="qualname",
     ),
@@ -961,12 +983,16 @@ torch._library.opaque_object.register_custom_class(CustomConstantType, typ="cons
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        DynamoCache.clear()
+        PrecompileContext.clear()
         self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
         self._saved_default_device_context = getattr(
             torch._GLOBAL_DEVICE_CONTEXT, "device_context", None
         )
 
     def tearDown(self):
+        DynamoCache.clear()
+        PrecompileContext.clear()
         fx_graph.magic_methods.clear()
         fx_graph.magic_methods.update(self._fx_magic_methods_snapshot)
 
@@ -1126,7 +1152,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
 
     def test_reduce_handles_an_empty_closure_cell(self):
@@ -1137,7 +1163,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         empty = [i for i, c in enumerate(wrapped.__closure__) if _cell_is_empty(c)]
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
-        GuardsStatePickler({id(wrapped): wrapped}, {}, {}, buf).dump({"fn": wrapped})
+        GuardsStatePickler({id(wrapped): wrapped}, {}, {}, {}, buf).dump(
+            {"fn": wrapped}
+        )
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
 
@@ -1155,7 +1183,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         base.cache = threading.Lock()  # unpicklable and unguarded
         buf = io.BytesIO()
         gtv = {id(base): base, id(base.tag): base.tag}
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(set(out.__dict__), {"tag", "cache"})
         self.assertEqual(out.__dict__["tag"], 2.0)
@@ -1172,9 +1200,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d = base.__defaults__
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
-        pickler = GuardsStatePickler(
-            gtv, {}, {}, buf, value_guarded_containers={id(d): d}
-        )
+        pickler = GuardsStatePickler(gtv, {}, {}, {id(d): d}, buf)
         pickler.dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], Inputs)
@@ -1191,7 +1217,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d = base.__defaults__
         gtv = {id(base): base, id(d): d, id(d[1]): d[1]}
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__defaults__[1], Inputs)
@@ -1207,12 +1233,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         kw = base.__kwdefaults__
         gtv = {id(base): base, id(kw): kw, id(kw["b"]): kw["b"]}
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIs(type(out.__kwdefaults__), collections.OrderedDict)
         self.assertIsInstance(out.__kwdefaults__["a"], Inputs)
 
-    def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
+    def test_rebuilt_functions_keep_a_shared_closure_cell_shared(self):
         # Two functions closing over one variable must still share the cell
         # after reload; rebuilding every cell silently unshares them.
         def outer():
@@ -1231,10 +1257,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         cell = a.__closure__[0]
         gtv = {id(a): a, id(b): b, id(cell.cell_contents): cell.cell_contents}
-        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    def test_reduce_restores_a_non_str_module(self):
+        # Dynamo cannot trace a function whose __module__ is not a str (its
+        # trace rules split it), so this is pickler-level: a decorator can still
+        # leave one behind, and the reducer must neither TypeError on
+        # `__module__ in sys.modules` nor drop the value it restores.
+        fn = types.FunctionType(global_func.__code__, globals(), "global_func")
+        fn.__module__ = 42
+        buf = io.BytesIO()
+        GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(out.__module__, 42)
 
     def test_pruned_shared_closure_cell_stays_shared(self):
         # An unguarded shared cell prunes to a single _Missing cell, and the two
@@ -1258,7 +1296,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # Only the functions are rooted; the shared cell and its contents are
         # omitted from guard_tree_values, so the cell is pruned.
         gtv = {id(a): a, id(b): b}
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
@@ -1277,7 +1315,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         g = fn.__globals__
         gtv = {id(fn): fn, id(g): g}
-        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
         pickler.dump(fn)
         out = pickle.loads(buf.getvalue())
         self.assertEqual(out.__module__, fn.__module__)
@@ -1295,7 +1333,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         g = a.__globals__
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         self.assertIs(out["a"].__globals__, out["b"].__globals__)
         self.assertEqual(out["a"].__globals__.keys(), g.keys())
@@ -1320,7 +1358,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             gtv = {id(fn): fn for fn in chosen}
             gtv[id(g)] = g
             buf = io.BytesIO()
-            pickler = GuardsStatePickler(gtv, {}, {}, buf)
+            pickler = GuardsStatePickler(gtv, {}, {}, {}, buf)
             pickler.dump(chosen)
             self.assertEqual(len(pickler._globals_snapshots), 1)
             return len(buf.getvalue())
@@ -1346,7 +1384,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__kwdefaults__["kw"], _Missing)
@@ -1358,7 +1396,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # functions does not drag their neighbourhoods into the pickle.
         inner = DecoratedForwardModule.forward.__wrapped__
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"fn": inner})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": inner})
         self.assertIsInstance(pickle.loads(buf.getvalue())["fn"], _Missing)
 
     def test_snapshot_globals_share_one_missing_sentinel(self):
@@ -1369,7 +1407,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         g = a.__globals__
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
         sentinels = {
             id(v)
@@ -1381,8 +1419,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     def test_reduce_keeps_a_none_valued_cell(self):
         # None is a value, not an empty cell; see
-        # FunctionPicklerBase._set_cell_contents. The cell is guarded here so it
-        # is carried; an unguarded one is pruned to a sentinel-holding cell.
+        # FunctionPicklerBase._set_cell_contents. None is a literal, so the cell
+        # is carried without any guard registering it.
         def outer():
             scale = None
 
@@ -1394,7 +1432,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         cell = fn.__closure__[0]
         buf = io.BytesIO()
-        GuardsStatePickler({id(cell): cell}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
@@ -1411,9 +1449,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             return fact
 
         fn = outer()
-        cell = fn.__closure__[0]
         buf = io.BytesIO()
-        GuardsStatePickler({id(fn): fn, id(cell): cell}, {}, {}, buf).dump({"fn": fn})
+        # The cell's contents is fn itself, which is kept, so the cell is carried.
+        GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIs(out.__closure__[0].cell_contents, out)
         self.assertEqual(out(5), 120)
@@ -1428,7 +1466,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         exec("def gen[T](x: T):\n    return x\n", ns)
         gen = ns["gen"]
         buf = io.BytesIO()
-        GuardsStatePickler({id(gen): gen}, {}, {}, buf).dump({"fn": gen})
+        GuardsStatePickler({id(gen): gen}, {}, {}, {}, buf).dump({"fn": gen})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(len(out.__type_params__), 1)
         self.assertIsInstance(out.__type_params__[0], _Missing)
@@ -1443,7 +1481,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         fn.__type_params__ = (int,)
         buf = io.BytesIO()
-        GuardsStatePickler({id(fn): fn, id(int): int}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({id(fn): fn, id(int): int}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(out.__type_params__, (int,))
         if sys.version_info >= (3, 12):
@@ -1465,7 +1503,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         d, kw = base.__defaults__, base.__kwdefaults__
         gtv = {id(base): base, id(d[1]): d[1], id(kw["d"]): kw["d"]}
         buf = io.BytesIO()
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
+        GuardsStatePickler(gtv, {}, {}, {}, buf).dump({"fn": base})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__defaults__[1], Inputs)
@@ -1485,7 +1523,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         fn.__annotations__ = {"x": Local, "y": int}
         buf = io.BytesIO()
-        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({id(int): int}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__annotations__["x"], _Missing)
         self.assertIs(out.__annotations__["y"], int)
@@ -1500,7 +1538,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         fn.__doc__ = threading.Lock()
         buf = io.BytesIO()
-        GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
         self.assertIsInstance(out.__doc__, _Missing)
 
@@ -1511,8 +1549,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         cell = [i for i, c in enumerate(w.__closure__) if c.cell_contents is w]
         self.assertEqual(len(cell), 1)
         buf = io.BytesIO()
-        gtv = {id(w): w, id(w.__dict__): w.__dict__}
-        GuardsStatePickler(gtv, {}, {}, buf).dump({"w": w})
+        # __dict__ is not kept, so the cycle runs through a REBUILT dict; `me`
+        # survives pruning because its value, w, is kept.
+        GuardsStatePickler({id(w): w}, {}, {}, {}, buf).dump({"w": w})
         out = pickle.loads(buf.getvalue())["w"]
         self.assertIs(out.me, out)
         self.assertIs(out.__closure__[cell[0]].cell_contents, out)
@@ -1525,7 +1564,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(global_add, Inputs(1, 2))
         self.assertFalse(hasattr(m.__self__, "global_add"))
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, Inputs)
@@ -1541,7 +1580,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         obj.global_add = global_add
         m = types.MethodType(global_add, obj)
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, SlottedByName)
@@ -1553,8 +1592,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(global_add, GetattrProxy())
         buf = io.BytesIO()
         GetattrProxy.probed.clear()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        self.assertEqual(GetattrProxy.probed, [])
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
+        # pickle itself may look protocol names up on the instance (3.10 probes
+        # __getstate__), so pin only that the METHOD name was never probed.
+        self.assertNotIn("global_add", GetattrProxy.probed)
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, GetattrProxy)
@@ -1564,7 +1605,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # __getattr__) can raise anything from the resolution probe; that must
         # fall back to the explicit reduce, not escape the reducer.
         m = types.MethodType(global_add, RaisingProbes())
-        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
         reduced = pickler._reduce_bound_method(m)
         self.assertIsNotNone(reduced)
         self.assertIs(reduced[1][0], global_add)
@@ -1572,7 +1613,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     def test_bound_method_the_class_resolves_falls_through(self):
         # A method the class MRO resolves back to, and a classmethod, take
         # pickle's default getattr() reconstruction.
-        pickler = GuardsStatePickler({}, {}, {}, io.BytesIO())
+        pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
         self.assertIsNone(pickler._reduce_bound_method(PlainMethods().add))
         self.assertIsNone(pickler._reduce_bound_method(PlainMethods.make))
 
@@ -1581,7 +1622,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # reconstruction would load a function where a bound method was.
         m = types.MethodType(global_add, StaticHolder())
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIsInstance(out, types.MethodType)
         self.assertIs(out.__func__, global_add)
@@ -1591,7 +1632,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # so there is nothing to probe and the method is carried explicitly.
         m = types.MethodType(functools.partial(global_add), Inputs(1, 2))
         buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"m": m})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(out.__func__.func, global_add)
         self.assertIsInstance(out.__self__, Inputs)
@@ -1608,7 +1649,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
         mod = Local()
         buf = io.BytesIO()
-        GuardsStatePickler({id(mod): mod}, {}, {}, buf).dump({"m": mod.forward})
+        GuardsStatePickler({id(mod): mod}, {}, {}, {}, buf).dump({"m": mod.forward})
         out = pickle.loads(buf.getvalue())["m"]
         self.assertIs(type(out.__self__), torch.nn.Module)
         self.assertTrue(out.__func__.__qualname__.endswith("Local.forward"))
@@ -1841,6 +1882,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             inner.__name__ = old_name
 
+    def test_fqn_mismatched_function_from_a_module_never_in_sys_modules(self):
+        # A module absent from sys.modules at DUMP time used to fall out of the
+        # reducer and be pickled by reference, failing the dump (a bypass); it is
+        # an fqn mismatch too and is rebuilt by value like the others.
+        mod = types.ModuleType("dynamo_test_guard_serialization_unregistered")
+        mod.keep_fn_name = keep_fn_name
+        exec("@keep_fn_name\ndef base(x):\n    return x * 2\n", mod.__dict__)
+        self.assertNotIn(mod.__name__, sys.modules)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod.base, torch.randn(3))
+        inner = mod.base.__wrapped__
+        inputs = {"x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        old_name = inner.__name__
+        try:
+            inner.__name__ = "renamed"
+            self._test_check_fn(ref, loaded, inputs, False)
+        finally:
+            inner.__name__ = old_name
+
     @parametrize("guard_type,cls,mutation", FQN_MISMATCH_CASES)
     def test_guard_rooted_at_fqn_mismatched_function(self, guard_type, cls, mutation):
         # The undecorated function the guard is rooted at is rebuilt by value
@@ -1881,10 +1941,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
         # A rebuilt local function's __defaults__ and __kwdefaults__ (the latter
-        # never carried before) round-trip and reject a change. This harness
-        # registers every element it compares, so it cannot tell whether a
-        # whole-container guard survives pruning; the full compile path does,
-        # see test_whole_defaults_equals_match_survives_a_called_default.
+        # never carried before) round-trip and reject a change. Every default
+        # here is a float, which _is_literal carries unconditionally, so this
+        # test cannot tell a whole-container guard from a per-element one; a
+        # later commit in this stack adds a full-compile round trip that can.
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)
@@ -1936,8 +1996,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3)
         expected = mod(x)
         torch._dynamo.reset()
-        DynamoCache.clear()
-        PrecompileContext.clear()
         compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(compiled(x), expected)
         (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
@@ -2110,6 +2168,26 @@ class TestGuardSerialization(TestGuardSerializationBase):
         class LocalModule(torch.nn.Module):
             def forward(self, x: torch.Tensor):
                 return x + 1
+
+        m = LocalModule()
+
+        def fn(m, x):
+            return m(x)
+
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+
+    def test_type_match_on_a_local_class_whose_repr_raises(self):
+        # The local-scope check runs outside the mapped dump, so the message
+        # must not touch the object: a __repr__ that raises is user code.
+        class LocalModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+            def __repr__(self):
+                raise RuntimeError("repr broken")
 
         m = LocalModule()
 
