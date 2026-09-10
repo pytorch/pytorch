@@ -5142,14 +5142,34 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     from .eval_frame import is_dynamo_supported
 
     type = torch.device(device_type).type
-    compile_supported = is_dynamo_supported()
+    if not is_dynamo_supported():
+        return False
     if type == "cpu":
-        pass
-    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
+        return True
+    from torch._inductor.config import triton_disable_device_detection
+
+    from .exc import TritonUnavailableError
+
+    # Match has_triton()'s early-outs: raise_if_triton_unavailable
+    # implementations import triton.backends unconditionally, and host
+    # device detection can be disabled via config.
+    if not has_triton_package() or triton_disable_device_detection:
+        return False
+    # Check DeviceInterface capability instead of hardcoded whitelist
+    try:
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        interface = get_interface_for_device(type)
+        if not (interface.is_available() and interface.is_triton_capable()):
+            return False
+        # Verify the triton backend is actually built, matching has_triton()
+        interface.raise_if_triton_unavailable()
+    except (NotImplementedError, TritonUnavailableError):
+        # Unregistered device type, partially implemented interface (base
+        # methods raise NotImplementedError), or triton backend not built
+        # for this device
+        return False
+    return True
 
 
 is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
