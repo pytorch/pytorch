@@ -86,10 +86,7 @@ def gpu_time(lmb, name, r=100):
     return elapsed / r
 
 
-@skipIfTorchDynamo("Bad interaction")
-class TestMin(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class _TestMinBase(TestCase):
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -98,8 +95,6 @@ class TestMin(TestCase):
         for o in gc.get_objects():
             if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
                 self.interesting.add(id(o))
-        if "cuda" in self._testMethodName:
-            self.mem_allocated = torch.cuda.memory_allocated()
 
     def tearDown(self):
         interesting = []
@@ -110,22 +105,13 @@ class TestMin(TestCase):
             ):
                 interesting.append(o)
 
-        extra_memory = 0
-        if "cuda" in self._testMethodName:
-            extra_memory += torch.cuda.memory_allocated() - self.mem_allocated
-
         #  nolevels = _n_levels_in_use() == 0
-        if extra_memory != 0 or len(interesting) != 0:
+        if len(interesting) != 0:
             import refcycle
 
             refcycle.garbage().export_image("garbage.pdf")
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
-        self.assertEqual(
-            extra_memory,
-            0,
-            lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
-        )
         self.assertEqual(
             len(interesting),
             0,
@@ -134,22 +120,6 @@ class TestMin(TestCase):
                 f"{[type(t) for t in interesting]}"
             ),
         )
-
-    def test_manual_stuff(self):
-        A_ = torch.rand(3, 4)
-        B_ = torch.rand(4, 5)
-        i, j, k = dims()
-        A = A_[i, k]
-        B = B_[k, j]
-        C = (A.expand(j) * B.expand(i)).sum(k)
-        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
-        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
-
-        D_ = torch.randint(0, 3, (6,))
-        d = dims()
-        D = D_[d]
-
-        A.index([i], [D]).order(k, d)
 
     def attn(
         self,
@@ -273,6 +243,27 @@ class TestMin(TestCase):
             gpu_time(lambda: B(hidden_state), "positional", r=3)
             gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
+
+@skipIfTorchDynamo("Bad interaction")
+class TestMin(_TestMinBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_manual_stuff(self):
+        A_ = torch.rand(3, 4)
+        B_ = torch.rand(4, 5)
+        i, j, k = dims()
+        A = A_[i, k]
+        B = B_[k, j]
+        C = (A.expand(j) * B.expand(i)).sum(k)
+        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
+        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
+
+        D_ = torch.randint(0, 3, (6,))
+        d = dims()
+        D = D_[d]
+
+        A.index([i], [D]).order(k, d)
+
     def test_attn(self):
         self.attn()
 
@@ -296,23 +287,6 @@ class TestMin(TestCase):
         # check that we still match names correctly
         for _ in range(10):
             f()
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/86710",
-    )
-    @skipIf(not TEST_CUDA, "no CUDA")
-    def test_attn_cuda(self):
-        # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(
-            batch_size=256,
-            hidden_size=768,
-            sequence_length=128,
-            num_attention_heads=12,
-            device="cuda",
-            time=measure_perf,
-            linear=torch.nn.Linear,
-        )
 
     def test_stack(self):
         i, j, d = dims()
@@ -692,7 +666,46 @@ class TestMin(TestCase):
         x.split(l, 0)
 
 
-skip_functorch_only = ["test_time_mm_fuse", "test_attn_cuda"]
+@skipIfTorchDynamo("Bad interaction")
+class TestMinDevice(_TestMinBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self.mem_allocated = torch.cuda.memory_allocated()
+
+    def tearDown(self):
+        extra_memory = torch.cuda.memory_allocated() - self.mem_allocated
+        if extra_memory != 0:
+            import refcycle
+
+            refcycle.garbage().export_image("garbage.pdf")
+        self.assertEqual(
+            extra_memory,
+            0,
+            lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
+        )
+        super().tearDown()
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/86710",
+    )
+    @skipIf(not TEST_CUDA, "no CUDA")
+    def test_attn_cuda(self):
+        # size from the BERT paper, 90% pretraining of sequence length 128
+        self.attn(
+            batch_size=256,
+            hidden_size=768,
+            sequence_length=128,
+            num_attention_heads=12,
+            device="cuda",
+            time=measure_perf,
+            linear=torch.nn.Linear,
+        )
+
+
+skip_functorch_only = ["test_time_mm_fuse"]
 
 
 class TestMinFunctorchOnly(TestMin):
