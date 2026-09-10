@@ -4461,6 +4461,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__:
+                # Rebuilt whether or not a guard is rooted at it, as before this
+                # change: it can never be found by name, and unlike a wraps
+                # wrapper it has no module-level neighbourhood to drag along.
                 return self._reduce_function_by_value(obj)
             resolved: Any = None
             # __module__ need not be a str (a decorator can set anything); an
