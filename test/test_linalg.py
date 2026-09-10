@@ -11545,9 +11545,11 @@ class TestGroupedMM(TestCase):
         subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
         subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
         subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
+        subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
         subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
         subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
         subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
+        subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
     ])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
