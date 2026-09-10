@@ -38,11 +38,42 @@ from torch.testing._internal.common_utils import (
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_XPU,
+    TestCase,
 )
 from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
+
+
+class TestMixedPrecisionPolicy(TestCase):
+    def test_dtype_callbacks_are_keyword_only(self):
+        def param_dtype_fn(_: nn.Parameter) -> torch.dtype:
+            return torch.float32
+
+        def reduce_dtype_fn(_: nn.Parameter) -> torch.dtype:
+            return torch.bfloat16
+
+        policy = MixedPrecisionPolicy(
+            torch.bfloat16,
+            torch.float32,
+            None,
+            False,
+            param_dtype_fn=param_dtype_fn,
+            reduce_dtype_fn=reduce_dtype_fn,
+        )
+
+        self.assertIs(policy.param_dtype_fn, param_dtype_fn)
+        self.assertIs(policy.reduce_dtype_fn, reduce_dtype_fn)
+        self.assertEqual(
+            MixedPrecisionPolicy.__match_args__,
+            ("param_dtype", "reduce_dtype", "output_dtype", "cast_forward_inputs"),
+        )
+        fields = {
+            field.name: field for field in dataclasses.fields(MixedPrecisionPolicy)
+        }
+        self.assertTrue(fields["param_dtype_fn"].kw_only)
+        self.assertTrue(fields["reduce_dtype_fn"].kw_only)
 
 
 class MixedParamDtypeModel(nn.Module):

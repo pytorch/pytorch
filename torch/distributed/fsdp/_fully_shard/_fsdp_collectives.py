@@ -318,9 +318,29 @@ def chunk_cat(
     num_chunks: int,
     out: torch.Tensor,
 ) -> None:
-    if out.device.type == "xpu" and len({tensor.dtype for tensor in tensors}) > 1:
-        tensors = [tensor.to(out.dtype) for tensor in tensors]
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
+
+
+lib.define(
+    "chunk_cat_mixed(Tensor[] tensors, int dim, int num_chunks, *, ScalarType dtype, Tensor(a!) out) -> ()"
+)
+
+
+@torch.library.impl(lib, "chunk_cat_mixed", "Meta")
+@torch.library.impl(lib, "chunk_cat_mixed", "CUDA")
+@torch.library.impl(lib, "chunk_cat_mixed", "XPU")
+@torch.library.impl(lib, "chunk_cat_mixed", "HPU")
+@torch.library.impl(lib, "chunk_cat_mixed", "CPU")
+@torch.library.impl(lib, "chunk_cat_mixed", "MTIA")
+@torch.library.impl(lib, "chunk_cat_mixed", "PrivateUse1")
+def chunk_cat_mixed(
+    tensors: list[torch.Tensor],
+    dim: int,
+    num_chunks: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    torch._chunk_cat_mixed(tensors, dim, num_chunks, dtype=dtype, out=out)
 
 
 @torch.no_grad()
@@ -398,7 +418,6 @@ def _get_param_all_gather_inputs(
     foreach_copy_indices: list[int] = []
     foreach_copy_inputs: list[torch.Tensor] = []
     foreach_copy_input_numels: list[int] = []
-    foreach_copy_target_dtypes: list[torch.dtype] = []
     foreach_copy_dtype_pair: tuple[torch.dtype, torch.dtype] | None = None
     foreach_copy_dtypes_are_uniform = True
 
@@ -417,7 +436,6 @@ def _get_param_all_gather_inputs(
                 raise AssertionError("Expected param_dtype to not be None")
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
-            foreach_copy_target_dtypes.append(param_dtype)
             dtype_pair = (all_gather_input.dtype, param_dtype)
             if foreach_copy_dtype_pair is None:
                 foreach_copy_dtype_pair = dtype_pair
@@ -442,11 +460,10 @@ def _get_param_all_gather_inputs(
             tuple[torch.dtype, torch.dtype],
             tuple[list[int], list[torch.Tensor]],
         ] = {}
-        for i, inp, target_dtype in zip(
-            foreach_copy_indices,
-            foreach_copy_inputs,
-            foreach_copy_target_dtypes,
-        ):
+        for i, inp in zip(foreach_copy_indices, foreach_copy_inputs):
+            target_dtype = fsdp_params[i].param_dtype
+            if target_dtype is None:
+                raise AssertionError("Expected param_dtype to not be None")
             indices, inputs = copy_groups.setdefault(
                 (inp.dtype, target_dtype), ([], [])
             )
@@ -590,7 +607,8 @@ def foreach_reduce(
     """
 
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) != 1:
+    grad_dtypes_are_uniform = len(grad_dtypes) == 1
+    if not grad_dtypes_are_uniform:
         expected_grad_dtypes = {
             fsdp_param.param_dtype or fsdp_param.orig_dtype
             for fsdp_param in fsdp_params
@@ -646,7 +664,14 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
+    if grad_dtypes_are_uniform:
+        foreach_reduce_scatter_copy_in(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
+    else:
+        foreach_reduce_scatter_copy_in_mixed(
+            unsharded_grads, reduce_scatter_input, world_size
+        )
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
@@ -829,6 +854,21 @@ def foreach_reduce_scatter_copy_in(
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
     torch.ops.fsdp.chunk_cat(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+    )
+
+
+def foreach_reduce_scatter_copy_in_mixed(
+    unsharded_grads: list[torch.Tensor],
+    reduce_scatter_input: torch.Tensor,
+    world_size: int,
+) -> None:
+    reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    torch.ops.fsdp.chunk_cat_mixed(
+        unsharded_grads,
+        dim=0,
+        num_chunks=world_size,
+        dtype=reduce_scatter_input.dtype,
+        out=reduce_scatter_input,
     )
 
 

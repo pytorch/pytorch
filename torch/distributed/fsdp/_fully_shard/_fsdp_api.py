@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import torch
 import torch.distributed as dist
@@ -70,8 +70,12 @@ class MixedPrecisionPolicy:
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
-    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = None
-    reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = None
+    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+        default=None, kw_only=True
+    )
+    reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+        default=None, kw_only=True
+    )
 
     def _without_dtype_fns(self) -> "MixedPrecisionPolicy":
         if self.param_dtype_fn is None and self.reduce_dtype_fn is None:

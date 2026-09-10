@@ -186,7 +186,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy._without_dtype_fns()
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states

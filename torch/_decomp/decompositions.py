@@ -1472,7 +1472,6 @@ def _preprocess_chunk_cat_inputs(
     tensors: list[Tensor],
     dim: int,
     num_chunks: int,
-    require_same_dtype: bool = True,
 ):
     torch._check(num_chunks >= 1, lambda: "_chunk_cat expects positive num_chunks")
     torch._check(
@@ -1482,11 +1481,10 @@ def _preprocess_chunk_cat_inputs(
     expected_device = tensors[0].device
     for tensor in tensors:
         torch._check(tensor.numel() > 0, lambda: "_chunk_cat expects non-empty tensor")
-        if require_same_dtype:
-            torch._check(
-                tensor.dtype == expected_dtype,
-                lambda: "_chunk_cat expects all input tensors with the same dtype",
-            )
+        torch._check(
+            tensor.dtype == expected_dtype,
+            lambda: "_chunk_cat expects all input tensors with the same dtype",
+        )
         torch._check(
             tensor.device == expected_device,
             lambda: "_chunk_cat expects all inputs tensors on the same device",
@@ -1514,9 +1512,7 @@ def _chunk_cat(
     num_chunks: int,
     out: Tensor | None = None,
 ) -> Tensor:
-    dim = _preprocess_chunk_cat_inputs(
-        tensors, dim, num_chunks, require_same_dtype=out is None
-    )
+    dim = _preprocess_chunk_cat_inputs(tensors, dim, num_chunks)
     padded_tensors = _pad_chunk(tensors, dim, num_chunks)
     if out is None:
         return torch.cat(padded_tensors, dim + 1)

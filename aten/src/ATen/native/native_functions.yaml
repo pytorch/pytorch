@@ -5755,6 +5755,16 @@
     CUDA: _chunk_cat_out_cuda
     XPU: _chunk_cat_out_xpu
 
+- func: _chunk_cat_mixed(Tensor[] tensors, int dim, int num_chunks, *, ScalarType dtype) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat_mixed
+    CUDA: _chunk_cat_mixed_cuda
+
+- func: _chunk_cat_mixed.out(Tensor[] tensors, int dim, int num_chunks, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat_mixed_out
+    CUDA: _chunk_cat_mixed_out_cuda
+
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
