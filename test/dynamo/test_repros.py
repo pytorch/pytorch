@@ -8938,6 +8938,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         graph_break_reasons = "\n".join(
             torch._dynamo.utils.counters["graph_break"].keys()
         )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
         self.assertNotIn("_is_cow_tensor", graph_break_reasons)
         self.assertNotIn("call_boxed", graph_break_reasons)
 
