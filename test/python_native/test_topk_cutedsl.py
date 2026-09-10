@@ -20,7 +20,7 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -53,6 +53,7 @@ def _test_n(k: int) -> int:
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(SM90OrLater, "SM90+ required")
 @skipIfNoCuteDSL
 class TestCuTeDSLTopK(TestCase):
     def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:
@@ -120,6 +121,25 @@ class TestCuTeDSLTopK(TestCase):
                 self.assertEqual(torch.gather(x, -1, got_i), got_v)
                 if deterministic:
                     self.assertEqual(got_i, ref_i)
+
+    def test_register_dynamic_n_ladder(self) -> None:
+        from torch._native.ops.topk.cutedsl_kernels import (
+            _compile_topk_register_i64,
+            topk_register,
+        )
+
+        torch.manual_seed(14)
+        k = 16
+        ns = (64, 128, 256, 512, 1024)
+        compiled = _compile_topk_register_i64(ns, k)
+        for n in ns:
+            x = torch.randn(4, n, device="cuda")
+            with torch.backends.python_native.cutedsl.disabled():
+                ref_v, _ = torch.topk(x, k, dim=-1)
+            got_v, got_i = topk_register(x, k)
+            self.assertIs(_compile_topk_register_i64(ns, k), compiled)
+            self.assertEqual(got_v, ref_v)
+            self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
     def test_radix_fixed_work_regimes(self) -> None:
         from torch._native.ops.topk.cutedsl_kernels import topk_radix
