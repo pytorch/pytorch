@@ -603,6 +603,58 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
+    @parametrize(
+        "hip_version, tlx_options, expected_kwargs",
+        [
+            (
+                "7.2",
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                },
+            ),
+            ("7.2", (), {}),
+            (
+                None,
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {},
+            ),
+        ],
+    )
+    def test_template_function_preserves_tlx_hip_options(
+        self, hip_version, tlx_options, expected_kwargs
+    ):
+        triton_meta = {
+            "device": MagicMock(),
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+
+        def capture_configs(_size_hints, configs, **_kwargs):
+            return configs
+
+        with (
+            patch.object(torch.version, "hip", hip_version),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                return_value=tlx_options,
+            ),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.cached_autotune",
+                side_effect=capture_configs,
+            ),
+        ):
+            configs = template(
+                num_stages=1,
+                num_warps=4,
+                triton_meta=triton_meta,
+            )
+
+        self.assertEqual(configs[0].kwargs, expected_kwargs)
+
     @runOnRocm
     def test_amd_special_config_args(self):
         """
