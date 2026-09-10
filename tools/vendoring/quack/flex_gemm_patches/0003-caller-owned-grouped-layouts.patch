@@ -1,12 +1,12 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index e6f2a10..1e1422a 100644
+index a9cf4be..3282e6e 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1052,0 +1053 @@ class EpiMod:
+@@ -1100,0 +1101 @@ class EpiMod:
 +                        swap_ab=swap_ab,
-@@ -1085,0 +1087 @@ class EpiMod:
+@@ -1133,0 +1135 @@ class EpiMod:
 +                    swap_ab=swap_ab,
-@@ -1134,0 +1137 @@ class EpiMod:
+@@ -1182,0 +1185 @@ class EpiMod:
 +                        swap_ab=swap_ab,
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
 index ea24697..75f2e18 100644

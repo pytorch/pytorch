@@ -161,6 +161,7 @@ import sys
 from typing import NamedTuple, Optional
 
 import torch
+import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, Float32, const_expr
 
@@ -298,47 +299,105 @@ def _mod_gemm_key(A, B, D, C, epi_args, epi_key_overrides, *tail) -> tuple:
     )
 
 
+def _fragment_apply(op, gemm, pstate):
+    """Adapt an apply-port op's per-element ``fn_apply`` to a TensorSSA callable."""
+
+    @cute.jit
+    def apply(value):
+        source = cute.make_rmem_tensor(value.shape, value.element_type)
+        source.store(value)
+        result = cute.make_rmem_tensor(value.shape, value.element_type)
+        for i in cutlass.range(cute.size(source), unroll_full=True):
+            result[i] = op.fn_apply(gemm, pstate, i, source[i])
+        return result.load()
+
+    return apply
+
+
 class _FragmentEpiModMixin(_EpiModMixinBase):
-    """Device adapter for whole-fragment TensorSSA EpiMod callbacks."""
+    """Device adapter for whole-fragment TensorSSA EpiMod callbacks.
+
+    The main fn and the accumulator prepass fn both receive the whole subtile
+    fragment as a TensorSSA (operands broadcast to the same shape) and return
+    TensorSSAs. Sinks may declare ``sink_operands``: names of operands whose
+    per-tile values are handed to ``fn_sink_flush`` by keyword.
+    """
+
+    def _fragment_operand(self, op, kind, fragment, tRS_rD, tRS_rC):
+        """Present one epilogue operand to a TensorSSA callback (or apply callable)."""
+        if const_expr(kind == "scalar"):
+            dtype = op.dtype
+            register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
+            filled = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
+            filled.fill(fragment)
+            return filled.load()
+        if const_expr(kind == "value"):
+            fragment = op.fn_prepare(self, fragment, False)
+            assert fragment is not None
+            return fragment.load()
+        if const_expr(kind == "apply"):
+            return _fragment_apply(op, self, op.fn_prepare(self, fragment, False))
+        assert kind in ("c", "row", "col", "tile"), (
+            "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
+        )
+        if const_expr(kind == "c"):
+            fragment = tRS_rC
+        assert fragment is not None
+        if const_expr(
+            kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
+        ):
+            fragment = fragment.to(self.acc_dtype)
+        value = fragment.load()
+        if const_expr(kind in ("row", "col")):
+            value = value.reshape(tRS_rD.shape)
+        if const_expr(kind != "c"):
+            dtype = op.dtype
+            if const_expr(dtype is Boolean):
+                value = value != cute.full_like(value, 0)
+            elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
+                value = value.to(dtype)
+        return value
+
+    @cute.jit
+    def _fragment_sink_flush(self, op, state, epi_loop_tensors, value):
+        """Flush one sink's returned plane(s) with the operands it declared."""
+        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+        planes = value if isinstance(value, tuple) else (value,)
+        fragments = []
+        for plane in planes:
+            fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
+            fragment.store(plane)
+            fragments.append(fragment)
+        operands = {
+            name: epi_loop_tensors[name] for name in getattr(op, "sink_operands", ())
+        }
+        op.fn_sink_flush(self, state, *fragments, **operands)
+
+    @cute.jit
+    def epi_prepass_subtile(self, params, epi_tensors, tRS_rD, epi_coord, epi_idx):
+        pfn = self._epi_mod_prepass_fn
+        ops_by_name = {op.name: op for op in self._epi_ops}
+        values = {}
+        for name, kind in self._epi_mod_prepass_operands:
+            op = ops_by_name[name]
+            state = op.begin_loop(self, epi_tensors[name], epi_coord)
+            values[name] = self._fragment_operand(op, kind, state, tRS_rD, None)
+        result = pfn(tRS_rD.load(), **values)
+        for name in self._epi_mod_prepass_outs:
+            op = ops_by_name[name]
+            state = op.begin_loop(self, epi_tensors[name], epi_coord)
+            self._fragment_sink_flush(op, state, epi_tensors, result[name])
 
     @cute.jit
     def epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC=None):
         fn = self._epi_mod_fn
         ops_by_name = {op.name: op for op in self._epi_ops}
-        values = {}
-        for name, kind in self._epi_mod_operands:
-            if const_expr(kind == "scalar"):
-                dtype = ops_by_name[name].dtype
-                register_dtype = Float32 if dtype is None or is_floating_dtype(dtype) else dtype
-                fragment = cute.make_rmem_tensor(tRS_rD.shape, register_dtype)
-                fragment.fill(epi_loop_tensors[name])
-                values[name] = fragment.load()
-                continue
-            if const_expr(kind == "value"):
-                fragment = ops_by_name[name].fn_prepare(self, epi_loop_tensors[name], False)
-                assert fragment is not None
-                values[name] = fragment.load()
-                continue
-            assert kind in ("c", "row", "col", "tile"), (
-                "TensorSSA callbacks support c/row/col/tile/scalar/value operands"
+        values = {
+            name: self._fragment_operand(
+                ops_by_name.get(name), kind, epi_loop_tensors.get(name), tRS_rD, tRS_rC
             )
-            fragment = tRS_rC if const_expr(kind == "c") else epi_loop_tensors[name]
-            assert fragment is not None
-            if const_expr(
-                kind == "c" or (kind == "tile" and is_floating_dtype(fragment.element_type))
-            ):
-                fragment = fragment.to(self.acc_dtype)
-            value = fragment.load()
-            if const_expr(kind in ("row", "col")):
-                value = value.reshape(tRS_rD.shape)
-            if const_expr(kind != "c"):
-                dtype = ops_by_name[name].dtype
-                if const_expr(dtype is Boolean):
-                    value = value != cute.full_like(value, 0)
-                elif const_expr(dtype is not None and not is_floating_dtype(dtype)):
-                    value = value.to(dtype)
-            values[name] = value
-
+            for name, kind in self._epi_mod_operands
+        }
         result = fn(tRS_rD.load(), **values)
         if const_expr("D" in result):
             tRS_rD.store(result["D"].to(self.acc_dtype))
@@ -348,13 +407,10 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
             output = cute.make_rmem_tensor(value.shape, value.element_type)
             output.store(value)
             outputs.append(output)
-        sink_tmps = []
         for name in self._epi_mod_sinks:
-            value = result[name]
-            sink_tmp = cute.make_rmem_tensor(value.shape, value.element_type)
-            sink_tmp.store(value)
-            sink_tmps.append(sink_tmp)
-        self._flush_sinks(ops_by_name, epi_loop_tensors, tuple(sink_tmps))
+            self._fragment_sink_flush(
+                ops_by_name[name], epi_loop_tensors[name], epi_loop_tensors, result[name]
+            )
         return tuple(outputs)
 
 
@@ -561,10 +617,8 @@ class EpiMod:
             op = self.output_ops.get(out_name)
             if op is None:
                 op = TileStore(out_name, gated=paired_acc)
-            elif paired_acc and not (
-                op.gated or getattr(op, "paired_output_bytes", None) is not None
-            ):
-                raise ValueError(f"output op {out_name!r} must support acc_pair mode")
+            elif paired_acc and not op.gated:
+                raise ValueError(f"output op {out_name!r} must be gated in acc_pair mode")
             epi_ops.append(op)
         epi_ops.extend(self.sinks.values())
         epi_ops.extend(self.extra_ops)
@@ -987,20 +1041,14 @@ class EpiMod:
                 out_n //= 2  # fp4 values are stored packed, two per byte
             _require_shape(out_name, aux, _tile_shape(batch, m, out_n, varlen_m))
             if paired_acc:
-                expected_bytes = getattr(output_op, "paired_output_bytes", (2,))
-                if isinstance(expected_bytes, int):
-                    expected_bytes = (expected_bytes,)
-                if aux.dtype in (
+                # fp8/fp4 gated aux = quantized postact (SM100-only; the
+                # TileStore op asserts the arch at trace time).
+                if aux.element_size() != 2 and aux.dtype not in (
                     torch.float8_e4m3fn,
                     torch.float8_e5m2,
                     torch.float4_e2m1fn_x2,
                 ):
-                    expected_bytes = (*expected_bytes, 1)
-                if aux.element_size() not in expected_bytes:
-                    raise TypeError(
-                        "acc_pair auxiliary output has the wrong storage width: "
-                        f"expected one of {expected_bytes} bytes, got {aux.element_size()}"
-                    )
+                    raise TypeError("acc_pair auxiliary output must be 16-bit (or fp8/fp4)")
                 if aux.stride(-1) != 1 or (D is not None and D.stride(-1) != 1):
                     raise ValueError("acc_pair auxiliary output and D must be N-major")
         # Swap-at-trace relabels pinned vec pins into KERNEL coordinates: a

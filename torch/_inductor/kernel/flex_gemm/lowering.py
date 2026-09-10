@@ -478,7 +478,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             aux_out_indices=aux_out_indices,
             local_reduce=template_local_reduce,
             main_transform=main_transform,
-            fragmentwise=epimod_source.fragmentwise,
             tuned=tuned,
         ),
     )

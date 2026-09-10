@@ -71,6 +71,7 @@ class FlexGemmEpiModLocalReducePlan:
     feeds_main: bool = False
     combine: str | None = None
     finalize: Callable[..., Any] | str | None = None
+    finalize_operands: tuple[str, ...] = ()
     store_finalize: Callable[..., Any] | str | None = None
     prepass: Callable[..., Any] | None = None
     prepass_combine: str | None = None
@@ -92,6 +93,12 @@ class FlexGemmEpiModLocalReducePlan:
             )
         if self.prepass_finalize is not None and self.prepass is None:
             raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
+        if self.finalize_operands and not callable(
+            self.store_finalize or self.finalize
+        ):
+            raise RuntimeError(
+                "FlexGEMM EpiMod finalize operands require a generated finalizer"
+            )
 
     @property
     def group(self) -> int:
@@ -108,6 +115,7 @@ class FlexGemmEpiModLocalReducePlan:
             self.feeds_main,
             self.combine,
             self.finalize,
+            self.finalize_operands,
             self.store_finalize,
             self.prepass,
             self.prepass_combine,
@@ -126,10 +134,9 @@ def flex_gemm_epimod(
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
     local_reduce: FlexGemmEpiModLocalReducePlan | None,
-    fragmentwise: bool,
     main_transform: FlexGemmGroupedMainOutputTransform | None,
 ):
-    """Build and cache a QuACK EpiMod from generated FlexGEMM metadata."""
+    """Build and cache a QuACK TensorSSA EpiMod from generated FlexGEMM metadata."""
     epilogue_arg_dtypes = tuple(arg.dtype for arg in epilogue_args)
     key = (
         epilogue_fn,
@@ -137,21 +144,15 @@ def flex_gemm_epimod(
         epilogue_arg_dtypes,
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
-        fragmentwise,
         main_transform,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
         return epimod
 
-    from torch._inductor.kernel.flex_gemm.quack_ops import epi_math
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
-    # Generated callbacks reference epi_math without importing QuACK into the
-    # generated source. Inject it only into the original function's globals;
-    # decorated wrappers may belong to third-party modules.
-    inspect.unwrap(epilogue_fn).__globals__["epi_math"] = epi_math
     op_types = {
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
@@ -173,13 +174,7 @@ def flex_gemm_epimod(
             GroupedMainStore,
         )
 
-        outputs = (
-            GroupedMainStore(
-                "main",
-                main_transform.group,
-                paired=not fragmentwise and main_transform.group == 2,
-            ),
-        )
+        outputs = (GroupedMainStore("main", main_transform.group),)
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
@@ -209,10 +204,13 @@ def flex_gemm_epimod(
             )
             prepass_outs = (LOCAL_REDUCE_FEED_MAIN_ARG_NAME,)
             if local_reduce.out is not None:
-                if (
-                    callable(store_finalize)
-                    and len(inspect.signature(store_finalize).parameters) == 2
-                ):
+                finalize_arity = (
+                    len(inspect.signature(store_finalize).parameters)
+                    - len(local_reduce.finalize_operands)
+                    if callable(store_finalize)
+                    else 1
+                )
+                if finalize_arity == 2:
                     if output_layout is not None:
                         raise RuntimeError(
                             "local-reduce output layouts do not support binary finalizers"
@@ -223,6 +221,7 @@ def flex_gemm_epimod(
                         group=local_reduce.group,
                         combine=local_reduce.combine,
                         finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
                     )
                 else:
                     sink = grouped_reduce.GroupedLocalReduce(
@@ -231,6 +230,7 @@ def flex_gemm_epimod(
                         group=local_reduce.group,
                         combine=local_reduce.combine,
                         finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
                         output_layout=output_layout,
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
@@ -254,40 +254,20 @@ def flex_gemm_epimod(
                     group=local_reduce.group,
                     combine=local_reduce.combine,
                     finalize=finalize,
+                    finalize_operands=local_reduce.finalize_operands,
                     output_layout=output_layout,
                 )
             if local_reduce.feeds_main:
                 ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
             else:
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
-    if fragmentwise:
-        epimod = epilogue_module.fragment_epilogue(
-            outputs=outputs,
-            ops=ops,
-            outs=sinks,
-            prepass=prepass,
-            prepass_outs=prepass_outs,
-        )(epilogue_fn)
-    else:
-        epimod = epilogue_module.gemm_epilogue(
-            outputs=outputs,
-            ops=ops,
-            outs=sinks,
-            mode=(
-                "acc_pair"
-                if main_transform is not None and main_transform.group == 2
-                else None
-            ),
-            prepass=prepass,
-            prepass_outs=prepass_outs,
-            vectorize=(
-                False
-                if main_transform is not None
-                and main_transform.group == 2
-                and local_reduce is not None
-                else None
-            ),
-        )(epilogue_fn)
+    epimod = epilogue_module.fragment_epilogue(
+        outputs=outputs,
+        ops=ops,
+        outs=sinks,
+        prepass=prepass,
+        prepass_outs=prepass_outs,
+    )(epilogue_fn)
     _EPIMOD_CACHE[key] = epimod
     return epimod
 
@@ -305,7 +285,6 @@ def gemm_epimod(
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmEpiModLocalReducePlan | None = None,
-    fragmentwise: bool = False,
     main_transform: FlexGemmGroupedMainOutputTransform | None = None,
     tuned: bool = False,
     config_constraints: tuple[tuple[str, Any], ...] = (),
@@ -323,7 +302,6 @@ def gemm_epimod(
         epilogue_arg_kinds,
         len(aux_outs),
         local_reduce,
-        fragmentwise,
         main_transform,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
