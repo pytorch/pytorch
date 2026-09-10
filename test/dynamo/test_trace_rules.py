@@ -64,7 +64,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._mps_is_on_macos_or_newer",
     "torch._C._swap_tensor_impl",
     "torch._C._unsafe_reset_storage",
-    "torch._dynamo.eval_frame.reset_code",
     "torch._C.autocast_decrement_nesting",
     "torch._C.autocast_increment_nesting",
     "torch._C.clear_autocast_cache",
