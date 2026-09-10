@@ -1,11 +1,8 @@
-# TWO-STAGE cross-CTA row reduction for few-row / huge-N (and the M=1 reduce-all case),
-# mirroring ATen's Reduce.cuh. Stage 1 reshapes (M, N) -> (M*C, N/C) and reduces each sub-row
-# to a RAW accumulator with no cross-block sync; stage 2 combines each row's C partials and
-# projects once with the true N, which keeps mean/var correct. 1.13-1.66x of ATen.
-#
-# C comes from N alone, not from M or the SM count, because it is baked into the plan. INDEX
-# traits are DECLINED: the reshape makes a sub-row's chunk index row % C, so they go to
-# kernel_general's ragged split, whose gidx_from="chunk" carries the absolute index.
+# Two-stage cross-CTA row reduction for few rows with large N, mirroring ATen Reduce.cuh.
+# Stage 1 reshapes (M, N) to (M*C, N/C) and emits raw accumulators; stage 2 combines C
+# partials and projects with true N, preserving mean/variance. C depends only on N because
+# it is part of the plan. Reshaping obscures global indices, so index traits use the
+# general kernel's ragged split. Measured 1.13-1.66x of ATen.
 
 import math
 from typing import NamedTuple
@@ -32,56 +29,47 @@ _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int3
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
-# Target stage-1 sub-row length. The reshape puts a whole sub-row in ONE block's tile, so it
-# trades directly against occupancy: at the smem ceiling ~1 block/SM and ~3.5 TB/s, at 8-20k
-# several blocks/SM and ~7.3. Below ~4k the stage-2 combine starts to cost. 8192 is the flat
-# top of that curve for throughput and for compile time.
+# Target one-block sub-row length. Smem-limited rows reach ~3.5 TB/s, 8-20k reach
+# ~7.3 TB/s with several blocks/SM, and below ~4k stage 2 costs; 8192 balances throughput
+# and compile time.
 _SUBROW_TARGET = 8192
-# Stage-2 threads-per-block: the combine is bandwidth-light (folds C partials), so a
-# mid block is plenty; parameterized so the autotuner / a retune can override.
+# Stage 2 only folds C partials, so a tunable mid-sized block suffices.
 _DEFAULT_BLOCK = 256
 
 
 class _XctaConfig(NamedTuple):
-    # xcta's own knob set; a knob the caller leaves None takes the default here. subrow_target is the
-    # stage-1 sub-row length TARGET, which _split_C snaps to a legal C by nearest-divisor search. No
-    # nfields term: wide-accumulator traits prefer shorter sub-rows, but the shift is shape-dependent
-    # and no closed form captures it without regressing nfields=1.
+    # Defaults for omitted knobs. _split_C snaps subrow_target to a nearby legal divisor.
+    # Wide accumulators can prefer shorter rows, but no nfields formula avoids regressions.
     block: int = _DEFAULT_BLOCK
     subrow_target: int = _SUBROW_TARGET
 
 
 def _split_C(N, vec, max_subrow_elems, subrow_target=None):
-    # C = chunks per output row. The reshape needs C | N exactly, with the sub-row length a
-    # multiple of vec that fits its tile. We do NOT maximize it -- that pins ~1 block/SM and halves
-    # bandwidth -- but aim for subrow_target and take the nearest divisor, searching outward. The
-    # search is bounded by the sub-row cap rather than by N, which matters when the divisors near
-    # the target lie tens of thousands apart.
+    # Find C | N whose vector-aligned sub-row fits the tile and is nearest the target.
+    # Maximizing sub-row size can halve bandwidth by leaving ~1 block/SM. Bound the search
+    # by the sub-row cap because nearby divisors may be far apart.
     target = _SUBROW_TARGET if subrow_target is None else subrow_target
     step = max(vec, 1)
-    # Floor on sub-row length: below it stage 1 barely reduces (a prime N degenerates to N
-    # partials and a no-op stage 1). Those stay on the grid-striding fallback instead.
+    # Below 256 elements, stage 1 barely reduces; use the grid-striding fallback.
     lo = max(step, 256)
     hi = min(max_subrow_elems, N)
     hi -= hi % step
     if hi < lo:
         return None
     tgt = min(max(target - (target % step), lo), hi)
-    # Expand symmetrically from tgt; first divisor of N (that keeps C <= _C_MAX) wins.
+    # Search outward from the target for the first divisor with bounded C.
     for d in range(0, hi - lo + step, step):
         for s in (tgt + d, tgt - d):
-            # C == 1 is rejected: a split into one chunk IS the one-shot, which every caller has already
-            # declined. It arises for a PRIME N, whose only in-window divisor is N itself -- (8, 65537)
-            # bf16 then folded the whole sub-row at vec=1, 74us against ATen's 6.0.
+            # Reject the already-declined C == 1 one-shot. For prime (8, 65537) bf16,
+            # scalar folding took 74us versus ATen's 6.0us.
             if lo <= s <= hi and N % s == 0 and 1 < N // s <= _C_MAX:
                 return N // s
     return None
 
 
 class FusedTwoStage:
-    # BOTH stage launches in ONE @cute.jit region: one compile artifact and one host-side call, so
-    # the Python dispatch and arg marshalling are paid once. The two launches still serialize on
-    # the stream. This replicates the two objects' own launch bodies back to back.
+    # Fuse both serialized launches into one compilation and host call, paying Python
+    # dispatch and argument marshalling once.
     def __init__(self, s1, s2):
         self.s1 = s1
         self.s2 = s2
@@ -103,10 +91,8 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # --- stage 1: the row kernel with final=False, writing each sub-row's RAW accumulator. Its
-        # fold is ROLLED, so the sub-row length arrives as runtime args and a vec class shares one
-        # kernel. No TMA atom: a sub-row here is wide enough that the direct load already coalesces.
-        # The other axes' args are None, since an unused Int32 param is not free. ---
+        # Stage 1 emits raw accumulators. Runtime loop counts share a kernel across N;
+        # wide sub-rows coalesce directly, so omit TMA and unused axis arguments.
         s1.kernel(
             [mX],
             parts,
@@ -127,12 +113,10 @@ class FusedTwoStage:
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
         )
-        # --- stage 2: the general axis, one block per output row, with the grid read live so the
-        # fused kernel serves any M. A single kept dim means the decode ignores the extent, so M stays
-        # dynamic, and the geometry arrives as runtime args. ---
+        # Stage 2 uses one block per output row. Runtime grid and geometry let one
+        # kernel serve every M and every N in the vector class with its own C.
         s2 = self.s2
-        # Argument order is the shared body's; the row/col axes' args are None (an unused
-        # Int32 param is not free -- see tile.TileReduce.kernel).
+        # Follow shared-body argument order; None omits costly row/column arguments.
         s2.tile.kernel(
             parts,
             mOuts,
@@ -151,8 +135,7 @@ class FusedTwoStage:
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
-# Two-level cache: compiled kernels keyed on the sub-row's vec class and stage-1 config, and
-# per-(N, knobs) derivations including the pre-boxed args (~6us of boxing) and None declines.
+# Cache kernels by vector class/config and geometry, boxed arguments (~6us), and declines by N.
 _PLAN = {}
 _GEOM = {}
 
@@ -169,8 +152,7 @@ def reduce_row_xcta(
 def reduce_row_xcta_2out(
     trait, trait_key, x, out_dtypes, block=None, flatten=False, subrow_target=None
 ):
-    # Two-output form: stage 2 projects BOTH fields of the same combined accumulator, so the split
-    # costs nothing over nouts==1. None if the split is declined.
+    # Project both fields from one accumulator at no extra split cost; None means declined.
     return _reduce_row_xcta(
         trait, trait_key, x, list(out_dtypes), 2, block, flatten, subrow_target
     )
@@ -179,9 +161,8 @@ def reduce_row_xcta_2out(
 def _reduce_row_xcta(
     trait, trait_key, x, out_dtypes, nouts, block, flatten, subrow_target
 ):
-    # FUSED two-stage row reduction; flatten collapses an M==1 result to 0-d, which a 1-D
-    # reduce-ALL wants and a (1, N) reduce-DIM does not. The single @cute.jit region is what turns
-    # this regime from ~0.6x of ATen with two launches into ~1.15-1.44x, and it captures cleanly.
+    # flatten makes M == 1 scalar for reduce-all, unlike reduce-dim. Fusing both launches
+    # improved ~0.6x of ATen to ~1.15-1.44x and remains graph-capturable.
     if not (x.is_cuda and x.is_contiguous()):
         raise AssertionError(
             f"need a contiguous CUDA input, got {x.device} {x.stride()}"
@@ -189,15 +170,12 @@ def _reduce_row_xcta(
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
-    # Fill the knobs from the config when the caller passed None; explicit values pass through.
     cfg = _XctaConfig()
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
-    # DYNAMIC M: the plan depends on N, dtype and trait but NOT M, so one kernel serves any batch
-    # size and M only sizes the grid and scratch. Stage 1 casts its tile coordinate to Int64, so a
-    # past-2**31 offset does not overflow. Two cache levels, as above, with subrow_target in the
-    # geometry key because it changes C.
+    # M only sizes grid and scratch, so one plan serves any batch size. Stage 1 uses Int64
+    # tile coordinates beyond 2**31. subrow_target belongs in the geometry key because it changes C.
     out_dtypes = tuple(out_dtypes)
     gkey = (trait_key, x.dtype, out_dtypes, N, block, subrow_target, str(x.device))
     geom = _GEOM.get(gkey)
@@ -209,8 +187,7 @@ def _reduce_row_xcta(
         return None
     C, s, fn, rexts, rstrides, kexts, kstrides, cnt, pn, s1nc, s1nw = geom
 
-    # One fused launch. Scratch is sized per call since M varies, and every operand is dynamic-M
-    # so the cached kernel serves any M.
+    # Size scratch per M; all operands keep M dynamic for plan reuse.
     sub = x.reshape(M * C, s)
     parts = [
         torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
@@ -231,36 +208,30 @@ def _reduce_row_xcta(
         s1nw,
         _L.stream(),
     )
-    # resize_ (not view) so the 0-d result is not a VIEW of `out`: aten reductions
-    # never alias, and view-ness is observable (see kernel_general._as_shape).
+    # resize_ preserves ATen's non-aliasing scalar output; view-ness is observable.
     if flatten and M == 1:
         return tuple(o.resize_(()) for o in outs)
     return tuple(outs)
 
 
 def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target):
-    # Derive the C split for this N, then compile or reuse the fused kernel for its bucket. None
-    # declines; the caller memoizes that, so the fallback is remembered too.
+    # Derive C, then compile or reuse its bucket; memoized None records a decline.
     device = x.device
     elsize = x.element_size()
     vec = math.gcd(N, 128 // (elsize * 8))
-    # C is fixed in the plan (it sets stage-1's sub-row length N//C and stage-2's partial
-    # count), so the same C must serve every M -> derive it once here, from N alone.
+    # C fixes both stages' geometry, so derive it from N alone for reuse across M.
     C = _split_C(N, vec, _RB._MAX_ROW_BYTES // elsize, subrow_target)
     if C is None:
-        # Prime / poorly-factored N: no clean reshape split. The caller memoizes the
-        # None -> the K0 general kernel serves it (any N, no reshape, O(1) compile).
+        # Prime or poorly factored N uses K0's reshape-free, extent-independent fallback.
         return None
     s = N // C
-    # INDEX traits are declined: stage 1 would have to rebase its within-sub-row column to the
-    # global one, which the reshape makes awkward. The ragged split serves them at 1.29-3.17x of
-    # ATen, since its gidx_from="chunk" already carries the absolute index.
+    # Decline index traits because reshaping obscures global columns; the ragged split
+    # already carries them and measured 1.29-3.17x of ATen.
     if getattr(trait, "has_index", False):
         return None
     svec = math.gcd(s, 128 // (elsize * 8))  # the sub-row's OWN vec class
 
-    # ONE stage-1 shape: the row kernel's fold is ROLLED, so the sub-row length is a runtime arg
-    # and one compiled kernel serves the whole vec class. N is absent from the key for that reason.
+    # Runtime rolled-loop length lets one stage-1 kernel serve a vector class, so omit N.
     cfg = _rt.row_config(s, elsize * 8)
     tpr = max(_rt.WARP, cfg.tpr)
     nt = max(tpr, cfg.nt)
@@ -279,7 +250,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         str(device),
     )
     align = svec * elsize
-    # Stage 1's rolled-loop counts over its sub-row: nchunks vec-groups, tpr per wave.
+    # Stage-1 rolled-loop counts: vector groups, then waves of tpr.
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // tpr)))
 
     def _make_s1():
@@ -296,8 +267,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         )
 
     def _fake_in():
-        # 2D row-major, both extents dynamic: mode 1 divisible by the sub-row vec width, so one
-        # compiled kernel serves every sub-row length in that vec class.
+        # Dynamic 2D row-major descriptor, with inner extent divisible by vector width.
         return _L.fake_compact(
             torch2cute[x.dtype], (_L.sym(), _L.sym(svec)), order=(1, 0), align=align
         )
@@ -307,8 +277,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
     def _build():
         s1 = _make_s1()
-        # Stage 2's geometry values are runtime launch args; the object contributes only the
-        # STRUCTURAL cache_sig fields, so the compiled kernel is geometry-agnostic.
+        # Runtime stage-2 geometry keeps the compiled kernel geometry-independent.
         s2 = _RB.ReduceBlock(
             trait,
             count=C,
@@ -322,8 +291,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
             block=block,
         )
         fop = FusedTwoStage(s1, s2)
-        # Descriptors only -- no seed tensors to allocate, and every extent dynamic so the compiled
-        # fn serves any M.
+        # Dynamic descriptors avoid seed tensors and serve any M.
         return _L.compile_kernel(
             fop,
             _fake_in(),
@@ -339,8 +307,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
 
 
 def _s2_args(C, M, N):
-    # Pre-boxed stage-2 runtime args, memoized because boxing is us-scale. The kept pair carries a
-    # seed M, but a single-pair decode ignores the extent, so M stays fully dynamic.
+    # Memoize boxed stage-2 arguments; single-pair decode ignores seed M, keeping it dynamic.
     return (
         _RB._exts([(C, 1)]),
         _RB._strides([(C, 1)]),
