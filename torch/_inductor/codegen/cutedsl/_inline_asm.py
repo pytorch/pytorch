@@ -84,17 +84,11 @@ def decode_e8m0(value: ir.Value) -> ir.Value:
     return arith.bitcast(T.f32(), bits)
 
 
-def convert_output(
-    value: ir.Value, result_type, *, scalar_integer: bool = False
-) -> ir.Value:
-    """Convert a register result to its fragment or scalar compute type."""
+def convert_output(value: ir.Value, result_type) -> ir.Value:
+    """Convert a register result to the requested logical element type."""
     if result_type == cutlass.Float8E8M0FNU:
         return decode_e8m0(value)
     target = result_type.mlir_type
-    if scalar_integer:
-        value = narrow_integer(value, result_type.width)
-        convert = arith.sitofp if result_type.signed else arith.uitofp
-        return convert(T.f32(), value)
     if value.type == target:
         return value
     if ir.IntegerType.isinstance(value.type):
@@ -205,6 +199,9 @@ def inline_asm_elementwise_intrinsic(
     if len(output_types) > 1:
         fields = ", ".join(str(output_type) for output_type in output_types)
         asm_result_type = ir.Type.parse(f"!llvm.struct<({fields})>")
+    compute_types = tuple(
+        cutlass.Float32 if ty == cutlass.Float8E8M0FNU else ty for ty in result_types
+    )
     fragments = [
         source
         for source, is_scalar in zip(sources, scalar_sources)
@@ -230,13 +227,6 @@ def inline_asm_elementwise_intrinsic(
         count = 1
         shape = None
 
-    scalar_integer_results = tuple(
-        not fragments and ir.IntegerType.isinstance(ty.mlir_type) for ty in result_types
-    )
-    compute_types = tuple(
-        cutlass.Float32 if ty == cutlass.Float8E8M0FNU or scalar_integer else ty
-        for ty, scalar_integer in zip(result_types, scalar_integer_results)
-    )
     converted = [[] for _ in result_types]
     for base in range(0, count, pack):
         produced = llvm.inline_asm(
@@ -254,12 +244,10 @@ def inline_asm_elementwise_intrinsic(
                 for index, output_type in enumerate(output_types)
             ]
         valid_outputs = min(pack, count - base)
-        for result_index, (ty, scalar_integer) in enumerate(
-            zip(result_types, scalar_integer_results)
-        ):
+        for result_index, ty in enumerate(result_types):
             output_start = result_index * pack
             converted[result_index].extend(
-                convert_output(output, ty, scalar_integer=scalar_integer)
+                convert_output(output, ty)
                 for output in outputs[output_start : output_start + valid_outputs]
             )
 
