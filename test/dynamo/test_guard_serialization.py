@@ -362,7 +362,8 @@ class GuardedDefaultsTupleModule(torch.nn.Module):
         self.fn = fn
 
     def forward(self, x):
-        # EQUALS_MATCH on the containers themselves, with no per-element source.
+        # A whole-tuple EQUALS_MATCH on __defaults__ and a keys-plus-per-element
+        # guard on __kwdefaults__, both read off a rebuilt local function.
         if self.fn.__defaults__ == (2.0, 1.0) and self.fn.__kwdefaults__ == {"c": 3.0}:
             x = x + 1
         return x + 2
@@ -970,7 +971,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(a.__closure__[0], b.__closure__[0])
         buf = io.BytesIO()
         cell = a.__closure__[0]
-        gtv = {id(a): a, id(b): b, id(cell): cell}
+        gtv = {id(a): a, id(b): b, id(cell.cell_contents): cell.cell_contents}
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
         out = pickle.loads(buf.getvalue())
@@ -1456,9 +1457,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             setattr(inner, attr, old_value)
 
     def test_nested_function_preserves_a_guarded_defaults_tuple(self):
-        # A guard on the container itself registers no per-element source, so
-        # pruning the elements is a silent permanent cache miss, not a load
-        # error; see the Note in guards.py.
+        # A rebuilt local function's __defaults__ and __kwdefaults__ (the latter
+        # never carried before) round-trip and reject a change. This harness
+        # registers every element it compares, so it cannot tell whether a
+        # whole-container guard survives pruning; the full compile path does,
+        # see test_whole_defaults_equals_match_survives_a_called_default.
         mod = GuardedDefaultsTupleModule()
         ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
         self._test_check_fn(ref, loaded, {"self": mod, "x": torch.randn(3)}, True)

@@ -159,7 +159,7 @@ class FunctionPicklerBase(pickle.Pickler):
     def _build_function(
         cls,
         f_globals: dict[str, Any],
-        module: str | None,
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -169,7 +169,8 @@ class FunctionPicklerBase(pickle.Pickler):
         # FunctionType derives __module__ from f_globals["__name__"], so any
         # scope that is not the real module dict leaves it None and a guard
         # rooted at fn.__module__ rebuilds against that. Leave that None in
-        # place rather than assigning it back (which the stub rejects).
+        # place rather than assigning it back (which the stub rejects). Any
+        # other value is restored as is: __module__ need not be a str.
         if module is not None:
             fn.__module__ = module
         fn.__qualname__ = qualname
@@ -178,7 +179,7 @@ class FunctionPicklerBase(pickle.Pickler):
     @classmethod
     def _unpickle_fn_from_module(
         cls,
-        module: str | None,
+        module: Any,
         code: types.CodeType,
         qualname: str,
         name: str,
@@ -212,9 +213,10 @@ class FunctionPicklerBase(pickle.Pickler):
         defaults, kwdefaults, attributes, doc, annotations, type_params = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
-        # FunctionType took __doc__/__annotations__/__type_params__ from the code
-        # object; functools.wraps overwrote them on the live function and a guard
-        # rooted there rebakes, so restore what the reducer captured.
+        # FunctionType() takes __doc__ from the code object and leaves
+        # __annotations__/__type_params__ empty (they are MAKE_FUNCTION operands);
+        # functools.wraps overwrote them on the live function and a guard rooted
+        # there rebakes, so restore what the reducer captured.
         fn.__doc__ = doc
         fn.__annotations__ = annotations
         # On Python < 3.12 there is no __type_params__ slot, so both a live
@@ -228,10 +230,11 @@ class FunctionPicklerBase(pickle.Pickler):
     @staticmethod
     def _read_raw_annotations(obj: Any) -> dict[str, Any]:
         # Reading obj.__annotations__ directly forces PEP 649 lazy evaluation on
-        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Take the
-        # unevaluated FORWARDREF shape instead; a ForwardRef proxy carries its
-        # owner and may not pickle (it does not for a local function), so the
-        # caller prunes any it does not need.
+        # 3.14+, raising NameError for a TYPE_CHECKING-only name. Ask for the
+        # FORWARDREF format instead: it evaluates what it can and falls back to
+        # proxies only for names that do not resolve, returning a COPY either
+        # way. A ForwardRef proxy carries its owner and may not pickle (it does
+        # not for a local function), so the caller prunes any it does not need.
         if sys.version_info >= (3, 14):
             import annotationlib
 
@@ -446,11 +449,12 @@ class _DynamoCodeCacheEntry:
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
       10. Whether the entry currently has nothing installable: every compile of
-         it was bypassed (its guards could not be serialized), or a backend was
-         missing at load. install() then leaves the frame to be traced fresh
-         rather than skipping it as trivial. Cleared once a compile records a
-         guarded code. (The load-time writer still flags the whole entry and
-         keeps the stale guarded codes; see PrecompileCacheEntry.from_cache_entry.)
+         it was bypassed (its guards could not be serialized), or a backend
+         artifact was missing when the package was saved. install() then leaves
+         the frame to be traced fresh rather than skipping it as trivial.
+         Cleared once a compile records a guarded code. (The save-time writer,
+         PrecompileCacheEntry.from_cache_entry, still flags the whole entry and
+         keeps the stale guarded codes.)
     """
 
     python_code: SerializedCode
