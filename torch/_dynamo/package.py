@@ -642,8 +642,9 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        # Backend ids the compile inside the current code_context registered,
-        # so a bypass can drop exactly those.
+        # Backend ids the compile inside the current code_context NEWLY added
+        # to the entry, so a bypass drops exactly those and never a backend an
+        # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
