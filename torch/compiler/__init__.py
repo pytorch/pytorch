@@ -6,7 +6,10 @@ from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
-from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
+from torch._higher_order_ops.invoke_subgraph import (
+    _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS,
+    NestedCompileRegionOptions,
+)
 
 # ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
 # plus an acceleration cache. Re-exported from the private impl module, whose
@@ -949,7 +952,13 @@ def nested_compile_region(
 
     Args:
         fn: The function to wrap
-        options: Optional backend to use for compiling the subgraph.
+        options: Optional compilation options for the subgraph. Construct them
+            with ``get_invoke_subgraph_compile_options`` from
+            ``torch._higher_order_ops.invoke_subgraph``. Its
+            ``fw_inductor_config_patches`` argument is stored as
+            ``inductor_config_patches``; its ``bw_inductor_config_patches``
+            argument retains the same name. Both mappings accept only the
+            Inductor config keys {supported_config_keys}.
             Warning: this is an experimental feature under development and
             not ready for use yet.
         max_reuse_entries: Maximum number of reuse cache entries per function
@@ -982,6 +991,15 @@ def nested_compile_region(
         options=options,
         max_reuse_entries=max_reuse_entries,
         reuse_hash_fn=reuse_hash_fn,
+    )
+
+
+if nested_compile_region.__doc__:
+    nested_compile_region.__doc__ = nested_compile_region.__doc__.format(
+        supported_config_keys=", ".join(
+            f"``{key}``"
+            for key in sorted(_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS)
+        )
     )
 
 
