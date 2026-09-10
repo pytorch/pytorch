@@ -26,19 +26,12 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
-
-
-def _aot_lib_loaded() -> bool:
-    from torch._native import _native_aot_embedded
-
-    return _native_aot_embedded()
-
-
-def skipIfNoAotLib(fn):
-    return unittest.skipUnless(
-        _aot_lib_loaded(), "AOT kernels not embedded in this build"
-    )(fn)
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfNoCuteDSL,
+    skipIfNoNativeAot,
+    TestCase,
+)
 
 
 def skipIfNoJitTopk(fn):
@@ -102,6 +95,23 @@ print("PROBE_RESULTS=" + json.dumps(results))
 """
 
 
+def _ran_dsl(x, k=64) -> bool:
+    """Whether topk(x, k) launched a DSL kernel, in this process.
+
+    Which layer served it is decided by the caller's environment: both launch the
+    same kernel, so the name in the profile only says that one of them did."""
+    from torch.profiler import profile, ProfilerActivity
+
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        torch.topk(x, k, dim=-1)
+        torch.cuda.synchronize()
+    return any(
+        "RadixSelectTopK" in e.name
+        for e in prof.events()
+        if e.device_type.name == "CUDA"
+    )
+
+
 def _run_probe(cases, extra_env):
     env = dict(os.environ, **extra_env)
     src = _PROBE.format(cases=json.dumps(cases), m=M)
@@ -123,7 +133,7 @@ def _run_probe(cases, extra_env):
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestNativeAotTopK(TestCase):
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_covered_grid_routes_to_aot(self):
         cases = [
             {"dtype": dtype, "n": n, "k": k}
@@ -138,7 +148,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
             self.assertEqual(r["index_dtype"], "torch.int64")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_deterministic_mode_routes_to_aot_bit_exact(self):
         # Det mode is on the grid, so its kernel must fire and match aten bit-exactly.
         # Probe values are torch.randn; ties are exercised in the next test.
@@ -152,7 +162,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_deterministic_ties_bit_exact(self):
         # Tie-heavy input, so det-mode indices must match aten's exactly. The
         # reference runs under disabled(), or it would come from the route under test.
@@ -170,7 +180,7 @@ class TestNativeAotTopK(TestCase):
         finally:
             torch.use_deterministic_algorithms(prior)
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_out_variant_routes_to_aot(self):
         results = _run_probe(
             [{"dtype": "float32", "n": 4096, "k": 64, "out_variant": True}],
@@ -179,7 +189,7 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["ran_dsl"])
         self.assertTrue(results[0]["values_ok"])
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_uncovered_calls_avoid_aot(self):
         cases = [
             {"dtype": "float32", "n": 3072, "k": 64},  # off-grid N
@@ -192,51 +202,29 @@ class TestNativeAotTopK(TestCase):
             self.assertFalse(r["ran_dsl"], f"{case} must not route to AOT")
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     @skipIfNoJitTopk
     def test_uncovered_fp32_served_by_jit_layer(self):
         # JIT layer live in this process, and off-grid fp32 is uncovered, so the cond
         # is not subtracted and the JIT DSL kernel runs.
-        from torch.profiler import profile, ProfilerActivity
-
         x = torch.randn(M, 3072, device="cuda")
         torch.topk(x, 64, dim=-1)  # trigger lazy compile outside profile
-        with profile(activities=[ProfilerActivity.CUDA]) as prof:
-            torch.topk(x, 64, dim=-1)
-            torch.cuda.synchronize()
-        self.assertTrue(
-            any(
-                "RadixSelectTopK" in e.name
-                for e in prof.events()
-                if e.device_type.name == "CUDA"
-            )
-        )
+        self.assertTrue(_ran_dsl(x))
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot
     def test_disabled_context_masks_aot_in_process(self):
         # cutedsl.disabled() flips the native-AOT Context switch as well as the JIT
         # layer, so no DSL kernel may run inside the block.
         from torch import _native
-        from torch.profiler import profile, ProfilerActivity
-
-        def ran_dsl():
-            with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                torch.topk(x, 64, dim=-1)
-                torch.cuda.synchronize()
-            return any(
-                "RadixSelectTopK" in e.name
-                for e in prof.events()
-                if e.device_type.name == "CUDA"
-            )
 
         x = torch.randn(M, 4096, device="cuda")
         pn = torch.backends.python_native
         self.assertTrue(_native.aot_enabled())
         with pn.cutedsl.disabled():
             self.assertFalse(_native.aot_enabled())
-            self.assertFalse(ran_dsl())
+            self.assertFalse(_ran_dsl(x))
         self.assertTrue(_native.aot_enabled())
-        self.assertTrue(ran_dsl())
+        self.assertTrue(_ran_dsl(x))
 
     def test_covered_call_correct_regardless_of_routing(self):
         # Correct whichever layer serves it, including stock aten with no AOT lib.
@@ -257,17 +245,16 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["values_ok"])
 
     def test_covered_axes_function_directly(self):
-        # covered_axes() is plain Python, loaded by file path since the module is
-        # stdlib-only at import.
-        import importlib.util
+        # covered_axes() is plain Python, loaded by file path (through the loader the
+        # declaration tooling itself uses) since the module is stdlib-only at import.
         import os
+
+        from torchgen.native_aot_decl import load_by_path
 
         path = os.path.join(
             os.path.dirname(torch.__file__), "_native", "ops", "topk", "aot.py"
         )
-        spec = importlib.util.spec_from_file_location("topk_aot_t", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = load_by_path("topk_aot_t", path)
 
         x = torch.empty(4, 4096)
         v = mod.covered_axes(x, 64)
