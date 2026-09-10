@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -707,6 +708,17 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
   auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
+
+  // Aliased out= tensors would silently corrupt the result (gh-180377). This
+  // must be checked before set_output_strided: after it, maybe_get_output may
+  // return a freshly allocated proxy instead of the user-provided tensor.
+  const auto& Q_out = maybe_get_output(0);
+  const auto& R_out = maybe_get_output(1);
+  if (Q_out.defined() && R_out.defined()) {
+    at::assert_no_internal_overlap(Q_out);
+    at::assert_no_internal_overlap(R_out);
+    at::assert_no_overlap(Q_out, R_out);
+  }
 
   auto A_shape = A.sizes().vec();
   const auto m = A_shape.cend()[-2];
