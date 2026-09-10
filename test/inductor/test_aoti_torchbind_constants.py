@@ -1,15 +1,9 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TEST_ACCELERATOR,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
@@ -44,10 +38,9 @@ class TestTorchbindAOTIDevice(TestCase):
 
         return M()
 
-    @unittest.skipIf(
-        TEST_ACCELERATOR and not HAS_TRITON, "requires triton on GPU builds"
-    )
     def test_custom_objs_exposed_through_loader(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
         m = self._make_model().to(device)
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -70,10 +63,9 @@ class TestTorchbindAOTIDevice(TestCase):
             msg=lambda msg: f"{msg}\nExpected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
-    @unittest.skipIf(
-        TEST_ACCELERATOR and not HAS_TRITON, "requires triton on GPU builds"
-    )
     def test_mutating_custom_obj_after_load_affects_run(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
         # The central contract: IValues returned by get_custom_objs() share
         # intrusive_ptr ownership with the live entries inside
         # OSSProxyExecutor::custom_objs_, so mutating state on the returned
@@ -108,10 +100,10 @@ class TestTorchbindAOTIDevice(TestCase):
         after = loader.run([x])[0]
         torch.testing.assert_close(after, 40 * x + x)
 
-    @unittest.skipIf(
-        TEST_ACCELERATOR and not HAS_TRITON, "requires triton on GPU builds"
-    )
     def test_custom_objs_empty_when_no_torchbind(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
+
         # A plain model with no torchbind attrs should yield an empty map.
         class Plain(torch.nn.Module):
             def forward(self, x):
