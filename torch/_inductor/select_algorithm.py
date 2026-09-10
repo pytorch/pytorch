@@ -54,7 +54,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
     use_pipelined_autotuning,
 )
-from .codecache import code_hash, PersistentCache, PyCodeCache
+from .codecache import code_hash, get_matmul_precision_key, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
     IndentedBuffer,
@@ -1238,6 +1238,10 @@ class TritonTemplateKernel(TritonKernel):
             raise AssertionError(
                 f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
             )
+
+        # the indexing math below is emitted into the kernel, so the scatter
+        # target's strides must be final
+        ir.freeze_storage_layout(scatter_graph)
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -3909,7 +3913,7 @@ def create_precompile_key(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            get_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4182,6 +4186,8 @@ class AlgorithmSelectorCache(PersistentCache):
         for preprocessing_fn in self.preprocessing_fns:
             choices = preprocessing_fn(choices)
 
+        choices = [choice for choice in choices if choice.is_layout_compatible()]
+
         # Apply benchmark_with_cudagraphs to all choices
         if benchmark_with_cudagraphs:
             for choice in choices:
@@ -4361,6 +4367,16 @@ class AlgorithmSelectorCache(PersistentCache):
             best_config_future=best_config_future,
             is_collective=is_collective,
         )
+        choices = [choice for choice in choices if choice.is_layout_compatible()]
+        if not choices:
+            raise self.create_no_valid_choices(
+                name, "Input layouts changed during autotuning."
+            )
+        timings = {
+            choice: time
+            for choice, time in timings.items()
+            if choice.is_layout_compatible()
+        }
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
         # in this case, since it will generally be the ATen kernel. if there are no
@@ -6341,7 +6357,8 @@ def should_use_layout_constraints(node):
 def get_strides_with_layout_constraints(node):
     if should_use_layout_constraints(node):
         return V.graph.buffer_layout_constraints[node.get_name()].stride
-    return node.get_stride()
+    # only used for benchmark input generation and logging, so a hint is fine
+    return node.get_stride_hint()
 
 
 class SymbolicGridFn:
@@ -6377,7 +6394,7 @@ class SymbolicGridFn:
 def _autotune_metadata(input_nodes):
     """Helper function to extract autotune metadata from input nodes."""
     return {
-        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_strides": ", ".join([str(n.get_stride_hint()) for n in input_nodes]),
         "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
         "autotune_shape": ", ".join(
             ["x".join(map(str, n.get_size())) for n in input_nodes]
@@ -6387,7 +6404,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(V.graph.sizevars.optimization_hints(n.get_stride()))
+                str(V.graph.sizevars.optimization_hints(n.get_stride_hint()))
                 for n in input_nodes
             ]
         ),

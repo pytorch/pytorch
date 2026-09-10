@@ -1053,7 +1053,7 @@ class CppGemmTemplate(CppTemplate):
                 raise AssertionError("expected mkldnn weight to not be a BaseView")
         # Note that the layout of MKLDNN Tensor is with the wrong stride
         view_size = new_inputs[1].layout.size
-        view_stride = new_inputs[1].layout.stride
+        view_stride = new_inputs[1].layout.stride_hint()
         view_offset = new_inputs[1].layout.offset
 
         def maybe_to_dense(inputs, layout_or_out):

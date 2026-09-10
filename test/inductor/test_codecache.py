@@ -46,6 +46,7 @@ from torch._inductor.codecache import (
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PersistentCache,
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
@@ -84,6 +85,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    recover_orig_fp32_precision,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -202,7 +204,7 @@ class TestCacheKeyStrategy(TestCase):
                     "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
                     fake_strategy,
                 ),
-                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch("torch._inductor.codecache.triton_key", return_value=None),
                 mock.patch.object(torch.cuda, "current_device", return_value=0),
                 mock.patch.object(
                     torch.cuda,
@@ -248,7 +250,7 @@ class TestCacheKeyStrategy(TestCase):
                     "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
                     wraps=SYSTEM_CACHE_KEY_STRATEGY,
                 ) as fake_strategy,
-                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch("torch._inductor.codecache.triton_key", return_value=None),
                 mock.patch.object(torch.cuda, "current_device", return_value=0),
                 mock.patch.object(
                     torch.cuda,
@@ -339,7 +341,7 @@ class TestCacheKeyStrategy(TestCase):
                     "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
                     wraps=SYSTEM_CACHE_KEY_STRATEGY,
                 ) as fake_strategy,
-                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch("torch._inductor.codecache.triton_key", return_value=None),
                 mock.patch.object(
                     torch.cuda, "current_device", side_effect=RuntimeError
                 ),
@@ -394,7 +396,7 @@ class TestCacheKeyStrategy(TestCase):
                     "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
                     wraps=SYSTEM_CACHE_KEY_STRATEGY,
                 ) as fake_strategy,
-                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch("torch._inductor.codecache.triton_key", return_value=None),
                 mock.patch.object(
                     torch.cuda, "current_device", side_effect=RuntimeError
                 ),
@@ -435,6 +437,42 @@ class TestCacheKeyStrategy(TestCase):
             self.assertEqual(AutotuneCache._prepare_key("/tmp/cabcdef.py"), "sentinel")
 
         self.assertEqual(fake_strategy.components, ("cabcdef.py:tag",))
+
+
+@instantiate_parametrized_tests
+class TestPersistentCache(TestCase):
+    @parametrize(
+        "backend,precision", [("cuda", "tf32"), ("mkldnn", "tf32"), ("mkldnn", "bf16")]
+    )
+    @recover_orig_fp32_precision
+    @config.patch(autotune_local_cache=True)
+    def test_backend_precision_cache_entries(self, backend, precision):
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        torch.backends.mkldnn.matmul.fp32_precision = "ieee"
+        matmul = getattr(torch.backends, backend).matmul
+        choice = mock.Mock()
+        choice.hash_key.return_value = "choice"
+        choice.kernel_hash_key.return_value = "kernel"
+        bench = mock.Mock(return_value={choice: 1.0})
+        cache = PersistentCache()
+        precompile_key = create_precompile_key("mm", "x", [choice])
+
+        self.assertEqual(cache.lookup([choice], "mm", "x", bench), {choice: 1.0})
+        self.assertEqual(cache.lookup([choice], "mm", "x", bench), {choice: 1.0})
+        self.assertEqual(bench.call_count, 1)
+
+        matmul.fp32_precision = precision
+        bench.return_value = {choice: 2.0}
+        self.assertEqual(cache.lookup([choice], "mm", "x", bench), {choice: 2.0})
+        self.assertEqual(bench.call_count, 2)
+        self.assertNotEqual(create_precompile_key("mm", "x", [choice]), precompile_key)
+
+        matmul.fp32_precision = "ieee"
+        self.assertEqual(cache.lookup([choice], "mm", "x", bench), {choice: 1.0})
+        self.assertEqual(bench.call_count, 2)
+        self.assertEqual(create_precompile_key("mm", "x", [choice]), precompile_key)
 
 
 class TestTorchKeyCache(TestCase):
