@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <istream>
 #include <mutex>
@@ -263,6 +264,7 @@ class TORCH_API PyTorchStreamWriter final {
 
  private:
   void setup(const std::string& file_name);
+  void throwIfWriterFuncError();
   void valid(const char* what, const char* info = "");
   void writeSerializationId();
   size_t current_pos_ = 0;
@@ -283,6 +285,7 @@ class TORCH_API PyTorchStreamWriter final {
   uint64_t version_ = kMinProducedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
+  std::exception_ptr writer_func_error_;
   friend size_t ostream_write_func(
       void* pOpaque,
       uint64_t file_ofs,
