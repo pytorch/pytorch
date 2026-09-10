@@ -1457,15 +1457,16 @@ def add(x, y):
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_two_packages_share_a_built_in_modules_wrap_inline_frame(self):
         # Every built-in nn.Module compiles through wrap_inline's one `inner`
-        # code object, so a first package's entries on it must not read as
+        # code object, so a loaded package's entries on it must not read as
         # another package serving the second module: that frame is multi-owner
         # by design, and a module whose guards miss records its own entry.
-        lin, relu = torch.nn.Linear(2, 2), torch.nn.ReLU()
+        ctx = DiskDynamoStore()
         x = torch.randn(3, 2)
-        pkg1 = CompilePackage(lin.forward)
-        self.assertEqual(
-            torch._dynamo.optimize(backend="eager", package=pkg1)(lin)(x), lin(x)
-        )
+        self._save_eager_package(torch.nn.Linear(2, 2).forward, ctx, (x,))
+        pkg1, backends = ctx.load_package(torch.nn.Linear(2, 2).forward, self.path())
+        pkg1.install(backends)
+        self.addCleanup(pkg1.uninstall)
+        relu = torch.nn.ReLU()
         pkg2 = CompilePackage(relu.forward)
         self.assertEqual(
             torch._dynamo.optimize(backend="eager", package=pkg2)(relu)(x), relu(x)

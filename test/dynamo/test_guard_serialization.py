@@ -1088,22 +1088,38 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = torch._dynamo.package.load_guards_state(buf.getvalue())["o"]
         self.assertEqual(out.a, [1])
 
-    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @unittest.skipIf(
+        not (
+            torch.distributed.is_available() and torch.distributed.is_gloo_available()
+        ),
+        "requires gloo",
+    )
     def test_an_unguarded_process_group_backend_is_pruned(self):
-        # FakeProcessGroup is a c10d Backend, not a ProcessGroup; both are
-        # unsupported and prune to the sentinel rather than failing the dump.
-        import torch.distributed as dist
-        from torch.testing._internal.distributed.fake_pg import FakeStore
+        # A c10d Backend (not a ProcessGroup) is unsupported too and prunes to
+        # the sentinel rather than failing the dump; no default group is needed.
+        from torch._C._distributed_c10d import HashStore, ProcessGroupGloo
 
-        dist.init_process_group("fake", rank=0, world_size=2, store=FakeStore())
-        self.addCleanup(dist.destroy_process_group)
         holder = _AttrHolder()
-        holder.pg = dist.group.WORLD._get_backend(torch.device("cpu"))
+        holder.pg = ProcessGroupGloo(HashStore(), 0, 1)
         self.assertIsInstance(holder.pg, torch._C._distributed_c10d.Backend)
         buf = io.BytesIO()
         GuardsStatePickler({id(holder): holder}, {}, {}, buf).dump({"h": holder})
         out = torch._dynamo.package.load_guards_state(buf.getvalue())["h"]
         self.assertIsInstance(out.pg, _Missing)
+
+    def test_torch_namespace_objects_are_pickled_whole(self):
+        # type(obj).__module__ == "torch" is torch's namespace too, so the
+        # exclusion must not stop at "torch."; a SymFloat is refused like a SymInt.
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        wrapper = torch._TorchCompileInductorWrapper("default", None, False)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(wrapper): wrapper}, {}, {}, buf).dump({"w": wrapper})
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["w"]
+        self.assertIsInstance(out.config, dict)
+        sym = ShapeEnv().create_unbacked_symfloat()
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymFloat"):
+            GuardsStatePickler({id(sym): sym}, {}, {}, io.BytesIO()).dump({"s": sym})
 
     def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
         # Attribute pruning assumes the default pickle protocol; a __setstate__
@@ -1127,7 +1143,11 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
-        self.assertTrue(_cell_is_empty(pickle.loads(buf.getvalue())["cell"]))
+        self.assertTrue(
+            _cell_is_empty(
+                torch._dynamo.package.load_guards_state(buf.getvalue())["cell"]
+            )
+        )
 
     def test_reduce_handles_an_empty_closure_cell(self):
         # Reading an EMPTY cell raised ValueError out of the reducer. It has to
@@ -1138,7 +1158,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(len(empty), 1)
         buf = io.BytesIO()
         GuardsStatePickler({id(wrapped): wrapped}, {}, {}, buf).dump({"fn": wrapped})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertTrue(_cell_is_empty(out.__closure__[empty[0]]))
 
     def test_reduce_keeps_the_function_dict_key_set(self):
@@ -1154,7 +1174,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         gtv = {id(base): base, id(base.tag): base.tag}
         GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(set(out.__dict__), {"tag", "cache"})
         self.assertEqual(out.__dict__["tag"], 2.0)
         self.assertIsInstance(out.__dict__["cache"], _Missing)
@@ -1176,7 +1196,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             gtv, {}, {}, buf, guard_tree_children=edges, guard_tree_verbatim=whole
         )
         pickler.dump({"fn": base})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertEqual(out.__defaults__, ("alpha", "beta"))
 
     def test_an_element_guarded_through_its_container_still_prunes_siblings(self):
@@ -1193,7 +1213,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler(gtv, {}, {}, buf, guard_tree_children=children).dump(
             {"fn": base}
         )
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertEqual(out.__defaults__[1], "beta")
 
@@ -1218,7 +1238,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(a): a, id(b): b, id(cell): cell}
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
     def test_pruned_shared_closure_cell_stays_shared(self):
@@ -1244,7 +1264,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # omitted from guard_tree_values, so the cell is pruned.
         gtv = {id(a): a, id(b): b}
         GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
         self.assertIsInstance(out["a"].__closure__[0].cell_contents, _Missing)
         self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
 
@@ -1264,11 +1284,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(fn): fn, id(g): g}
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump(fn)
-        out = pickle.loads(buf.getvalue())
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
         self.assertEqual(out.__module__, fn.__module__)
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
         self.assertEqual(out.__globals__.keys(), g.keys())
+        self.assertIs(out.__globals__["__builtins__"], sys.modules["builtins"])
 
     def test_globals_snapshot_is_built_once_per_module_dict(self):
         # The snapshot prunes a whole module dict. Building one per function
@@ -1310,7 +1331,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn = outer()
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__defaults__[0], _Missing)
         self.assertIsInstance(out.__kwdefaults__["kw"], _Missing)
         self.assertIsInstance(out.__closure__[0].cell_contents, _Missing)
@@ -1322,7 +1343,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         inner = DecoratedForwardModule.forward.__wrapped__
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"fn": inner})
-        self.assertIsInstance(pickle.loads(buf.getvalue())["fn"], _Missing)
+        self.assertIsInstance(
+            torch._dynamo.package.load_guards_state(buf.getvalue())["fn"], _Missing
+        )
 
     def test_snapshot_globals_share_one_missing_sentinel(self):
         # A globals snapshot prunes a whole module dict; a fresh _Missing per
@@ -1333,7 +1356,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(a): a, id(b): b, id(g): g}
         buf = io.BytesIO()
         GuardsStatePickler(gtv, {}, {}, buf).dump({"a": a, "b": b})
-        out = pickle.loads(buf.getvalue())
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
         sentinels = {
             id(v)
             for fn in out.values()
@@ -1357,7 +1380,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         cell = fn.__closure__[0]
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn, id(cell): cell}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
@@ -1375,7 +1398,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__annotations__ = {"x": Local, "y": int}
         buf = io.BytesIO()
         GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__annotations__["x"], _Missing)
         self.assertIs(out.__annotations__["y"], int)
 
@@ -1390,7 +1413,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         fn.__doc__ = threading.Lock()
         buf = io.BytesIO()
         GuardsStatePickler({id(int): int}, {}, {}, buf).dump({"fn": fn})
-        out = pickle.loads(buf.getvalue())["fn"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["fn"]
         self.assertIsInstance(out.__doc__, _Missing)
 
     def test_retained_grad_non_leaf_survives_pickle(self):
@@ -1408,7 +1431,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         gtv = {id(x): x, id(grad): grad}
         pickler = GuardsStatePickler(gtv, {}, {}, buf)
         pickler.dump(x)
-        out = pickle.loads(buf.getvalue())
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
         self.assertIsNotNone(out.grad)
         self.assertEqual(out.grad.shape, grad.shape)
 
@@ -1421,7 +1444,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         gtv = {id(w): w, id(w.__dict__): w.__dict__}
         GuardsStatePickler(gtv, {}, {}, buf).dump({"w": w})
-        out = pickle.loads(buf.getvalue())["w"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["w"]
         self.assertIs(out.me, out)
         self.assertIs(out.__closure__[cell[0]].cell_contents, out)
 
@@ -1434,7 +1457,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(hasattr(m.__self__, "global_add"))
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, Inputs)
 
@@ -1448,7 +1471,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = types.MethodType(global_add, obj)
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-        out = pickle.loads(buf.getvalue())["m"]
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())["m"]
         self.assertIs(out.__func__, global_add)
         self.assertIsInstance(out.__self__, SlottedByName)
 
@@ -1461,7 +1484,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 m = types.MethodType(global_add, recv)
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
-                out = pickle.loads(buf.getvalue())["m"]
+                out = torch._dynamo.package.load_guards_state(buf.getvalue())["m"]
                 self.assertIs(out.__func__, global_add)
                 self.assertIsInstance(out.__self__, type(recv))
         self.assertEqual(PropertyProxy.calls, 0)
@@ -1957,22 +1980,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_guard_rooted_at_fqn_mismatched_bound_method(self):
         # The undecorated forward bound directly: the method carries its
         # function explicitly (_reduce_bound_method), and that function is an
-        # fqn mismatch rebuilt by value.
+        # fqn mismatch rebuilt by value. The raw function also travels as an
+        # unguarded leaf, which only the source-site seed can keep whole.
         mod = DecoratedAttributeForwardModule()
         inner = type(mod).forward.__wrapped__
         bound = types.MethodType(inner, mod)
 
-        def fn(f, x):
+        def fn(g, f, x):
             if f.scale_flag == 2.0:
                 x = x + 1
             return f(x)
 
         x = torch.randn(3)
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, bound, x)
-        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, inner, bound, x)
+        self._test_check_fn(ref, loaded, {"g": inner, "f": bound, "x": x}, True)
         inner.scale_flag = 3.0
         try:
-            self._test_check_fn(ref, loaded, {"f": bound, "x": x}, False)
+            self._test_check_fn(ref, loaded, {"g": inner, "f": bound, "x": x}, False)
         finally:
             inner.scale_flag = 2.0
 
@@ -2920,6 +2944,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
             self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list; a
+        # module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        self.assertIsInstance(state.output_graph.local_scope["m"], torch.nn.LSTM)
 
     def test_grad_mode_loading(self):
         def fn(x):
