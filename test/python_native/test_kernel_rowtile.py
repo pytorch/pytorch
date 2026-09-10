@@ -1,9 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Smoke test for the vectorized row kernel on the shared tile datapath: that it compiles and
-# reduces a contiguous last dim, that its ROLLED fold serves every N in a vec class from one
-# compiled kernel, and that its two narrow-row options are wired and correct. Numeric
-# coverage comes from the overrides' OpInfo suites.
+# Smoke tests for the shared vectorized row kernel: contiguous reduction, one rolled
+# kernel per vector/config class, output/partial paths, and launch/addressing invariants.
 
 import unittest
 
@@ -35,16 +33,14 @@ class TestKernelRowTile(TestCase):
 
         trait = T.SumOps(acc=cutlass.Float32)
         kernel_rowtile._CACHE.clear()
-        # same vec class (all multiples of 4 in fp32) and the same config rung, so the
-        # rolled fold takes N at runtime and ONE kernel must serve all of them
+        # One runtime-N kernel serves this fp32 vec/config class.
         for n in (2048, 2052, 2056, 2060, 2064):
             x = torch.randn(64, n, device="cuda")
             (out,) = kernel_rowtile.reduce_row_tile(
                 trait, "vecclass", x, [torch.float32]
             )
             self.assertEqual(out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
-        # Count only THIS test's plans: the reference x.sum() above is itself served by this kernel
-        # once the aten overrides land, which compiles a second entry under its own op key.
+        # Filter this key because reference x.sum compiles its own plan.
         mine = [k for k in kernel_rowtile._CACHE if "vecclass" in k]
         self.assertEqual(
             len(mine),
@@ -53,8 +49,7 @@ class TestKernelRowTile(TestCase):
         )
 
     def test_two_output_trait(self):
-        # nouts=2 is a distinct store path (nslots x nouts) and the docstring calls it out, but
-        # nothing crossed it. max.dim returns (values, indices) off one combined accumulator.
+        # nouts=2 stores values and indices projected from one accumulator.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -73,9 +68,8 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(idx, want_i.to(torch.int32))
 
     def test_stage1_partials_are_raw_accumulators(self):
-        # final=False is why this kernel doubles as the cross-CTA stage 1: it stores the RAW per-field
-        # accumulator. For Welford the count field must equal the row length exactly -- a projected
-        # store would put a variance there.
+        # final=False stores raw per-field accumulators for cross-CTA stage 1; Welford's
+        # count must equal row length rather than a projected variance.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -91,19 +85,15 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(parts[2], torch.full((32,), 256.0, device="cuda"))
 
     def test_single_row_config_rungs_are_valid(self):
-        # reduce-all arrives as ONE row, where the row-packing ladder leaves the device on a fraction
-        # of a CTA. single_row_config widens it, but ONLY to a rung value: tpr is both the tree width
-        # and the block size, and a computed width silently returned a WRONG variance. Sweep the band
-        # rather than pinning shapes, since which N get widened is a measured choice.
+        # Reduce-all widens its lone row only to a legal tree/block rung; a computed width
+        # returned wrong variance. Sweep because the widening cutoff is measured.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         widened = 0
         for n in (32, 64, 96, 100, 128, 200, 400, 1024, 2048, 4096, 16384, 1 << 20):
             for bits in (16, 32, 64):
                 cfg = rt.single_row_config(n, bits)
-                if (
-                    cfg is None
-                ):  # the ladder's own pick stands, or the row cannot feed a warp
+                if cfg is None:  # ladder stands or row cannot feed a warp
                     continue
                 widened += 1
                 with self.subTest(n=n, bits=bits):
@@ -124,23 +114,19 @@ class TestKernelRowTile(TestCase):
         self.assertIsNone(rt.single_row_config(32, 32))
 
     def test_oneshot_gate_bounds_loads_not_just_smem(self):
-        # _oneshot_ok is what keeps a row that FITS smem but needs a huge per-thread load count
-        # off this path (it belongs on the cross-CTA split). Both bounds must bite.
+        # One-shot must reject both oversized rows and excessive per-thread loads.
         import torch
         from torch._native.ops.reductions import kernel_general as kg
 
         self.assertTrue(kg._oneshot_ok(torch.empty(1, 4096, device="cuda")))
-        # A prime N collapses vec to 1, so loads/thread is N/tpr: rejected on the load bound
-        # even though the tile is small.
+        # Prime N collapses vec to 1 and exceeds the load bound despite fitting smem.
         self.assertFalse(kg._oneshot_ok(torch.empty(1, 65537, device="cuda")))
         # Wide enough to blow the smem budget outright.
         self.assertFalse(kg._oneshot_ok(torch.empty(1, 1 << 22, device="cuda")))
 
     def test_absmax_absmin_propagate_nan(self):
-        # These traits' contract is vector_norm(ord=+-inf), which PROPAGATES NaN, and they spell it
-        # with builtin max/min, whose lowering over these accumulators is not evident from the source.
-        # Pin it from EVERY position, since whether a NaN survives can depend on which operand of the
-        # fold it lands in, and leave half the rows clean so the values get checked too.
+        # Abs extrema model vector_norm(+/-inf), which propagates NaN. Vary its fold
+        # position and leave clean rows to check values too.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -164,8 +150,7 @@ class TestKernelRowTile(TestCase):
                 self.assertEqual(got[half:], want[half:])
 
     def test_welford_divisor_clamps_at_zero(self):
-        # correction >= n must divide by ZERO (-> +inf, which is what aten returns), never by a
-        # negative number -- unclamped it returned a NEGATIVE variance.
+        # correction >= n divides by zero (+inf like ATen), never a negative denominator.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -185,11 +170,9 @@ class TestKernelRowTile(TestCase):
                 self.assertTrue(torch.isinf(got).all())
 
     def test_welford_agrees_with_aten_on_infinities(self):
-        # WelfordOps.combine has no zero-count guard, unlike ATen's, so merging a PADDED identity lane
-        # with a mean of +-inf computes NaN. That is real in the intermediate and does not surface: a
-        # Welford mean is infinite only when an element is, and ATen's variance is then non-finite
-        # too. The guard would cost two selects on the innermost chain and change nothing finite, so
-        # what is pinned is the AGREEMENT rather than the guard.
+        # Without ATen's zero-count guard, padded identity plus an infinite mean yields an
+        # intermediate NaN. ATen variance is already nonfinite; avoid two innermost selects
+        # and pin agreement instead.
         import math
 
         import cutlass
@@ -197,7 +180,7 @@ class TestKernelRowTile(TestCase):
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        # Both N leave padded lanes: at N=3 only 3 of 32 lanes hold an element.
+        # Both Ns pad lanes; N=3 uses only 3 of 32.
         for n in (3, 127):
             for where in ("first", "last", "both"):
                 with self.subTest(n=n, inf_at=where):
@@ -213,16 +196,14 @@ class TestKernelRowTile(TestCase):
                         [torch.float32],
                     )
                     want = x.var(dim=1)
-                    # nan == nan here, but nan must not stand in for inf: equal_nan alone would
-                    # accept exactly the corruption this guards against.
+                    # Check NaN masks so equal_nan cannot accept NaN in place of inf.
                     self.assertEqual(got.isnan(), want.isnan())
                     finite = ~got.isnan()
                     self.assertEqual(got[finite], want[finite])
 
     def test_integer_accumulator_identities(self):
-        # _pos_id / _neg_id have integer arms because Int32/Int64 have no .inf. A wrong sentinel loses
-        # to every real element, so the result is off by one identity -- visible only on an integer
-        # reduction, which this drives directly.
+        # Int accumulators lack .inf; a wrong sentinel loses to every element and leaks
+        # the identity into the result.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -237,8 +218,7 @@ class TestKernelRowTile(TestCase):
                 self.assertEqual(got, ref)
 
     def _sum_trait(self):
-        # The narrow-row tests all drive a plain sum; keep the import local so the module still
-        # imports without the DSL.
+        # Import locally so this module loads without the DSL.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -246,8 +226,7 @@ class TestKernelRowTile(TestCase):
         return T.SumOps(acc=cutlass.Float32)
 
     def test_gapped_rows_are_addressed_at_runtime(self):
-        # Inner stride 1 but a row PITCH that is not the row length. Nothing about the pitch is
-        # baked -- _fake() declares both extents dynamic -- so the reduction must still be right.
+        # Dynamic extents must handle unit inner stride with a gapped row pitch.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -260,9 +239,8 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
     def test_misaligned_base_is_served_after_an_aligned_call(self):
-        # A contiguous row can still be under-aligned (a storage offset), which N alone cannot
-        # see. The ALIGNED call runs first on purpose: a plan keyed without alignment would hand
-        # the second call the first's wider claim, which faults at launch.
+        # Storage offset can underalign a contiguous row. Run aligned first to ensure the
+        # cache key does not reuse its wider claim and fault.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
@@ -282,8 +260,7 @@ class TestKernelRowTile(TestCase):
                 )
 
     def test_non_power_of_two_warp_count_is_rejected(self):
-        # tpr=96 is a multiple of 32 that divides nt, but 3 warps per row is not a power of two:
-        # the cross-warp butterfly would drop the third partial (256 instead of 384 at N=384).
+        # Three warps would drop the third partial (256 instead of 384 at N=384).
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
