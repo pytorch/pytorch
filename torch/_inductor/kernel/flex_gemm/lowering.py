@@ -22,11 +22,12 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
 )
+from torch._inductor import config
 from torch._logging import warning_once
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 
-from ... import config, ir
+from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import (
     constant_pad_nd,
@@ -61,7 +62,6 @@ log = logging.getLogger(__name__)
 
 
 def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
-    """Rewrite additive GEMMs so NVGEMM can fuse their pointwise epilogues."""
     graph = graph_module.graph
     changed = False
     for node in list(graph.nodes):
@@ -531,7 +531,7 @@ def flex_gemm_quack_configs(
     with select_flex_gemm_configs() as legal_configs:
         main(*inputs, output, *bmreq.extra_args, stream=None)
     if not legal_configs:
-        raise AssertionError("FlexGEMM config probe did not reach gemm_epimod")
+        raise AssertionError("FlexGEMM config probe did not reach gemm_epilogue")
     return tuple(
         tuple(sorted(dataclasses.asdict(quack_config).items()))
         for quack_config in legal_configs
@@ -556,7 +556,35 @@ def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
 
 
 def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Lower FlexGEMM analysis into one generated QuACK EpiMod choice."""
+    """Lower FlexGEMM through the generated QUACK CuTeDSL template.
+
+    The current pipeline is:
+
+    ::
+
+        FlexGEMM HOP body (FX GraphModule)
+                         |
+                         v
+          find GEMM operands and captured epilogue args
+                         |
+                         v
+             FlexGemmEpilogueAnalysis.from_graph_module()
+                         |
+                         +--> output plan + buffer ABI
+                         |        `--> derive layout + allocate aux
+                         |
+                         +--> grouped/reduction geometry
+                         |        `--> flex_gemm_candidate_configs()
+                         |
+                         `--> materialize_flex_gemm_epilogue()
+                                  `--> QuACK EpiMod source + EpiOp specs
+                         |
+                         v
+             combine into template choices -> autotune_select_algorithm
+                         |
+                         v
+              restore captured output order
+    """
     if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
@@ -564,8 +592,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     tuned = kernel_options.get("tuned", False)
     fast_math = kernel_options.get("fast_math", False)
     explicit_config = kernel_options.get("config")
-    supported_options = OrderedSet(["backend", "tuned", "fast_math", "config"])
-    unsupported_options = OrderedSet(kernel_options) - supported_options
+    unsupported_options = OrderedSet(kernel_options) - OrderedSet(
+        ["backend", "tuned", "fast_math", "config"]
+    )
     if unsupported_options:
         raise NotImplementedError(
             f"unsupported FlexGEMM kernel options: {sorted(unsupported_options)}"
@@ -589,12 +618,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             )
     explicit_swap_ab = config_constraints.get("swap_ab") is True
 
-    from torch._inductor.kernel.flex_gemm.epilogue import (
+    from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         analyze_flex_gemm_epilogue,
         flex_gemm_indexed_output_plan,
         flex_gemm_output_values,
         gemm_node as flex_gemm_node,
-        materialize_flex_gemm_epimod,
+        materialize_flex_gemm_epilogue,
     )
     from torch._inductor.kernel.flex_gemm.template import (
         flex_gemm_epilogue_template,
@@ -631,11 +660,11 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
     if scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
-        gemm_nodes = blockscaled.gemm_inputs
+        gemm_fx_node.args = blockscaled.gemm_inputs
         mainloop_scale_nodes = blockscaled.tensorwise_scales
         alpha, beta = 1.0, 0.0
     elif grouped_mm:
-        gemm_nodes = quack_grouped_mm_contract(gemm_fx_node)
+        gemm_fx_node.args = quack_grouped_mm_contract(gemm_fx_node)
         alpha, beta = 1.0, 0.0
     else:
         unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(
@@ -645,14 +674,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             raise NotImplementedError(
                 f"unsupported FlexGEMM GEMM kwargs: {sorted(unsupported_gemm_kwargs)}"
             )
-        gemm_nodes = gemm_fx_node.args
         alpha = gemm_fx_node.kwargs.get("alpha", gemm_kwargs.get("alpha", 1.0))
         beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
         if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
             raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
 
     gemm_args: list[TensorBox] = []
-    for arg in gemm_nodes:
+    for arg in gemm_fx_node.args:
         gemm_arg = placeholder_args[arg] if isinstance(arg, torch.fx.Node) else arg
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
@@ -684,7 +712,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
-        for index, arg in enumerate(gemm_nodes)
+        for index, arg in enumerate(gemm_fx_node.args)
     )
     log_flex_gemm_artifact(
         "problem",
@@ -699,6 +727,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                     strict=True,
                 )
             ),
+            alpha=float(alpha),
+            beta=float(beta),
             tuned=tuned,
             fast_math=fast_math,
             explicit_config=explicit_config,
@@ -749,8 +779,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
         epilogue_args = [arg for _, arg in epilogue_pairs]
 
-    main_transform = outputs.main_transform
-    if main_transform is not None and epilogue_args[len(mainloop_scale_nodes) :]:
+    output_contraction = outputs.output_contraction
+    if output_contraction is not None and epilogue_args[len(mainloop_scale_nodes) :]:
         raise NotImplementedError(
             "FlexGEMM grouped main outputs do not yet support captured tensors"
         )
@@ -762,9 +792,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(
             "FlexGEMM generated epilogues require output metadata"
         )
-    output_size = ir.convert_shape_to_inductor(output_meta.shape)
+    logical_output_size = ir.convert_shape_to_inductor(output_meta.shape)
     aux_metas = validate_flex_gemm_aux_outputs(
-        gemm_op, outputs.aux_outputs, output_size
+        gemm_op, outputs.aux_outputs, logical_output_size
     )
     indexed_metas = () if indexed_output is None else (indexed_output.node.meta["val"],)
     if not has_flex_gemm_quack():
@@ -772,15 +802,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     # A terminal ``view(dtype)`` reinterprets bits: the kernel stores the source
     # dtype and the result is re-viewed below.
     output_storage = outputs.output_storage
-    storage_dtype = (
+    output_storage_dtype = (
         output_meta.dtype
         if output_storage is None
         else output_storage.meta["val"].dtype
     )
-    packed_uint8_main = main_transform is not None and storage_dtype is torch.uint8
+    packed_uint8_main = (
+        output_contraction is not None and output_storage_dtype is torch.uint8
+    )
     if (
-        not storage_dtype.is_floating_point
-        and storage_dtype is not torch.bool
+        not output_storage_dtype.is_floating_point
+        and output_storage_dtype is not torch.bool
         and not packed_uint8_main
     ):
         raise NotImplementedError(
@@ -788,17 +820,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
     local_reduce_metas = flex_gemm_local_reduce_metas(outputs.local_reduce)
     output_stride = ir.convert_shape_to_inductor(output_meta.stride())
-    if main_transform is not None:
+    if output_contraction is not None:
         # Grouped main outputs use TMA stores, whose outer stride must preserve
         # 16-byte alignment even when the contracted N extent is not aligned.
-        output_alignment = max(16 // storage_dtype.itemsize, 1)
+        output_alignment = max(16 // output_storage_dtype.itemsize, 1)
         output_stride[-2] = (
-            ceildiv(output_size[-1], output_alignment) * output_alignment
+            ceildiv(logical_output_size[-1], output_alignment) * output_alignment
         )
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
-        storage_dtype,
-        output_size,
+        output_storage_dtype,
+        logical_output_size,
         output_stride,
     )
     gemm_input_nodes = [
@@ -855,7 +887,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         *infer_flex_gemm_epilogue_arg_kinds(
             gemm_op,
             epilogue_input_nodes[mainloop_scale_count:],
-            output_size,
+            logical_output_size,
         ),
     )
     if grouped_mm and "tile" in epilogue_arg_kinds:
@@ -865,7 +897,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
     if gemm_args[mat1_index].get_device_or_error().type != "cuda":
         raise NotImplementedError("FlexGEMM QUACK backend requires CUDA tensors")
-    epimod_source = materialize_flex_gemm_epimod(
+    epimod_source = materialize_flex_gemm_epilogue(
         subgraph.graph_module,
         epilogue_analysis,
         epilogue_arg_placeholders,
@@ -879,7 +911,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     log_flex_gemm_artifact(
         "lowering_plan",
         lambda: format_flex_gemm_lowering_plan(
-            output_size,
+            logical_output_size,
             output_meta.dtype,
             tuple(
                 zip(
@@ -909,7 +941,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             out_index=indexed_out_indices[0],
             indices_index=indexed_index_input_indices[0],
         )
-    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
         outputs.local_reduce, local_reduce_out_index, epimod_source
     )
     if epimod_source.local_reduce_fragment_reduced:
@@ -935,7 +967,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         aux_out_indices=aux_out_indices,
         indexed_output=template_indexed_output,
         local_reduce=template_local_reduce,
-        main_transform=main_transform,
+        output_contraction=output_contraction,
     )
     template_kwargs = dict(
         input_nodes=input_nodes,
@@ -985,7 +1017,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     }
     if grouped_mm:
         input_gen_fns[gemm_input_indices[2]] = functools.partial(
-            flex_gemm_cu_seqlens_benchmark_input, total_m=output_size[0]
+            flex_gemm_cu_seqlens_benchmark_input, total_m=logical_output_size[0]
         )
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",
@@ -1008,14 +1040,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         structural_outs[node] if node in structural_outs else next(aux_iter)
         for node in outputs.returned_aux_outputs
     ]
-    if storage_dtype is not output_meta.dtype:
+    if output_storage_dtype is not output_meta.dtype:
         result = TensorBox(ir.DtypeView.create(result, output_meta.dtype))
     return (result, *ordered_aux_outs)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Dispatch FlexGEMM to ordinary Inductor lowering or a backend template."""
+    """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     if backend in ("NVGEMM", "QUACK") and gemm_op in FLEX_GEMM_OP_SPECS:
         mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
