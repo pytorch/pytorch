@@ -4506,9 +4506,11 @@ def _pickles_by_default(obj: Any) -> bool:
 
 
 # The exact-container bookkeeping nn.Module.__init__ installs: __getattr__ indexes
-# the three dicts on every attribute miss, and none of these ever reached
-# reducer_override before persistent_id existed. Hook OrderedDicts are not
-# listed: they were, and stay, pruned unless a guard reads them.
+# the three dicts for every attribute outside __dict__ (parameters, buffers,
+# submodules) and state_dict/named_buffers read _non_persistent_buffers_set;
+# none of these ever reached reducer_override before persistent_id existed. Hook
+# OrderedDicts are not listed: they were, and stay, pruned unless a guard reads
+# them.
 _NN_MODULE_STATE_ATTRS = frozenset(
     {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
 )
@@ -4783,7 +4785,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             }
             # The builtins module, not the sentinel: a function the rebuilt one
             # creates at call time reads its builtins from __globals__.
-            snapshot["__builtins__"] = builtins
+            if "__builtins__" in f_globals:
+                snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
@@ -5022,12 +5025,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            self._prune_unguarded_attributes(obj)
+            # A module with its own __setstate__ (RNNBase indexes _all_weights)
+            # would read a pruned attribute at load; DDP is rebuilt through
+            # nn.Module.__setstate__ below, so it stays pruned.
+            is_ddp = isinstance(obj, torch.nn.parallel.DistributedDataParallel)
+            if is_ddp or type(obj).__setstate__ is torch.nn.Module.__setstate__:
+                self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
-            if isinstance(obj, torch.nn.parallel.DistributedDataParallel):
+            if is_ddp:
                 return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
@@ -5065,9 +5073,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         ):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
-        elif isinstance(obj, torch.SymInt):
+        elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             raise torch._dynamo.exc.PackageError(
-                f"Cannot serialize SymInt {obj} (node: {obj.node})"
+                f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
             )
 
         elif isinstance(obj, types.MappingProxyType):
@@ -5143,7 +5151,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isclass(obj)
             and not inspect.ismodule(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
-            and not type(obj).__module__.startswith("torch.")
+            and type(obj).__module__.partition(".")[0] != "torch"
             and _pickles_by_default(obj)
         ):
             # Any object the guard tree reached, not just an nn.Module. A guarded
@@ -5263,7 +5271,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if is_module and name in _NN_MODULE_STATE_ATTRS:
                 # nn.Module.__getattr__ indexes these, so a pruned one turns
-                # every attribute miss on the loaded module into a TypeError.
+                # every parameter, buffer and submodule access on the loaded
+                # module into a TypeError.
                 continue
             if id(attr) in self.guard_tree_values:
                 continue
