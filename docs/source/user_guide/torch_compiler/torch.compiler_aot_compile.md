@@ -200,9 +200,10 @@ kernels). `"eager"`, `"aot_eager"` and the rest of the eager family (the
 generated code and are not subject to this check, and neither is a user
 backend that declares the plain attribute `emits_native_code = False` (any
 other value, including a method, counts as native). The attribute is read off
-the callable handed to `torch.compile`, or off that callable's `compiler_fn`
-when it is a wrapper, so for `aot_autograd(fw_compiler=...)` set it on the
-object `aot_autograd` returns. Declaring it on a backend that does emit
+the object handed to `torch.compile` as `backend` (for a registered backend
+name, off the function that name resolves to), never off anything that object
+wraps: for `aot_autograd(fw_compiler=...)` set it on the object `aot_autograd`
+returns, not on `fw_compiler`. Declaring it on a backend that does emit
 native code disables the only check standing between a mis-targeted artifact
 and a crash or wrong result at first call; opt out only a backend whose
 artifacts hold no compiled kernels.
