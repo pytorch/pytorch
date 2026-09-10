@@ -2,33 +2,30 @@
 
 """Tests for fusion region detection."""
 
-import unittest
-
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
-from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    xfailIfNoAcceleratorTriton,
+)
 
 
-HAS_GPU = torch.cuda.is_available()
-
-
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFusionRegionDetection(InductorTestCase):
     """Tests for fusion region detection and grouping."""
 
-    def setUp(self):
-        super().setUp()
-        self.device = "cuda"
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_fusion_region_grouping(self):
+    def test_fusion_region_grouping(self, device):
         """Test that connected fusible ops are grouped into regions."""
         from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
 
         with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
+            a = torch.ones(64, 64, device=device)
             traced = make_fx(lambda a: (a + 1) * 2 - 3)(a)
 
         region_of = build_fusion_regions(traced)
@@ -46,19 +43,19 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertIs(region_of[add_node], region_of[mul_node])
         self.assertIs(region_of[mul_node], region_of[sub_node])
 
-    def test_mm_not_in_fusion_region(self):
+    def test_mm_not_in_fusion_region(self, device):
         """Test that mm ops are not included in fusion regions."""
         from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
 
         with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
+            a = torch.ones(64, 64, device=device)
             traced = make_fx(lambda a: torch.mm(a + 1, a) * 2)(a)
 
         region_of = build_fusion_regions(traced)
         (mm_node,) = traced.graph.find_nodes(op="call_function", target=aten.mm.default)
         self.assertNotIn(mm_node, region_of)
 
-    def test_strict_local_fusion_no_cross_mm(self):
+    def test_strict_local_fusion_no_cross_mm(self, device):
         """Test that fusion regions don't cross non-fusible (mm) boundaries.
 
         Pattern:
@@ -82,8 +79,8 @@ class TestFusionRegionDetection(InductorTestCase):
             return b2, c, d2
 
         with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            y = torch.ones(64, 64, device=self.device)
+            a = torch.ones(64, 64, device=device)
+            y = torch.ones(64, 64, device=device)
             traced = make_fx(model)(a, y)
 
         region_of = build_fusion_regions(traced)
@@ -105,7 +102,7 @@ class TestFusionRegionDetection(InductorTestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    def test_estimate_fused_node_costs(self):
+    def test_estimate_fused_node_costs(self, device):
         """Test that fused costs correctly exclude internal I/O."""
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
@@ -123,8 +120,8 @@ class TestFusionRegionDetection(InductorTestCase):
             return x, y
 
         with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            b = torch.ones(64, 64, device=self.device)
+            a = torch.ones(64, 64, device=device)
+            b = torch.ones(64, 64, device=device)
             traced = make_fx(model)(a, b)
 
         region_of = build_fusion_regions(traced)
@@ -152,12 +149,12 @@ class TestFusionRegionDetection(InductorTestCase):
         fused_total = sum(fused_costs.values())
         self.assertLessEqual(fused_total, individual_total)
 
-    def test_is_fusible_node(self):
+    def test_is_fusible_node(self, device):
         """Test is_fusible_node correctly classifies ops."""
         from torch._inductor.fx_passes.fusion_regions import is_fusible_node
 
         with FakeTensorMode():
-            a = torch.randn(64, 64, device=self.device)
+            a = torch.randn(64, 64, device=device)
             traced = make_fx(lambda a: torch.linalg.qr(torch.mm(a + 1, a)))(a)
 
         def find_node(target):
@@ -182,7 +179,7 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertFalse(is_fusible_node(qr_node))
 
     @xfailIfNoAcceleratorTriton
-    def test_fused_costs_does_not_mutate_graph(self):
+    def test_fused_costs_does_not_mutate_graph(self, device):
         """estimate_fused_node_costs must not mutate the graph."""
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
@@ -200,8 +197,8 @@ class TestFusionRegionDetection(InductorTestCase):
             return x, y, z
 
         with FakeTensorMode():
-            a = torch.ones(64, 64, device=self.device)
-            b = torch.ones(64, 64, device=self.device)
+            a = torch.ones(64, 64, device=device)
+            b = torch.ones(64, 64, device=device)
             traced = make_fx(model)(a, b)
 
         graph_str_before = traced.print_readable(print_output=False)
@@ -217,12 +214,12 @@ class TestFusionRegionDetection(InductorTestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    def test_fused_costs_handles_forced_bad_region(self):
+    def test_fused_costs_handles_forced_bad_region(self, device):
         """estimate_fused_node_costs works for any region_of mapping."""
         from torch._inductor.fx_passes.fusion_regions import estimate_fused_node_costs
 
         with FakeTensorMode():
-            t = torch.randn(64, 64, device=self.device)
+            t = torch.randn(64, 64, device=device)
 
             def fn(x):
                 a = x.neg()
@@ -258,7 +255,11 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertTrue(all(c >= 0.0 for c in costs.values()))
 
 
-if __name__ == "__main__":
-    from torch.testing._internal.common_utils import run_tests
+instantiate_device_type_tests(
+    TestFusionRegionDetection,
+    globals(),
+    except_for="cpu",
+)
 
+if __name__ == "__main__":
     run_tests()
