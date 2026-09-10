@@ -20,6 +20,7 @@ import functools
 import itertools
 import re
 import sys
+import threading
 import types
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -1981,16 +1982,28 @@ def _cached_cleaned_instructions(
 
 
 _unique_id_counter = itertools.count()
+_unique_id_lock = threading.Lock()
 
 
 def unique_id(name: str, with_uuid: bool = False) -> str:
-    ret = f"{name}_{next(_unique_id_counter)}"
+    with _unique_id_lock:
+        index = next(_unique_id_counter)
+    ret = f"{name}_{index}"
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
 
 
+def _reserve_unique_id_through(index: int) -> None:
+    global _unique_id_counter
+
+    with _unique_id_lock:
+        current = next(_unique_id_counter)
+        _unique_id_counter = itertools.count(max(current, index + 1))
+
+
 COMPILED_FN_PREFIX = "__compiled_fn"
+RESUME_FN_PREFIX = "__resume_at"
 _COMPILED_FN_NAME_RE = re.compile(
     rf"^{COMPILED_FN_PREFIX}_\d+_"
     r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
