@@ -620,6 +620,75 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
 
+    def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
+        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
+        from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
+            torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
+        )
+        placeholders = [
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        match = SimpleNamespace(
+            args=tuple(placeholders[:2]),
+            kwargs={"inp": placeholders[2]},
+            nodes=list(graph_module.graph.nodes),
+        )
+        self.assertTrue(is_valid_addmm_fusion(match))
+
+        mark_flex_gemm_body_gemm_node(graph_module, torch.ops.aten.mm.default)
+        self.assertFalse(is_valid_addmm_fusion(match))
+
+    @parametrize(
+        "case",
+        (
+            (
+                "addmm",
+                torch.ops.aten.addmm.default,
+                ((4, 16), (4, 8), (8, 16)),
+            ),
+            (
+                "baddbmm",
+                torch.ops.aten.baddbmm.default,
+                ((2, 4, 16), (2, 4, 8), (2, 8, 16)),
+            ),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_post_grad_unfuse_preserves_flex_gemm_body_gemm(self, case):
+        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
+        from torch._inductor.fx_passes.post_grad import (
+            should_prefer_unfused_addmm,
+            should_prefer_unfused_baddbmm,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        _, gemm_op, input_shapes = case
+        check = {
+            torch.ops.aten.addmm.default: should_prefer_unfused_addmm,
+            torch.ops.aten.baddbmm.default: should_prefer_unfused_baddbmm,
+        }[gemm_op]
+        with FakeTensorMode():
+            input_values = [torch.empty(shape, device="cuda") for shape in input_shapes]
+        graph_module = make_fx(
+            lambda inp, mat1, mat2: gemm_op(inp, mat1, mat2).relu(),
+            tracing_mode="fake",
+        )(*input_values)
+        inputs = [node for node in graph_module.graph.nodes if node.op == "placeholder"]
+        gemm = next(node for node in graph_module.graph.nodes if node.target is gemm_op)
+        match = SimpleNamespace(
+            args=tuple(inputs[1:]),
+            kwargs={"inp": inputs[0]},
+            output_node=lambda: gemm,
+        )
+        self.assertTrue(check(match))
+
+        mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
+        self.assertFalse(check(match))
+
     def test_local_reduce_propagates_before_grouped_view_matching(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import gemm_node
         from torch._inductor.kernel.gemm_epilogue_analysis import (
@@ -1308,75 +1377,6 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             "flex_gemm.to_blocked.default",
             format_flex_gemm_analysis_details(analysis),
         )
-
-    def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
-        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
-        from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
-            torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
-        )
-        placeholders = [
-            node for node in graph_module.graph.nodes if node.op == "placeholder"
-        ]
-        match = SimpleNamespace(
-            args=tuple(placeholders[:2]),
-            kwargs={"inp": placeholders[2]},
-            nodes=list(graph_module.graph.nodes),
-        )
-        self.assertTrue(is_valid_addmm_fusion(match))
-
-        mark_flex_gemm_body_gemm_node(graph_module, torch.ops.aten.mm.default)
-        self.assertFalse(is_valid_addmm_fusion(match))
-
-    @parametrize(
-        "case",
-        (
-            (
-                "addmm",
-                torch.ops.aten.addmm.default,
-                ((4, 16), (4, 8), (8, 16)),
-            ),
-            (
-                "baddbmm",
-                torch.ops.aten.baddbmm.default,
-                ((2, 4, 16), (2, 4, 8), (2, 8, 16)),
-            ),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_post_grad_unfuse_preserves_flex_gemm_body_gemm(self, case):
-        from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
-        from torch._inductor.fx_passes.post_grad import (
-            should_prefer_unfused_addmm,
-            should_prefer_unfused_baddbmm,
-        )
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        _, gemm_op, input_shapes = case
-        check = {
-            torch.ops.aten.addmm.default: should_prefer_unfused_addmm,
-            torch.ops.aten.baddbmm.default: should_prefer_unfused_baddbmm,
-        }[gemm_op]
-        with FakeTensorMode():
-            input_values = [torch.empty(shape, device="cuda") for shape in input_shapes]
-        graph_module = make_fx(
-            lambda inp, mat1, mat2: gemm_op(inp, mat1, mat2).relu(),
-            tracing_mode="fake",
-        )(*input_values)
-        inputs = [node for node in graph_module.graph.nodes if node.op == "placeholder"]
-        gemm = next(node for node in graph_module.graph.nodes if node.target is gemm_op)
-        match = SimpleNamespace(
-            args=tuple(inputs[1:]),
-            kwargs={"inp": inputs[0]},
-            output_node=lambda: gemm,
-        )
-        self.assertTrue(check(match))
-
-        mark_flex_gemm_body_gemm_node(graph_module, gemm_op)
-        self.assertFalse(check(match))
 
 
 class FlexGemmTestCase(TestCase):
@@ -2980,1250 +2980,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_output_contraction_rejects_unsupported_composition(self):
-        m = k = n = 64
-        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-
-        def group_eight(a, b):
-            def epilogue(acc):
-                lanes = acc.view(m, n, 8)
-                return sum(lanes[..., index] for index in range(8))
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        b = torch.randn(k, 8 * n, device="cuda", dtype=torch.float16)
-        with self.assertRaisesRegex(Exception, "group 2 or 4"):
-            torch.compile(group_eight, backend="inductor", fullgraph=True)(a, b)
-
-        torch._dynamo.reset()
-
-        def captured(a, b, scale):
-            def epilogue(acc):
-                lanes = acc.view(m, n, 2)
-                return (lanes[..., 0] - lanes[..., 1]) * scale
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
-        scale = torch.randn(1, 1, device="cuda", dtype=torch.float16)
-        with self.assertRaisesRegex(Exception, "do not yet support captured tensors"):
-            torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
-
-        torch._dynamo.reset()
-
-        def auxiliary(a, b):
-            def epilogue(acc):
-                lanes = acc.view(m, n, 2)
-                return lanes[..., 0] - lanes[..., 1], acc
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        with self.assertRaisesRegex(Exception, "do not yet compose"):
-            torch.compile(auxiliary, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_output_contraction_chunked_view(self):
-        m, n, k = 128, 128, 64
-
-        def epilogue_fn(acc):
-            grouped = acc.view(m, 2, n)
-            return grouped.select(1, 0) + grouped.select(1, 1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(2 * n, k, device="cuda", dtype=torch.bfloat16).t()
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b),
-            epilogue_fn(a.double() @ b.double()),
-            k,
-        )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("indices", ((0, 1), (1, 0), (-1, -2)))
-    def test_mm_output_contraction_specializes_select_indices(self, indices):
-        m, n, k = 128, 128, 64
-        first, second = indices
-
-        def epilogue_fn(acc):
-            grouped = acc.view(m, n, 2)
-            return grouped.select(-1, first) - grouped.select(-1, second)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.bfloat16)
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b),
-            epilogue_fn(a.double() @ b.double()),
-            k,
-        )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("split_size", (64, 128))
-    def test_mm_output_contraction_specializes_split_size(self, split_size):
-        torch._dynamo.reset()
-        m = k = 64
-
-        def epilogue_fn(acc):
-            lanes = acc.float().split(split_size, dim=-1)
-            return (lanes[0] - lanes[1]).to(acc.dtype)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        b = torch.randn(2 * split_size, k, device="cuda", dtype=torch.float16).t()
-        torch._dynamo.mark_static(b, 1)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        torch.testing.assert_close(actual, epilogue_fn(a @ b), atol=0.2, rtol=0.05)
-        FileCheck().check("FlexGemmOutputContraction(group=2").check(
-            "chunked=True"
-        ).check_not("extern_kernels.mm").run(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("chunked", (False, True))
-    def test_mm_output_contraction_dynamic_m(self, chunked):
-        group, n, k = 2, 256, 64
-
-        def epilogue_fn(acc):
-            if chunked:
-                lhs, rhs = acc.chunk(group, dim=-1)
-                return lhs - rhs
-            grouped = acc.view(acc.shape[0], acc.shape[1] // group, group)
-            return grouped.select(-1, 0) - grouped.select(-1, 1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        b = (
-            torch.randn(n, k, device="cuda", dtype=torch.bfloat16).t()
-            if chunked
-            else torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        )
-        for index, m in enumerate((128, 192)):
-            a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-            if index == 0:
-                torch._dynamo.mark_dynamic(a, 0)
-            actual = compiled(a, b)
-            self.assertMatchesLowPrecisionEager(
-                actual,
-                epilogue_fn(a @ b),
-                epilogue_fn(a.double() @ b.double()),
-                k,
-            )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_output_contraction_dynamic_n(self):
-        m = k = 64
-
-        def epilogue_fn(acc):
-            lanes = acc.view(m, -1, 2)
-            return lanes[..., 0] - lanes[..., 1]
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        for index, output_n in enumerate((64, 68, 80)):
-            b = torch.randn(k, 2 * output_n, device="cuda", dtype=torch.float16)
-            if index == 0:
-                torch._dynamo.mark_dynamic(b, 1)
-            actual = compiled(a, b)
-            torch.testing.assert_close(actual, fn(a, b), atol=0.2, rtol=0.05)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_chunked_output_contraction_rejects_grouped_reduction(self):
-        m, n, k, group = 128, 128, 64, 16
-
-        def epilogue_fn(acc):
-            lanes = acc.chunk(2, dim=-1)
-            main = lanes[0] + lanes[1]
-            aux = acc.float().view(m, -1, group).sum(-1)
-            return main, aux
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(2 * n, k, device="cuda", dtype=torch.bfloat16).t()
-        with self.assertRaisesRegex(
-            Exception, "chunked grouped main outputs do not compose"
-        ):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_chunked_output_contraction_rejects_contiguous_b(self):
-        def epilogue_fn(acc):
-            lhs, rhs = acc.chunk(2, dim=-1)
-            return lhs + rhs
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(Exception, "column-major B storage"):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("rounding", ("floor", "rceil"))
-    def test_mm_tuple_aux_mx_scale_rounding(self, rounding):
-        m, n, k, group = 128, 128, 16, 16
-        maxima = torch.tensor(
-            [0.0, 1.0, 448.0, 500.0, 512.0, 1024.0, 2.0**-120, 2.0**120],
-            device="cuda",
-            dtype=torch.bfloat16,
-        )
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        a[:, 0] = 1
-        b[0] = maxima.repeat_interleave(group)
-
-        def epilogue_fn(acc):
-            grouped = acc.float().abs().view(m, n // group, group)
-            return acc, mx_e8m0_scale(grouped.amax(-1), rounding=rounding)
-
-        def fn(lhs, rhs):
-            return flex_gemm(
-                torch.mm,
-                (lhs, rhs),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        (actual, scale), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected, expected_scale = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
-        self.assertMxScaleCode(code, rounding)
-        self.assertIn("FlexGemmRuntimeLocalReducePlan", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("max_value", (4.0, 6.0))
-    def test_mm_tuple_aux_nvfp4_scale_rounding(self, max_value):
-        m, n, k, group = 128, 128, 16, 16
-        maxima = torch.tensor(
-            [0.0, 0.09375, 1.0, 4.0, 6.0, 7.0, 448.0, 2688.0],
-            device="cuda",
-            dtype=torch.bfloat16,
-        )
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        a[:, 0] = 1
-        b[0] = maxima.repeat_interleave(group)
-
-        def epilogue_fn(acc):
-            grouped = acc.float().abs().view(m, n // group, group)
-            return acc, nvfp4_e4m3_scale(grouped.amax(-1), max_value=max_value)
-
-        def fn(lhs, rhs):
-            return flex_gemm(
-                torch.mm,
-                (lhs, rhs),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        (actual, scale), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected, expected_scale = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
-        self.assertNvfp4ScaleCode(code, max_value)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_prepare_softmax_online_local_reduce(self):
-        from torch._inductor import inductor_prims
-
-        m = n = k = 64
-        group = 16
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            maximum, _ = inductor_prims.prepare_softmax_online(grouped, -1)
-            return acc.relu(), maximum.squeeze(-1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, maximum), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected, expected_maximum = epilogue_fn(a @ b)
-
-        torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
-        torch.testing.assert_close(maximum, expected_maximum, rtol=0.02, atol=0.2)
-        FileCheck().check("combine='max'").check_not(
-            "_local_reduce_combine(lhs, rhs)"
-        ).check_not("reduce_planes=").run(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("group", (64, 128, 192, 256))
-    def test_mm_associative_logsumexp_groups(self, group):
-        m, k, n = 65, 64, 4 * group
-        kernel_options = {"backend": "QUACK"}
-        if group == 192:
-            kernel_options["config"] = {"tile_n": 192}
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            return acc.relu(), grouped.logsumexp(-1) * 0.5 + 1.0
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options=kernel_options,
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        high_precision = a.double() @ b.double()
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b)[0],
-            high_precision.relu(),
-            k,
-        )
-        torch.testing.assert_close(
-            stats,
-            (high_precision.view(m, -1, group).logsumexp(-1) * 0.5 + 1.0).float(),
-            atol=2e-3,
-            rtol=2e-3,
-        )
-        self.assertAssociativeReduceCode(code, group)
-        FileCheck().check(
-            "cute.where(operator.eq(lhs[0], maximum), one, cute.math.exp2((lhs[0] - maximum) * "
-        ).check("_local_reduce_finalize(state):").check("cute.math.log(state[1])").run(
-            code
-        )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_logsumexp_dynamic_m(self):
-        k, n, group = 64, 512, 128
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(acc.shape[0], -1, group)
-            return acc.relu(), grouped.logsumexp(-1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        b = self.makeTensor(k, n)
-        for index, m in enumerate((65, 129)):
-            a = self.makeTensor(m, k)
-            if index == 0:
-                torch._dynamo.mark_dynamic(a, 0)
-            actual, stats = compiled(a, b)
-            high_precision = a.double() @ b.double()
-            self.assertMatchesLowPrecisionEager(
-                actual,
-                epilogue_fn(a @ b)[0],
-                high_precision.relu(),
-                k,
-            )
-            torch.testing.assert_close(
-                stats,
-                high_precision.view(m, -1, group).logsumexp(-1).float(),
-                atol=2e-3,
-                rtol=2e-3,
-            )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("axis", (0, 1))
-    def test_mm_associative_logsumexp_dynamic_grouped_dimension(self, axis):
-        k, group = 64, 64
-
-        def epilogue_fn(acc):
-            if axis == 1:
-                grouped = acc.float().view(acc.shape[0], -1, group)
-                return acc.relu(), grouped.logsumexp(-1)
-            grouped = acc.float().view(-1, group, acc.shape[1])
-            return acc.relu(), grouped.logsumexp(1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        if axis == 1:
-            a = self.makeTensor(65, k)
-            initial_b = self.makeTensor(k, 128)
-            torch._dynamo.mark_dynamic(initial_b, 1)
-            inputs = ((a, initial_b), (a, self.makeTensor(k, 192)))
-        else:
-            initial_a = self.makeTensor(128, k)
-            torch._dynamo.mark_dynamic(initial_a, 0)
-            b = self.makeTensor(k, 128)
-            inputs = ((initial_a, b), (self.makeTensor(192, k), b))
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        for a, b in inputs:
-            actual, stats = compiled(a, b)
-            high_precision = a.double() @ b.double()
-            self.assertMatchesLowPrecisionEager(
-                actual,
-                epilogue_fn(a @ b)[0],
-                high_precision.relu(),
-                k,
-            )
-            expected_stats = (
-                high_precision.view(high_precision.shape[0], -1, group).logsumexp(-1)
-                if axis == 1
-                else high_precision.view(-1, group, high_precision.shape[1]).logsumexp(
-                    1
-                )
-            )
-            torch.testing.assert_close(
-                stats,
-                expected_stats.float(),
-                atol=2e-3,
-                rtol=2e-3,
-            )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_state_composes_projections(self):
-        from torch._inductor import inductor_prims
-
-        m, k, n, group = 65, 64, 512, 128
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            maximum, total = inductor_prims.prepare_softmax_online(grouped, -1)
-            stats = maximum.squeeze(-1) * 0.25 + total.squeeze(-1) * 0.75
-            return acc.relu(), stats
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        high_precision = a.double() @ b.double()
-        grouped = high_precision.view(m, -1, group)
-        maximum = grouped.amax(-1)
-        total = (grouped - maximum.unsqueeze(-1)).exp().sum(-1)
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b)[0],
-            high_precision.relu(),
-            k,
-        )
-        torch.testing.assert_close(
-            stats,
-            (maximum * 0.25 + total * 0.75).float(),
-            atol=2e-3,
-            rtol=2e-3,
-        )
-        self.assertIn("state[0]", code)
-        self.assertIn("state[1]", code)
-        self.assertAssociativeReduceCode(code, group)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_state_reuses_scalar_projection(self):
-        m, k, n, group = 65, 64, 512, 128
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            stats = grouped.logsumexp(-1) + grouped.amax(-1)
-            return acc > 0, stats
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        high_precision = a.double() @ b.double()
-        grouped = high_precision.view(m, -1, group)
-        self.assertEqual(actual, epilogue_fn(a @ b)[0])
-        self.assertEqual(
-            stats,
-            (grouped.logsumexp(-1) + grouped.amax(-1)).float(),
-            atol=2e-3,
-            rtol=2e-3,
-        )
-        self.assertAssociativeReduceCode(code, group)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_logsumexp_axis_m(self):
-        m, n, k, group = 256, 128, 64, 64
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(-1, group, n)
-            return acc.relu(), grouped.logsumexp(1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        high_precision = a.double() @ b.double()
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b)[0],
-            high_precision.relu(),
-            k,
-        )
-        torch.testing.assert_close(
-            stats,
-            high_precision.view(-1, group, n).logsumexp(1).float(),
-            atol=2e-3,
-            rtol=2e-3,
-        )
-        self.assertAssociativeReduceCode(code, group, axis=0, fragment_reduced=False)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_logsumexp_special_values(self):
-        m, k, n, group = 4, 16, 512, 128
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        b[:, :group] = (
-            torch.linspace(-80, 80, group, device="cuda", dtype=torch.bfloat16) / k
-        )
-        b[:, group : 2 * group] = -torch.inf
-        b[:, 2 * group] = torch.inf
-        b[:, 3 * group] = torch.nan
-
-        def epilogue_fn(acc):
-            logits = acc.float()
-            return logits, logits.view(m, -1, group).logsumexp(-1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected, expected_stats = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected, equal_nan=True)
-        torch.testing.assert_close(
-            stats,
-            expected_stats,
-            atol=2e-3,
-            rtol=2e-3,
-            equal_nan=True,
-        )
-        self.assertAssociativeReduceCode(code, group)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_associative_logsumexp_supports_swap_ab(self):
-        m, n, k, group = 512, 256, 64, 128
-
-        def epilogue_fn(acc):
-            grouped = acc.float().view(m, -1, group)
-            return acc.relu(), grouped.logsumexp(-1)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={
-                    "backend": "QUACK",
-                    "config": {"swap_ab": True},
-                },
-            )
-
-        a = self.makeTensor(m, k)
-        b = self.makeTensor(k, n)
-        (actual, stats), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        self.assertLocalReduceAuxMatches(actual, stats, a, b, epilogue_fn)
-        self.assertIn("('swap_ab', True)", code)
-        self.assertAssociativeReduceCode(code, group, fragment_reduced=False)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("group", (16, 32, 64))
-    def test_mm_tuple_aux_physical_mx_scale_preserves_nan(self, group):
-        m, n, k = 16, 128, 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        b[0, 0] = float("nan")
-        (_, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        _, expected_aux = epilogue_fn(a @ b)
-        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
-        self.assertTrue((aux.view(torch.uint8) == 0).any())
-        self.assertTrue((aux.view(torch.uint8) == 255).any())
-        self.assertMxScaleCode(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_aux_scale_via_inline_asm_matches_named_op(self):
-        from torch._higher_order_ops.inline_asm_elementwise import (
-            inline_asm_elementwise,
-        )
-
-        m, n, k, group = 64, 128, 64, 32
-        max_value = 448.0
-
-        def named_epilogue(acc):
-            grouped = acc.float().view(m, -1, group)
-            return acc, mx_e8m0_scale(grouped.abs().amax(-1))
-
-        def asm_epilogue(acc):
-            grouped = acc.float().view(m, -1, group)
-            encoded = inline_asm_elementwise(
-                grouped.abs().amax(-1) / max_value,
-                asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
-                constraints="=h,r",
-                dtype=torch.uint16,
-            )
-            return acc, encoded.to(torch.uint8).float()
-
-        def half_asm_epilogue(acc):
-            encoded = inline_asm_elementwise(
-                acc.to(torch.bfloat16),
-                asm_str="mov.b16 $0, $1;",
-                constraints="=h,h",
-                dtype=torch.uint16,
-            )
-            return acc, encoded.float()
-
-        def compile_epilogue(epilogue_fn):
-            def fn(a, b):
-                return flex_gemm(
-                    torch.mm,
-                    (a, b),
-                    epilogue_fn,
-                    kernel_options={"backend": "QUACK"},
-                )
-
-            return torch.compile(fn, backend="inductor", fullgraph=True)
-
-        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
-        _, named_scale = compile_epilogue(named_epilogue)(a, b)
-        (_, asm_scale), (code,) = run_and_get_code(compile_epilogue(asm_epilogue), a, b)
-
-        self.assertEqual(asm_scale, named_scale.view(torch.uint8).float())
-        self.assertIn("inline_asm_elementwise_intrinsic(", code)
-
-        (_, half_bits), (half_code,) = run_and_get_code(
-            compile_epilogue(half_asm_epilogue), a, b
-        )
-        expected_bits = (a @ b).to(torch.bfloat16).view(torch.uint16).float()
-        self.assertEqual(half_bits, expected_bits)
-        self.assertIn(".to(cutlass.BFloat16)", half_code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_inline_asm_three_outputs(self):
-        m = k = n = 64
-
-        def epilogue_fn(acc):
-            first, second, third = inline_asm_elementwise(
-                acc.float(),
-                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
-                constraints="=f,=f,=f,f",
-                dtype=(torch.float32, torch.float32, torch.float32),
-            )
-            return first + second + third
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        expected_input = (a @ b).float()
-        self.assertEqual(actual, expected_input * 3 + expected_input.square())
-        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_inline_asm_pack2_broadcasts_and_repeats_scalar(self):
-        from torch._higher_order_ops.inline_asm_elementwise import (
-            inline_asm_elementwise,
-        )
-
-        m = k = n = 64
-
-        def fn(a, b, row, col, scalar):
-            def epilogue_fn(acc):
-                return inline_asm_elementwise(
-                    row,
-                    col,
-                    scalar,
-                    acc.float(),
-                    asm_str=(
-                        "add.f32 $0, $2, $4; add.f32 $0, $0, $6; "
-                        "add.f32 $0, $0, $8; add.f32 $1, $3, $5; "
-                        "add.f32 $1, $1, $7; add.f32 $1, $1, $9;"
-                    ),
-                    constraints="=f,=f,f,f,f,f,f,f,f,f",
-                    dtype=torch.float32,
-                    pack=2,
-                )
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        row = torch.randn(1, n, device="cuda", dtype=torch.float32)
-        col = torch.randn(m, 1, device="cuda", dtype=torch.float32)
-        scalar = torch.randn(1, 1, device="cuda", dtype=torch.float32)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True),
-            a,
-            b,
-            row,
-            col,
-            scalar,
-        )
-
-        torch.testing.assert_close(actual, row + col + scalar)
-        FileCheck().check("pack=2").run(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        ((torch.float16, "Float16"), (torch.bfloat16, "BFloat16")),
-        name_fn=lambda case: str(case[0]).removeprefix("torch."),
-    )
-    def test_mm_inline_asm_pack2_restores_16bit_inputs(self, case):
-        from torch._higher_order_ops.inline_asm_elementwise import (
-            inline_asm_elementwise,
-        )
-
-        dtype, cute_type = case
-        m = k = n = 64
-
-        def fn(a, b, row):
-            def epilogue_fn(acc):
-                scalar = torch.full((), 0.5, device="cuda", dtype=dtype)
-                return inline_asm_elementwise(
-                    row,
-                    scalar,
-                    acc.float(),
-                    asm_str="mov.b16 $0, $2; mov.b16 $1, $3;",
-                    constraints="=h,=h,h,h,h,h,f,f",
-                    dtype=dtype,
-                    pack=2,
-                )
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        row = torch.randn(1, n, device="cuda", dtype=dtype)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row
-        )
-
-        self.assertEqual(actual, row.expand(m, n))
-        FileCheck().check(f".to(cutlass.{cute_type})").check("pack=2").run(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        (
-            ("nonpositive_pack", 0, "=f,f", "requires pack >= 1"),
-            ("output_count", 2, "=f,f,f", "requires 2 output constraints"),
-            ("input_count", 2, "=f,=f,f", "requires 2 input constraints"),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_mm_inline_asm_rejects_invalid_pack_contract(self, case):
-        from torch._higher_order_ops.inline_asm_elementwise import (
-            inline_asm_elementwise,
-        )
-
-        _, pack, constraints, error = case
-
-        def fn(a, b):
-            def epilogue_fn(acc):
-                return inline_asm_elementwise(
-                    acc.float(),
-                    asm_str="mov.f32 $0, $1;",
-                    constraints=constraints,
-                    dtype=torch.float32,
-                    pack=pack,
-                )
-
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex((ValueError, InductorError), error):
-            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_physical_mx_scale_zero_preserves_min_value(self):
-        m, n, k, group = 16, 128, 16, 64
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc, mx_e8m0_scale(x.abs().amax(-1)).float() * 2
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        (_, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        _, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(aux, expected_aux, rtol=0, atol=0)
-        self.assertEqual(aux, torch.full_like(aux, 2.0**-126))
-        self.assertMxScaleCode(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_physical_nvfp4_scale_rounds_before_pointwise(self):
-        m, n, k, group = 16, 128, 64, 64
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc, nvfp4_e4m3_scale(x.abs().amax(-1)).float() * 2
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (_, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        _, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(aux, expected_aux, rtol=0, atol=0)
-        self.assertNvfp4ScaleCode(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_tensorSSA_supports_mx_scale_max_value_saturation(self):
-        m, n, k, group = 64, 128, 64, 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(
-                x.abs().amax(-1), max_value=2.0**-122, rounding="floor"
-            )
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        expected, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
-        self.assertTrue((aux.view(torch.uint8) == 255).all())
-        self.assertMxScaleCode(code, "floor")
-        self.assertNotIn("fragment_reduced=True", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_nvfp4_fragment_scale_feeds_main_with_e4m3_rounding(self):
-        m = n = 64
-        group = 16
-
-        def epilogue_fn(acc):
-            x = (acc.float() + 7.0).view(m, -1, group)
-            scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
-            return (x * scale.float().reciprocal()).view(m, n)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(m, 64, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(64, n, device="cuda", dtype=torch.bfloat16)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        torch.testing.assert_close(actual, epilogue_fn(a @ b))
-        self.assertNvfp4ScaleCode(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("rounding", ("floor", "rceil"))
-    def test_mm_fragment_group_mx_quant_preserves_nan(self, rounding):
-        m = n = k = 32
-        group = 32
-
-        def epilogue_fn(acc):
-            x = (acc.float() + float("nan")).view(m, -1, group)
-            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True), rounding=rounding)
-            quantized = (x * scale.float().reciprocal()).view(m, n)
-            return (
-                quantized.clamp(-448.0, 448.0).to(torch.float8_e4m3fn),
-                scale.squeeze(-1),
-            )
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        quantized, scale = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
-        self.assertTrue(torch.isnan(quantized.float()).all())
-        self.assertTrue((scale.view(torch.uint8) == 255).all())
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_fragment_group_mx_quant_feed_uses_tensorSSA(self):
-        m, n, k, group = 64, 128, 64, 32
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-            return (
-                (x * scale.float().reciprocal()).view(m, n).to(torch.float8_e4m3fn),
-                scale.squeeze(-1),
-            )
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        x = (a @ b).float().view(m, -1, group)
-        expected_aux = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-        expected = (
-            (x * expected_aux.float().reciprocal()).view(m, n).to(torch.float8_e4m3fn)
-        )
-        torch.testing.assert_close(actual.float(), expected.float())
-        self.assertEqual(
-            aux.view(torch.uint8), expected_aux.squeeze(-1).view(torch.uint8)
-        )
-        self.assertMxScaleCode(code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_local_m_reduce_feed_main_supports_mx_scale(self):
-        m, n, k, group = 128, 64, 64, 32
-
-        def epilogue_fn(acc):
-            x = acc.float().view(-1, group, n)
-            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
-            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
-
-        def high_precision_fn(acc):
-            x = acc.view(-1, group, n)
-            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
-            return (x * scale.reciprocal()).view(m, n)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
-        self.assertMatchesLowPrecisionEager(
-            actual,
-            epilogue_fn(a @ b),
-            high_precision_fn(a.double() @ b.double()),
-            k,
-        )
-        self.assertMxScaleCode(code)
-        self.assertIn("feeds_main=True", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipUnless(
-        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10,
-        "packed NVFP4 main outputs are currently validated only on SM100",
-    )
-    def test_mm_nvfp4_pack_matches_reference(self):
-        from torch._higher_order_ops.flex_gemm import nvfp4_pack
-
-        m, n, k = 128, 128, 64
-        boundaries = torch.tensor(
-            [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0],
-            device="cuda",
-            dtype=torch.bfloat16,
-        )
-        lower = torch.nextafter(boundaries, torch.full_like(boundaries, float("-inf")))
-        upper = torch.nextafter(boundaries, torch.full_like(boundaries, float("inf")))
-        values = torch.cat(
-            (
-                -upper,
-                -boundaries,
-                -lower,
-                torch.tensor(
-                    [float("-inf"), -0.0, 0.0, float("inf")],
-                    device="cuda",
-                    dtype=torch.bfloat16,
-                ),
-                lower,
-                boundaries,
-                upper,
-            )
-        ).repeat(4)[:n]
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        a[:, 0] = 1
-        b[0] = values
-
-        def epilogue_fn(acc):
-            return nvfp4_pack(acc.float().view(m, -1, 2))
-
-        def fn(lhs, rhs):
-            return flex_gemm(
-                torch.mm,
-                (lhs, rhs),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-        self.assertEqual(actual, epilogue_fn(a @ b))
-        self.assertIn("cvt.rn.satfinite.e2m1x2.f32", code)
-        self.assertIn("FlexGemmOutputContraction(group=2", code)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_epilogue_alpha_clamp_compiled_matches_reference(self):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
@@ -4244,48 +3000,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double()),
             a.shape[1],
         )
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("case", ("clamp", "clamp_min", "clamp_max"))
-    def test_mm_epilogue_clamp_preserves_nan(self, case):
-        m = n = k = 16
-
-        def epilogue_fn(acc):
-            x = acc.float() + float("nan")
-            match case:
-                case "clamp":
-                    return x.clamp(-1.0, 1.0)
-                case "clamp_min":
-                    return x.clamp_min(-1.0)
-                case "clamp_max":
-                    return x.clamp_max(1.0)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        self.assertTrue(torch.isnan(actual).all())
-        check = FileCheck()
-        match case:
-            case "clamp":
-                check = check.check("cutlass.max").check("cutlass.min")
-            case "clamp_min":
-                check = check.check("cutlass.max")
-            case "clamp_max":
-                check = check.check("cutlass.min")
-        check.check_not("operator.ne").run(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -5135,6 +3849,269 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("chunked", (False, True))
+    def test_mm_output_contraction_dynamic_m(self, chunked):
+        group, n, k = 2, 256, 64
+
+        def epilogue_fn(acc):
+            if chunked:
+                lhs, rhs = acc.chunk(group, dim=-1)
+                return lhs - rhs
+            grouped = acc.view(acc.shape[0], acc.shape[1] // group, group)
+            return grouped.select(-1, 0) - grouped.select(-1, 1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        b = (
+            torch.randn(n, k, device="cuda", dtype=torch.bfloat16).t()
+            if chunked
+            else torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        )
+        for index, m in enumerate((128, 192)):
+            a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+            if index == 0:
+                torch._dynamo.mark_dynamic(a, 0)
+            actual = compiled(a, b)
+            self.assertMatchesLowPrecisionEager(
+                actual,
+                epilogue_fn(a @ b),
+                epilogue_fn(a.double() @ b.double()),
+                k,
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_dynamic_n(self):
+        m = k = 64
+
+        def epilogue_fn(acc):
+            lanes = acc.view(m, -1, 2)
+            return lanes[..., 0] - lanes[..., 1]
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for index, output_n in enumerate((64, 68, 80)):
+            b = torch.randn(k, 2 * output_n, device="cuda", dtype=torch.float16)
+            if index == 0:
+                torch._dynamo.mark_dynamic(b, 1)
+            actual = compiled(a, b)
+            torch.testing.assert_close(actual, fn(a, b), atol=0.2, rtol=0.05)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("split_size", (64, 128))
+    def test_mm_output_contraction_specializes_split_size(self, split_size):
+        torch._dynamo.reset()
+        m = k = 64
+
+        def epilogue_fn(acc):
+            lanes = acc.float().split(split_size, dim=-1)
+            return (lanes[0] - lanes[1]).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+        b = torch.randn(2 * split_size, k, device="cuda", dtype=torch.float16).t()
+        torch._dynamo.mark_static(b, 1)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        torch.testing.assert_close(actual, epilogue_fn(a @ b), atol=0.2, rtol=0.05)
+        FileCheck().check("FlexGemmOutputContraction(group=2").check(
+            "chunked=True"
+        ).check_not("extern_kernels.mm").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_rejects_unsupported_composition(self):
+        m = k = n = 64
+        a = torch.randn(m, k, device="cuda", dtype=torch.float16)
+
+        def group_eight(a, b):
+            def epilogue(acc):
+                lanes = acc.view(m, n, 8)
+                return sum(lanes[..., index] for index in range(8))
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        b = torch.randn(k, 8 * n, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(Exception, "group 2 or 4"):
+            torch.compile(group_eight, backend="inductor", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
+        def captured(a, b, scale):
+            def epilogue(acc):
+                lanes = acc.view(m, n, 2)
+                return (lanes[..., 0] - lanes[..., 1]) * scale
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.float16)
+        scale = torch.randn(1, 1, device="cuda", dtype=torch.float16)
+        with self.assertRaisesRegex(Exception, "do not yet support captured tensors"):
+            torch.compile(captured, backend="inductor", fullgraph=True)(a, b, scale)
+
+        torch._dynamo.reset()
+
+        def auxiliary(a, b):
+            def epilogue(acc):
+                lanes = acc.view(m, n, 2)
+                return lanes[..., 0] - lanes[..., 1], acc
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(Exception, "do not yet compose"):
+            torch.compile(auxiliary, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_chunked_view(self):
+        m, n, k = 128, 128, 64
+
+        def epilogue_fn(acc):
+            grouped = acc.view(m, 2, n)
+            return grouped.select(1, 0) + grouped.select(1, 1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2 * n, k, device="cuda", dtype=torch.bfloat16).t()
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            k,
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("indices", ((0, 1), (1, 0), (-1, -2)))
+    def test_mm_output_contraction_specializes_select_indices(self, indices):
+        m, n, k = 128, 128, 64
+        first, second = indices
+
+        def epilogue_fn(acc):
+            grouped = acc.view(m, n, 2)
+            return grouped.select(-1, first) - grouped.select(-1, second)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, 2 * n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            epilogue_fn(a.double() @ b.double()),
+            k,
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_chunked_output_contraction_rejects_grouped_reduction(self):
+        m, n, k, group = 128, 128, 64, 16
+
+        def epilogue_fn(acc):
+            lanes = acc.chunk(2, dim=-1)
+            main = lanes[0] + lanes[1]
+            aux = acc.float().view(m, -1, group).sum(-1)
+            return main, aux
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2 * n, k, device="cuda", dtype=torch.bfloat16).t()
+        with self.assertRaisesRegex(
+            Exception, "chunked grouped main outputs do not compose"
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_chunked_output_contraction_rejects_contiguous_b(self):
+        def epilogue_fn(acc):
+            lhs, rhs = acc.chunk(2, dim=-1)
+            return lhs + rhs
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(Exception, "column-major B storage"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize(
         "case",
         (
@@ -5695,6 +4672,855 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("rounding", ("floor", "rceil"))
+    def test_mm_tuple_aux_mx_scale_rounding(self, rounding):
+        m, n, k, group = 128, 128, 16, 16
+        maxima = torch.tensor(
+            [0.0, 1.0, 448.0, 500.0, 512.0, 1024.0, 2.0**-120, 2.0**120],
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        a[:, 0] = 1
+        b[0] = maxima.repeat_interleave(group)
+
+        def epilogue_fn(acc):
+            grouped = acc.float().abs().view(m, n // group, group)
+            return acc, mx_e8m0_scale(grouped.amax(-1), rounding=rounding)
+
+        def fn(lhs, rhs):
+            return flex_gemm(
+                torch.mm,
+                (lhs, rhs),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        (actual, scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected, expected_scale = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
+        self.assertMxScaleCode(code, rounding)
+        self.assertIn("FlexGemmRuntimeLocalReducePlan", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("max_value", (4.0, 6.0))
+    def test_mm_tuple_aux_nvfp4_scale_rounding(self, max_value):
+        m, n, k, group = 128, 128, 16, 16
+        maxima = torch.tensor(
+            [0.0, 0.09375, 1.0, 4.0, 6.0, 7.0, 448.0, 2688.0],
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        a[:, 0] = 1
+        b[0] = maxima.repeat_interleave(group)
+
+        def epilogue_fn(acc):
+            grouped = acc.float().abs().view(m, n // group, group)
+            return acc, nvfp4_e4m3_scale(grouped.amax(-1), max_value=max_value)
+
+        def fn(lhs, rhs):
+            return flex_gemm(
+                torch.mm,
+                (lhs, rhs),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        (actual, scale), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected, expected_scale = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(scale.view(torch.uint8), expected_scale.view(torch.uint8))
+        self.assertNvfp4ScaleCode(code, max_value)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_prepare_softmax_online_local_reduce(self):
+        from torch._inductor import inductor_prims
+
+        m = n = k = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            maximum, _ = inductor_prims.prepare_softmax_online(grouped, -1)
+            return acc.relu(), maximum.squeeze(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        (actual, maximum), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected, expected_maximum = epilogue_fn(a @ b)
+
+        torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
+        torch.testing.assert_close(maximum, expected_maximum, rtol=0.02, atol=0.2)
+        FileCheck().check("combine='max'").check_not(
+            "_local_reduce_combine(lhs, rhs)"
+        ).check_not("reduce_planes=").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (64, 128, 192, 256))
+    def test_mm_associative_logsumexp_groups(self, group):
+        m, k, n = 65, 64, 4 * group
+        kernel_options = {"backend": "QUACK"}
+        if group == 192:
+            kernel_options["config"] = {"tile_n": 192}
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            return acc.relu(), grouped.logsumexp(-1) * 0.5 + 1.0
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options=kernel_options,
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        high_precision = a.double() @ b.double()
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b)[0],
+            high_precision.relu(),
+            k,
+        )
+        torch.testing.assert_close(
+            stats,
+            (high_precision.view(m, -1, group).logsumexp(-1) * 0.5 + 1.0).float(),
+            atol=2e-3,
+            rtol=2e-3,
+        )
+        self.assertAssociativeReduceCode(code, group)
+        FileCheck().check(
+            "cute.where(operator.eq(lhs[0], maximum), one, cute.math.exp2((lhs[0] - maximum) * "
+        ).check("_local_reduce_finalize(state):").check("cute.math.log(state[1])").run(
+            code
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_logsumexp_dynamic_m(self):
+        k, n, group = 64, 512, 128
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(acc.shape[0], -1, group)
+            return acc.relu(), grouped.logsumexp(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        b = self.makeTensor(k, n)
+        for index, m in enumerate((65, 129)):
+            a = self.makeTensor(m, k)
+            if index == 0:
+                torch._dynamo.mark_dynamic(a, 0)
+            actual, stats = compiled(a, b)
+            high_precision = a.double() @ b.double()
+            self.assertMatchesLowPrecisionEager(
+                actual,
+                epilogue_fn(a @ b)[0],
+                high_precision.relu(),
+                k,
+            )
+            torch.testing.assert_close(
+                stats,
+                high_precision.view(m, -1, group).logsumexp(-1).float(),
+                atol=2e-3,
+                rtol=2e-3,
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("axis", (0, 1))
+    def test_mm_associative_logsumexp_dynamic_grouped_dimension(self, axis):
+        k, group = 64, 64
+
+        def epilogue_fn(acc):
+            if axis == 1:
+                grouped = acc.float().view(acc.shape[0], -1, group)
+                return acc.relu(), grouped.logsumexp(-1)
+            grouped = acc.float().view(-1, group, acc.shape[1])
+            return acc.relu(), grouped.logsumexp(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        if axis == 1:
+            a = self.makeTensor(65, k)
+            initial_b = self.makeTensor(k, 128)
+            torch._dynamo.mark_dynamic(initial_b, 1)
+            inputs = ((a, initial_b), (a, self.makeTensor(k, 192)))
+        else:
+            initial_a = self.makeTensor(128, k)
+            torch._dynamo.mark_dynamic(initial_a, 0)
+            b = self.makeTensor(k, 128)
+            inputs = ((initial_a, b), (self.makeTensor(192, k), b))
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for a, b in inputs:
+            actual, stats = compiled(a, b)
+            high_precision = a.double() @ b.double()
+            self.assertMatchesLowPrecisionEager(
+                actual,
+                epilogue_fn(a @ b)[0],
+                high_precision.relu(),
+                k,
+            )
+            expected_stats = (
+                high_precision.view(high_precision.shape[0], -1, group).logsumexp(-1)
+                if axis == 1
+                else high_precision.view(-1, group, high_precision.shape[1]).logsumexp(
+                    1
+                )
+            )
+            torch.testing.assert_close(
+                stats,
+                expected_stats.float(),
+                atol=2e-3,
+                rtol=2e-3,
+            )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_state_composes_projections(self):
+        from torch._inductor import inductor_prims
+
+        m, k, n, group = 65, 64, 512, 128
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            maximum, total = inductor_prims.prepare_softmax_online(grouped, -1)
+            stats = maximum.squeeze(-1) * 0.25 + total.squeeze(-1) * 0.75
+            return acc.relu(), stats
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        high_precision = a.double() @ b.double()
+        grouped = high_precision.view(m, -1, group)
+        maximum = grouped.amax(-1)
+        total = (grouped - maximum.unsqueeze(-1)).exp().sum(-1)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b)[0],
+            high_precision.relu(),
+            k,
+        )
+        torch.testing.assert_close(
+            stats,
+            (maximum * 0.25 + total * 0.75).float(),
+            atol=2e-3,
+            rtol=2e-3,
+        )
+        self.assertIn("state[0]", code)
+        self.assertIn("state[1]", code)
+        self.assertAssociativeReduceCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_state_reuses_scalar_projection(self):
+        m, k, n, group = 65, 64, 512, 128
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            stats = grouped.logsumexp(-1) + grouped.amax(-1)
+            return acc > 0, stats
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        high_precision = a.double() @ b.double()
+        grouped = high_precision.view(m, -1, group)
+        self.assertEqual(actual, epilogue_fn(a @ b)[0])
+        self.assertEqual(
+            stats,
+            (grouped.logsumexp(-1) + grouped.amax(-1)).float(),
+            atol=2e-3,
+            rtol=2e-3,
+        )
+        self.assertAssociativeReduceCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_logsumexp_axis_m(self):
+        m, n, k, group = 256, 128, 64, 64
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(-1, group, n)
+            return acc.relu(), grouped.logsumexp(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        high_precision = a.double() @ b.double()
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b)[0],
+            high_precision.relu(),
+            k,
+        )
+        torch.testing.assert_close(
+            stats,
+            high_precision.view(-1, group, n).logsumexp(1).float(),
+            atol=2e-3,
+            rtol=2e-3,
+        )
+        self.assertAssociativeReduceCode(code, group, axis=0, fragment_reduced=False)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_logsumexp_special_values(self):
+        m, k, n, group = 4, 16, 512, 128
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[:, :group] = (
+            torch.linspace(-80, 80, group, device="cuda", dtype=torch.bfloat16) / k
+        )
+        b[:, group : 2 * group] = -torch.inf
+        b[:, 2 * group] = torch.inf
+        b[:, 3 * group] = torch.nan
+
+        def epilogue_fn(acc):
+            logits = acc.float()
+            return logits, logits.view(m, -1, group).logsumexp(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected, expected_stats = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+        torch.testing.assert_close(
+            stats,
+            expected_stats,
+            atol=2e-3,
+            rtol=2e-3,
+            equal_nan=True,
+        )
+        self.assertAssociativeReduceCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_associative_logsumexp_supports_swap_ab(self):
+        m, n, k, group = 512, 256, 64, 128
+
+        def epilogue_fn(acc):
+            grouped = acc.float().view(m, -1, group)
+            return acc.relu(), grouped.logsumexp(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={
+                    "backend": "QUACK",
+                    "config": {"swap_ab": True},
+                },
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        (actual, stats), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        self.assertLocalReduceAuxMatches(actual, stats, a, b, epilogue_fn)
+        self.assertIn("('swap_ab', True)", code)
+        self.assertAssociativeReduceCode(code, group, fragment_reduced=False)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_three_outputs(self):
+        m = k = n = 64
+
+        def epilogue_fn(acc):
+            first, second, third = inline_asm_elementwise(
+                acc.float(),
+                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                constraints="=f,=f,=f,f",
+                dtype=(torch.float32, torch.float32, torch.float32),
+            )
+            return first + second + third
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected_input = (a @ b).float()
+        self.assertEqual(actual, expected_input * 3 + expected_input.square())
+        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_pack2_broadcasts_and_repeats_scalar(self):
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+
+        m = k = n = 64
+
+        def fn(a, b, row, col, scalar):
+            def epilogue_fn(acc):
+                return inline_asm_elementwise(
+                    row,
+                    col,
+                    scalar,
+                    acc.float(),
+                    asm_str=(
+                        "add.f32 $0, $2, $4; add.f32 $0, $0, $6; "
+                        "add.f32 $0, $0, $8; add.f32 $1, $3, $5; "
+                        "add.f32 $1, $1, $7; add.f32 $1, $1, $9;"
+                    ),
+                    constraints="=f,=f,f,f,f,f,f,f,f,f",
+                    dtype=torch.float32,
+                    pack=2,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        row = torch.randn(1, n, device="cuda", dtype=torch.float32)
+        col = torch.randn(m, 1, device="cuda", dtype=torch.float32)
+        scalar = torch.randn(1, 1, device="cuda", dtype=torch.float32)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            row,
+            col,
+            scalar,
+        )
+
+        torch.testing.assert_close(actual, row + col + scalar)
+        FileCheck().check("pack=2").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        ((torch.float16, "Float16"), (torch.bfloat16, "BFloat16")),
+        name_fn=lambda case: str(case[0]).removeprefix("torch."),
+    )
+    def test_mm_inline_asm_pack2_restores_16bit_inputs(self, case):
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+
+        dtype, cute_type = case
+        m = k = n = 64
+
+        def fn(a, b, row):
+            def epilogue_fn(acc):
+                scalar = torch.full((), 0.5, device="cuda", dtype=dtype)
+                return inline_asm_elementwise(
+                    row,
+                    scalar,
+                    acc.float(),
+                    asm_str="mov.b16 $0, $2; mov.b16 $1, $3;",
+                    constraints="=h,=h,h,h,h,h,f,f",
+                    dtype=dtype,
+                    pack=2,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        row = torch.randn(1, n, device="cuda", dtype=dtype)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row
+        )
+
+        self.assertEqual(actual, row.expand(m, n))
+        FileCheck().check(f".to(cutlass.{cute_type})").check("pack=2").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "case",
+        (
+            ("nonpositive_pack", 0, "=f,f", "requires pack >= 1"),
+            ("output_count", 2, "=f,f,f", "requires 2 output constraints"),
+            ("input_count", 2, "=f,=f,f", "requires 2 input constraints"),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_mm_inline_asm_rejects_invalid_pack_contract(self, case):
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+
+        _, pack, constraints, error = case
+
+        def fn(a, b):
+            def epilogue_fn(acc):
+                return inline_asm_elementwise(
+                    acc.float(),
+                    asm_str="mov.f32 $0, $1;",
+                    constraints=constraints,
+                    dtype=torch.float32,
+                    pack=pack,
+                )
+
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(64, 64, device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex((ValueError, InductorError), error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("group", (16, 32, 64))
+    def test_mm_tuple_aux_physical_mx_scale_preserves_nan(self, group):
+        m, n, k = 16, 128, 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[0, 0] = float("nan")
+        (_, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        _, expected_aux = epilogue_fn(a @ b)
+        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
+        self.assertTrue((aux.view(torch.uint8) == 0).any())
+        self.assertTrue((aux.view(torch.uint8) == 255).any())
+        self.assertMxScaleCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_aux_scale_via_inline_asm_matches_named_op(self):
+        from torch._higher_order_ops.inline_asm_elementwise import (
+            inline_asm_elementwise,
+        )
+
+        m, n, k, group = 64, 128, 64, 32
+        max_value = 448.0
+
+        def named_epilogue(acc):
+            grouped = acc.float().view(m, -1, group)
+            return acc, mx_e8m0_scale(grouped.abs().amax(-1))
+
+        def asm_epilogue(acc):
+            grouped = acc.float().view(m, -1, group)
+            encoded = inline_asm_elementwise(
+                grouped.abs().amax(-1) / max_value,
+                asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+                constraints="=h,r",
+                dtype=torch.uint16,
+            )
+            return acc, encoded.to(torch.uint8).float()
+
+        def half_asm_epilogue(acc):
+            encoded = inline_asm_elementwise(
+                acc.to(torch.bfloat16),
+                asm_str="mov.b16 $0, $1;",
+                constraints="=h,h",
+                dtype=torch.uint16,
+            )
+            return acc, encoded.float()
+
+        def compile_epilogue(epilogue_fn):
+            def fn(a, b):
+                return flex_gemm(
+                    torch.mm,
+                    (a, b),
+                    epilogue_fn,
+                    kernel_options={"backend": "QUACK"},
+                )
+
+            return torch.compile(fn, backend="inductor", fullgraph=True)
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        _, named_scale = compile_epilogue(named_epilogue)(a, b)
+        (_, asm_scale), (code,) = run_and_get_code(compile_epilogue(asm_epilogue), a, b)
+
+        self.assertEqual(asm_scale, named_scale.view(torch.uint8).float())
+        self.assertIn("inline_asm_elementwise_intrinsic(", code)
+
+        (_, half_bits), (half_code,) = run_and_get_code(
+            compile_epilogue(half_asm_epilogue), a, b
+        )
+        expected_bits = (a @ b).to(torch.bfloat16).view(torch.uint16).float()
+        self.assertEqual(half_bits, expected_bits)
+        self.assertIn(".to(cutlass.BFloat16)", half_code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_physical_mx_scale_zero_preserves_min_value(self):
+        m, n, k, group = 16, 128, 16, 64
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc, mx_e8m0_scale(x.abs().amax(-1)).float() * 2
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        (_, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        _, expected_aux = epilogue_fn(a @ b)
+        torch.testing.assert_close(aux, expected_aux, rtol=0, atol=0)
+        self.assertEqual(aux, torch.full_like(aux, 2.0**-126))
+        self.assertMxScaleCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_physical_nvfp4_scale_rounds_before_pointwise(self):
+        m, n, k, group = 16, 128, 64, 64
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc, nvfp4_e4m3_scale(x.abs().amax(-1)).float() * 2
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        (_, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        _, expected_aux = epilogue_fn(a @ b)
+        torch.testing.assert_close(aux, expected_aux, rtol=0, atol=0)
+        self.assertNvfp4ScaleCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_tensorSSA_supports_mx_scale_max_value_saturation(self):
+        m, n, k, group = 64, 128, 64, 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc.relu(), mx_e8m0_scale(
+                x.abs().amax(-1), max_value=2.0**-122, rounding="floor"
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        expected, expected_aux = epilogue_fn(a @ b)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
+        self.assertTrue((aux.view(torch.uint8) == 255).all())
+        self.assertMxScaleCode(code, "floor")
+        self.assertNotIn("fragment_reduced=True", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_nvfp4_fragment_scale_feeds_main_with_e4m3_rounding(self):
+        m = n = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            x = (acc.float() + 7.0).view(m, -1, group)
+            scale = nvfp4_e4m3_scale(x.abs().amax(-1, keepdim=True))
+            return (x * scale.float().reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(64, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        torch.testing.assert_close(actual, epilogue_fn(a @ b))
+        self.assertNvfp4ScaleCode(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("rounding", ("floor", "rceil"))
+    def test_mm_fragment_group_mx_quant_preserves_nan(self, rounding):
+        m = n = k = 32
+        group = 32
+
+        def epilogue_fn(acc):
+            x = (acc.float() + float("nan")).view(m, -1, group)
+            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True), rounding=rounding)
+            quantized = (x * scale.float().reciprocal()).view(m, n)
+            return (
+                quantized.clamp(-448.0, 448.0).to(torch.float8_e4m3fn),
+                scale.squeeze(-1),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        quantized, scale = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+        self.assertTrue(torch.isnan(quantized.float()).all())
+        self.assertTrue((scale.view(torch.uint8) == 255).all())
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("reduction", ("amax", "amin"))
     def test_mm_tuple_aux_physical_extrema_preserve_nan(self, reduction):
         m = 16
@@ -5727,6 +5553,86 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux[:, 1], torch.zeros_like(aux[:, 1]))
         FileCheck().check(f"combine='{reduction[1:]}'").run(code)
         self.assertLocalReduceAuxCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("case", ("clamp", "clamp_min", "clamp_max"))
+    def test_mm_epilogue_clamp_preserves_nan(self, case):
+        m = n = k = 16
+
+        def epilogue_fn(acc):
+            x = acc.float() + float("nan")
+            match case:
+                case "clamp":
+                    return x.clamp(-1.0, 1.0)
+                case "clamp_min":
+                    return x.clamp_min(-1.0)
+                case "clamp_max":
+                    return x.clamp_max(1.0)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertTrue(torch.isnan(actual).all())
+        check = FileCheck()
+        match case:
+            case "clamp":
+                check = check.check("cutlass.max").check("cutlass.min")
+            case "clamp_min":
+                check = check.check("cutlass.max")
+            case "clamp_max":
+                check = check.check("cutlass.min")
+        check.check_not("operator.ne").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_fragment_group_mx_quant_feed_uses_tensorSSA(self):
+        m, n, k, group = 64, 128, 64, 32
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
+            return (
+                (x * scale.float().reciprocal()).view(m, n).to(torch.float8_e4m3fn),
+                scale.squeeze(-1),
+            )
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        x = (a @ b).float().view(m, -1, group)
+        expected_aux = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
+        expected = (
+            (x * expected_aux.float().reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+        )
+        torch.testing.assert_close(actual.float(), expected.float())
+        self.assertEqual(
+            aux.view(torch.uint8), expected_aux.squeeze(-1).view(torch.uint8)
+        )
+        self.assertMxScaleCode(code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -7048,6 +6954,100 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
         self.assertPhysicalFeedMainCode(code, group)
         FileCheck().check("torch.float8_e4m3fn").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_local_m_reduce_feed_main_supports_mx_scale(self):
+        m, n, k, group = 128, 64, 64, 32
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
+            return (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn)
+
+        def high_precision_fn(acc):
+            x = acc.view(-1, group, n)
+            scale = mx_e8m0_scale(x.amax(1, keepdim=True)).float()
+            return (x * scale.reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b),
+            high_precision_fn(a.double() @ b.double()),
+            k,
+        )
+        self.assertMxScaleCode(code)
+        self.assertIn("feeds_main=True", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10,
+        "packed NVFP4 main outputs are currently validated only on SM100",
+    )
+    def test_mm_nvfp4_pack_matches_reference(self):
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack
+
+        m, n, k = 128, 128, 64
+        boundaries = torch.tensor(
+            [0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0],
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        lower = torch.nextafter(boundaries, torch.full_like(boundaries, float("-inf")))
+        upper = torch.nextafter(boundaries, torch.full_like(boundaries, float("inf")))
+        values = torch.cat(
+            (
+                -upper,
+                -boundaries,
+                -lower,
+                torch.tensor(
+                    [float("-inf"), -0.0, 0.0, float("inf")],
+                    device="cuda",
+                    dtype=torch.bfloat16,
+                ),
+                lower,
+                boundaries,
+                upper,
+            )
+        ).repeat(4)[:n]
+        a = torch.zeros(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        a[:, 0] = 1
+        b[0] = values
+
+        def epilogue_fn(acc):
+            return nvfp4_pack(acc.float().view(m, -1, 2))
+
+        def fn(lhs, rhs):
+            return flex_gemm(
+                torch.mm,
+                (lhs, rhs),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+        self.assertEqual(actual, epilogue_fn(a @ b))
+        self.assertIn("cvt.rn.satfinite.e2m1x2.f32", code)
+        self.assertIn("FlexGemmOutputContraction(group=2", code)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
