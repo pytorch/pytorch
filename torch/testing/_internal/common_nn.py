@@ -3379,6 +3379,13 @@ class TestBase:
                 else:
                     raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
+        # Lazily-drawn args (inputs, constructor args, targets). The cache keeps
+        # draws consistent WITHIN one test invocation; it must not leak across
+        # the generated test variants that share this instance, or the RNG
+        # position at module-construction time (and thus the parameter draw)
+        # depends on which sibling test ran first and the in-suite
+        # configuration silently diverges from the standalone repro command.
+        # Every public entry point clears it.
         self._arg_cache = {}
 
     def get_name(self):
@@ -3464,6 +3471,7 @@ class ModuleTest(TestBase):
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3552,6 +3560,7 @@ class ModuleTest(TestBase):
                 test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
 
     def test_cuda(self, test_case):
+        self._arg_cache.clear()
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
 
@@ -3885,6 +3894,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3922,6 +3932,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
                 gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
+        self._arg_cache.clear()
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
