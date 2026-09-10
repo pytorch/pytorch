@@ -1563,7 +1563,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     @staticmethod
-    def _stringify_cpu_triton_call_arg(arg: Any) -> str:
+    def _stringify_cpu_triton_call_arg(arg: object) -> str:
         """Render a Triton kernel call argument as a C++ expression."""
         if isinstance(arg, str):
             return arg

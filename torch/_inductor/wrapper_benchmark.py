@@ -112,9 +112,9 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Any | None,
-            n_spills: Any | None,
-            shared: Any | None,
+            n_regs: int | None,
+            n_spills: int | None,
+            shared: int | None,
             prefix: str = "",
         ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):
