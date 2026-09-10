@@ -171,7 +171,7 @@ def _launch(op, key, ins, outs):
 def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
     """Return reduced and kept (extent, input-stride) pairs from TensorIterator.
     Zero output stride marks reductions; kept dimensions sort by output stride for
-    fastest-first block decoding. Reduced-dimension order is irrelevant.
+    fastest-first block decoding. Reduced pairs retain TensorIterator order.
     """
     it = reduce_op(out, x)
     in_str = it.element_strides(it.noutputs)  # input operand follows the outputs

@@ -106,9 +106,7 @@ class TileMap:
         return self.vec * itemsize if self.wide_ok else itemsize
 
     def strides(self):
-        """(lane, w, l) column strides -- the ORDER lives here and nowhere else. The two orders read
-        the same elements into the same registers, swapping only the `l` and `w` strides.
-        """
+        """(lane, warp, load) strides; warp_major swaps the warp/load assignment."""
         if self.tpr == 1:
             return (0, 0, self.vec)
         wle = WARP * self.vec  # columns one warp covers in one load
@@ -117,10 +115,7 @@ class TileMap:
         return (self.vec, wle, wle * self.nw)
 
     def col_base(self, lane, w, l: int, warp_stride=None):
-        """Column of element 0 of this thread's load `l`. Returns a PYTHON INT when the offset is
-        entirely compile-time: a static offset lets the compiler prove alignment and emit the wide
-        load, where the same number wrapped in Int32 silently costs 3x.
-        """
+        """First column of load `l`; preserve static ints so the compiler proves alignment."""
         s_lane, s_w, s_l = self.strides()
         if warp_stride is not None:
             # Caller supplies the per-warp stride; 0 means the warp offset is already folded
@@ -823,14 +818,14 @@ class TileReduce:
         it = self.itree
         # fold_groups owns leaf/mask/tree work; this body carries tiles and seeds identity.
         op, ident = leaf_op(trait), identity(trait)
-        Es = const_expr(it.stage_e)  # columns per lane PER TILE
+        Es = const_expr(it.stage_e)  # columns per lane per tile
         vec = const_expr(it.vec)
         span = const_expr(it.batches[0][2] * it.wpr * WARP * it.vec)
         wle = const_expr(WARP * vec)
         tile_cols = const_expr(Es * WARP)
         ntiles = const_expr(span // tile_cols)
         pitch = const_expr(Es + vec)
-        stride = const_expr(pitch * WARP)  # one buffer, one row
+        stride = const_expr(pitch * WARP)  # one row buffer
         depth = const_expr(min(_ITREE_STAGE_DEPTH, ntiles))
         smem = cutlass.utils.SmemAllocator()
         sX = smem.allocate_tensor(
@@ -872,7 +867,7 @@ class TileReduce:
 
         tree: list = []
         for t in cutlass.range_constexpr(ntiles):
-            # Wait only for this tile; later transfers may remain in flight.
+            # Wait for this tile.
             cute.arch.cp_async_wait_group(const_expr(min(depth - 1, ntiles - 1 - t)))
             cute.arch.sync_warp()
 
@@ -1227,8 +1222,8 @@ class TileReduce:
             )
             part_stride = Int32(1)
         else:
-            # COL: (P, C) partials put this chunk's columns in row `by`; (C, P) interleaves
-            # them per column, which a block-per-column stage 2 needs (see kernel_coltile).
+            # COL: (P, C) stores this chunk's columns in row `by`; (C, P) interleaves
+            # partials per column for block-per-column combination.
             part_base = (
                 Int32(by) * (nchunks * const_expr(self.nslots)) + out_base
                 if const_expr(self.pc)
