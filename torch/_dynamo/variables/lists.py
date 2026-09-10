@@ -587,15 +587,13 @@ class BaseListVariable(VariableTracker):
             return None
         check_positional(tx, "pop", len(args), 0, 1)
 
-        # Clinic converts the index (`Py_ssize_t = -1`) before the body, so a
-        # bad index raises ahead of the empty-list check. A symbolic index has
-        # to specialize under a guard; the element removed is structural.
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1049-L1076
+        # Clinic converts the index (`Py_ssize_t = -1`) with _PyNumber_Index then
+        # PyLong_AsSsize_t, before the body, so a bad index raises ahead of the
+        # empty-list check below.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h#L163-L174
         idx = -1
         if args:
-            idx = pynumber_as_ssize_t(
-                tx, args[0], err=OverflowError
-            ).as_python_constant()
+            idx = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
 
         if len(self.items) == 0:
             raise_observed_exception(IndexError, tx, args=["pop from empty list"])
@@ -1451,15 +1449,18 @@ class DequeVariable(BaseListVariable):
     @staticmethod
     def validate_maxlen(
         tx: "InstructionTranslatorBase", maxlen: VariableTracker
-    ) -> None:
-        # deque_init: maxlenobj != Py_None is run through PyLong_AsSsize_t
-        # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1729-L1736
+    ) -> VariableTracker:
+        # deque_init: maxlenobj != Py_None is run through PyLong_AsSsize_t, and
+        # the deque keeps that ssize_t, not the object it was handed.
+        # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1729-L1738
         if isinstance(maxlen, ConstantVariable) and maxlen.value is None:
-            return
-        if pylong_as_ssize_t(tx, maxlen) < 0:
+            return maxlen
+        val = pylong_as_ssize_t(tx, maxlen)
+        if val < 0:
             raise_observed_exception(
                 ValueError, tx, args=["maxlen must be non-negative"]
             )
+        return ConstantVariable.create(val)
 
     def __init__(
         self,
@@ -1887,7 +1888,7 @@ class DequeVariable(BaseListVariable):
         )
         if len(args) > 2 or kwargs:
             raise_args_mismatch(tx, "__init__")
-        self.validate_maxlen(tx, new_maxlen)
+        new_maxlen = self.validate_maxlen(tx, new_maxlen)
         tx.output.side_effects.mutation(self)
         self.state += 1
         self.maxlen = new_maxlen

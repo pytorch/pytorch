@@ -814,6 +814,24 @@ def getindex(
     return i
 
 
+def _ssize_t_value(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
+    """Concrete int behind an int-like tracker, for the C ssize_t conversions.
+
+    A Py_ssize_t cannot hold a symbol, so a backed SymInt has to specialize here,
+    which installs a guard; an unbacked one raises instead of guessing.
+    """
+    from .tensor import SymNodeVariable
+
+    if isinstance(obj, SymNodeVariable):
+        val = obj.evaluate_expr(tx.output)
+    else:
+        val = obj.as_python_constant()
+
+    if not isinstance(val, int):
+        raise AssertionError(f"expected an int-like value, got {type(val).__name__}")
+    return val
+
+
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
@@ -824,7 +842,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
     if not issubclass(obj.python_type(), int):
         raise_type_error(tx, "an integer is required")
-    val = obj.as_python_constant()
+    val = _ssize_t_value(tx, obj)
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -846,19 +864,7 @@ def pynumber_as_ssize_t(
 
     https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/abstract.c#L1469
     """
-    from .tensor import SymNodeVariable
-
-    value = pynumber_index(tx, item)
-
-    # PyLong_AsSsize_t: a symbolic int must be specialized to a concrete
-    # ssize_t (with guard) to be usable as a C index.
-    if isinstance(value, SymNodeVariable):
-        val = value.evaluate_expr(tx.output)
-    else:
-        val = value.as_python_constant()
-
-    if not isinstance(val, int):
-        raise AssertionError("pynumber_index did not return an int-like value")
+    val = _ssize_t_value(tx, pynumber_index(tx, item))
 
     if -sys.maxsize - 1 <= val <= sys.maxsize:
         return ConstantVariable.create(int(val))
