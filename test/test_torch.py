@@ -103,7 +103,6 @@ class TestTorchDeviceType(TestCase):
 
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
-    @onlyCPU
     def test_constants(self, device):
         self.assertIsInstance(torch.e, float)
         self.assertEqual(torch.e, math.e, atol=0, rtol=0)
@@ -452,7 +451,6 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
 
-    @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_storage_meta_ok(self, device, dtype):
@@ -979,7 +977,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(len(w), 1)
 
     # FIXME: move to test_testing
-    @onlyCPU
     def test_warn_always_caught(self, device):
         # Check that we can catch a TORCH_WARN_ONCE warning twice
         # since assertWarnsOnceRegex uses set_warn_always(True) which changes
@@ -2061,7 +2058,6 @@ class TestTorchDeviceType(TestCase):
         self._test_gather_backward_one_dim(device, True)
 
     # FIXME: move to test_scatter_gather_ops
-    @onlyCPU
     def test_gather_backward_one_dim(self, device) -> None:
         self._test_gather_backward_one_dim(device, False)
 
@@ -3331,7 +3327,6 @@ class TestTorchDeviceType(TestCase):
             # not the data
             self.assertEqual(x, y)
 
-    @onlyCPU
     def test_bfloat16_neg_abs(self, device):
         src = torch.randn(256)
         src[0] = torch.nan
