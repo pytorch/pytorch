@@ -21,6 +21,7 @@ from .._cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
+    tile,
 )
 
 
@@ -90,9 +91,9 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # Stage 1 mirrors RowTile.__call__, emitting raw per-field accumulators.
-        # Runtime rolled-loop counts let all N in a vector class share one kernel.
-        s1.kernel(mX, parts, s1_nchunks, s1_nwaves, project_n).launch(
+        # Stage 1 emits raw accumulators. Runtime rolled-loop counts share a kernel
+        # across N; wide sub-rows coalesce directly, so omit TMA and unused axis arguments.
+        s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
@@ -233,7 +234,17 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // tpr)))
 
     def _make_s1():
-        return _rt.RowTile(trait, torch2cute[x.dtype], s, tpr, nt, nouts, False, unroll)
+        return tile.TileReduce(
+            trait,
+            torch2cute[x.dtype],
+            "row",
+            s,
+            tpr=tpr,
+            nt=nt,
+            nouts=nouts,
+            final=False,
+            unroll=unroll,
+        )
 
     def _fake_in():
         # Dynamic 2D row-major descriptor, with inner extent divisible by vector width.
