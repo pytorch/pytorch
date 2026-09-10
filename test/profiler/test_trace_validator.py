@@ -19,7 +19,10 @@ from torch.profiler._trace_validator import (
     _check_stream_wait_corr_id_in_past,
     _check_stream_wait_corr_id_populated,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -57,6 +60,26 @@ def _activity_for_device_type(device_type):
             f"Add it to _DEVICE_TYPE_TO_ACTIVITY."
         )
     return _DEVICE_TYPE_TO_ACTIVITY[device_type]
+
+
+def _backward_seq_events(events):
+    """The events _check_backward_seq_id_uniqueness actually indexes.
+
+    Mirrors that rule's filter exactly, including the way its ``or`` chain still
+    admits a falsy-but-present sequence number; keep the two in sync. A guard
+    built on the event name alone would accept a trace the rule finds nothing to
+    check in.
+    """
+    matched = []
+    for ev in events:
+        name = ev.get("name", "")
+        if ev.get("ph") != "X" or "autograd::engine::evaluate_function:" not in name:
+            continue
+        args = ev.get("args", {})
+        seq = args.get("Sequence number") or args.get("seq_num")
+        if seq is not None:
+            matched.append(ev)
+    return matched
 
 
 def _sync_device(device):
@@ -559,9 +582,6 @@ class TestTraceValidatorRules(TestCase):
 # ---------------------------------------------------------------------------
 
 
-# Re-enable alongside the per-test skips once kineto's CPU/GPU timestamp
-# clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     """E2E tests for validation rules that are not tied to any specific accelerator.
@@ -579,9 +599,7 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skip(
-        "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
-    )
+    @skipCUDAIf(True, "backward sequence ID uniqueness not yet verified on CUDA")
     def test_backward_seq_id_uniqueness(self, device):
         # Kept on failure so CI leaves the trace behind for inspection.
         trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
@@ -590,6 +608,11 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
         events = _profile_training_payload(
             trace_path, dev, _activity_for_device_type(dev.type)
         )
+        # _check_backward_seq_id_uniqueness([]) returns [], so len(v) == 0 cannot tell a
+        # holding rule from a trace it found nothing to check. Guard on the rule's own
+        # predicate: a backward event without a sequence number is never indexed.
+        indexed = _backward_seq_events(events)
+        self.assertTrue(indexed, f"no indexable backward events; kept at {trace_path}")
         v = _check_backward_seq_id_uniqueness(events)
         self.assertEqual(len(v), 0, f"{self._fmt(v)}\ntrace kept at {trace_path}")
         shutil.rmtree(trace_dir, ignore_errors=True)
@@ -608,10 +631,11 @@ instantiate_device_type_tests(
 # ---------------------------------------------------------------------------
 
 
-# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
-# while all E2E tests are disabled. Re-enable alongside the per-test skips once
-# kineto's CPU/GPU timestamp clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
+# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed while
+# this class's tests are disabled. Re-enable alongside the per-test skips once kineto's
+# CPU/GPU timestamp clock-skew issue is fixed. Scope note: the skew is CUDA-side, so it
+# does not hold TestTraceValidatorE2EAgnosticDevice, whose rule reads CPU-side events.
+@unittest.skip("CUDA E2E disabled pending kineto clock-skew fix; see per-test skips")
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
