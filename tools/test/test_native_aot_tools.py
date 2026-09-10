@@ -867,6 +867,89 @@ class TestSidecarIntegrity(unittest.TestCase):
                     tc._sm_number(bad)
 
 
+@contextlib.contextmanager
+def _fake_triton():
+    """Stand in for triton, yielding what export() asked it to compile.
+
+    triton.runtime raises on any access: resolving the active driver builds CudaUtils,
+    which needs a libcuda the GPU-less builders have not got."""
+    seen: dict[str, Any] = {}
+
+    class _Poisoned(types.ModuleType):
+        def __getattr__(self, name):
+            raise AssertionError(f"export must not reach triton.runtime.{name}")
+
+    def fake_compile(src, target=None, options=None):
+        seen["target"] = target
+        seen["options"] = options
+        return types.SimpleNamespace(
+            asm={"cubin": b"\x7fELF-fake"},
+            metadata=types.SimpleNamespace(name="_fake_kernel", shared=256),
+        )
+
+    def fake_ast_source(**kwargs):
+        seen["src"] = kwargs
+        return types.SimpleNamespace(**kwargs)
+
+    fake_compiler = types.ModuleType("triton.compiler")
+    cast(Any, fake_compiler).ASTSource = fake_ast_source
+    fake_backends_compiler = types.ModuleType("triton.backends.compiler")
+    cast(Any, fake_backends_compiler).GPUTarget = lambda backend, arch, warp_size: (
+        backend,
+        arch,
+        warp_size,
+    )
+    fake_triton = types.ModuleType("triton")
+    cast(Any, fake_triton).compile = fake_compile
+    cast(Any, fake_triton).compiler = fake_compiler
+    cast(Any, fake_triton).runtime = _Poisoned("triton.runtime")
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "triton": fake_triton,
+            "triton.compiler": fake_compiler,
+            "triton.backends.compiler": fake_backends_compiler,
+        },
+    ):
+        yield seen
+
+
+class TestTritonExport(unittest.TestCase):
+    _KERNEL = "class _Fn:\n    arg_names = ('A_ptr', 'M', 'BLOCK')\nkern = _Fn()\n"
+
+    @contextlib.contextmanager
+    def _exported(self, arch):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "kernel.py")
+            with open(path, "w") as f:
+                f.write(self._KERNEL)
+            b = {
+                "prefix": "fake_bmm_f32",
+                "kernel_path": path,
+                "kernel_name": "kern",
+                "signature": "*fp32:16, i32, 64",
+                "launch": {"grid_x": "M"},
+                "num_warps": 8,
+                "args": [{"name": "a", "kind": "tensor", "read_only": True}],
+            }
+            with _fake_triton() as seen:
+                extra = toolchains.get_toolchain("triton").export(b, d, arch=arch)
+            yield d, extra, seen
+
+    def test_the_target_comes_from_the_arch_not_from_a_driver(self):
+        with self._exported("sm_100a") as (d, extra, seen):
+            self.assertEqual(seen["target"], ("cuda", 100, 32))
+            self.assertEqual(extra["symbol"], "_fake_kernel")
+            self.assertEqual((extra["shared"], extra["block_x"]), (256, 8 * 32))
+            with open(os.path.join(d, "fake_bmm_f32.cubin"), "rb") as f:
+                self.assertEqual(f.read(), b"\x7fELF-fake")
+
+    def test_divisibility_hints_leave_the_signature_and_constants_split_out(self):
+        with self._exported("sm_90") as (_, _extra, seen):
+            self.assertEqual(seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"})
+            self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
+
+
 class TestLauncherGeneration(unittest.TestCase):
     def test_read_only_inputs_take_const_data_ptr(self):
         # read_only args must go through const_data_ptr: a mutable data_ptr()

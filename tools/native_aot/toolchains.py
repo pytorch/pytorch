@@ -509,23 +509,6 @@ class TritonToolchain(Toolchain):
             raise ValueError(f"arch must look like sm_90a, got {arch!r}")
         return int(m.group(1))
 
-    @classmethod
-    def _activate_triton_target(cls, arch: str):
-        """Pin the target so compiling never queries a device: the stock driver answers
-        through torch.cuda.current_device, which throws on a GPU-less builder."""
-        import triton
-        from triton.backends.compiler import GPUTarget
-        from triton.backends.nvidia.driver import CudaDriver
-
-        target = GPUTarget("cuda", cls._sm_number(arch), 32)
-
-        class _FixedTargetDriver(CudaDriver):
-            def get_current_target(self):
-                return target
-
-        triton.runtime.driver.set_active(_FixedTargetDriver())
-        return target
-
     LAUNCHER_TMPL = """\
 namespace {{
 // {prefix}: raw cubin ({cubin_len} bytes), embedded, loaded per device on first use.
@@ -598,8 +581,10 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             if _const(s) is None
         }
 
+        # Target built here, never asked of triton.runtime.driver: resolving the active
+        # driver constructs CudaUtils, which needs a libcuda the builders have not got.
         if arch:
-            target = self._activate_triton_target(arch)
+            target = GPUTarget("cuda", self._sm_number(arch), 32)
         else:
             import torch
 
