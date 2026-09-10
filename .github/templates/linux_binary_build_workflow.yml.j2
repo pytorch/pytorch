@@ -320,11 +320,10 @@ jobs:
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
   {%- for config in group %}
-      - uses: !{{ common.upload_artifact_action }}
-        with:
-          name: !{{ config['build_name'] }}
-          if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/!{{ config['build_name'] }}/*
+      !{{ common.upload_artifact_with_retry(
+            step_id="upload-" ~ config['build_name'],
+            name=config['build_name'],
+            path="${{ runner.temp }}/artifacts/" ~ config['build_name'] ~ "/*") }}
   {%- endfor %}
 {%- endfor %}
 
@@ -657,13 +656,12 @@ jobs:
         run: |
           python3 .ci/libtorch/smoke_test_extract_libtorch.py \
             --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
-      - uses: !{{ common.upload_artifact_action }}
-        if: always()
-        with:
-          name: ${{ matrix.build_name }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ github.workspace }}/libtorch_output/"
+      !{{ common.upload_artifact_with_retry(
+            step_id="upload-libtorch",
+            name="${{ matrix.build_name }}",
+            path='"${{ github.workspace }}/libtorch_output/"',
+            retention_days=14,
+            always=True) }}
 
 {%- if branches == "nightly" %}
 

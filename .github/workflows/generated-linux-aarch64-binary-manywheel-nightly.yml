@@ -187,45 +187,157 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_10-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_10-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_10-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_10-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_11-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_11-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_11-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_11-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_12-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_12-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_12-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_12-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_13-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_13-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_13-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_13-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_14-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_14-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14t-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_14t-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14t-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_14t-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_15-cpu-aarch64
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu-aarch64/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_15-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu-aarch64/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15t-cpu-aarch64
+        continue-on-error: true
         with:
           name: manywheel-py3_15t-cpu-aarch64
           if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cpu-aarch64/*
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15t-cpu-aarch64.outcome == 'failure'
+        with:
+          name: manywheel-py3_15t-cpu-aarch64
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cpu-aarch64/*
 
   manywheel-cuda-aarch64-cu130-build:
@@ -276,45 +388,157 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_10-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_10-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_10-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_10-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_11-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_11-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_11-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_11-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_12-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_12-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_12-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_12-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_13-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_13-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_13-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_13-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_14-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_14-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14t-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14t-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_14t-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_15-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_0/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_15-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_0/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15t-cuda-aarch64-13_0
+        continue-on-error: true
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_0
           if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_0/*
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15t-cuda-aarch64-13_0.outcome == 'failure'
+        with:
+          name: manywheel-py3_15t-cuda-aarch64-13_0
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_0/*
 
   manywheel-cuda-aarch64-cu132-build:
@@ -365,45 +589,157 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_10-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_10-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_10-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_10-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_11-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_11-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_11-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_11-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_12-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_12-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_12-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_12-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_13-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_13-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_13-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_13-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_14-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_14-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14t-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14t-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_14t-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_15-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_2/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_15-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_2/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15t-cuda-aarch64-13_2
+        continue-on-error: true
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_2
           if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_2/*
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15t-cuda-aarch64-13_2.outcome == 'failure'
+        with:
+          name: manywheel-py3_15t-cuda-aarch64-13_2
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_2/*
 
   manywheel-cuda-aarch64-cu134-build:
@@ -454,45 +790,157 @@ jobs:
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
       # matrix below downloads.
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_10-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_10-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_10-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_10-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_11-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_11-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_11-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_11-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_12-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_12-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_12-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_12-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_13-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_13-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_13-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_13-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_14-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_14-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_14t-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_14t-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_14t-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_14t-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_15-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_4/*
-      - uses: actions/upload-artifact@v4.4.0
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_15-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cuda-aarch64-13_4/*
+      - uses: actions/upload-artifact@v4.6.2
+        id: upload-manywheel-py3_15t-cuda-aarch64-13_4
+        continue-on-error: true
         with:
           name: manywheel-py3_15t-cuda-aarch64-13_4
           if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_4/*
+      - name: Retry artifact upload
+        uses: actions/upload-artifact@v4.6.2
+        if: steps.upload-manywheel-py3_15t-cuda-aarch64-13_4.outcome == 'failure'
+        with:
+          name: manywheel-py3_15t-cuda-aarch64-13_4
+          if-no-files-found: error
+          # Delete any existing artifact under this name -- normally the
+          # registration the failed attempt left behind -- so the retry's
+          # CreateArtifact has a chance to succeed. The action handles deletion
+          # errors on a best-effort basis.
+          overwrite: true
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_4/*
 
   manywheel-cpu-aarch64-test:
