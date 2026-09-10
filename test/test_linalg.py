@@ -125,7 +125,7 @@ def get_tunableop_untuned_filename():
     return untuned_filename
 
 
-class TestLinalg(TestCase):
+class TestLinalgDevice(TestCase):
     def setUp(self):
         super().setUp()
         # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
@@ -11585,7 +11585,7 @@ for test_name in (
     "test_linalg_batched_lu_stability_large_inputs",
     "test_linalg_batched_lu_edge_cases",
 ):
-    setattr(TestLinalg, test_name, onlyAccelerator(getattr(TestLinalgCUDA, test_name)))
+    setattr(TestLinalgDevice, test_name, onlyAccelerator(getattr(TestLinalgCUDA, test_name)))
     delattr(TestLinalgCUDA, test_name)
 
 
@@ -11711,13 +11711,8 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-<<<<<<< HEAD
-instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestLinalgCUDA, globals(), only_for=("cuda"))
-=======
-instantiate_device_type_tests(TestLinalg, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
->>>>>>> 2ba11530add (test_linalg: Enable XPU for device-agnostic TestLinalg)
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
