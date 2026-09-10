@@ -1,0 +1,111 @@
+FROM quay.io/pypa/manylinux_2_28_s390x as base
+
+# Language variables
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C.UTF-8
+
+# there is a bugfix in gcc >= 14 for precompiled headers and s390x vectorization interaction.
+# with earlier gcc versions test/inductor/test_cpu_cpp_wrapper.py will fail.
+ARG DEVTOOLSET_VERSION=14
+# Installed needed OS packages. This is to support all
+# the binary builds (torch, vision, audio, text, data)
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
+  autoconf \
+  automake \
+  bison \
+  bzip2 \
+  curl \
+  diffutils \
+  file \
+  git \
+  make \
+  patch \
+  perl \
+  unzip \
+  util-linux \
+  wget \
+  which \
+  xz \
+  yasm \
+  less \
+  zstd \
+  libgomp \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+  gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+  gcc-toolset-${DEVTOOLSET_VERSION}-binutils-gold \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+  cmake \
+  rust \
+  cargo \
+  llvm-devel \
+  libzstd-devel \
+  python3.12-devel \
+  python3.12-test \
+  python3.12-setuptools \
+  python3.12-pip \
+  python3.12-pyyaml \
+  python3.12-numpy \
+  python3.12-wheel \
+  python3.12-cryptography \
+  blas-devel \
+  openblas-devel \
+  lapack-devel \
+  atlas-devel \
+  libjpeg-devel \
+  libxslt-devel \
+  libxml2-devel \
+  openssl-devel \
+  valgrind \
+  ninja-build
+
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
+# git236+ would refuse to run git commands in repos owned by other users
+# Which causes version check to fail, as pytorch repo is bind-mounted into the image
+# Override this behaviour by treating every folder as safe
+# For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
+RUN git config --global --add safe.directory "*"
+
+# installed python doesn't have development parts. Rebuild it from scratch
+RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
+
+# EPEL for cmake
+FROM base as patchelf
+# Install patchelf
+ADD ./common/install_patchelf.sh install_patchelf.sh
+RUN bash ./install_patchelf.sh && rm install_patchelf.sh
+RUN cp $(which patchelf) /patchelf
+
+FROM patchelf as python
+# build python
+COPY manywheel/s390_scripts /build_scripts
+
+# python 3.9 is no longer used and fails when running get-pip.py script, and 3.11.0 needs to be updated on s390x
+ENV CPYTHON_VERSIONS="3.10.1 3.11.14 3.12.0 3.13.0 3.14.0 3.14.0t 3.15.0 3.15.0t"
+
+ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+ENV SSL_CERT_FILE=
+RUN bash build_scripts/build.sh && rm -r build_scripts
+
+FROM base as final
+COPY --from=python             /opt/python                             /opt/python
+COPY --from=python             /opt/_internal                          /opt/_internal
+COPY --from=python             /opt/python/cp312-cp312/bin/auditwheel  /usr/local/bin/auditwheel
+COPY --from=patchelf           /usr/local/bin/patchelf                 /usr/local/bin/patchelf
+
+RUN alternatives --set python /usr/bin/python3.12
+RUN alternatives --set python3 /usr/bin/python3.12
+
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
+
+COPY manywheel/s390_scripts/dependencies_s390x.sh dependencies_s390x.sh
+RUN bash ./dependencies_s390x.sh && rm dependencies_s390x.sh
+
+ENTRYPOINT []
+CMD ["/bin/bash"]

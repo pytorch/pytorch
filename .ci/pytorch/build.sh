@@ -1,0 +1,428 @@
+#!/bin/bash
+
+set -ex -o pipefail
+
+# Required environment variable: $BUILD_ENVIRONMENT
+# (This is set by default in the Docker images we build, so you don't
+# need to set it yourself.
+
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+  export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
+
+  if command -v sccache >/dev/null; then
+    SCCACHE_PATH="$(command -v sccache)"
+    export CMAKE_C_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export HIP_CLANG_LAUNCHER="${SCCACHE_PATH}"
+  fi
+fi
+
+echo "Python version:"
+python --version
+
+echo "GCC version:"
+gcc --version
+
+echo "CMake version:"
+cmake --version
+
+echo "Environment variables:"
+env
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
+  JEMALLOC_LIB=$(find /usr/lib* -name "libjemalloc.so.2" 2>/dev/null | head -1)
+  if [[ -n "${JEMALLOC_LIB}" ]]; then
+    export LD_PRELOAD="${JEMALLOC_LIB}"
+  fi
+  echo "NVCC version:"
+  nvcc --version
+
+  # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+  # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header is
+  # actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so non-13.x
+  # / CPU builds, which have no such header, don't pull it in. Skip it too when LIBCLANG_PATH
+  # already points the codegen at a libclang.so (that env supplies the clang bindings itself).
+  if [ -z "${LIBCLANG_PATH:-}" ] && python -c "import sys; from tools.setup_helpers.cupti import find_cupti_header as f; sys.exit(0 if f() else 1)"; then
+    python -mpip install libclang
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
+fi
+
+
+# mkl-static/mkl-include are pip-installed into the active Python environment
+# (a conda env or a venv), not provided by conda. Detect MKL directly rather
+# than guessing from the presence of conda.
+if ! python -m pip show mkl-static >/dev/null 2>&1; then
+  # No MKL (e.g. aarch64/s390x, or ROCm cross compilation on intel build
+  # machines that later run on amd). Enable MKLDNN, except for ROCm where we
+  # deliberately keep some non-mkldnn builds working.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
+else
+  # Point CMAKE_PREFIX_PATH at the environment prefix (sys.prefix) so cmake can
+  # find the pip-installed mkl-static/mkl-include. FindMKL uses plain
+  # find_library/find_path, which already search <prefix>/lib and <prefix>/include
+  # for each CMAKE_PREFIX_PATH entry, so no extra CMAKE_LIBRARY_PATH/INCLUDE_PATH
+  # hints are needed.
+  CMAKE_PREFIX_PATH="$(python -c 'import sys; print(sys.prefix)')"
+  export CMAKE_PREFIX_PATH
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/acl
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
+
+  export CMAKE_CROSSCOMPILING=TRUE
+  export CMAKE_SYSTEM_NAME=Linux
+  export CMAKE_SYSTEM_PROCESSOR=riscv64
+
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  # Restrict chown to the workspace and the cross-compile sysroot/venv we
+  # actually write into. The workspace path differs by runner: EC2 docker
+  # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
+  # the host path that doesn't exist inside the container; OSDC k8s has it
+  # at ${GITHUB_WORKSPACE} (/__w/pytorch/pytorch) and no /var/lib/jenkins.
+  # Recursing into all of /opt would also fail on OSDC because /opt/git-cache
+  # is a read-only hostPath mount.
+  for dir in "${GITHUB_WORKSPACE:-}" /var/lib/jenkins/workspace /opt/sysroot /opt/riscv-cross-env; do
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      sudo chown -R jenkins "$dir"
+    fi
+  done
+
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+fi
+
+# Use special scripts for Android builds
+
+if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+  export USE_VULKAN=1
+  # shellcheck disable=SC1091
+  source /var/lib/jenkins/vulkansdk/setup-env.sh
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
+
+  if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx906"
+  fi
+
+  # hipify sources
+  python tools/amd_build/build_amd.py
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/umf/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
+  # Enable XCCL build
+  export USE_XCCL=1
+  export USE_MPI=0
+  export USE_STATIC_MKL=1
+  export TORCH_XPU_ARCH_LIST=pvc
+  # Use different AOT target list for different runner tests
+  if [[ "$BUILD_ENVIRONMENT" == *client* ]]; then
+    export TORCH_XPU_ARCH_LIST=bmg
+  fi
+fi
+
+# sccache will fail for CUDA builds if all cores are used for compiling
+# gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
+if [ -z "$MAX_JOBS" ]; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
+fi
+
+# TORCH_CUDA_ARCH_LIST must be passed from an environment variable
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
+  echo "TORCH_CUDA_ARCH_LIST must be defined"
+  exit 1
+fi
+
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  FLASH_ATTENTION_MAX_JOBS=2
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
+  export FLASH_ATTENTION_MAX_JOBS
+  echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
+fi
+
+# TODO: Removeme once all the wrappers are gone
+if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  sudo rm -f /opt/cache/bin/clang++
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export USE_CUDA=1
+  fi
+  export USE_ASAN=1
+  export REL_WITH_DEB_INFO=1
+  export UBSAN_FLAGS="-fno-sanitize-recover=all"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export USE_TSAN=1
+  export USE_CUDA=0
+  export USE_XNNPACK=0
+  export USE_FBGEMM=0
+  export USE_DISTRIBUTED=0
+  export BUILD_TEST=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
+  export USE_PER_OPERATOR_HEADERS=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *-tsan* ]]; then
+  export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
+  export CMAKE_BUILD_TYPE=Debug
+elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
+# Do not change workspace permissions for ROCm and s390x CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* && -d /var/lib/jenkins/workspace ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+  # rocm builds fail when WERROR=1
+  # XLA test build fails when WERROR=1
+  # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
+  # Release xpu build stress with WERROR=1
+  # set only when building other architectures
+  # or building non-XLA tests.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
+    # TODO: Remove me and may be just focus on numpy-2.x testing
+    if [[ "$PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      # In relality it's only needed for numpy_2_x and vllm shards (where vllm depends on numpy-2)
+      python -mpip install numpy==2.0.2
+    fi
+
+    WERROR=1 python -m build --wheel --no-isolation
+  else
+    if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+      source .ci/pytorch/install_cache_xla.sh
+    fi
+    python -m build --wheel --no-isolation
+  fi
+  pip_install_whl "$(echo dist/*.whl)"
+
+  # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
+  # still emit a debug-rebuild plan with a -g compile and the libtorch_python
+  # relink. This guards against build-system changes (e.g. a new
+  # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
+  # on a from-source build that test jobs don't have. --dry-run reads the tree
+  # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+    debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
+    echo "${debinfo_plan}"
+    grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
+    grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+    # Regression test for https://github.com/pytorch/pytorch/issues/164297
+    # Torch should be importable and that's about it
+    pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+    install_torchvision
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+    install_torchaudio
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+    install_torchrec_and_fbgemm
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+    install_torchao
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
+    install_torchcomms
+  fi
+
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
+    install_spmd_types
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+    echo "Checking that xpu is compiled"
+    pushd dist/
+    if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
+      echo "XPU support is compiled in."
+    else
+      echo "XPU support is NOT compiled in."
+      exit 1
+    fi
+    popd
+  fi
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  assert_git_not_dirty
+  # Copy ninja build logs to dist folder
+  mkdir -p dist
+  if [ -f build/.ninja_log ]; then
+    cp build/.ninja_log dist
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    build_rocm_ck_wheel dist/
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
+    CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
+    CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
+    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
+    # Build custom operator tests.
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+    CUSTOM_OP_TEST="$PWD/test/custom_operator"
+    python --version
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+
+    mkdir -p "$CUSTOM_OP_BUILD"
+    pushd "$CUSTOM_OP_BUILD"
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build jit hook tests
+    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
+    mkdir -p "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir -p "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+  fi
+else
+  # Test no-Python build
+  echo "Building libtorch"
+
+  # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
+  # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
+  # 16 CPUs
+  MAX_JOBS=$(nproc --ignore=4)
+  export MAX_JOBS
+
+  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  # Build outside the source tree so the artifacts don't interfere with
+  # the workspace. /tmp is writable on both EC2 and OSDC runners.
+  mkdir -p /tmp/cpp-build/caffe2
+  pushd /tmp/cpp-build/caffe2
+  WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
+  popd
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
+  PYTHONPATH=. python tools/stats/export_test_times.py
+fi
+# don't do this for s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* ]]; then
+  print_sccache_stats
+fi

@@ -1,0 +1,14 @@
+#pragma once
+#include <functional>
+#include <memory>
+#include <string>
+
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/ir/ir.h>
+
+namespace torch::jit {
+
+TORCH_API void InlineLoopCondition(std::shared_ptr<Graph>& graph);
+TORCH_API void InlineBlockBeforeNode(Node* before_node, Block* block);
+
+} // namespace torch::jit
