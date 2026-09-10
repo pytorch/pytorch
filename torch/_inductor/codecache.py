@@ -42,13 +42,16 @@ from types import (
     ModuleType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import NotRequired, override, Self, TypedDict
+from typing_extensions import override, Self, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -159,10 +162,14 @@ class SystemVersionInfo(TypedDict, total=False):
     hip: str | None
 
 
-class SystemInfo(TypedDict):
+class SystemCacheInfo(TypedDict, total=False):
+    device: SystemDeviceInfo
+    version: SystemVersionInfo
+    device_interfaces: dict[str, dict[str, object]]
+
+
+class SystemInfo(SystemCacheInfo):
     hash: str
-    device: NotRequired[SystemDeviceInfo]
-    version: NotRequired[SystemVersionInfo]
 
 
 class CacheInfo(TypedDict, total=False):
@@ -333,9 +340,10 @@ class CacheBase:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
+        version_info: SystemVersionInfo = {"triton": triton_version}
+        hash_input: SystemCacheInfo = {"version": version_info}
         try:
             device_info: SystemDeviceInfo = {"name": None}
-            version_info: SystemVersionInfo = {"triton": triton_version}
             device_properties = torch.cuda.get_device_properties(
                 torch.cuda.current_device()
             )
@@ -345,18 +353,48 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
-            hash_input: dict[str, Any] = {
-                "device": device_info,
-                "version": version_info,
-            }
-            return {
-                "device": device_info,
-                "version": version_info,
-                "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
-            }
+            hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
-            # If cuda is not installed, none of the above config is relevant.
-            return {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})}
+            # If CUDA is not installed, omit CUDA/HIP-specific device information.
+            pass
+
+        device_interface_info: dict[str, dict[str, object]] = {}
+        for name, interface in get_registered_device_interfaces():
+            # The registry contains both the base device name and indexed local
+            # instances; collect cache metadata only once per backend.
+            if ":" in name:
+                continue
+
+            # CacheBase.get_system() participates in every compile's FX graph
+            # cache key, so a broken third-party backend must not break CPU-only
+            # compilation.
+            try:
+                if not interface.is_available():
+                    continue
+                info = interface.get_cache_system_info()
+                if info is None:
+                    continue
+                if not isinstance(info, dict):
+                    raise TypeError(f"expected a dict or None, got {type(info)}")
+                # Probe serializability here before key_from_json() and
+                # update_local_cache() serialize this metadata later.
+                json.dumps(info, sort_keys=True)
+                device_interface_info[name] = info
+            except Exception:
+                log.warning(
+                    "Failed to collect cache system info from device interface %s",
+                    name,
+                    exc_info=True,
+                )
+                continue
+
+        if device_interface_info:
+            hash_input["device_interfaces"] = device_interface_info
+
+        return {
+            **hash_input,
+            "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
+        }
 
     @staticmethod
     @clear_on_fresh_cache
@@ -1850,19 +1888,36 @@ class GuardedCache(Generic[T]):
     ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
-            if os.path.exists(subdir):
-                for path in sorted(os.listdir(subdir)):
-                    if path.startswith("."):
-                        continue  # Skip temp files from concurrent write_atomic() calls
-                    try:
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            content = f.read()
-                            yield pickle.loads(content), content, True
-                    except Exception:
-                        log.warning(
-                            "fx graph cache unable to load compiled graph",
-                            exc_info=True,
-                        )
+            try:
+                names = sorted(os.listdir(subdir))
+            except FileNotFoundError:
+                # Nothing was ever written for this key, or another process cleared
+                # the cache out from under us. The local cache root is shared across
+                # processes, so checking os.path.exists() first would only narrow the
+                # race, not close it. Either way there are no candidates: a miss.
+                names = []
+            except OSError:
+                # Anything else (a bad mode on the cache dir, a dead mount) is not a
+                # race and is worth surfacing, but it still leaves no candidates.
+                log.warning(
+                    "%s unable to list cache entries", cls.__name__, exc_info=True
+                )
+                names = []
+            for path in names:
+                if path.startswith("."):
+                    continue  # Skip temp files from concurrent write_atomic() calls
+                try:
+                    with open(os.path.join(subdir, path), "rb") as f:
+                        content = f.read()
+                        yield pickle.loads(content), content, True
+                except FileNotFoundError:
+                    continue  # Raced with a concurrent cache clear
+                except Exception:
+                    log.warning(
+                        "%s unable to load compiled graph",
+                        cls.__name__,
+                        exc_info=True,
+                    )
 
         if remote_cache:
             try:
