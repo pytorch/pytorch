@@ -6937,8 +6937,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: sub_out
-    MPS: sub_out_mps
+    CPU, CUDA, MPS, XPU: sub_out
     MTIA: sub_out_mtia
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_out_sparse
   tags: pointwise

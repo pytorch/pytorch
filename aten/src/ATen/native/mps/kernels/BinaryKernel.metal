@@ -11,24 +11,10 @@ struct add_functor {
   }
 };
 
-struct sub_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return static_cast<T>(a - b);
-  }
-};
-
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
     return static_cast<T>(a + c10::metal::mul(alpha, b));
-  }
-};
-
-struct sub_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a - c10::metal::mul(alpha, b));
   }
 };
 
@@ -683,8 +669,6 @@ REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
 REGISTER_INTEGER_BINARY_OP(mul);
-REGISTER_FLOAT_BINARY_OP(sub);
-REGISTER_INTEGER_BINARY_OP(sub);
 REGISTER_OPMATH_FLOAT_BINARY_OP(div_floor);
 REGISTER_INTEGER_BINARY_OP(div_floor);
 REGISTER_FLOAT_BINARY_OP(div_trunc);
@@ -726,14 +710,6 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(add_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, long, long, long);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, int, int, int);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float, float, float);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half, half, half);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, short, short, short);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, uchar, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, char, char, char);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bool, bool, bool);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
@@ -744,7 +720,6 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
 
 // Complex binary functions
@@ -758,14 +733,10 @@ REGISTER_OPMATH_BINARY_OP(div_true, float2, float2);
 REGISTER_OPMATH_BINARY_OP(div_true, half2, half2);
 REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
-REGISTER_BINARY_OP(sub, float2, float2);
-REGISTER_BINARY_OP(sub, half2, half2);
 REGISTER_BINARY_OP(logaddexp, float2, float2);
 REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
 
