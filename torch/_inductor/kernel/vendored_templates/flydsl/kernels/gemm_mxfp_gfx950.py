@@ -474,7 +474,6 @@ def gemm_mxfp_gfx950_kernel(
     scale_b_u8: fx.Tensor,
     param: MXFPGemmParams,
 ):
-    d = param
     m = param.m
     n = param.n
     k = param.k
@@ -522,15 +521,15 @@ def gemm_mxfp_gfx950_kernel(
     block_m_offset = bid_m * fx.Int32(block_m)
     block_n_offset = bid_n * fx.Int32(block_n)
 
-    if const_expr(d.lds_scale):
+    if const_expr(param.lds_scale):
 
         @fx.struct
         class SharedABStorage:
             a: fx.Array[operand_elem, stages * block_m * block_k, 16]
             b: fx.Array[operand_elem, stages * block_n * block_k, 16]
             # E8M0 bytes, one per 32 elements, staged on the same schedule.
-            sca: fx.Array[fx.Uint8, stages * d.sc_a_bytes, 16]
-            scb: fx.Array[fx.Uint8, stages * d.sc_b_bytes, 16]
+            sca: fx.Array[fx.Uint8, stages * param.sc_a_bytes, 16]
+            scb: fx.Array[fx.Uint8, stages * param.sc_b_bytes, 16]
 
     else:
 
@@ -557,7 +556,7 @@ def gemm_mxfp_gfx950_kernel(
 
     smem_a_bytes = fx.recast_iter(fx.Uint8, ab_storage.a.ptr)
     smem_b_bytes = fx.recast_iter(fx.Uint8, ab_storage.b.ptr)
-    if const_expr(d.lds_scale):
+    if const_expr(param.lds_scale):
         smem_sca = fx.recast_iter(fx.Uint8, ab_storage.sca.ptr)
         smem_scb = fx.recast_iter(fx.Uint8, ab_storage.scb.ptr)
 
@@ -715,7 +714,7 @@ def gemm_mxfp_gfx950_kernel(
         outer_tile_size=block_m,
         outer_bound=m,
         leading_stride=a_leading_stride,
-        load_iters=d.ldg_a_iters,
+        load_iters=param.ldg_a_iters,
         is_k_major=a_is_transposed,
         has_outer_tail=False,
     )
@@ -726,12 +725,12 @@ def gemm_mxfp_gfx950_kernel(
         outer_tile_size=block_n,
         outer_bound=n,
         leading_stride=b_leading_stride,
-        load_iters=d.ldg_b_iters,
+        load_iters=param.ldg_b_iters,
         is_k_major=not b_is_transposed,
         has_outer_tail=False,
     )
 
-    if const_expr(d.lds_scale):
+    if const_expr(param.lds_scale):
         sc_lds_atom = fx.make_copy_atom(fx.UniversalCopy8b(), fx.Uint8)
         scale_load_context = AsyncLoadContext(
             wave_offset=get_wave_lds_offset(tid, GFX950_SCALE_DMA_BYTES),
@@ -740,29 +739,29 @@ def gemm_mxfp_gfx950_kernel(
             block_threads=block_threads,
             async_load_bytes=GFX950_SCALE_DMA_BYTES,
             in_data_bytes=1,
-            ldg_x_threads=d.scale_row_bytes // GFX950_SCALE_DMA_BYTES,
-            block_k=d.scale_row_bytes,
+            ldg_x_threads=param.scale_row_bytes // GFX950_SCALE_DMA_BYTES,
+            block_k=param.scale_row_bytes,
             has_k_tail=False,
         )
         a_scale_load_operand = AsyncLoadOperand(
             context=scale_load_context,
             rsrc=fx.rocdl.get_buffer_rsrc(fx.get_iter(sa_flat)),
-            lds_layout=fx.make_ordered_layout((block_m, d.scale_row_bytes), (1, 0)),
+            lds_layout=fx.make_ordered_layout((block_m, param.scale_row_bytes), (1, 0)),
             outer_tile_size=block_m,
             outer_bound=m,
             leading_stride=scale_k,
-            load_iters=d.sc_a_iters,
+            load_iters=param.sc_a_iters,
             is_k_major=False,
             has_outer_tail=False,
         )
         b_scale_load_operand = AsyncLoadOperand(
             context=scale_load_context,
             rsrc=fx.rocdl.get_buffer_rsrc(fx.get_iter(sb_flat)),
-            lds_layout=fx.make_ordered_layout((block_n, d.scale_row_bytes), (1, 0)),
+            lds_layout=fx.make_ordered_layout((block_n, param.scale_row_bytes), (1, 0)),
             outer_tile_size=block_n,
             outer_bound=n,
             leading_stride=scale_k,
-            load_iters=d.sc_b_iters,
+            load_iters=param.sc_b_iters,
             is_k_major=False,
             has_outer_tail=False,
         )
@@ -770,15 +769,15 @@ def gemm_mxfp_gfx950_kernel(
     def async_load_a_to_lds(k_tile, stage):
         async_load_operand(
             a_load_operand,
-            lds_base=smem_a_bytes + stage * fx.Int32(d.a_stage_bytes),
+            lds_base=smem_a_bytes + stage * fx.Int32(param.a_stage_bytes),
             global_outer_offset=block_m_offset,
             k_tile=k_tile,
         )
 
-        if const_expr(d.lds_scale):
+        if const_expr(param.lds_scale):
             async_load_operand(
                 a_scale_load_operand,
-                lds_base=smem_sca + stage * fx.Int32(d.sc_a_bytes),
+                lds_base=smem_sca + stage * fx.Int32(param.sc_a_bytes),
                 global_outer_offset=block_m_offset,
                 k_tile=k_tile,
             )
@@ -786,14 +785,14 @@ def gemm_mxfp_gfx950_kernel(
     def async_load_b_to_lds(k_tile, stage):
         async_load_operand(
             b_load_operand,
-            lds_base=smem_b_bytes + stage * fx.Int32(d.b_stage_bytes),
+            lds_base=smem_b_bytes + stage * fx.Int32(param.b_stage_bytes),
             global_outer_offset=block_n_offset,
             k_tile=k_tile,
         )
-        if const_expr(d.lds_scale):
+        if const_expr(param.lds_scale):
             async_load_operand(
                 b_scale_load_operand,
-                lds_base=smem_scb + stage * fx.Int32(d.sc_b_bytes),
+                lds_base=smem_scb + stage * fx.Int32(param.sc_b_bytes),
                 global_outer_offset=block_n_offset,
                 k_tile=k_tile,
             )
@@ -870,7 +869,7 @@ def gemm_mxfp_gfx950_kernel(
 
     def packed_unit_issue(buf, base, row_base, repeat_stride, n_repeat, col_base):
         """Issue dword loads over groups of four repeat/K-half units."""
-        n_units = n_repeat * d.k_halves
+        n_units = n_repeat * param.k_halves
         regs = []
         for q in range_constexpr(0, n_units, 4):
             unit = fx.Int32(q) + lane_grp
@@ -878,12 +877,12 @@ def gemm_mxfp_gfx950_kernel(
 
                 unit = unit % fx.Int32(n_units)
             row = row_base + fx.Int32(repeat_stride) * (
-                unit // fx.Int32(d.k_halves)
+                unit // fx.Int32(param.k_halves)
             )
             offset = (
                 (base + row) * fx.Int32(scale_k32)
                 + col_base
-                + unit % fx.Int32(d.k_halves)
+                + unit % fx.Int32(param.k_halves)
             )
             reg = fx.make_rmem_tensor(1, fx.Uint32)
             fx.copy(scale32_atom, fx.slice(buf, (None, offset)), reg)
@@ -967,7 +966,7 @@ def gemm_mxfp_gfx950_kernel(
             )
             thr_sA = thr_copy_A.partition_S(sA_stage)
             thr_sB = thr_copy_B.partition_S(sB_stage)
-            for kh in range_constexpr(d.k_halves):
+            for kh in range_constexpr(param.k_halves):
                 fx.copy(
                     b_s2r_atom,
                     thr_sB[None, None, kh],
@@ -980,20 +979,20 @@ def gemm_mxfp_gfx950_kernel(
                 )
             return frag_A, frag_B
 
-        base_a = stage_dwords(smem_a_bytes, stage, d.a_stage_bytes)
-        base_b = stage_dwords(smem_b_bytes, stage, d.b_stage_bytes)
-        base_a_bytes = smem_a_bytes + stage * fx.Int32(d.a_stage_bytes)
-        base_b_bytes = smem_b_bytes + stage * fx.Int32(d.b_stage_bytes)
-        av = [None] * (d.k_halves * d.mma_m_repeat)
-        bv = [None] * (d.k_halves * d.mma_n_repeat)
+        base_a = stage_dwords(smem_a_bytes, stage, param.a_stage_bytes)
+        base_b = stage_dwords(smem_b_bytes, stage, param.b_stage_bytes)
+        base_a_bytes = smem_a_bytes + stage * fx.Int32(param.a_stage_bytes)
+        base_b_bytes = smem_b_bytes + stage * fx.Int32(param.b_stage_bytes)
+        av = [None] * (param.k_halves * param.mma_m_repeat)
+        bv = [None] * (param.k_halves * param.mma_n_repeat)
 
         def _rd_b(kh, ni):
             if const_expr(b_is_transposed):
-                bv[kh * d.mma_n_repeat + ni] = read_frag(
+                bv[kh * param.mma_n_repeat + ni] = read_frag(
                     base_b, b_row_base + fx.Int32(ni * n_repeat_stride), kh
                 )
             else:
-                bv[kh * d.mma_n_repeat + ni] = issue_frag_transposed(
+                bv[kh * param.mma_n_repeat + ni] = issue_frag_transposed(
                     base_b_bytes,
                     b_lds_layout_bytes,
                     b_row_base - lane_row + fx.Int32(ni * n_repeat_stride),
@@ -1002,62 +1001,62 @@ def gemm_mxfp_gfx950_kernel(
 
         def _rd_a(kh, mi):
             if const_expr(a_is_transposed):
-                av[kh * d.mma_m_repeat + mi] = issue_frag_transposed(
+                av[kh * param.mma_m_repeat + mi] = issue_frag_transposed(
                     base_a_bytes,
                     a_lds_layout_bytes,
                     a_row_base - lane_row + fx.Int32(mi * m_repeat_stride),
                     kh,
                 )
             else:
-                av[kh * d.mma_m_repeat + mi] = read_frag(
+                av[kh * param.mma_m_repeat + mi] = read_frag(
                     base_a, a_row_base + fx.Int32(mi * m_repeat_stride), kh
                 )
 
-        for kh in range_constexpr(d.k_halves):
-            for ni in range_constexpr(d.mma_n_repeat):
+        for kh in range_constexpr(param.k_halves):
+            for ni in range_constexpr(param.mma_n_repeat):
                 _rd_b(kh, ni)
-            for mi in range_constexpr(d.mma_m_repeat):
+            for mi in range_constexpr(param.mma_m_repeat):
                 _rd_a(kh, mi)
         if const_expr(a_is_transposed or not b_is_transposed):
             rocdl.s_waitcnt(lgkmcnt=0)
             if const_expr(a_is_transposed):
-                for kh in range_constexpr(d.k_halves):
-                    for mi in range_constexpr(d.mma_m_repeat):
-                        idx = kh * d.mma_m_repeat + mi
+                for kh in range_constexpr(param.k_halves):
+                    for mi in range_constexpr(param.mma_m_repeat):
+                        idx = kh * param.mma_m_repeat + mi
                         av[idx] = finish_frag_transposed(av[idx])
             if const_expr(not b_is_transposed):
-                for kh in range_constexpr(d.k_halves):
-                    for ni in range_constexpr(d.mma_n_repeat):
-                        idx = kh * d.mma_n_repeat + ni
+                for kh in range_constexpr(param.k_halves):
+                    for ni in range_constexpr(param.mma_n_repeat):
+                        idx = kh * param.mma_n_repeat + ni
                         bv[idx] = finish_frag_transposed(bv[idx])
         return av, bv
 
     def a_fragment(frags, mi, kh):
         if const_expr(is_mxfp4):
-            return frags[kh * d.mma_m_repeat + mi]
+            return frags[kh * param.mma_m_repeat + mi]
         return frags[None, mi, kh]
 
     def b_fragment(frags, ni, kh):
         if const_expr(is_mxfp4):
-            return frags[kh * d.mma_n_repeat + ni]
+            return frags[kh * param.mma_n_repeat + ni]
         return frags[None, ni, kh]
 
-    if const_expr(d.lds_scale):
+    if const_expr(param.lds_scale):
         # Base byte offset for this lane's first scale value.
         sc_lane_base_a = (
-            a_row_base * fx.Int32(d.scale_row_bytes) + lane_grp
+            a_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
         )
         sc_lane_base_b = (
-            b_row_base * fx.Int32(d.scale_row_bytes) + lane_grp
+            b_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
         )
 
     def lds_scale_read(base_bytes, dyn_base, repeat_stride, n_repeat):
         """Read one E8M0 byte for each repeat and MFMA K slice."""
         words = []
         for r in range_constexpr(n_repeat):
-            for kh in range_constexpr(d.k_halves):
+            for kh in range_constexpr(param.k_halves):
                 off = dyn_base + fx.Int32(
-                    r * repeat_stride * d.scale_row_bytes
+                    r * repeat_stride * param.scale_row_bytes
                     + kh * (MXFP_MFMA_K // MXFP_SCALE_BLOCK_K)
                 )
                 reg = fx.make_rmem_tensor(1, fx.Uint8)
@@ -1071,41 +1070,41 @@ def gemm_mxfp_gfx950_kernel(
                 words.append(fx.get_scalar(reg[0]).to(fx.Int32))
         return words
 
-    def compute_stage(k_tile, stage):
-        if const_expr(d.lds_scale):
-            av, bv = load_fragments(stage)
+    def compute_stage(read_stage, k_tile):
+        if const_expr(param.lds_scale):
+            av, bv = load_fragments(read_stage)
             sa_words = lds_scale_read(
                 smem_sca,
-                sc_lane_base_a + stage * fx.Int32(d.sc_a_bytes),
+                sc_lane_base_a + read_stage * fx.Int32(param.sc_a_bytes),
                 m_repeat_stride,
-                d.mma_m_repeat,
+                param.mma_m_repeat,
             )
             sb_words = lds_scale_read(
                 smem_scb,
-                sc_lane_base_b + stage * fx.Int32(d.sc_b_bytes),
+                sc_lane_base_b + read_stage * fx.Int32(param.sc_b_bytes),
                 n_repeat_stride,
-                d.mma_n_repeat,
+                param.mma_n_repeat,
             )
-            for kh in range_constexpr(d.k_halves):
-                for ni in range_constexpr(d.mma_n_repeat):
-                    for mi in range_constexpr(d.mma_m_repeat):
+            for kh in range_constexpr(param.k_halves):
+                for ni in range_constexpr(param.mma_n_repeat):
+                    for mi in range_constexpr(param.mma_m_repeat):
                         scaled_mma(
                             frag_C[(None, 0), mi, ni],
                             a_fragment(av, mi, kh),
                             b_fragment(bv, ni, kh),
-                            sa_words[mi * d.k_halves + kh],
-                            sb_words[ni * d.k_halves + kh],
+                            sa_words[mi * param.k_halves + kh],
+                            sb_words[ni * param.k_halves + kh],
                         )
             return
 
         if const_expr(packed_unit_scale):
-            col_base = k_tile * fx.Int32(d.k_halves)
+            col_base = k_tile * fx.Int32(param.k_halves)
             a_regs = packed_unit_issue(
                 sa32,
                 block_m_offset,
                 a_row_base,
                 m_repeat_stride,
-                d.mma_m_repeat,
+                param.mma_m_repeat,
                 col_base,
             )
             b_regs = packed_unit_issue(
@@ -1113,28 +1112,28 @@ def gemm_mxfp_gfx950_kernel(
                 block_n_offset,
                 b_row_base,
                 n_repeat_stride,
-                d.mma_n_repeat,
+                param.mma_n_repeat,
                 col_base,
             )
-            av, bv = load_fragments(stage)
+            av, bv = load_fragments(read_stage)
             sa_words = packed_scale_finish(a_regs)
             sb_words = packed_scale_finish(b_regs)
-            for kh in range_constexpr(d.k_halves):
-                for ni in range_constexpr(d.mma_n_repeat):
-                    for mi in range_constexpr(d.mma_m_repeat):
+            for kh in range_constexpr(param.k_halves):
+                for ni in range_constexpr(param.mma_n_repeat):
+                    for mi in range_constexpr(param.mma_m_repeat):
                         scaled_mma(
                             frag_C[(None, 0), mi, ni],
                             a_fragment(av, mi, kh),
                             b_fragment(bv, ni, kh),
-                            sa_words[mi * d.k_halves + kh],
-                            sb_words[ni * d.k_halves + kh],
+                            sa_words[mi * param.k_halves + kh],
+                            sb_words[ni * param.k_halves + kh],
                         )
             return
 
         if const_expr(packed_repeat_scale):
             issued = []
-            for kh in range_constexpr(d.k_halves):
-                col32 = k_tile * fx.Int32(d.k_halves) + fx.Int32(kh)
+            for kh in range_constexpr(param.k_halves):
+                col32 = k_tile * fx.Int32(param.k_halves) + fx.Int32(kh)
                 issued.append(
                     (
                         packed_scale_issue(
@@ -1142,7 +1141,7 @@ def gemm_mxfp_gfx950_kernel(
                             block_m_offset,
                             a_row_base,
                             m_repeat_stride,
-                            d.mma_m_repeat,
+                            param.mma_m_repeat,
                             col32,
                         ),
                         packed_scale_issue(
@@ -1150,17 +1149,17 @@ def gemm_mxfp_gfx950_kernel(
                             block_n_offset,
                             b_row_base,
                             n_repeat_stride,
-                            d.mma_n_repeat,
+                            param.mma_n_repeat,
                             col32,
                         ),
                     )
                 )
-            av, bv = load_fragments(stage)
-            for kh in range_constexpr(d.k_halves):
+            av, bv = load_fragments(read_stage)
+            for kh in range_constexpr(param.k_halves):
                 sa_words = packed_scale_finish(issued[kh][0])
                 sb_words = packed_scale_finish(issued[kh][1])
-                for ni in range_constexpr(d.mma_n_repeat):
-                    for mi in range_constexpr(d.mma_m_repeat):
+                for ni in range_constexpr(param.mma_n_repeat):
+                    for mi in range_constexpr(param.mma_m_repeat):
                         scaled_mma(
                             frag_C[(None, 0), mi, ni],
                             a_fragment(av, mi, kh),
@@ -1170,10 +1169,10 @@ def gemm_mxfp_gfx950_kernel(
                         )
             return
 
-        av, bv = load_fragments(stage)
-        for kh in range_constexpr(d.k_halves):
+        av, bv = load_fragments(read_stage)
+        for kh in range_constexpr(param.k_halves):
             scale_col = (
-                k_tile * fx.Int32(d.scale_row_bytes)
+                k_tile * fx.Int32(param.scale_row_bytes)
                 + fx.Int32(kh * (MXFP_MFMA_K // MXFP_SCALE_BLOCK_K))
                 + lane_grp
             )
@@ -1183,7 +1182,7 @@ def gemm_mxfp_gfx950_kernel(
                     block_m_offset + a_row_base + fx.Int32(mi * m_repeat_stride),
                     scale_col,
                 )
-                for mi in range_constexpr(d.mma_m_repeat)
+                for mi in range_constexpr(param.mma_m_repeat)
             ]
             sb_words = [
                 load_scale_word(
@@ -1191,10 +1190,10 @@ def gemm_mxfp_gfx950_kernel(
                     block_n_offset + b_row_base + fx.Int32(ni * n_repeat_stride),
                     scale_col,
                 )
-                for ni in range_constexpr(d.mma_n_repeat)
+                for ni in range_constexpr(param.mma_n_repeat)
             ]
-            for ni in range_constexpr(d.mma_n_repeat):
-                for mi in range_constexpr(d.mma_m_repeat):
+            for ni in range_constexpr(param.mma_n_repeat):
+                for mi in range_constexpr(param.mma_m_repeat):
                     scaled_mma(
                         frag_C[(None, 0), mi, ni],
                         a_fragment(av, mi, kh),
@@ -1214,18 +1213,18 @@ def gemm_mxfp_gfx950_kernel(
         k_tile = fx.Int32(kt)
         current_stage = k_tile % fx.Int32(stages)
         write_stage = (current_stage + fx.Int32(stages - 1)) % fx.Int32(stages)
-        __barrier((stages - 2) * d.ldg_wait_count)
+        __barrier((stages - 2) * param.ldg_wait_count)
         next_tile = k_tile + fx.Int32(stages - 1)
         async_load_b_to_lds(next_tile, write_stage)
         async_load_a_to_lds(next_tile, write_stage)
 
-        compute_stage(k_tile, current_stage)
+        compute_stage(current_stage, k_tile)
 
     current_stage = fx.Int32(main_loop_end % stages)
     for s in range_constexpr(stages - 1):
         k_tile = fx.Int32(main_loop_end + s)
-        __barrier((stages - 2 - s) * d.ldg_wait_count)
-        compute_stage(k_tile, current_stage)
+        __barrier((stages - 2 - s) * param.ldg_wait_count)
+        compute_stage(current_stage, k_tile)
         current_stage = (current_stage + fx.Int32(1)) % fx.Int32(stages)
 
     frag_C_out = fx.make_fragment_like(frag_C, out_elem)
