@@ -3114,9 +3114,7 @@ class TestBlockStateAbsorption(TestCase):
         device = outputs[0].device.index
 
         def check(live_data_ptrs):
-            return torch._C._xpu_checkPoolLiveAllocations(
-                device, pool, live_data_ptrs
-            )
+            return torch._C._xpu_checkPoolLiveAllocations(device, pool, live_data_ptrs)
 
         self.assertTrue(check({outputs[0].data_ptr()}))
         self.assertFalse(check({outputs[0].data_ptr(), 0}))
