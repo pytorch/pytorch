@@ -67,7 +67,6 @@ class _ProbeState:
 
     # id(value) -> picklable; without the memo a probe tree is exponential.
     cache: dict[int, bool] = dataclasses.field(default_factory=dict)
-    # Ids being probed right now, for cycle-breaking.
     inflight: set[int] = dataclasses.field(default_factory=set)
     # Whether a probe short-circuited on an in-flight id; such a verdict is
     # not cached as final but parked for the rest of the probe tree.
@@ -160,10 +159,9 @@ class AOTCompilePickler(FunctionPicklerBase):
             state.leaned = True
             return True
         probe = type(self)(self.external_data, io.BytesIO())
-        # One memo across the probe tree: probing a nested function re-probes
-        # its own annotations. Every probed value is owned by the function being
-        # pickled, which pickle keeps alive until dump() returns, so an id is not
-        # reused within one serialize().
+        # Every probed value is owned by the function being pickled, which pickle
+        # keeps alive until dump() returns, so an id is not reused within one
+        # serialize().
         probe._probe_state = state
         state.inflight.add(vid)
         leaned_before = state.leaned
@@ -184,7 +182,6 @@ class AOTCompilePickler(FunctionPicklerBase):
         finally:
             state.inflight.discard(vid)
         leaned = state.leaned
-        # A caller that consulted this value also leaned on whatever we did.
         state.leaned = leaned_before or leaned
         # A False that leaned on an in-flight True may be a false negative, so
         # it is not cached as final. It is parked for the rest of this probe
@@ -198,6 +195,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             state.parked[vid] = result
         if not state.inflight:
             state.parked.clear()
+            state.leaned = False
         return result
 
     def _pickleable_annotations(self, obj: Any) -> dict[str, Any]:
@@ -342,7 +340,7 @@ class AOTCompiledFunction:
         pickler = AOTCompilePickler(external_data or {}, buf)
         try:
             pickler.dump(state)
-        except (pickle.PicklingError, TypeError, AttributeError) as e:
+        except (pickle.PicklingError, TypeError, AttributeError, RecursionError) as e:
             # Preserve the original exception object -- callers and tests match
             # on it (e.g. "cannot pickle '_thread.lock' object") -- and append
             # guidance. Mutate args and re-raise rather than type(e)(msg): a
@@ -351,7 +349,9 @@ class AOTCompiledFunction:
             # constructor failure. AttributeError is caught too: the C _pickle
             # accelerator raises a bare AttributeError "Can't get local object"
             # for a <locals> class in a default/kwdefault (3.14+ raises
-            # PicklingError), so it needs the same guidance.
+            # PicklingError), so it needs the same guidance. RecursionError as
+            # well: a deep-but-finite value in an unpruned slot overflows the C
+            # pickler, and external_data is its fix too.
             message = str(e)
             prefix = f"{message}\n" if message else ""
             e.args = (

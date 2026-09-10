@@ -1172,6 +1172,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # And the state really did arrive, so a guard on the scope's shape
         # (DICT_KEYS_MATCH, len) still sees the module it was captured from.
         self.assertEqual(out.__globals__.keys(), g.keys())
+        self.assertIs(out.__globals__["__builtins__"], sys.modules["builtins"])
 
     def test_globals_snapshot_is_built_once_per_module_dict(self):
         # The snapshot prunes a whole module dict. Building one per function
@@ -1681,22 +1682,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_guard_rooted_at_fqn_mismatched_bound_method(self):
         # The undecorated forward bound directly: the method carries its
         # function explicitly (_reduce_bound_method), and that function is an
-        # fqn mismatch rebuilt by value.
+        # fqn mismatch rebuilt by value. The raw function also travels as an
+        # unguarded leaf, which only the source-site seed can keep whole.
         mod = DecoratedAttributeForwardModule()
         inner = type(mod).forward.__wrapped__
         bound = types.MethodType(inner, mod)
 
-        def fn(f, x):
+        def fn(g, f, x):
             if f.scale_flag == 2.0:
                 x = x + 1
             return f(x)
 
         x = torch.randn(3)
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, bound, x)
-        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, inner, bound, x)
+        self._test_check_fn(ref, loaded, {"g": inner, "f": bound, "x": x}, True)
         inner.scale_flag = 3.0
         try:
-            self._test_check_fn(ref, loaded, {"f": bound, "x": x}, False)
+            self._test_check_fn(ref, loaded, {"g": inner, "f": bound, "x": x}, False)
         finally:
             inner.scale_flag = 2.0
 

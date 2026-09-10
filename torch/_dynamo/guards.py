@@ -4404,7 +4404,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             }
             # The builtins module, not the sentinel: a function the rebuilt one
             # creates at call time reads its builtins from __globals__.
-            snapshot["__builtins__"] = builtins
+            if "__builtins__" in f_globals:
+                snapshot["__builtins__"] = builtins
             self._globals_snapshots[id(f_globals)] = snapshot
         return snapshot
 
