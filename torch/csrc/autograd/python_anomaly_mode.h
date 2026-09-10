@@ -14,8 +14,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
   static constexpr const char* ANOMALY_TRACE_KEY = "traceback_";
   static constexpr const char* ANOMALY_PARENT_KEY = "parent_";
 
-  // dict_ is a SafePyObject so destruction routes through
-  // PyInterpreter::decref instead of a hand-written destructor here.
+  // dict_ is a SafePyObject, so no hand-written destructor is needed.
   PyAnomalyMetadata()
       : dict_(
             [] {

@@ -27,8 +27,7 @@ struct PySavedVariableHooks : public SavedVariableHooks {
     return *data_;
   }
 
-  // SafePyObject destructs through PyInterpreter::decref, so no manual
-  // destructor is needed here.
+  // SafePyObject destructs through PyInterpreter::decref, no manual dtor.
   c10::SafePyObject pack_hook_;
   c10::SafePyObject unpack_hook_;
   std::optional<c10::SafePyObject> data_;

@@ -11805,6 +11805,39 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
 
+    def test_saved_tensor_hooks_pack_error_then_unpack(self):
+        # mark_dirty attaches grad_fn before packing runs, so a raising pack
+        # hook leaves a live tensor whose SavedVariable never finished.
+        class CustomError(Exception):
+            pass
+
+        class error_on_pack_hook(torch.autograd.graph.saved_tensors_hooks):
+            def __init__(self) -> None:
+                def pack_hook(x):
+                    raise CustomError("pack")
+
+                super().__init__(pack_hook, lambda x: x)
+
+        class MarkDirtyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                ctx.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                ctx.saved_tensors
+                return grad
+
+        a = torch.ones(2, requires_grad=True).clone()
+        with error_on_pack_hook():
+            with self.assertRaisesRegex(CustomError, "pack"):
+                MarkDirtyFunc.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, "call_pack_hook was not called"):
+            a.sum().backward()
+
     def test_saved_tensor_hooks_custom_function_intermediates(self):
         class Func(torch.autograd.Function):
             @staticmethod
