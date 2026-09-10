@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_str.py b/test/cpython/v3_13/test_str.py
-index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6a4604736 100644
+index 46673cc56adb3561c98bf4b49ffd758265d3e88c..613121c14a09f55f9d4af7d870902c220828a7de 100644
 --- a/test/cpython/v3_13/test_str.py
 +++ b/test/cpython/v3_13/test_str.py
 @@ -1,3 +1,57 @@
@@ -60,7 +60,17 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
  """ Test script for the Unicode implementation.
  
  Written by Marc-Andre Lemburg (mal@lemburg.com).
-@@ -73,14 +127,19 @@ class WithRepr:
+@@ -18,7 +72,8 @@ import unicodedata
+ import unittest
+ import warnings
+ from test.support import warnings_helper
+-from test import support, string_tests
++from test import support
++import string_tests
+ from test.support.script_helper import assert_python_failure
+ 
+ try:
+@@ -73,14 +128,19 @@ class WithRepr:
  
  class StrTest(string_tests.StringLikeTest,
          string_tests.MixinStrUnicodeTest,
@@ -81,7 +91,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      def checkequalnofix(self, result, object, methodname, *args):
          method = getattr(object, methodname)
          realresult = method(*args)
-@@ -594,6 +653,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -594,6 +654,7 @@ class StrTest(string_tests.StringLikeTest,
                                      left + delim * 2 + right,
                                      'replace', delim * 2, repl)
  
@@ -89,7 +99,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      @support.cpython_only
      def test_replace_id(self):
          pattern = 'abc'
-@@ -1006,6 +1066,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -1006,6 +1067,7 @@ class StrTest(string_tests.StringLikeTest,
          self.assertEqual('x'.center(4, '\U0010FFFF'),
                           '\U0010FFFFx\U0010FFFF\U0010FFFF')
  
@@ -97,7 +107,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      @unittest.skipUnless(sys.maxsize == 2**31 - 1, "requires 32-bit system")
      @support.cpython_only
      def test_case_operation_overflow(self):
-@@ -1655,6 +1716,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -1655,6 +1717,7 @@ class StrTest(string_tests.StringLikeTest,
          self.assertEqual('lhs %% %r' % SubclassedStr('rhs'),
                           "Success, self.__rmod__('lhs %% %r') was called")
  
@@ -105,7 +115,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      @support.cpython_only
      @unittest.skipIf(_testcapi is None, 'need _testcapi module')
      def test_formatting_huge_precision_c_limits(self):
-@@ -2457,11 +2519,13 @@ class StrTest(string_tests.StringLikeTest,
+@@ -2457,11 +2520,13 @@ class StrTest(string_tests.StringLikeTest,
      def test_expandtabs_overflows_gracefully(self):
          self.assertRaises(OverflowError, 't\tt\t'.expandtabs, sys.maxsize)
  
@@ -119,7 +129,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      def test_raiseMemError(self):
          asciifields = "nnb"
          compactfields = asciifields + "nP"
-@@ -2601,10 +2665,12 @@ class StrTest(string_tests.StringLikeTest,
+@@ -2601,10 +2666,12 @@ class StrTest(string_tests.StringLikeTest,
          self.assertTrue(astral >= bmp2)
          self.assertFalse(astral >= astral2)
  
@@ -132,7 +142,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      def test_check_encoding_errors(self):
          # bpo-37388: str(bytes) and str.decode() must check encoding and errors
          # arguments in dev mode
-@@ -2707,7 +2773,7 @@ class StrTest(string_tests.StringLikeTest,
+@@ -2707,7 +2774,7 @@ class StrTest(string_tests.StringLikeTest,
              str(b"x", "utf-8", "strict", errors="ignore")
  
  
@@ -141,7 +151,7 @@ index 46673cc56adb3561c98bf4b49ffd758265d3e88c..cb7b0043a06c9b5574684dcfe71325e6
      def test_formatter_parser(self):
          def parse(format):
              return list(_string.formatter_parser(format))
-@@ -2783,4 +2849,4 @@ class StringModuleTest(unittest.TestCase):
+@@ -2783,4 +2850,4 @@ class StringModuleTest(unittest.TestCase):
  
  
  if __name__ == "__main__":

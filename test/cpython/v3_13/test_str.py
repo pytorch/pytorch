@@ -72,7 +72,8 @@ import unicodedata
 import unittest
 import warnings
 from test.support import warnings_helper
-from test import support, string_tests
+from test import support
+import string_tests
 from test.support.script_helper import assert_python_failure
 
 try:
