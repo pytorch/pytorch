@@ -13651,8 +13651,8 @@ def ___make_guard_fn():
                     l[i] = t * x
                 return itertools.accumulate(l, builtin_op)
 
-            t_list = [torch.tensor([i + 1]) for i in range(4)]
-            x = torch.tensor([[1, 2], [3, 4]])
+            t_list = [torch.tensor([i + 1], device=device_type) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]], device=device_type)
             eager = fn(*t_list, x)
 
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -17120,11 +17120,11 @@ def forward(self, L_x_ : torch.Tensor):
             h = x * 2 + 1
             x_detached = h.detach().requires_grad_()
             chunksz = x_detached.shape[0] // 2
-            total_loss = torch.tensor(0.0)
+            total_loss = torch.tensor(0.0, device=x.device)
             for start in range(0, x_detached.shape[0], chunksz):
                 chunk = x_detached[start : start + chunksz]
                 chunk_targets = targets[start : start + chunksz]
-                logits = chunk @ torch.eye(chunk.shape[-1])
+                logits = chunk @ torch.eye(chunk.shape[-1], device=chunk.device)
                 loss = torch.nn.functional.cross_entropy(logits, chunk_targets)
                 loss.backward()
                 total_loss = total_loss + loss.detach()

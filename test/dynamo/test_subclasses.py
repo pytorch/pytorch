@@ -1527,7 +1527,9 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         def fn(x):
             return x.to("cpu")
 
-        x = torch.nn.Parameter(torch.randn(2, 2).as_subclass(MySubclass))
+        x = torch.nn.Parameter(
+            torch.randn(2, 2, device=device_type).as_subclass(MySubclass)
+        )
 
         fn_opt = compile_full_eager(fn)
 

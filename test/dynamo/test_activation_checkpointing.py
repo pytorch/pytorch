@@ -2259,7 +2259,7 @@ class GraphModule(torch.nn.Module):
                     y = self.fc2(h)
                     return OutputNode(y=y)
 
-            mlp = TinyMLP()
+            mlp = TinyMLP().to(device_type)
 
             def checkpointed_forward(inp):
                 return torch.utils.checkpoint.checkpoint(

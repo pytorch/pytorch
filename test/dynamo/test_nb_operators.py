@@ -16,6 +16,9 @@ from torch.testing._internal.common_utils import (
 from torch.utils._ordered_set import OrderedSet
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class UserDefinedDict(dict):
     pass
 
@@ -1696,8 +1699,8 @@ class TestNbAdd(torch._dynamo.test_case.TestCase):
             x += y
             return x
 
-        x = torch.randn(4, 4)
-        y = torch.randn(4, 4)
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x.clone(), y), fn(x.clone(), y))
 
@@ -1716,7 +1719,7 @@ class TestNbAdd(torch._dynamo.test_case.TestCase):
             x += 3
             return x
 
-        x = torch.randn(4)
+        x = torch.randn(4, device=device_type)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x.clone()), fn(x.clone()))
 
