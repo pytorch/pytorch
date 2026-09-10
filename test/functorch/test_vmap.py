@@ -72,7 +72,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
-    TEST_MPS,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1238,7 +1237,7 @@ class TestVmapAPI(TestCase):
 class TestVmapAPIDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _test_vmap_autocast(self, device):
+    def test_vmap_autocast(self, device):
         if torch.device(device).type == "cpu":
             amp_dtype = torch.bfloat16
         else:
@@ -1309,17 +1308,6 @@ class TestVmapAPIDevice(TestCase):
 
         if not expected.allclose(out):
             raise AssertionError("Expected func3 output to be close to vmap output")
-
-    def test_vmap_autocast_cpu(self):
-        self._test_vmap_autocast("cpu")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_vmap_autocast_cuda(self):
-        self._test_vmap_autocast("cuda")
-
-    @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
-    def test_vmap_autocast_mps(self):
-        self._test_vmap_autocast("mps")
 
 
 def slice_inputs(inputs, bdims, i):
@@ -6789,6 +6777,10 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         ):
             vmap(vmap(vmap(f)))(x)
 
+
+instantiate_device_type_tests(
+    TestVmapAPIDevice, globals(), only_for=("cpu", "cuda", "mps"), allow_mps=True
+)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
