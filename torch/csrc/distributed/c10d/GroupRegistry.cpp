@@ -15,9 +15,12 @@ class GroupRegistry {
  public:
   void register_group(
       const std::string& group_name,
-      c10::intrusive_ptr<c10d::ProcessGroup> group) {
+      const c10::intrusive_ptr<c10d::ProcessGroup>& group) {
     std::unique_lock write_lock(lock_);
-    auto [_, inserted] = registry_.try_emplace(group_name, std::move(group));
+    // By reference, not by value and moved: registry_ holds weak pointers and
+    // weak_intrusive_ptr only converts from a const intrusive_ptr&, so a move
+    // here never moved -- it just cost a refcount round trip per call.
+    auto [_, inserted] = registry_.try_emplace(group_name, group);
     TORCH_CHECK(
         inserted,
         "A process group is already registered under the name",
