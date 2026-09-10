@@ -3143,11 +3143,9 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented(
-                gb_type="Exception with bad expected type",
-                context=str(expected_exc_types),
-                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
-                hints=[*graph_break_hints.USER_ERROR],
+            exc.raise_type_error(
+                self,
+                "catching classes that do not inherit from BaseException is not allowed",
             )
 
         if sys.version_info >= (3, 11):
@@ -3175,11 +3173,9 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented(
-                    gb_type="Exception with non-type expectation",
-                    context=str(expected_type),
-                    explanation=f"`except ...` expects a non-type: {expected_type}.",
-                    hints=[*graph_break_hints.USER_ERROR],
+                exc.raise_type_error(
+                    self,
+                    "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
@@ -3299,6 +3295,9 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
+        # pyrefly: ignore [not-iterable]
+        if not all(isinstance(k, str) for k in kwargsvars):
+            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
