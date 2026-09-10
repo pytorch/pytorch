@@ -48,6 +48,8 @@ class UnaryOpTestCase(CPythonTestCase):
         self.assertTrue(eval("~" + nines) == ~(10**32-1))
 
     def test_negation_of_exponentiation(self):
+        # Make sure '**' does the right thing; these form a
+        # regression test for SourceForge bug #456756.
         self.assertEqual(-2 ** 3, -8)
         self.assertEqual((-2) ** 3, -8)
         self.assertEqual(-2 ** 4, -16)

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_unary.py b/test/cpython/v3_13/test_unary.py
-index a45fbf6bd6bc54b150c80902f09c8dcf0c0fc673..e2f8ba824a1c1a7aab9d14913d0412f6867544fa 100644
+index a45fbf6bd6bc54b150c80902f09c8dcf0c0fc673..0f5b7cb136145198a3f0e941cc7e95f084db5c8a 100644
 --- a/test/cpython/v3_13/test_unary.py
 +++ b/test/cpython/v3_13/test_unary.py
 @@ -1,8 +1,26 @@
@@ -30,16 +30,7 @@ index a45fbf6bd6bc54b150c80902f09c8dcf0c0fc673..e2f8ba824a1c1a7aab9d14913d0412f6
  
      def test_negative(self):
          self.assertTrue(-2 == 0 - 2)
-@@ -30,8 +48,6 @@ class UnaryOpTestCase(unittest.TestCase):
-         self.assertTrue(eval("~" + nines) == ~(10**32-1))
- 
-     def test_negation_of_exponentiation(self):
--        # Make sure '**' does the right thing; these form a
--        # regression test for SourceForge bug #456756.
-         self.assertEqual(-2 ** 3, -8)
-         self.assertEqual((-2) ** 3, -8)
-         self.assertEqual(-2 ** 4, -16)
-@@ -47,4 +63,4 @@ class UnaryOpTestCase(unittest.TestCase):
+@@ -47,4 +65,4 @@ class UnaryOpTestCase(unittest.TestCase):
  
  
  if __name__ == "__main__":
