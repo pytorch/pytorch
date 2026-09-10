@@ -308,12 +308,46 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
         rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
+        rhs_expr = str(rhs)
+        try:
+            float(rhs_expr)
+        except ValueError:
+            pass
+        else:
+            if CuteDSLOpOverrides._is_tensor_like(a):
+                return CuteDSLOpOverrides._apply_unary_op(a, f"({{x}} + {rhs_expr})")
         return CuteDSLOpOverrides.add(a, rhs)
 
     @staticmethod
+    def mul(a: Any, b: Any) -> Any:
+        rhs_expr = str(b)
+        try:
+            float(rhs_expr)
+        except ValueError:
+            pass
+        else:
+            if CuteDSLOpOverrides._is_tensor_like(a):
+                return CuteDSLOpOverrides._apply_unary_op(a, f"({{x}} * {rhs_expr})")
+        return CuteDSLOpOverrides.mul(a, b)
+
+    @staticmethod
     def sub(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
+        rhs = b if alpha == 1 else GemmEpilogueCuteDSLOpOverrides.mul(b, alpha)
         return CuteDSLOpOverrides.sub(a, rhs)
+
+    @staticmethod
+    def erf(x: Any) -> Any:
+        return CuteDSLOpOverrides._apply_unary_op(x, "erf({x})")
+
+    @staticmethod
+    def sigmoid(x: Any) -> Any:
+        return CuteDSLOpOverrides._apply_unary_op(x, "sigmoid({x})")
+
+    @staticmethod
+    def maximum(a: Any, b: Any) -> Any:
+        if CuteDSLOpOverrides._is_tensor_like(a) and str(b) in ("0", "0.0"):
+            return CuteDSLOpOverrides._apply_unary_op(a, "relu({x})")
+        return CuteDSLOpOverrides.maximum(a, b)
 
     @staticmethod
     def _to_copy(x: Any, *, dtype: torch.dtype, **kwargs: Any) -> Any:
@@ -326,7 +360,14 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
             raise NotImplementedError(
                 f"unsupported GEMM epilogue _to_copy kwargs: {unsupported_kwargs}"
             )
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+        return GemmEpilogueCuteDSLOpOverrides.to_dtype(x, dtype)
+
+    @staticmethod
+    def to_dtype(x: Any, dtype: torch.dtype, **kwargs: Any) -> Any:
+        x_cse = CuteDSLOpOverrides._get_cse_var(x)
+        if x_cse is not None and x_cse.dtype == dtype:
+            return x
+        return CuteDSLOpOverrides.to_dtype(x, dtype, **kwargs)
 
     @staticmethod
     def where(condition: Any, a: Any, b: Any) -> Any:
@@ -374,4 +415,4 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
 
     @staticmethod
     def convert_element_type(x: Any, dtype: torch.dtype) -> Any:
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+        return GemmEpilogueCuteDSLOpOverrides.to_dtype(x, dtype)

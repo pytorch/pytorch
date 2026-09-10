@@ -50,6 +50,7 @@ from cutlass.cute.nvgpu import cpasync, tcgen05
 
 log = common_efc.log
 
+from torch._inductor.kernel.gemm_epilogue import GEMM_REDUCTION_FRAGMENT_WIDTH
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -521,7 +522,13 @@ class PersistentDenseGemmEFCKernel:
                 )
                 or (
                     self.local_reduce_axis == 1
-                    and self.local_reduce_group > self.epi_tile_n
+                    and (
+                        self.local_reduce_group > GEMM_REDUCTION_FRAGMENT_WIDTH
+                        or (
+                            self.tensor_epilogue_returns_local_reduce
+                            and self.local_reduce_combine is not None
+                        )
+                    )
                 )
             )
         )
@@ -1363,6 +1370,10 @@ class PersistentDenseGemmEFCKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                mma_tile_offset_m = (
+                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                    + mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                )
 
                 # Slice the supplemental written tensors per MMA tile index.
                 self.efc.kernel.slice_written_tensors_per_mma_tile_index(
@@ -1480,10 +1491,7 @@ class PersistentDenseGemmEFCKernel:
                         output_m = cute.size(mA_mkl, mode=[0])
                         output_n = cute.size(mB_nkl, mode=[0])
                         for i in cutlass.range(cute.size(direct_flt), unroll_full=True):
-                            global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                + direct_coord_flt[i][0]
-                            )
+                            global_m = mma_tile_offset_m + direct_coord_flt[i][0]
                             global_n = (
                                 mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + direct_coord_flt[i][1]
@@ -1551,6 +1559,7 @@ class PersistentDenseGemmEFCKernel:
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[0] // group
                         )
+                        group_offset = mma_tile_coord_v * groups_per_cta
                         g_reduce: typing.Any = None
                         if cutlass.const_expr(local_reduce_tensor is not None):
                             m_reduce = local_reduce_tensor[
@@ -1558,7 +1567,7 @@ class PersistentDenseGemmEFCKernel:
                             ]
                             g_reduce = cute.local_tile(
                                 m_reduce,
-                                (groups_per_cta, self.cta_tile_shape_mnk[1]),
+                                (self.mma_tiler[0] // group, self.cta_tile_shape_mnk[1]),
                                 mma_tile_coord_mnl[:2],
                             )
                         limit_n = (
@@ -1612,8 +1621,11 @@ class PersistentDenseGemmEFCKernel:
                             row_idx = coord_flt[i][0]
                             n_idx = coord_flt[i][1]
                             group_idx = row_idx // group
+                            output_group_idx = group_idx + group_offset
                             global_group_idx = (
-                                mma_tile_coord_mnl[0] * groups_per_cta + group_idx
+                                mma_tile_coord_mnl[0]
+                                * (self.mma_tiler[0] // group)
+                                + output_group_idx
                             )
                             group_value = reduced_flt[i]
                             group_warp_start = group_idx * group_warps
@@ -1653,7 +1665,7 @@ class PersistentDenseGemmEFCKernel:
                                     and n_idx < limit_n
                                     and global_group_idx < limit_groups
                                 ):
-                                    g_reduce[group_idx, n_idx] = group_value
+                                    g_reduce[output_group_idx, n_idx] = group_value
                         if cutlass.const_expr(group > lanes_in_m):
                             epilogue_sync_barrier.arrive_and_wait()
                         if cutlass.const_expr(self.local_reduce_feeds_main):
@@ -1704,11 +1716,7 @@ class PersistentDenseGemmEFCKernel:
                                 for i in cutlass.range(
                                     cute.size(normalized_flt), unroll_full=True
                                 ):
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + coord_flt[i][0]
-                                    )
+                                    global_m = mma_tile_offset_m + coord_flt[i][0]
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
@@ -1754,11 +1762,7 @@ class PersistentDenseGemmEFCKernel:
                                 for i in cutlass.range(
                                     cute.size(secondary_flt), unroll_full=True
                                 ):
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + coord_flt[i][0]
-                                    )
+                                    global_m = mma_tile_offset_m + coord_flt[i][0]
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
@@ -1863,14 +1867,11 @@ class PersistentDenseGemmEFCKernel:
                             ]
                             g_reduce = cute.local_tile(
                                 m_reduce,
-                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                        limit_m = min(
-                            cute.size(mA_mkl, mode=[0])
-                            - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                            self.cta_tile_shape_mnk[0],
-                        )
+                        row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                        limit_m = cute.size(mA_mkl, mode=[0])
                         limit_groups = (
                             cute.size(local_reduce_tensor, mode=[2])
                             if cutlass.const_expr(local_reduce_tensor is not None)
@@ -1879,7 +1880,10 @@ class PersistentDenseGemmEFCKernel:
                         for i in cutlass.range(cute.size(acc_flt), unroll_full=True):
                             row_idx = coord_flt[i][0]
                             n_idx = coord_flt[i][1]
-                            logical_row = row_idx
+                            output_row = row_idx + row_offset
+                            global_row = (
+                                mma_tile_coord_mnl[0] * self.mma_tiler[0] + output_row
+                            )
                             group_idx = (
                                 subtile_n_idx // fragments_per_group
                                 if cutlass.const_expr(group > fragment_n)
@@ -1899,7 +1903,7 @@ class PersistentDenseGemmEFCKernel:
                                     )
                                     == 0
                                 )
-                                and logical_row < limit_m
+                                and global_row < limit_m
                                 and global_group_idx < limit_groups
                             ):
                                 reduced = self.local_reduce_init
@@ -1935,11 +1939,9 @@ class PersistentDenseGemmEFCKernel:
                                             fragment_idx = (
                                                 subtile_n_idx % fragments_per_group
                                             )
-                                            sLocalReduce[logical_row, fragment_idx] = (
-                                                reduced
-                                            )
+                                            sLocalReduce[row_idx, fragment_idx] = reduced
                                     elif n_idx % group == 0:
-                                        g_reduce[logical_row, group_idx] = reduced
+                                        g_reduce[output_row, group_idx] = reduced
                         if cutlass.const_expr(group > fragment_n):
                             fragment_idx = subtile_n_idx % fragments_per_group
                             partial = local_reduce_partial.load()
@@ -1979,6 +1981,11 @@ class PersistentDenseGemmEFCKernel:
                                 ):
                                     row_idx = store_coord_flt[i][0]
                                     n_idx = store_coord_flt[i][1]
+                                    output_row = row_idx + row_offset
+                                    global_row = (
+                                        mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                                        + output_row
+                                    )
                                     group_idx = subtile_n_idx // fragments_per_group
                                     global_group_idx = (
                                         mma_tile_coord_mnl[1] * groups_per_cta
@@ -1986,12 +1993,12 @@ class PersistentDenseGemmEFCKernel:
                                     )
                                     if (
                                         n_idx % fragment_n == 0
-                                        and row_idx < limit_m
+                                        and global_row < limit_m
                                         and global_group_idx < limit_groups
                                     ):
                                         value = final_flt[i]
                                         value = self.local_reduce_finalize(value, group)
-                                        g_reduce[row_idx, group_idx] = value
+                                        g_reduce[output_row, group_idx] = value
                         if cutlass.const_expr(
                             local_reduce_secondary_feed_tensor is not None
                             and self.local_reduce_secondary_consumer is not None
@@ -2001,10 +2008,7 @@ class PersistentDenseGemmEFCKernel:
                             for i in cutlass.range(
                                 cute.size(acc_flt), unroll_full=True
                             ):
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + acc_coord_flt[i][0]
-                                )
+                                global_m = mma_tile_offset_m + acc_coord_flt[i][0]
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + acc_coord_flt[i][1]
@@ -2039,11 +2043,7 @@ class PersistentDenseGemmEFCKernel:
                                 for i in cutlass.range(
                                     cute.size(acc_flt), unroll_full=True
                                 ):
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + acc_coord_flt[i][0]
-                                    )
+                                    global_m = mma_tile_offset_m + acc_coord_flt[i][0]
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
@@ -2081,6 +2081,9 @@ class PersistentDenseGemmEFCKernel:
                             epilogue_context.local_reduce.to(self.acc_dtype)
                         )
                         returned_flt = cute.filter_zeros(returned_fragment)
+                        returned_fragment_width = cutlass.const_expr(
+                            cute.size(epilogue_context.local_reduce.shape, mode=[0])
+                        )
                         returned_coordinates = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
                             epi_tile=epi_tile,
@@ -2089,6 +2092,69 @@ class PersistentDenseGemmEFCKernel:
                             reference_src=False,
                         )[(None, None, None, 0, subtile_idx)]
                         returned_coord_flt = cute.filter_zeros(returned_coordinates)
+                        if cutlass.const_expr(
+                            group > returned_fragment_width
+                        ):
+                            _, warp_layout_mn = get_lane_warp_layouts(
+                                tiled_copy_t2r, reference_src=False
+                            )
+                            physical_group = cutlass.const_expr(
+                                min(group, epi_tile_n)
+                            )
+                            group_warps = cutlass.const_expr(
+                                physical_group // returned_fragment_width
+                            )
+                            warp_n = warp_layout_mn[1]
+                            warps_in_n = cutlass.const_expr(cute.size(warp_n))
+                            assert group_warps <= warps_in_n
+                            epilogue_warp_idx = cute.arch.make_warp_uniform(
+                                epi_tidx // cute.arch.WARP_SIZE
+                            )
+                            warp_n_idx = warp_layout_mn.get_hier_coord(
+                                epilogue_warp_idx
+                            )[1]
+                            for i in cutlass.range(
+                                cute.size(returned_flt), unroll_full=True
+                            ):
+                                row_idx = returned_coord_flt[i][0]
+                                n_idx = returned_coord_flt[i][1]
+                                local_group_idx = (
+                                    n_idx % epi_tile_n
+                                ) // physical_group
+                                group_warp_start = local_group_idx * group_warps
+                                group_warp_idx = warp_n_idx - group_warp_start
+                                if (
+                                    n_idx % returned_fragment_width == 0
+                                    and group_warp_idx > 0
+                                    and group_warp_idx < group_warps
+                                ):
+                                    sLocalReduce[row_idx, group_warp_idx - 1] = (
+                                        returned_flt[i]
+                                    )
+                            epilogue_sync_barrier.arrive_and_wait()
+                            for i in cutlass.range(
+                                cute.size(returned_flt), unroll_full=True
+                            ):
+                                row_idx = returned_coord_flt[i][0]
+                                n_idx = returned_coord_flt[i][1]
+                                local_group_idx = (
+                                    n_idx % epi_tile_n
+                                ) // physical_group
+                                group_warp_start = local_group_idx * group_warps
+                                if (
+                                    n_idx % physical_group == 0
+                                    and warp_n_idx == group_warp_start
+                                ):
+                                    value = returned_flt[i]
+                                    for warp_offset in cutlass.range_constexpr(
+                                        1, group_warps
+                                    ):
+                                        value = self.local_reduce_combine(
+                                            value,
+                                            sLocalReduce[row_idx, warp_offset - 1],
+                                        )
+                                    returned_flt[i] = value
+                            epilogue_sync_barrier.arrive_and_wait()
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[1] // group
                         )
@@ -2097,14 +2163,11 @@ class PersistentDenseGemmEFCKernel:
                         ]
                         g_reduce = cute.local_tile(
                             m_reduce,
-                            (self.cta_tile_shape_mnk[0], groups_per_cta),
+                            (self.mma_tiler[0], groups_per_cta),
                             mma_tile_coord_mnl[:2],
                         )
-                        limit_m = min(
-                            cute.size(local_reduce_tensor, mode=[1])
-                            - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                            self.cta_tile_shape_mnk[0],
-                        )
+                        row_offset = mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                        limit_m = cute.size(local_reduce_tensor, mode=[1])
                         limit_groups = cute.size(local_reduce_tensor, mode=[2])
                         if cutlass.const_expr(group > epi_tile_n):
                             n_subtiles = cutlass.const_expr(
@@ -2153,6 +2216,11 @@ class PersistentDenseGemmEFCKernel:
                                 ):
                                     row_idx = store_coord_flt[i][0]
                                     n_idx = store_coord_flt[i][1]
+                                    output_row = row_idx + row_offset
+                                    global_row = (
+                                        mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                                        + output_row
+                                    )
                                     group_idx = subtile_n_idx // fragments_per_group
                                     global_group_idx = (
                                         mma_tile_coord_mnl[1] * groups_per_cta
@@ -2160,13 +2228,13 @@ class PersistentDenseGemmEFCKernel:
                                     )
                                     if (
                                         n_idx % epi_tile_n == 0
-                                        and row_idx < limit_m
+                                        and global_row < limit_m
                                         and global_group_idx < limit_groups
                                     ):
                                         value = self.local_reduce_finalize(
                                             final_flt[i], group
                                         )
-                                        g_reduce[row_idx, group_idx] = value.to(
+                                        g_reduce[output_row, group_idx] = value.to(
                                             local_reduce_tensor.element_type
                                         )
                         else:
@@ -2175,16 +2243,26 @@ class PersistentDenseGemmEFCKernel:
                             ):
                                 row_idx = returned_coord_flt[i][0]
                                 n_idx = returned_coord_flt[i][1]
+                                output_row = row_idx + row_offset
+                                global_row = (
+                                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                                    + output_row
+                                )
                                 group_idx = n_idx // group
                                 global_group_idx = (
                                     mma_tile_coord_mnl[1] * groups_per_cta + group_idx
                                 )
                                 if (
                                     n_idx % group == 0
-                                    and row_idx < limit_m
+                                    and global_row < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    g_reduce[row_idx, group_idx] = returned_flt[i].to(
+                                    value = returned_flt[i]
+                                    if cutlass.const_expr(
+                                        self.local_reduce_finalize is not None
+                                    ):
+                                        value = self.local_reduce_finalize(value, group)
+                                    g_reduce[output_row, group_idx] = value.to(
                                         local_reduce_tensor.element_type
                                     )
                     if cutlass.const_expr(
@@ -2237,12 +2315,13 @@ class PersistentDenseGemmEFCKernel:
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[0] // group
                         )
+                        group_offset = mma_tile_coord_v * groups_per_cta
                         m_reduce = local_reduce_tensor[
                             mma_tile_coord_mnl[2], None, None
                         ]
                         g_reduce = cute.local_tile(
                             m_reduce,
-                            (groups_per_cta, self.cta_tile_shape_mnk[1]),
+                            (self.mma_tiler[0] // group, self.cta_tile_shape_mnk[1]),
                             mma_tile_coord_mnl[:2],
                         )
                         limit_n = min(
@@ -2283,8 +2362,11 @@ class PersistentDenseGemmEFCKernel:
                             row_idx = coord_flt[i][0]
                             n_idx = coord_flt[i][1]
                             group_idx = row_idx // group
+                            output_group_idx = group_idx + group_offset
                             global_group_idx = (
-                                mma_tile_coord_mnl[0] * groups_per_cta + group_idx
+                                mma_tile_coord_mnl[0]
+                                * (self.mma_tiler[0] // group)
+                                + output_group_idx
                             )
                             group_value = reduced_flt[i]
                             group_warp_start = group_idx * group_warps
@@ -2314,7 +2396,7 @@ class PersistentDenseGemmEFCKernel:
                                 group_value = self.local_reduce_finalize(
                                     group_value, group
                                 )
-                                g_reduce[group_idx, n_idx] = group_value.to(
+                                g_reduce[output_group_idx, n_idx] = group_value.to(
                                     local_reduce_tensor.element_type
                                 )
                         if cutlass.const_expr(group > lanes_in_m):
@@ -2507,7 +2589,7 @@ class PersistentDenseGemmEFCKernel:
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
         sC: cute.Tensor,
-        dtype: type[cutlass.Numeric],
+        dtype: type[cutlass.Numeric] | None = None,
     ) -> tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
         """Make tiledCopy for global memory store, then use it to:
         - partition register array (source) and global memory (destination) for non-TMA store version;

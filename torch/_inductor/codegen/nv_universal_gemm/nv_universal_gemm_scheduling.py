@@ -257,6 +257,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         return NVGemmVerticalFusionDecision.REJECT
 
     @staticmethod
+    def _supports_scalar_reduce() -> bool:
+        try:
+            from cutlass.operators.providers.cutedsl.evt import converter
+        except ImportError:
+            return False
+        return callable(getattr(converter, "make_scalar_reduce", None))
+
+    @staticmethod
     def _lower_pointwise_epilogue(
         gemm_name: str,
         nodes: Sequence[BaseSchedulerNode],
@@ -268,6 +276,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if len(buffers) != len(nodes):
             raise NotImplementedError("NVGEMM epilogue nodes must be computed buffers")
         try:
+            return CutlassEVTCodegen.ir_to_evt_python_code(
+                gemm_name,
+                list(nodes),
+                removed_buffers,
+                fn_name=EPILOGUE_FN_NAME,
+                as_standalone_function=True,
+            )
+        except NotImplementedError:
             return LoopIRCuteDSLCodegen.from_buffers(
                 gemm_name,
                 buffers,
@@ -275,14 +291,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 EPILOGUE_FN_NAME,
                 reduction_geometries,
                 suppressed_outputs,
-            )
-        except NotImplementedError:
-            return CutlassEVTCodegen.ir_to_evt_python_code(
-                gemm_name,
-                list(nodes),
-                removed_buffers,
-                fn_name=EPILOGUE_FN_NAME,
-                as_standalone_function=True,
             )
 
     def _can_fuse_epilogue_impl(
@@ -356,6 +364,9 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             variant == GemmVariant.SCALED_GEMM for variant in variants
         )
         reduction_plan = epilogue_program.reduction_plan
+        if reduction_plan is not None and not self._supports_scalar_reduce():
+            log.debug("NVGEMM local reductions require scalar reduction support")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and self._uses_swap_ab(ir_node):
             log.debug("NVGEMM swap_ab does not support fused local reductions")
             return NVGemmVerticalFusionDecision.DEFER
@@ -508,7 +519,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     ir_node.get_name(),
                     codegen_nodes,
                     trial_removed_buffers,
-                    epilogue_program.generated_reduction_geometries,
+                    {
+                        name: geometry
+                        for name, geometry in epilogue_program.generated_reduction_geometries.items()
+                        if any(
+                            isinstance(node.node, ComputedBuffer) and node.node.get_name() == name
+                            for node in codegen_nodes
+                        )
+                    },
                     suppressed_outputs,
                 )
                 trial_reads = lowered_epilogue.reads
@@ -566,6 +584,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             ):
                 continue
             program = self._lower_epilogue(producer, (node1, node2))
+            if (
+                program.reduction_plan is not None
+                and not self._supports_scalar_reduce()
+            ):
+                return True
             if program.has_unclaimed_reduction:
                 return True
         return False
@@ -593,6 +616,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
+        if self.is_nv_universal_gemm_template(
+            node1
+        ) or self.is_nv_universal_gemm_fused_template(node1):
+            return -1
+
         has_reduction = any(
             isinstance(node.node, ComputedBuffer)
             and isinstance(node.node.data, Reduction)
@@ -658,6 +686,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         ]
         combined_program = self._lower_epilogue(template, (*epilogue_nodes, node2))
         if not combined_program.supported:
+            return False
+        if (
+            combined_program.reduction_plan is not None
+            and not self._supports_scalar_reduce()
+        ):
             return False
         feed_main_ordered = combined_program.feeds_main and (
             bool(epilogue_nodes)
@@ -838,6 +871,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             scheduler = V.graph.scheduler
             try:
                 reduction_plan = self._schedule_reduction_plan(epilogue_program)
+                if reduction_plan is not None and not self._supports_scalar_reduce():
+                    raise NotImplementedError(
+                        "cutlass.operators lacks scalar reduction support"
+                    )
                 if feeds_main:
                     if reduction_plan is None:
                         raise AssertionError("expected feed-main reduction plan")
@@ -893,7 +930,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         original_buffer_name,
                         codegen_nodes,
                         removed_buffers_with_gemm,
-                        epilogue_program.generated_reduction_geometries,
+                        {
+                            name: geometry
+                            for name, geometry in epilogue_program.generated_reduction_geometries.items()
+                            if any(
+                                isinstance(node.node, ComputedBuffer) and node.node.get_name() == name
+                                for node in codegen_nodes
+                            )
+                        },
                         suppressed_outputs,
                     )
                     if feeds_main and reduction_plan is not None:
