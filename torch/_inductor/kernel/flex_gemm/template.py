@@ -34,6 +34,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     feeds_main: bool = False
     combine: str | None = None
     finalize: str | None = None
+    finalize_operands: tuple[str, ...] = ()
     store_finalize: str | None = None
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
@@ -55,6 +56,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             local_reduce.feeds_main,
             source.local_reduce_combine,
             source.local_reduce_finalize,
+            source.local_reduce_finalize_operands,
             source.local_reduce_store_finalize,
             source.local_reduce_prepass_combine,
             source.local_reduce_prepass_finalize,
@@ -153,8 +155,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
 
             def {self.kernel_name}_precompile(**metadata):
                 # Compile workers cannot initialize CUDA; the template caller
-                # precompiles each choice's pinned QuACK kernel from the parent
-                # through Inductor's pool instead (see FlexGemmEpilogueCaller).
+                # compiles each choice's pinned QuACK kernel in-process instead
+                # (see FlexGemmEpilogueCaller.precompile).
                 pass
             """
         )
@@ -194,6 +196,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         plan += f", combine={local_reduce.combine!r}"
         if local_reduce.finalize is not None:
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
+        if local_reduce.finalize_operands:
+            plan += f", finalize_operands={local_reduce.finalize_operands!r}"
         if local_reduce.store_finalize is not None:
             plan += (
                 ", store_finalize="
