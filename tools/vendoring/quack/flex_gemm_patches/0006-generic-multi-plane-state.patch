@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index f108578..6a4c151 100644
+index 76d6f17..a73a355 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -61,2 +61,3 @@ guesses about vectorization.
@@ -8,31 +8,21 @@ index f108578..6a4c151 100644
 +  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
 +  ``sink_arity``; arity greater than one means the fn returns a tuple of
 +  independently collected value planes for the sink to combine.
-@@ -369,9 +370,6 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
--            value = result[name]
--            # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
--            planes = value if isinstance(value, tuple) else (value,)
--            fragments = []
--            for plane in planes:
--                fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
--                fragment.store(plane)
--                fragments.append(fragment)
--            sink_tmps.append(fragments[0] if len(fragments) == 1 else tuple(fragments))
-+            planes = []
-+            for value in self._value_planes(name, ops_by_name[name].sink_arity, result[name]):
-+                plane = cute.make_rmem_tensor(value.shape, value.element_type)
-+                plane.store(value)
-+                planes.append(plane)
-+            sink_tmps.append(tuple(planes))
-@@ -470 +468,3 @@ class EpiMod:
+@@ -359,2 +359,0 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+-        planes = value if isinstance(value, tuple) else (value,)
+@@ -362 +361 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-        for plane in planes:
++        for plane in self._value_planes(op.name, op.sink_arity, value):
+@@ -500 +499,3 @@ class EpiMod:
 -            if getattr(op, "scaled", False) and self.mode == "acc_pair":
 +            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
 +                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
 +            if op.sink_arity > 1 and self.mode == "acc_pair":
-@@ -472 +472 @@ class EpiMod:
+@@ -502 +503 @@ class EpiMod:
 -                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
 +                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
-@@ -474,0 +475,8 @@ class EpiMod:
+@@ -504,0 +506,8 @@ class EpiMod:
 +        for name in self.prepass_outs:
 +            op = self.ops.get(name)
 +            if op is None:
@@ -41,7 +31,7 @@ index f108578..6a4c151 100644
 +                raise ValueError(
 +                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
 +                )
-@@ -803 +811 @@ class EpiMod:
+@@ -833 +842 @@ class EpiMod:
 -                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
 +                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
