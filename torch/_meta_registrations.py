@@ -8282,11 +8282,6 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return torch.empty_like(self)
 
 
-@register_meta(aten.nan_to_num_)
-def nan_to_num_(self, nan=None, posinf=None, neginf=None):
-    return self
-
-
 @register_meta(torch.ops.aten.transpose_)
 def transpose_(self, dim0, dim1):
     if self.layout in {

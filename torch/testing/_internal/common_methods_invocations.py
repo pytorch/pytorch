@@ -24197,7 +24197,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
-        dtypes=all_types_and(torch.half, torch.bool, torch.bfloat16),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
