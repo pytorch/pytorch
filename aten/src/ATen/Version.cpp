@@ -10,7 +10,7 @@
 #endif
 
 #if AT_MKLDNN_ACL_ENABLED()
-#include <arm_compute/core/Version.h>
+#include <arm_compute/AclVersion.h>
 #endif
 
 #include <caffe2/core/common.h>
@@ -50,7 +50,8 @@ std::string get_mkldnn_version() {
          << " (Git Hash " << ver->hash << ')';
     }
     #if AT_MKLDNN_ACL_ENABLED()
-      ss << " with ACL v" << ARM_COMPUTE_VERSION_STR;
+      const AclVersion* ver = AclVersionInfo();
+      ss << " with ACL v" << ver->major << '.' << ver->minor << '.' << ver->patch;
     #endif
   #else
     ss << "MKLDNN not found";
