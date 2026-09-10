@@ -568,10 +568,11 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
 
     Category: Accelerator-AGNOSTIC
 
-    These tests profile a real workload on whatever accelerator is available
-    and validate trace properties that are hardware-independent (autograd
-    sequence IDs). Any backend that can run a ResNet50 training loop will
-    exercise these tests.
+    These tests profile a real workload on the accelerator under test and
+    validate trace properties that are hardware-independent (autograd sequence
+    IDs). The rules themselves are backend-neutral, so any backend that can run
+    a ResNet50 training loop belongs here -- add it to the ``only_for`` list
+    below once someone has actually run these tests on it.
 
     Instantiated per device type via ``instantiate_device_type_tests``.
     """
@@ -595,7 +596,10 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
 
 
 instantiate_device_type_tests(
-    TestTraceValidatorE2EAgnosticDevice, globals(), except_for=("cpu",)
+    TestTraceValidatorE2EAgnosticDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
