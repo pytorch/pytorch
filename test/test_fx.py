@@ -76,11 +76,14 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
+    IS_ARM64,
+    IS_LINUX,
     IS_WINDOWS,
-    run_tests,
-    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    run_tests,
+    skipIfTorchDynamo,
+    xfailIf,
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -2190,6 +2193,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                         f"got {tensor_meta[1].shape}"
                     )
 
+    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
