@@ -112,8 +112,9 @@ class SerializedCode:
 
 
 def _instance_dict(obj: Any) -> dict[str, Any] | None:
-    """obj.__dict__ read through the plain slot, so a user __getattr__ on a
-    __slots__ receiver never runs; None when there is no instance dict."""
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
     try:
         d = object.__getattribute__(obj, "__dict__")
     except AttributeError:
@@ -126,12 +127,11 @@ class FunctionPicklerBase(pickle.Pickler):
 
     GuardsStatePickler is the first subclass; the AOT pickler in
     torch/_dynamo/aot_compile.py is rebuilt on this base next. Both rebuild the
-    same kinds of objects
-    that pickle cannot do by reference: code objects, closure cells, python
-    modules, bound methods, and functions rebuilt from their code object. Each
-    subclass keeps its own dispatch and decides what a rebuilt function carries;
-    this class fixes HOW it is rebuilt so a fix in one pickler cannot be missed
-    in the other.
+    same kinds of objects that pickle cannot do by reference: code objects,
+    closure cells, python modules, bound methods, and functions rebuilt from
+    their code object. Each subclass keeps its own dispatch and decides what a
+    rebuilt function carries; this class fixes HOW it is rebuilt so a fix in one
+    pickler cannot be missed in the other.
 
     Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
