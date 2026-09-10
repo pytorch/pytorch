@@ -820,6 +820,31 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("not picklable", msg)
         self.assertIn("external_data", msg)
 
+    def test_save_fails_loudly_on_a_helpers_unpicklable_kwdefault(self):
+        # The BC break: a nested helper's __kwdefaults__ now travel with it (the
+        # helper must be a local here so fn closes over it and it rides in the
+        # runtime env), so an unpicklable keyword default fails the save with
+        # guidance instead of being dropped.
+        def outer():
+            def helper(x, *, lock=threading.Lock()):
+                return x * 2
+
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile(((torch.randn(3),), {}))
+        with self.assertRaises((TypeError, pickle.PicklingError)) as cm:
+            compiled_fn.save_compiled_function(self.path())
+        msg = str(cm.exception)
+        self.assertIn("cannot pickle", msg)
+        self.assertIn("kwdefault", msg)
+        self.assertIn("external_data", msg)
+
     def test_aot_compile_prunes_functools_wraps_wrapped(self):
         # functools.wraps writes __wrapped__ into the wrapper's __dict__, so a
         # helper that merely decorates another function drags the wrapped one
