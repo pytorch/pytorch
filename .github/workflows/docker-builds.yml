@@ -31,7 +31,12 @@ permissions:
   contents: read
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   docker-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240

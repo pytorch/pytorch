@@ -27,6 +27,7 @@ aspects of contributing to PyTorch.
     - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+  - [Skip CI while iterating](#skip-ci-while-iterating)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -503,6 +504,27 @@ ghstack submit
 **NB**: It is not recommended to use this workflow unless you are also using
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
+
+### Skip CI while iterating
+
+Prefix your PR title with `[no-ci]` to disable CI while iterating, for example
+`[no-ci] Add a new operator`. The prefix is checked on PR runs and on runs
+triggered by `ciflow/*` labels, including when those labels trigger CI again
+after a push. A short `check-ci` job fails with an explanation before the
+build, test, and lint jobs start. This failure keeps the PR from being merged
+without CI. PR administration, such as CLA and mergeability checks, still runs.
+
+The prefix must be in the title when the run starts; adding it does not cancel
+CI that is already running. To enable CI, remove the prefix and push a new
+commit. You can also rerun the failed workflows: the check reads the current
+PR title each time. Branch CI, such as `main` and nightly runs, is unaffected.
+
+With `ghstack`, the initial PR title comes from your commit subject. Once the
+PR exists, you can edit its title on GitHub, and normal `ghstack` updates
+preserve it, so you do not need to repeat the prefix on each update.
+`ghstack -u` replaces the PR title from the commit subject, so keep the prefix
+there too if you use that option. This is separate from GitHub's `[no ci]`
+commit-message directive, which applies only to the commit that contains it.
 
 ## Merging your Change
 If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.

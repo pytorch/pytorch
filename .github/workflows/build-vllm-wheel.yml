@@ -21,7 +21,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build-wheel:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     strategy:
       fail-fast: false
@@ -139,10 +144,14 @@ jobs:
               && tar -C /tmp -xzf /tmp/sccache.tar.gz \
               && mv /tmp/sccache-*/sccache /usr/local/bin/sccache || echo "sccache unavailable; building without it"
           fi
-          command -v sccache >/dev/null && sccache --show-stats || true
+          if command -v sccache >/dev/null; then
+            sccache --show-stats || true
+          fi
 
           "${PYTHON_EXECUTABLE}" setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
-          command -v sccache >/dev/null && sccache --show-stats || true
+          if command -v sccache >/dev/null; then
+            sccache --show-stats || true
+          fi
 
       - name: Prepare vLLM wheel
         working-directory: ${{ runner.temp }}/artifacts

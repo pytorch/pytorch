@@ -24,7 +24,12 @@ permissions:
   contents: read
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   build:
+    needs: check-ci
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: "windows-11-arm64-preview"

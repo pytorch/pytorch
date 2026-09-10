@@ -14,7 +14,16 @@ concurrency:
 permissions: read-all
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+
   macos-py3-arm64-build:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml

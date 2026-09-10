@@ -32,12 +32,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
   # Builds every Python version sequentially on a single runner. libtorch_cpu
   # is Python-ABI-free and shared across iterations via `build/` — only
   # libtorch_python + _C are recompiled per interpreter (~5 min each after the
   # first ~80 min full build), thanks to the Python-cache invalidation in
   # tools/setup_helpers/cmake.py.
   wheel-build:
+    needs: check-ci
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-26-xlarge
     timeout-minutes: 280
@@ -86,7 +90,9 @@ jobs:
         # One command, parallel downloads of everything in DESIRED_PYTHONS.
         # Cached under ~/.local/share/uv/python/; the build script's per-
         # iteration `uv python install <ver>` becomes a cache hit.
-        run: uv python install $DESIRED_PYTHONS
+        run: |
+          read -ra python_versions <<< "${DESIRED_PYTHONS}"
+          uv python install "${python_versions[@]}"
       - name: Build all wheels
         run: |
           # Per-Python build now delocates inline (repair_wheel.py); no

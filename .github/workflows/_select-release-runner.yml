@@ -20,7 +20,11 @@ on:
         value: ${{ jobs.select.outputs.arm64 }}
 
 jobs:
+  check-ci:
+    uses: ./.github/workflows/_check-ci.yml
+
   select:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-24.04
     outputs:
