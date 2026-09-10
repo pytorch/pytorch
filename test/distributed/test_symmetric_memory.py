@@ -45,12 +45,14 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     setup_torchcomms_pg,
     skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
     skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI350_ARCH,
     parametrize,
     requires_cuda,
     requires_cuda_p2p_access,
@@ -2594,6 +2596,12 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # rendezvous succeeds but barrier_kernel's first atomic on the peer's signal
+    # pad memory-faults; passes on gfx950 outside those runners and on the mi300
+    # runners with the same image. Skipped on that arch until the runner P2P
+    # path is understood.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_large_alloc_barrier(self):
         # alloc() only zeros the signal pad, not the whole (much larger) data

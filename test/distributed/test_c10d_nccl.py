@@ -61,6 +61,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
     skip_if_rocm_ver_atleast_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
@@ -69,6 +70,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI350_ARCH,
     IS_LINUX,
     IS_SANDCASTLE,
     parametrize,
@@ -4676,6 +4678,13 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_single(output, t)
 
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # symmetric-memory rendezvous succeeds but the first device-side atomic on
+    # the peer's signal pad in one_shot_all_reduce never completes and the test
+    # hangs; passes on gfx950 outside those runners and on the mi300 runners
+    # with the same image. Skipped on that arch until the runner P2P path is
+    # understood.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(
