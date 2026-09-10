@@ -9,11 +9,14 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 from torch._inductor.test_case import run_tests
+from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfTorchDynamo,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
@@ -21,10 +24,94 @@ from torch.testing._internal.common_utils import (
 @instantiate_parametrized_tests
 class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
     @staticmethod
+    def _generated_fn_body(code, signature):
+        start = code.index(signature)
+        indent = start - (code.rfind("\n", 0, start) + 1)
+        lines = code[start:].split("\n")
+        body = [lines[0]]
+        for line in lines[1:]:
+            if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                break
+            body.append(line)
+        return "\n".join(body)
+
+    @staticmethod
     def _empty_graph_module():
         graph = torch.fx.Graph()
         graph.output(())
         return torch.fx.GraphModule({}, graph)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize("parent_max_autotune", (False, True))
+    @parametrize("nested_max_autotune", (False, True))
+    def test_nested_region_inductor_config_max_autotune(
+        self, parent_max_autotune, nested_max_autotune
+    ):
+        """Check GEMM backend selection in both forward and backward code."""
+        if not IS_BIG_GPU:
+            self.skipTest("requires a GPU with Triton GEMM template support")
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"max_autotune": nested_max_autotune},
+            bw_inductor_config_patches={"max_autotune": nested_max_autotune},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x, y):
+            return x @ y
+
+        def fn(x, y, a, b):
+            # Keep the otherwise identical regional and parent GEMMs separate.
+            return torch.cat((region(x, y), a @ b))
+
+        inputs = [
+            torch.randn(128, 128, device=GPU_TYPE, requires_grad=True) for _ in range(4)
+        ]
+        with torch.no_grad():
+            expected = fn(*inputs)
+
+        with torch._inductor.config.patch(max_autotune=parent_max_autotune):
+            result, codes = run_fw_bw_and_get_code(
+                lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
+            )
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(codes), 2)
+        fw_code, bw_code = codes
+        regions_and_settings = (
+            (
+                self._generated_fn_body(fw_code, "def partitioned_fw_subgraph_0_0("),
+                nested_max_autotune,
+            ),
+            (
+                self._generated_fn_body(fw_code, "    def call(self, args):"),
+                parent_max_autotune,
+            ),
+            (
+                self._generated_fn_body(bw_code, "def partitioned_bw_subgraph_0_0("),
+                nested_max_autotune,
+            ),
+            (
+                self._generated_fn_body(bw_code, "    def call(self, args):"),
+                parent_max_autotune,
+            ),
+        )
+        for code, max_autotune in regions_and_settings:
+            expected_backend = "triton_tem_" if max_autotune else "extern_kernels.mm"
+            unexpected_backend = "extern_kernels.mm" if max_autotune else "triton_tem_"
+            self.assertIn(expected_backend, code)
+            self.assertNotIn(unexpected_backend, code)
 
     def test_invalid_inductor_config(self):
         """Test that invalid inductor config keys are caught with a clear error."""
