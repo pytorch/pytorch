@@ -14,7 +14,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_chunk_cat_mixed_native.h>
 #include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/split_with_sizes_copy_native.h>
@@ -706,17 +705,6 @@ void _mixed_dtype_chunk_cat_out_cuda_contiguous(
   for (const auto& tensor : tensors) {
     src_dtypes.push_back(static_cast<int64_t>(tensor.scalar_type()));
   }
-  std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
-      tensors[0].sizes(),
-      dim,
-      num_chunks,
-      chunk_size,
-      out.element_size());
-  at::native::resize_output(out, view_sizes);
-  at::assert_no_internal_overlap(out);
-  for (const Tensor& tensor : tensors) {
-    at::assert_no_overlap(out, tensor);
-  }
   auto packed = pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
@@ -727,6 +715,13 @@ void _mixed_dtype_chunk_cat_out_cuda_contiguous(
        &num_blocks_per_tensor_chunk,
        &src_dtypes},
       device);
+  std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
+      tensors[0].sizes(),
+      dim,
+      num_chunks,
+      chunk_size,
+      out.element_size());
+  at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
   detail::mixed_dtype_chunk_cat_cuda_kernel<<<
@@ -936,13 +931,24 @@ Tensor& _chunk_cat_out_cuda(
     int64_t dim,
     int64_t num_chunks,
     Tensor& out) {
-  dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  dim = at::native::preprocess_chunk_cat_inputs(
+      tensors, dim, num_chunks, /*require_same_dtype=*/false);
   TORCH_CHECK(
       tensors[0].device() == out.device(),
       "_chunk_cat_out_cuda: mismatch between input and out tensor devices");
-  bool both_input_output_contiguous =
-      detail::all_contiguous(tensors) && out.is_non_overlapping_and_dense();
+  const bool all_inputs_contiguous = detail::all_contiguous(tensors);
+  const bool both_input_output_contiguous =
+      all_inputs_contiguous && out.is_non_overlapping_and_dense();
+  const bool all_inputs_same_dtype = std::all_of(
+      tensors.begin(), tensors.end(), [&](const Tensor& tensor) {
+        return tensor.dtype() == tensors[0].dtype();
+      });
+  const auto is_supported_mixed_dtype = [](ScalarType dtype) {
+    return dtype == ScalarType::Half || dtype == ScalarType::BFloat16 ||
+        dtype == ScalarType::Float || dtype == ScalarType::Double;
+  };
   if (both_input_output_contiguous &&
+      all_inputs_same_dtype &&
       (tensors[0].dtype() == at::ScalarType::BFloat16) &&
       (out.dtype() == at::ScalarType::Float)) {
     // _chunk_cat_out_cuda_contiguous should also support other types, thanks to
@@ -956,7 +962,27 @@ Tensor& _chunk_cat_out_cuda(
         out.element_size(),
         tensors[0].element_size());
   } else if (
-      both_input_output_contiguous && tensors[0].dtype() == out.dtype()) {
+      !all_inputs_same_dtype && all_inputs_contiguous && out.is_contiguous() &&
+      is_supported_mixed_dtype(out.scalar_type()) &&
+      std::all_of(tensors.begin(), tensors.end(), [&](const Tensor& tensor) {
+        return is_supported_mixed_dtype(tensor.scalar_type());
+      })) {
+    at::assert_no_internal_overlap(out);
+    for (const Tensor& tensor : tensors) {
+      at::assert_no_overlap(out, tensor);
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        out.scalar_type(),
+        "mixed_dtype_chunk_cat_cuda",
+        [&] {
+          detail::_mixed_dtype_chunk_cat_out_cuda_contiguous<scalar_t>(
+              tensors, dim, num_chunks, out);
+        });
+  } else if (
+      both_input_output_contiguous && all_inputs_same_dtype &&
+      tensors[0].dtype() == out.dtype()) {
     // Type-agnostic copy since out and input tensors have the same type.
     detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors,
@@ -968,73 +994,6 @@ Tensor& _chunk_cat_out_cuda(
   } else {
     at::native::_chunk_cat_out(tensors, dim, num_chunks, out);
   }
-  return out;
-}
-
-static Tensor& _chunk_cat_mixed_out_cuda_impl(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    ScalarType dtype,
-    Tensor& out) {
-  TORCH_CHECK(
-      tensors[0].device() == out.device(),
-      "_chunk_cat_mixed_out_cuda: mismatch between input and out tensor devices");
-  TORCH_CHECK_TYPE(
-      out.scalar_type() == dtype,
-      "_chunk_cat_mixed expected out dtype ",
-      dtype,
-      " but got ",
-      out.scalar_type());
-  const auto is_supported_dtype = [](ScalarType scalar_type) {
-    return scalar_type == ScalarType::Half ||
-        scalar_type == ScalarType::BFloat16 ||
-        scalar_type == ScalarType::Float ||
-        scalar_type == ScalarType::Double;
-  };
-  const bool use_fast_path = detail::all_contiguous(tensors) &&
-      out.is_contiguous() && is_supported_dtype(dtype) &&
-      std::all_of(tensors.begin(), tensors.end(), [&](const Tensor& tensor) {
-        return is_supported_dtype(tensor.scalar_type());
-      });
-  if (use_fast_path) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        dtype,
-        "mixed_dtype_chunk_cat_cuda",
-        [&] {
-          detail::_mixed_dtype_chunk_cat_out_cuda_contiguous<scalar_t>(
-              tensors, dim, num_chunks, out);
-        });
-  } else {
-    at::native::_chunk_cat_mixed_out(
-        tensors, dim, num_chunks, dtype, out);
-  }
-  return out;
-}
-
-Tensor& _chunk_cat_mixed_out_cuda(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    ScalarType dtype,
-    Tensor& out) {
-  dim = at::native::preprocess_mixed_dtype_chunk_cat_inputs(
-      tensors, dim, num_chunks);
-  return _chunk_cat_mixed_out_cuda_impl(
-      tensors, dim, num_chunks, dtype, out);
-}
-
-Tensor _chunk_cat_mixed_cuda(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    ScalarType dtype) {
-  dim = at::native::preprocess_mixed_dtype_chunk_cat_inputs(
-      tensors, dim, num_chunks);
-  Tensor out = at::empty({0}, tensors[0].options().dtype(dtype));
-  _chunk_cat_mixed_out_cuda_impl(tensors, dim, num_chunks, dtype, out);
   return out;
 }
 

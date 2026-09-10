@@ -85,6 +85,10 @@ CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumprod.out"),
 }
 
+# The functional _chunk_cat overload has no dtype argument, so its inputs must
+# be converted to the out dtype when functionalizing _chunk_cat.out.
+CHUNK_CAT_OUT = OperatorName.parse("_chunk_cat.out")
+
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
 # - gen_functionalization_definition
@@ -644,6 +648,33 @@ def maybe_replace_cumulative_out_dtype_exprs(
     return adjusted_exprs
 
 
+def maybe_replace_chunk_cat_out_exprs(
+    f: NativeFunction,
+    functional_sig: DispatcherSignature,
+    functional_exprs: list[str],
+) -> list[str]:
+    if f.func.name != CHUNK_CAT_OUT:
+        return functional_exprs
+
+    tensors_arg_idx = next(
+        (
+            i
+            for i, arg in enumerate(functional_sig.arguments())
+            if arg.name == "tensors"
+        ),
+        None,
+    )
+    if tensors_arg_idx is None or len(f.func.arguments.out) != 1:
+        raise AssertionError(f"Unexpected _chunk_cat.out schema: {f.func}")
+    adjusted_exprs = functional_exprs.copy()
+    tensors_expr = adjusted_exprs[tensors_arg_idx]
+    adjusted_exprs[tensors_arg_idx] = (
+        f"cast_tensor_list_to_dtype({tensors_expr}, "
+        f"{f.func.arguments.out[0].name}_.scalar_type())"
+    )
+    return adjusted_exprs
+
+
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -716,6 +747,9 @@ def emit_inplace_functionalization_body(
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
     functional_exprs = maybe_replace_cumulative_out_dtype_exprs(
+        f, functional_sig, functional_exprs
+    )
+    functional_exprs = maybe_replace_chunk_cat_out_exprs(
         f, functional_sig, functional_exprs
     )
 

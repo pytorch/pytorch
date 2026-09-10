@@ -38,7 +38,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_chunk_cat_mixed_native.h>
 #include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
@@ -3332,40 +3331,8 @@ Tensor& _chunk_cat_out(
     int64_t dim,
     int64_t num_chunks,
     Tensor& out) {
-  auto wrapped_dim =
-      at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
-  at::cat_out(
-      out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim + 1);
-  return out;
-}
-
-Tensor _chunk_cat_mixed(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    ScalarType dtype) {
-  auto wrapped_dim = at::native::preprocess_mixed_dtype_chunk_cat_inputs(
-      tensors, dim, num_chunks);
-  Tensor out = at::empty({0}, tensors[0].options().dtype(dtype));
-  at::cat_out(
-      out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim + 1);
-  return out;
-}
-
-Tensor& _chunk_cat_mixed_out(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    ScalarType dtype,
-    Tensor& out) {
-  auto wrapped_dim = at::native::preprocess_mixed_dtype_chunk_cat_inputs(
-      tensors, dim, num_chunks);
-  TORCH_CHECK_TYPE(
-      out.scalar_type() == dtype,
-      "_chunk_cat_mixed expected out dtype ",
-      dtype,
-      " but got ",
-      out.scalar_type());
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(
+      tensors, dim, num_chunks, /*require_same_dtype=*/false);
   at::cat_out(
       out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim + 1);
   return out;

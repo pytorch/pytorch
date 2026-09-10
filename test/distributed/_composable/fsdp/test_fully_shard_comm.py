@@ -46,7 +46,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2109,40 +2108,9 @@ class TestMixedDtypeChunkCat(TestCase):
         ]
         fp32_inputs = [tensor.float() for tensor in inputs]
         expected = torch._chunk_cat(fp32_inputs, dim=dim, num_chunks=num_chunks)
-        actual = torch._chunk_cat_mixed(
-            inputs, dim=dim, num_chunks=num_chunks, dtype=torch.float32
-        )
+        actual = torch.empty_like(expected)
+        torch.ops.fsdp.chunk_cat(inputs, dim=dim, num_chunks=num_chunks, out=actual)
         self.assertEqual(actual, expected)
-
-        out = torch.empty_like(expected)
-        torch.ops.fsdp.chunk_cat_mixed(
-            inputs,
-            dim=dim,
-            num_chunks=num_chunks,
-            dtype=out.dtype,
-            out=out,
-        )
-        self.assertEqual(out, expected)
-
-    def test_mixed_dtype_chunk_cat_checks_out_dtype(self, device):
-        inputs = [
-            torch.arange(3, device=device, dtype=torch.bfloat16),
-            torch.arange(4, device=device, dtype=torch.float32),
-        ]
-        out = torch.empty((2, 2), device=device, dtype=torch.bfloat16)
-        with self.assertRaisesRegex(TypeError, "expected out dtype Float"):
-            torch._chunk_cat_mixed(
-                inputs, dim=0, num_chunks=2, dtype=torch.float32, out=out
-            )
-
-    def test_legacy_chunk_cat_rejects_mixed_dtypes(self, device):
-        inputs = [
-            torch.arange(3, device=device, dtype=torch.bfloat16),
-            torch.arange(4, device=device, dtype=torch.float32),
-        ]
-        out = torch.empty((2, 2), device=device)
-        with self.assertRaisesRegex(RuntimeError, "same dtype"):
-            torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
 
     def test_mixed_dtype_chunk_cat_functionalization(self, device):
         inputs = [
@@ -2155,25 +2123,12 @@ class TestMixedDtypeChunkCat(TestCase):
         out = torch.empty_like(expected)
 
         def func(tensors, output):
-            torch._chunk_cat_mixed(
-                tensors,
-                dim=0,
-                num_chunks=2,
-                dtype=output.dtype,
-                out=output,
-            )
+            torch._chunk_cat(tensors, dim=0, num_chunks=2, out=output)
             return output
 
         actual = torch.func.functionalize(func)(inputs, out)
         self.assertEqual(actual, expected)
         self.assertEqual(out, expected)
-
-        graph = make_fx(torch.func.functionalize(func))(inputs, out)
-        call_targets = {
-            node.target for node in graph.graph.nodes if node.op == "call_function"
-        }
-        self.assertIn(torch.ops.aten._chunk_cat_mixed.default, call_targets)
-        self.assertNotIn(torch.ops.aten._to_copy.default, call_targets)
 
     @onlyCUDA
     def test_mixed_dtype_chunk_cat_noncontiguous_out(self, device):
@@ -2184,7 +2139,7 @@ class TestMixedDtypeChunkCat(TestCase):
         expected = torch.tensor([[1, 3], [2, 4]], device=device, dtype=torch.float32)
         out = torch.empty((2, 2), device=device).t()
 
-        torch._chunk_cat_mixed(inputs, dim=0, num_chunks=2, dtype=out.dtype, out=out)
+        torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
 
         self.assertEqual(out, expected)
 
@@ -2197,9 +2152,7 @@ class TestMixedDtypeChunkCat(TestCase):
         ]
 
         with self.assertRaisesRegex(RuntimeError, "single memory location"):
-            torch._chunk_cat_mixed(
-                inputs, dim=0, num_chunks=2, dtype=out.dtype, out=out
-            )
+            torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
 
 
 instantiate_device_type_tests(
