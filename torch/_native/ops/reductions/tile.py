@@ -101,9 +101,7 @@ class TileMap:
         return self.vec * itemsize if self.wide_ok else itemsize
 
     def strides(self):
-        """(lane, w, l) column strides -- the ORDER lives here and nowhere else. The two orders read
-        the same elements into the same registers, swapping only the `l` and `w` strides.
-        """
+        """(lane, warp, load) strides; warp_major swaps the warp/load assignment."""
         if self.tpr == 1:
             return (0, 0, self.vec)
         wle = WARP * self.vec  # columns one warp covers in one load
@@ -112,10 +110,7 @@ class TileMap:
         return (self.vec, wle, wle * self.nw)
 
     def col_base(self, lane, w, l: int, warp_stride=None):
-        """Column of element 0 of this thread's load `l`. Returns a PYTHON INT when the offset is
-        entirely compile-time: a static offset lets the compiler prove alignment and emit the wide
-        load, where the same number wrapped in Int32 silently costs 3x.
-        """
+        """First column of load `l`; preserve static ints so the compiler proves alignment."""
         s_lane, s_w, s_l = self.strides()
         if warp_stride is not None:
             # Caller supplies the per-warp stride; 0 means the warp offset is already folded
@@ -1096,8 +1091,8 @@ class TileReduce:
             )
             part_stride = Int32(1)
         else:
-            # COL: (P, C) partials put this chunk's columns in row `by`; (C, P) interleaves
-            # them per column, which a block-per-column stage 2 needs (see kernel_coltile).
+            # COL: (P, C) stores this chunk's columns in row `by`; (C, P) interleaves
+            # partials per column for block-per-column combination.
             part_base = (
                 Int32(by) * (nchunks * const_expr(self.nslots)) + out_base
                 if const_expr(self.pc)

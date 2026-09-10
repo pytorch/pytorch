@@ -1,6 +1,5 @@
 # Owner(s): ["module: dsl-native-ops"]
-# Tests for hw_caps arithmetic over device properties, checked for internal consistency
-# and against hand-computed values; the remaining machinery runs only inside kernels.
+# Host-side hardware-capability arithmetic and per-device caching.
 
 import sys
 import unittest
@@ -9,7 +8,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
-# Guard before importing hw_caps, which transitively imports cutlass, to avoid collection errors.
 if not TEST_CUTEDSL:
     sys.stderr.write("CuTeDSL not available\n")
     if __name__ == "__main__":
