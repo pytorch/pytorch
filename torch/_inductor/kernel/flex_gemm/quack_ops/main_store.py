@@ -35,21 +35,17 @@ class GroupedMainStore(TileStore):
 
     supports_swap_ab = False
 
-    def __init__(self, name, group, paired=False):
+    def __init__(self, name, group):
         if group not in (2, 4):
             raise ValueError("GroupedMainStore supports group 2 or 4")
-        if paired and group != 2:
-            raise ValueError("paired GroupedMainStore supports group 2 only")
         epi_tile_fn = (
             _grouped_main_epi_tile_2 if group == 2 else _grouped_main_epi_tile_4
         )
         super().__init__(name, epi_tile_fn=epi_tile_fn)
         self.group = group
-        self.paired = paired
-        self.paired_output_bytes = (1, 2) if paired else None
 
     def config_key(self):
-        return (self.group, self.paired, *super().config_key())
+        return (self.group, *super().config_key())
 
     def output_n(self, n):
         """Return the contracted logical output N extent."""
@@ -93,8 +89,6 @@ class GroupedMainStore(TileStore):
         layout = cutlass.utils.LayoutEnum.from_tensor(tensor)
         if not layout.is_n_major_c():
             raise ValueError("grouped main output must be N-major")
-        if self.paired and not (gemm.d_layout is None or gemm.d_layout.is_n_major_c()):
-            raise AssertionError("paired grouped main output requires an N-major D")
         setattr(gemm, self._layout_gemm_attr(), layout)
         setattr(gemm, self._dtype_gemm_attr(), tensor.element_type)
         epi_tile = _contract_epi_tile_n(gemm.epi_tile, self.group)

@@ -34,6 +34,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     feeds_main: bool = False
     combine: str | None = None
     finalize: str | None = None
+    finalize_operands: tuple[str, ...] = ()
     store_finalize: str | None = None
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
@@ -55,6 +56,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             local_reduce.feeds_main,
             source.local_reduce_combine,
             source.local_reduce_finalize,
+            source.local_reduce_finalize_operands,
             source.local_reduce_store_finalize,
             source.local_reduce_prepass_combine,
             source.local_reduce_prepass_finalize,
@@ -76,7 +78,6 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
-        fragmentwise: Whether the generated function consumes a complete TensorSSA fragment.
         tuned: Whether QuACK should autotune this call.
     """
 
@@ -91,7 +92,6 @@ class FlexGemmEpilogueConfig:
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
-    fragmentwise: bool
     tuned: bool
 
 
@@ -191,6 +191,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         plan += f", combine={local_reduce.combine!r}"
         if local_reduce.finalize is not None:
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
+        if local_reduce.finalize_operands:
+            plan += f", finalize_operands={local_reduce.finalize_operands!r}"
         if local_reduce.store_finalize is not None:
             plan += (
                 ", store_finalize="
@@ -213,10 +215,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
-        kwargs = [
-            f", fragmentwise={config.fragmentwise!r}",
-            f", tuned={config.tuned!r}",
-        ]
+        kwargs = [f", tuned={config.tuned!r}"]
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
         if epilogue_args:
