@@ -767,7 +767,7 @@ void initPythonBindings(PyObject* module) {
       case torch::unwind::Mode::dladdr:
         return "dladdr";
     }
-    TORCH_CHECK(false, "unknown symbolize mode");
+    TORCH_CHECK_VALUE(false, "unknown symbolize mode");
   });
   // directly convert address pointers to frames, used for testing symbolize
   m.def(
