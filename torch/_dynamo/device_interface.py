@@ -218,7 +218,13 @@ class DeviceInterface:
         return cls.Stream is not DeviceInterface.Stream
 
     @staticmethod
-    def allow_tf32(*, size_threshold: bool = True) -> bool:
+    def allow_tf32() -> bool:
+        """Whether the backend permits reduced-precision FP32 matmul in Triton.
+
+        For third-party Triton backends this reflects the backend-specific
+        reduced-precision FP32 mode (not necessarily NVIDIA TF32). Inductor
+        may apply additional shape heuristics at the call site.
+        """
         return False
 
     @classmethod
@@ -374,10 +380,8 @@ class CudaInterface(DeviceInterface):
         )
 
     @staticmethod
-    def allow_tf32(*, size_threshold: bool = True) -> bool:
-        return (
-            torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-        )
+    def allow_tf32() -> bool:
+        return torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -597,7 +601,7 @@ class XpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def allow_tf32(*, size_threshold: bool = True) -> bool:
+    def allow_tf32() -> bool:
         return torch.backends.mkldnn.allow_tf32
 
     @staticmethod

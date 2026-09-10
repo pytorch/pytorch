@@ -2412,20 +2412,21 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ) -> dict[str, Any]:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
         device_type = kernel_inputs.device_type
-        size_threshold = True
+        try:
+            iface = get_interface_for_device(device_type)
+            allow_tf32 = iface.allow_tf32()
+        except NotImplementedError:
+            allow_tf32 = False
+
         if device_type == "cuda":
+            m, n, k = kernel_inputs.mnk_symbolic()
             # allow_tf32 alignment heuristics based on reverse engineering
             # H100 CUDA 12.8 behavior
             size_threshold = V.graph.sizevars.statically_known_true(
                 sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
             )
-        try:
-            iface = get_interface_for_device(device_type)
-            allow_tf32 = iface.allow_tf32(size_threshold=size_threshold)
-        except NotImplementedError:
-            allow_tf32 = False
+            allow_tf32 = allow_tf32 and size_threshold
 
         extra_kwargs = {
             "ALLOW_TF32": allow_tf32,
