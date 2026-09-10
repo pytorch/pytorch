@@ -133,7 +133,7 @@ def _direct_cutedsl_epilogue(metadata):
                 )
             result_values = results[:-1]
             if efc_config.phase == common_efc.EFC.Phase.ThreadOperation:
-                efc_config.epilogue_context.local_reduce = results[-1]
+                efc_config.epilogue_context.local_reduce.store(results[-1])
         elif len(outputs) == 1:
             result_values = (results,)
         else:
