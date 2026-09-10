@@ -507,8 +507,7 @@ class RingBuffer {
 
 static char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
-// BlockState, SegmentState, and PrivatePoolState contain the information
-// needed to reconstruct a private pool to a previous state.
+
 struct BlockState {
   c10::DeviceIndex device = 0;
   sycl::queue* queue = nullptr;
@@ -1983,6 +1982,7 @@ class DeviceCachingAllocator {
     freeBlocksAllocatedToPool(private_pool, rr);
 
     std::unordered_map<void*, Block*> ptrs_to_blocks;
+
     for (Block* block : private_pool->small_blocks.blocks) {
       ptrs_to_blocks[block->ptr] = block;
     }
