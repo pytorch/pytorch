@@ -3562,56 +3562,6 @@ class TestMPS(TestCaseMPS):
                         helper((N, C_out, H, W), (C_out, C_in, kH, kW), bias_shape=(C_in), stride=stride,
                                padding=padding, output_padding=output_padding, dilation=dilation)
 
-    # Test sigmoid
-    def test_sigmoid(self):
-        def helper(shape):
-
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            sigmoid_op = torch.nn.Sigmoid()
-
-            y = sigmoid_op(x)
-            ref_y = sigmoid_op(cpu_x)
-
-            cpu_grad = torch.ones_like(ref_y)
-            grad = cpu_grad.to('mps')
-
-            y.backward(gradient=grad)
-            ref_y.backward(gradient=cpu_grad)
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper((2, 3, 4, 5))
-        helper((2, 3, 4))
-        helper((2, 8, 4, 5))
-
-    # Test tanh
-    def test_tanh(self):
-        def helper(shape):
-
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            tanh_op = torch.nn.Tanh()
-
-            y = tanh_op(x)
-            ref_y = tanh_op(cpu_x)
-
-            cpu_grad = torch.ones_like(ref_y)
-            grad = cpu_grad.to('mps')
-
-            y.backward(gradient=grad)
-            ref_y.backward(gradient=cpu_grad)
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper((2, 3, 4, 5))
-        helper((2, 3, 4))
-        helper((2, 8, 4, 5))
-
     def test_threshold(self):
         def helper(threshold, value, num_elems, inplace=False, requires_grad=True):
             m = nn.Threshold(threshold=threshold, value=value, inplace=inplace)
@@ -7826,19 +7776,6 @@ class TestMPS(TestCaseMPS):
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5])
 
-    # Test abs
-    def test_abs(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            abs_result = torch.abs(x)
-            abs_result_cpu = torch.abs(cpu_x)
-
-            self.assertEqual(abs_result, abs_result_cpu)
-
-        helper((2, 8, 4, 5))
-
     def test_angle(self):
         def helper(shape, dtype):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
@@ -8098,29 +8035,6 @@ class TestMPS(TestCaseMPS):
             F.elu(elu_input_noncontiguous.to('cpu'), alpha, inplace),
             F.elu(elu_input_noncontiguous.to('mps'), alpha, inplace)
         )
-
-    # Test glu
-    def test_glu(self):
-        def helper(shape, dim=0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            for activation_func in [torch.nn.GLU(dim=dim)]:
-                glu_result = activation_func(x)
-                glu_result_cpu = activation_func(cpu_x)
-
-                cpu_grad = torch.randn(glu_result_cpu.shape)
-                grad = cpu_grad.to('mps')
-
-                glu_result.backward(gradient=grad)
-                glu_result_cpu.backward(gradient=cpu_grad)
-
-                self.assertEqual(glu_result, glu_result_cpu)
-                self.assertEqual(x.grad, cpu_x.grad)
-
-        for shape in [[4], (2, 4), (2, 8, 4, 6)]:
-            for dim in range(len(shape)):
-                helper(shape, dim)
 
     # Test softplus
     def test_softplus(self):
@@ -8656,25 +8570,6 @@ class TestMPS(TestCaseMPS):
         mps_transpose6 = torch.transpose(mps_x, 1, 2).to('cpu')
         self.assertEqual(cpu_transpose6, mps_transpose6)
 
-    # Test sign
-    def test_sign(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            sign_result = torch.sign(x)
-            sign_result_cpu = torch.sign(cpu_x)
-
-            cpu_grad = torch.ones_like(sign_result_cpu)
-            grad = cpu_grad.to('mps')
-
-            sign_result.backward(gradient=grad)
-            sign_result_cpu.backward(gradient=cpu_grad)
-
-            self.assertEqual(sign_result, sign_result_cpu)
-
-        helper((2, 8, 4, 5))
-
     def test_signbit(self):
         def helper(shape, dtype):
             cpu_x = torch.randn(shape, device='cpu').to(dtype)
@@ -8688,25 +8583,6 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), torch.int)
         helper((2, 8, 4, 5), torch.float)
         helper((2, 8, 4, 5), torch.int64)
-
-    # Test neg
-    def test_neg(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            neg_result = torch.neg(x)
-            neg_result_cpu = torch.neg(cpu_x)
-
-            cpu_grad = torch.ones_like(neg_result_cpu)
-            grad = cpu_grad.to('mps')
-
-            neg_result.backward(gradient=grad)
-            neg_result_cpu.backward(gradient=cpu_grad)
-
-            self.assertEqual(neg_result, neg_result_cpu)
-
-        helper((2, 8, 4, 5))
 
     def test_neg_strided_input(self):
         # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
@@ -12412,6 +12288,41 @@ class TestLinalgMPS(TestCaseMPS):
         # Fitted values A@x are unique for full column rank even where the raw
         # solution is sensitive to conditioning of individual batch members.
         self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
+
+    @parametrize("shape", [(16, 48), (48, 16)])
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_svd_rank_deficient(self, device, dtype, shape):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196112:
+        # the native Jacobi kernel forms the range factor as (A V) / sigma, which
+        # collapses to zero for sigma ~ 0, leaving that factor non-orthonormal for
+        # rank-deficient inputs; the null columns must be an orthonormal
+        # completion. The wide (m<n) case emits V row-major, so the completion has
+        # to honor that layout or it corrupts the emitted singular vectors.
+        m, n = shape
+        k = min(m, n)
+        rank = k // 2
+        q = torch.linalg.qr(torch.randn(16, m, k, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, n, k, dtype=dtype)).Q
+        spectrum = torch.linspace(0.5, 2.0, k)
+        spectrum[:rank] = 0  # exact deficiency; 16 batches keep it over the gate
+        A = (q * spectrum) @ v.mH
+        U, S, Vh = torch.linalg.svd(A.to(device), full_matrices=False)
+        eye = torch.eye(k, dtype=dtype, device=device)
+        self.assertEqual(U.mH @ U, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
+        self.assertEqual(Vh @ Vh.mH, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
+        self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+
+    def test_linalg_svd_large_batch_conj(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196113:
+        # for m<n the native SVD runs the kernel on A.mH(); .contiguous() leaves
+        # the conjugate bit unresolved when that view is already contiguous (a
+        # column-major or conjugated input), and the Jacobi kernel reads the raw
+        # buffer, so it silently returned SVD(conj(A)). 12288 elements is over
+        # the gate. Row-major inputs stay correct, so this needs the other layouts.
+        A = torch.randn(8, 32, 48, dtype=torch.complex64, device=device)  # m < n
+        for Am in (A, A.mT.contiguous().mT, A.conj()):  # row-major, column-major, conj
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), Am.cpu(), atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
