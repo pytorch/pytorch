@@ -1,8 +1,6 @@
-# COLUMN reduction (dim 0 of a contiguous 2D input): a DRIVER over tile.TileReduce, owning the
-# measured launch policy and the plan cache. It differs from the row case in two ways -- one
-# output per THREAD with no lane merge, and vectorization along the KEPT axis. The REDUCED axis
-# must be split or the reduction carries no parallelism: unsplit, (65536, 256) took 7830us
-# against ATen's 15.8.
+# Column-reduction driver for tile.TileReduce, with launch policy and plan cache.
+# Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
+# axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 
 from cutlass import Int32
 
@@ -19,38 +17,29 @@ _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
 
-# Rows per chunk of the reduced axis. MEASURED: the optimal split factor is a constant ~64
-# ROWS per chunk across every shape, not a constant P -- capping P instead left the
-# tall-narrow case at a quarter of the throughput.
+# About 64 reduced rows per chunk was consistently optimal; fixed P cut tall-narrow
+# throughput to one quarter.
 _Q_TARGET = 64
 _P_MAX = 4096
-# Stage 2's work mapping. Block-per-column wins while C is small enough that C blocks is not
-# itself the cost, thread-per-column once C/nt alone fills the device; the crossover measured
-# between 4096 and 16384.
+# Use blocks per column below the measured 4096-16384 crossover, then threads per column.
 _C_THREAD_STAGE2 = 8192
-# Columns per thread. Here `vec` sets the load width AND the live ACCUMULATOR count, a tension
-# the row case does not have. Capped at 4: bf16 at 8 is 0.77-0.83x of 4.
+# vec controls both load width and live accumulators; cap at 4 because bf16 vec 8 is 0.77-0.83x.
 _VEC_MAX = 4
-# Threads per block, SMALL on purpose: a block covers nt column-chunks, so a wide block idles
-# most of its threads whenever the column count is short, and the reduced-axis split already
-# supplies blocks. Measured 17.3us at nt=256 against 9.9 at 64 on the tall-narrow case.
-#
-# 32 for 1- and 2-field traits and 64 for 3-field, from an interleaved A/B against the
-# pre-shared kernel: a Welford accumulator is register-heavy enough to want a second warp per
-# block to hide latency, while the lean traits want the narrower one. That pair holds the
-# merged body at 0.92-1.01x of the pre-merge kernel except (16384, 1024) sum/amax, which lose
-# 7-9%, against argmax gaining 6-8% and a wide-short sum 15%.
+# Small blocks avoid idle threads on narrow columns; nt=256 took 17.3us versus 9.9us
+# at 64. Use 32 threads for 1-2 fields and 64 for register-heavy Welford. Against the
+# pre-shared kernel this is 0.92-1.01x, except (16384, 1024) sum/amax lose 7-9%,
+# while argmax gains 6-8% and wide-short sum gains 15%.
 _NT = 32
 _NT_WIDE_ACC = 64  # 3-field traits (Welford): see above
 
 
 def _split_p(R):
-    """Chunks of the reduced axis, from the measured ~_Q_TARGET-rows-per-chunk rule."""
+    """Split the reduced axis into about _Q_TARGET rows per chunk."""
     return max(1, min(_P_MAX, -(-R // _Q_TARGET)))
 
 
 def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None):
-    """Reduce dim 0 of a contiguous 2D `x` -> (C,), splitting the reduced axis npar ways."""
+    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     if nt is None:
@@ -58,8 +47,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     R, C = x.shape
     vec = min(tile.vec_size(C, x.element_size()), _VEC_MAX) if vec is None else vec
     if C % vec:
-        # nchunks = C // vec, so a trailing partial group would never be stored and `out` would keep
-        # whatever torch.empty gave it. The derived vec always divides C; an explicit one may not.
+        # An explicit nondivisor vec would leave trailing outputs uninitialized.
         raise AssertionError(f"vec must divide the column count: {C=} {vec=}")
     if npar is None:
         npar = _split_p(R)
@@ -90,8 +78,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     dsts = [out] if single else parts
 
     def _fake():
-        # Compile-time descriptors; both extents dynamic, the inner one divisible by vec. The row
-        # axis's arg is None, not a dummy -- an unused Int32 param costs 1.27x here.
+        # Dynamic descriptors require vec divisibility; None avoids a 1.27x unused argument.
         return (
             [
                 _L.fake_compact(
@@ -110,8 +97,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
             _stream(),
         )
 
-    # align is baked in by _compile, and the _VEC_MAX cap means equal vec no longer implies
-    # equal alignment the way the row path's uncapped vec does -- so key it.
+    # _VEC_MAX decouples vec from compile-time alignment, so key both.
     key = ("coltile", trait_key, x.dtype, out_dtype, align) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
@@ -120,8 +106,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     if single:
         return out
 
-    # Stage 2: fold each column's npar partials and project once with the TRUE reduced
-    # extent -- thread-per-column when C alone fills the device, else block-per-column.
+    # Fold npar partials and project with true R; use threads per column only when C fills the GPU.
     if not pc:
         s2 = ReduceBlock(
             trait,
@@ -140,15 +125,13 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
         _launch(s2, key2, parts, [out])
         return out
 
-    # Stage 2 is the SAME body in combine mode: nchunks carries the column count (one
-    # thread each), nrows the true reduced extent for project, and q is unused.
+    # Shared combine mode uses nchunks as C and nrows as true R; q is unused.
     op2 = tile.TileReduce(
         trait, torch2cute[x.dtype], "col", C, nt=nt, vec=1, combine=True
     )
 
     def _fake2():
-        # nchunks carries the column count (one thread each), project_n the true reduced extent
-        # for the projection; the row axis's nwaves and the split's q are unused -> None.
+        # Row nwaves and split q are unused.
         return (
             [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
             [_L.fake_compact(torch2cute[out.dtype], (_L.sym(),))],
