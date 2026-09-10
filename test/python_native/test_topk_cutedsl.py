@@ -131,13 +131,20 @@ class TestCuTeDSLTopK(TestCase):
         torch.manual_seed(14)
         k = 16
         ns = (64, 128, 256, 512, 1024)
-        compiled = _compile_topk_register_i64(ns, k)
+        major = torch.cuda.get_device_capability()[0]
+        compiled_by_rung = {}
         for n in ns:
+            rung = (n,) if major >= 10 and n == 1024 else ns
+            compiled = _compile_topk_register_i64(rung, k)
+            self.assertIs(
+                compiled_by_rung.setdefault(rung, compiled),
+                compiled,
+            )
             x = torch.randn(4, n, device="cuda")
             with torch.backends.python_native.cutedsl.disabled():
                 ref_v, _ = torch.topk(x, k, dim=-1)
             got_v, got_i = topk_register(x, k)
-            self.assertIs(_compile_topk_register_i64(ns, k), compiled)
+            self.assertIs(_compile_topk_register_i64(rung, k), compiled)
             self.assertEqual(got_v, ref_v)
             self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
@@ -269,6 +276,22 @@ class TestCuTeDSLTopK(TestCase):
             got = torch.topk(x, bad_k, dim=-1)
             self.assertEqual(got.values, ref.values)
             self.assertEqual(got.indices, ref.indices)
+
+    def test_eligibility_does_not_materialize_cow(self) -> None:
+        from torch._native.ops.topk import cutedsl_impl
+
+        base = torch.randn(256, _test_n(64), device="cuda")
+        x = base._lazy_clone()
+        data_ptr = x.const_data_ptr()
+        self.assertTrue(torch._C._is_cow_tensor(x))
+
+        self.assertFalse(cutedsl_impl._eligible(x, 100, -1, True, True))
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), data_ptr)
+
+        torch.topk(x, 100)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        self.assertEqual(x.const_data_ptr(), data_ptr)
 
     def test_register_n_out_of_range_falls_through(self) -> None:
         """Register K values with N outside the per-K cap should fall through."""
