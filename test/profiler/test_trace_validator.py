@@ -559,9 +559,6 @@ class TestTraceValidatorRules(TestCase):
 # ---------------------------------------------------------------------------
 
 
-# Re-enable alongside the per-test skips once kineto's CPU/GPU timestamp
-# clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     """E2E tests for validation rules that are not tied to any specific accelerator.
@@ -579,9 +576,6 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skip(
-        "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
-    )
     def test_backward_seq_id_uniqueness(self, device):
         trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
         self.addCleanup(shutil.rmtree, trace_dir, ignore_errors=True)
@@ -589,6 +583,16 @@ class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
         dev = torch.device(device)
         events = _profile_training_payload(
             trace_path, dev, _activity_for_device_type(dev.type)
+        )
+        # _check_backward_seq_id_uniqueness([]) returns [], so len(v) == 0 alone cannot
+        # tell a holding rule from a trace it found nothing to check.
+        backward = "autograd::engine::evaluate_function:"
+        self.assertTrue(
+            any(
+                backward in e.get("name", "") and "Sequence number" in e.get("args", {})
+                for e in events
+            ),
+            "no backward events with a sequence number",
         )
         v = _check_backward_seq_id_uniqueness(events)
         self.assertEqual(len(v), 0, self._fmt(v))
@@ -607,10 +611,11 @@ instantiate_device_type_tests(
 # ---------------------------------------------------------------------------
 
 
-# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
-# while all E2E tests are disabled. Re-enable alongside the per-test skips once
-# kineto's CPU/GPU timestamp clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
+# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed while
+# this class's tests are disabled. Re-enable alongside the per-test skips once kineto's
+# CPU/GPU timestamp clock-skew issue is fixed. Scope note: the skew is CUDA-side, so it
+# does not hold TestTraceValidatorE2EAgnosticDevice, whose rule reads CPU-side events.
+@unittest.skip("CUDA E2E disabled pending kineto clock-skew fix; see per-test skips")
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
