@@ -149,6 +149,9 @@ def keep_module_name(func):
 
 
 def keep_none_module(func):
+    # Dynamo traces func.__module__ as func.__globals__["__name__"] (a str), so
+    # the traced branch differs from eager here; the guard itself reads the
+    # real attribute (None) and that round trip is what the subtest pins.
     func.__module__ = None
 
     @functools.wraps(func)
@@ -1266,13 +1269,14 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # Dynamo cannot trace a function whose __module__ is not a str (its
         # trace rules split it), so this is pickler-level: a decorator can still
         # leave one behind, and the reducer must neither TypeError on
-        # `__module__ in sys.modules` nor drop the value it restores.
+        # `__module__ in sys.modules` (an unhashable value would) nor drop the
+        # value it restores.
         fn = types.FunctionType(global_func.__code__, globals(), "global_func")
-        fn.__module__ = 42
+        fn.__module__ = ["not", "a", "module"]
         buf = io.BytesIO()
         GuardsStatePickler({id(fn): fn}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
-        self.assertEqual(out.__module__, 42)
+        self.assertEqual(out.__module__, ["not", "a", "module"])
 
     def test_pruned_shared_closure_cell_stays_shared(self):
         # An unguarded shared cell prunes to a single _Missing cell, and the two
@@ -1430,7 +1434,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             return inner
 
         fn = outer()
-        cell = fn.__closure__[0]
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"fn": fn})
         out = pickle.loads(buf.getvalue())["fn"]
