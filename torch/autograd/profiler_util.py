@@ -581,6 +581,8 @@ class EventMetadata(NamedTuple):
     context: int | None
     channel: int | None
     channel_type: int | None
+    # ROCm reports the HSA queue a kernel or copy was dispatched to; None on CUDA.
+    hsa_queue: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -630,6 +632,7 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "context": ("context", int),
     "channel": ("channel", int),
     "channel_type": ("channel_type", int),
+    "hsa_queue": ("hsa_queue", int),
     "bytes": ("bytes", int),
     "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),

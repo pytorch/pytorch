@@ -3070,6 +3070,55 @@ class TestMaxAutotune(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
+    @fresh_cache()
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "native matmul takes different tuning configs",
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_decompose_k_without_valid_splits_falls_back(self):
+        a, b = self._make_matrices(
+            M=64,
+            K=64,
+            N=64,
+            dtype=torch.float16,
+            device=GPU_TYPE,
+            requires_grad=False,
+        )
+        names: list[str] = []
+
+        def record(choices):
+            names.extend(choice.name for choice in choices)
+            return choices
+
+        torch._dynamo.reset()
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+        add_preprocessing_fn(record)
+        try:
+            with config.patch(
+                {
+                    "test_configs.max_mm_configs": 1,
+                    "triton.decompose_k_threshold": 0,
+                    "triton.num_decompose_k_splits": 1,
+                }
+            ):
+                actual = torch.compile(lambda x, y: x @ y)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+
+        self.assertEqual(actual, a @ b)
+        self.assertTrue(any(name.startswith("triton_mm") for name in names), names)
+        self.assertFalse(
+            any(name.startswith("decompose_k_mm") for name in names), names
+        )
+
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
     )
