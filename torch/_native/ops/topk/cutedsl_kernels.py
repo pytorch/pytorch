@@ -321,7 +321,10 @@ class _RadixSelectTopK:
             if byte_pos == 0:
                 # First pass: decided_mask==0, every element participates.
                 for step in cutlass.range(VEC_ITERS):
-                    if step < ACTUAL_VEC_ITERS:
+                    vec_active = True
+                    if const_expr(self.fixed_vec_iters is not None):
+                        vec_active = step < ACTUAL_VEC_ITERS
+                    if vec_active:
                         base = step * NT * VEC + tidx * VEC
                         rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                         for vi in cutlass.range_constexpr(self.VEC):
@@ -340,7 +343,10 @@ class _RadixSelectTopK:
                         cute.arch.atomic_add(_elem_ptr(s_hist, byte_val), Int32(1))
             else:
                 for step in cutlass.range(VEC_ITERS):
-                    if step < ACTUAL_VEC_ITERS:
+                    vec_active = True
+                    if const_expr(self.fixed_vec_iters is not None):
+                        vec_active = step < ACTUAL_VEC_ITERS
+                    if vec_active:
                         base = step * NT * VEC + tidx * VEC
                         rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                         for vi in cutlass.range_constexpr(self.VEC):
@@ -427,7 +433,10 @@ class _RadixSelectTopK:
             above_base = Int32(0)
             eq_base = Int32(0)
             for step in cutlass.range(VEC_ITERS):
-                if step < ACTUAL_VEC_ITERS:
+                vec_active = True
+                if const_expr(self.fixed_vec_iters is not None):
+                    vec_active = step < ACTUAL_VEC_ITERS
+                if vec_active:
                     base = step * NT * VEC + tidx * VEC
                     rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
 
@@ -541,7 +550,10 @@ class _RadixSelectTopK:
         else:
             # Non-deterministic atomic-counter gather.
             for step in cutlass.range(VEC_ITERS):
-                if step < ACTUAL_VEC_ITERS:
+                vec_active = True
+                if const_expr(self.fixed_vec_iters is not None):
+                    vec_active = step < ACTUAL_VEC_ITERS
+                if vec_active:
                     base = step * NT * VEC + tidx * VEC
                     rvals = _load_vec(_elem_ptr(mX, (row, base)), VEC, IN_DTYPE)
                     for vi in cutlass.range_constexpr(self.VEC):

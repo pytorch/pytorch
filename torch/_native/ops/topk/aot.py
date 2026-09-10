@@ -176,7 +176,7 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
         major = props.major
         if self.numel() // n < props.multi_processor_count:
             eligible = False
-        if self.data_ptr() % (4 * self.element_size()):
+        if self.const_data_ptr() % (4 * self.element_size()):
             eligible = False
     kernel = _kernel_for(dtype, n, k, major) if eligible else None
     eligible = eligible and kernel is not None
@@ -264,11 +264,11 @@ def cpp_dispatch_prelude():
       if (!_naot_aligned(self) || !_naot_aligned(values) || !_naot_aligned(indices)) return false;
       const bool det = at::globalContext().deterministicAlgorithms();
       const int64_t N = self.size(-1);
-      if (N == 0 || N % 4 != 0) return false;
+      if (N == 0) return false;
       const int64_t M = self.numel() / N;
-      const int64_t cc_major = at::cuda::getCurrentDeviceProperties()->major;
+      const int64_t cc_major = _naot_props->major;
       // Perf gate: one CTA per row; below a full wave aten wins.
-      if (M < at::cuda::getCurrentDeviceProperties()->multiProcessorCount) return false;
+      if (M < _naot_props->multiProcessorCount) return false;
     """
 
 
@@ -292,6 +292,7 @@ def cpp_dispatch(spec):
         f"self.scalar_type() == {_DTYPES[spec['dtype']]}",
         f"k == {k}",
         "det" if deterministic else "!det",
+        "N % 4 == 0",
         f"N >= (cc_major >= 10 ? {sm100_min} : {sm90_min})",
     ]
     fixed_vec_iters = spec["fixed_vec_iters"]

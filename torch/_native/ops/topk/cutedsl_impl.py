@@ -89,7 +89,7 @@ def _eligible(
         return False
     if not last_dim_row_major_ok(self, dim):
         return False
-    if self.data_ptr() % (4 * self.element_size()):
+    if self.const_data_ptr() % (4 * self.element_size()):
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
     if _kernel_for(_DTYPE_NAMES[self.dtype], N, k, major) is None:

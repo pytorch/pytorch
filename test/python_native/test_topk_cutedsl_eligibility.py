@@ -16,7 +16,7 @@ class TestCuTeDSLTopKEligibility(TestCase):
             device=torch.device("cuda:0"),
             shape=(256, 256),
             ndim=2,
-            data_ptr=mock.Mock(return_value=0),
+            const_data_ptr=mock.Mock(return_value=0),
             element_size=mock.Mock(return_value=4),
         )
         with (

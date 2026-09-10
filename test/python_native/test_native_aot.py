@@ -117,6 +117,37 @@ def _run_probe(cases, extra_env):
     return json.loads(line[len("PROBE_RESULTS=") :])
 
 
+class TestNativeAotTopKDeclaration(TestCase):
+    def test_dispatch_alignment_is_radix_only(self):
+        from torch._native.ops.topk import aot
+
+        prelude = aot.cpp_dispatch_prelude()
+        self.assertNotIn("N % 4", prelude)
+        self.assertNotIn("getCurrentDeviceProperties", prelude)
+        self.assertIn("_naot_props->major", prelude)
+        self.assertIn("_naot_props->multiProcessorCount", prelude)
+
+        register = aot.cpp_dispatch(
+            {
+                "kernel": "register",
+                "dtype": "float32",
+                "K": 16,
+                "N_rung": "64_128_256_512_1024",
+            }
+        )
+        radix = aot.cpp_dispatch(
+            {
+                "kernel": "radix",
+                "dtype": "float32",
+                "K": 64,
+                "deterministic": False,
+                "fixed_vec_iters": None,
+            }
+        )
+        self.assertNotIn("N % 4", register)
+        self.assertIn("N % 4 == 0", radix)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestNativeAotTopK(TestCase):
@@ -282,6 +313,26 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
+    @skipIfNoJitTopk
+    def test_shared_policy_cases_route_to_jit_without_aot(self):
+        cases = [
+            *({"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)),
+            {"dtype": "float32", "n": 4100, "k": 64},
+            {"dtype": "float32", "n": 5120, "k": 512, "det": True},
+            {"dtype": "bfloat16", "n": 2048, "k": 64},
+            {
+                "dtype": "bfloat16",
+                "n": 2048,
+                "k": 64,
+                "out_variant": True,
+            },
+        ]
+        results = _run_probe(cases, {"TORCH_DISABLE_NATIVE_AOT": "1"})
+        for case, r in zip(cases, results):
+            self.assertTrue(r["ran_dsl"], f"JIT kernel did not fire for {case}")
+            self.assertTrue(r["values_ok"], f"values mismatch for {case}")
+            self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
+
     @skipIfNoAotLib
     def test_disabled_context_masks_aot_in_process(self):
         # cutedsl.disabled() flips the native-AOT Context switch as well as the JIT
@@ -353,6 +404,13 @@ class TestNativeAotTopK(TestCase):
         self.assertEqual(register["N"], None)
         self.assertEqual(register["N_rung"], "64_128_256_512_1024")
         self.assertTrue(register["eligible"])
+        base = torch.empty(M, 4096, device="cuda")
+        cow = base._lazy_clone()
+        data_ptr = cow.const_data_ptr()
+        uncovered = mod.covered_axes(cow, 100)
+        self.assertFalse(uncovered["eligible"])
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertEqual(cow.const_data_ptr(), data_ptr)
         # Schema defaults come from the function signature itself.
         self.assertEqual(
             mod.covered_axes(x, 64), mod.covered_axes(x, 64, -1, True, True)

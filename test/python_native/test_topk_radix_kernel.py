@@ -75,10 +75,11 @@ class TestRadixKernelBuilder(TestCase):
                 "dtype": "float32",
                 "K": 1024,
                 "deterministic": True,
-                "scalar_tail_iters": 0,
+                "scalar_tail_iters": 4,
                 "fixed_vec_iters": None,
             }
         )
+        self.assertEqual(b["fn"].min_blocks_per_mp, 2)
         with mock.patch.object(
             cutlass_dsl.cuda_helpers,
             "get_device_attribute",
