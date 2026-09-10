@@ -207,6 +207,10 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} _dealias_marked_returns",
             "_dealias_marked_returns",
         ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
+        ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
             "CUDARngStateHelper.get_torch_state_as_tuple",
@@ -556,6 +560,12 @@ def _compose_standalone_module(
         out: list[tuple[str, str]] = []
         for gname, gobj in globals_dict.items():
             if gname == "__builtins__":
+                continue
+            # The runtime wrapper's warn-once set is live compile-time state that must
+            # not be baked into the artifact: emit a fresh empty set so the exported
+            # module round-trips deterministically and starts its own warn-once cycle.
+            if gname == "_warned_inputs":
+                out.append((gname, "set()"))
                 continue
             expr = _resolve_global(
                 gobj,
