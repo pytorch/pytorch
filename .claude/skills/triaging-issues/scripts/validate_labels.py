@@ -21,6 +21,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from coerce_tool_input import coerced
 from gh_api import gh_api
 
 
@@ -127,7 +128,8 @@ def allow_with_updated_input(tool_input: dict, merged_labels: list[str]) -> None
     there swaps in the arguments the tool actually receives.
     """
     updated = dict(tool_input)
-    updated["labels"] = merged_labels
+    if merged_labels:
+        updated["labels"] = merged_labels
     json.dump(
         {
             "hookSpecificOutput": {
@@ -147,11 +149,25 @@ def main():
         debug_log(f"Hook invoked with data: {json.dumps(data, indent=2)}")
         tool_input = data.get("tool_input", {})
 
+        # Hooks run in parallel and the last updatedInput wins, so the
+        # stringified-argument fix for this tool has to live in this hook
+        # rather than in coerce_tool_input.py's matcher.
+        coerced_input = coerced(tool_input)
+        if coerced_input is not None:
+            debug_log(f"Coerced tool input to {json.dumps(coerced_input)}")
+            tool_input = coerced_input
+
         requested_labels = tool_input.get("labels", []) or []
         debug_log(f"Labels requested: {requested_labels}")
+        if not isinstance(requested_labels, list):
+            # Iterating a bare string would strip it char by char and fall
+            # through to 'triage review', silently discarding the labels.
+            raise RuntimeError("labels must be a JSON array of label names")
 
         if not requested_labels:
             debug_log("No labels provided, allowing")
+            if coerced_input is not None:
+                allow_with_updated_input(tool_input, [])
             sys.exit(0)
 
         owner = tool_input.get("owner", "pytorch")
